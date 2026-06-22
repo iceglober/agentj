@@ -1,0 +1,30 @@
+# Node / TS
+node_modules/
+dist/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Bun
+.bun/
+
+# coder runtime state written into target repos
+.coder/proposals/
+.coder/fixtures/
+.coder/*.jsonl

@@ -1,0 +1,9 @@
+# Bun monorepo config.
+#
+# Bun auto-links workspace packages and installs peer deps by default.
+# Lifecycle scripts are disabled unless a package is explicitly allow-listed.
+[install]
+exact = false
+
+[install.scripts]
+allowList = []
