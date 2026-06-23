@@ -1,6 +1,7 @@
 // coder-server — barrel + entry. Wires the efficiency engine: Router → context budget →
 // AI SDK loop, with Capabilities/Extractors, Succinctness, Ledger, telemetry, Distiller.
 export * from "./server.ts";
+export * from "./runner.ts";
 export * from "./loop.ts";
 export * from "./router/index.ts";
 export * from "./operations/index.ts";

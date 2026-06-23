@@ -48,6 +48,7 @@
       "version": "0.0.0",
       "dependencies": {
         "coder-core": "workspace:*",
+        "coder-server": "workspace:*",
         "ink": "^5",
         "react": "^18.3.1",
       },
