@@ -32,7 +32,7 @@ interface GroupNode {
   running: boolean;
   collapsed: boolean;
 }
-type Node = UserNode | MsgNode | ToolNode | GroupNode;
+export type Node = UserNode | MsgNode | ToolNode | GroupNode;
 
 interface Session {
   id: string;
@@ -51,10 +51,18 @@ interface Session {
   questions?: ClarifyQuestion[]; // structured clarification awaiting answers
   answers: number[]; // chosen option index per question
   qIdx: number; // current question being answered
+  qDeadline?: number; // ms timestamp to auto-select the default (a timed proposal); cleared on any keypress
   pending?: string;
   sandbox: "host" | "docker";
+  live: LiveTool[]; // tools running right now — shown with a progress spinner the moment they start
   cpu: number;
   rss: number;
+}
+
+interface LiveTool {
+  callId: string;
+  label: string; // tool(args)
+  start: number; // ms, for the elapsed clock
 }
 
 export interface InkChatOptions {
@@ -84,6 +92,7 @@ function newSession(sandbox: "host" | "docker"): Session {
     answers: [],
     qIdx: 0,
     sandbox,
+    live: [],
     cpu: 0,
     rss: 0,
   };
@@ -104,24 +113,14 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
   const [active, setActive] = useState(0);
   const [frame, setFrame] = useState(0);
   const [blink, setBlink] = useState(false);
+  const [, bumpTick] = useState(0); // 1s re-render while a timed proposal counts down
 
+  const fireTimeout = useRef<() => void>(() => {}); // reassigned each render with fresh closures
   const acs = useRef(new Map<string, AbortController>());
   const pgids = useRef(new Map<string, number>());
-  const toolNames = useRef(new Map<string, string>());
   const holds = useRef(new Map<string, number>()); // peak-hold ticks so a reading stays visible after a command ends
 
   const patch = (id: string, fn: (s: Session) => Session): void => setSessions((ss) => ss.map((s) => (s.id === id ? fn(s) : s)));
-  // Append text/tool to the open group if one is running, else to a top-level node.
-  const addTool = (id: string, label: string): void =>
-    patch(id, (s) => {
-      const i = openGroup(s.nodes);
-      const nodes = [...s.nodes];
-      if (i >= 0) {
-        const g = nodes[i] as GroupNode;
-        nodes[i] = { ...g, tools: [...g.tools, label] };
-      } else nodes.push({ kind: "tool", text: label });
-      return { ...s, nodes };
-    });
   const addText = (id: string, text: string): void =>
     patch(id, (s) => {
       const i = openGroup(s.nodes);
@@ -185,6 +184,16 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
     return () => clearInterval(t);
   }, [modalUp]);
 
+  // Drive a timed proposal's countdown: re-render each second and fire the auto-default at the deadline.
+  useEffect(() => {
+    if (!modalUp) return;
+    const t = setInterval(() => {
+      bumpTick((x) => x + 1);
+      fireTimeout.current();
+    }, 1000);
+    return () => clearInterval(t);
+  }, [modalUp]);
+
   const runTurn = async (id: string, text: string): Promise<void> => {
     patch(id, (s) => ({ ...s, nodes: [...s.nodes, { kind: "user", text }], running: true, sel: -1, nav: false, inputHistory: [...s.inputHistory, text], histIdx: -1 }));
     const session = sessions.find((s) => s.id === id);
@@ -212,13 +221,30 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
             return { ...s, nodes };
           });
         else if (e.type === "questions.required")
-          patch(id, (s) => ({ ...s, questions: e.questions, answers: e.questions.map((q) => Math.max(0, q.options.findIndex((o) => o.default))), qIdx: 0 }));
-        else if (e.type === "tool.start") toolNames.current.set(e.callId, `${e.tool}(${preview(e.args)})`);
-        else if (e.type === "tool.end") {
-          const name = toolNames.current.get(e.callId) ?? "tool";
-          toolNames.current.delete(e.callId);
-          addTool(id, `${name} — ${[e.elapsedMs != null ? fmtMs(e.elapsedMs) : "", e.summary ?? e.status].filter(Boolean).join(" ")}`);
-        } else if (e.type === "message.delta") addText(id, e.text);
+          patch(id, (s) => ({
+            ...s,
+            questions: e.questions,
+            answers: e.questions.map((q) => Math.max(0, q.options.findIndex((o) => o.default))),
+            qIdx: 0,
+            qDeadline: e.questions[0]?.timeoutSec ? Date.now() + e.questions[0].timeoutSec * 1000 : undefined,
+          }));
+        else if (e.type === "tool.start")
+          // Show it the MOMENT it starts (live spinner + elapsed), not when it finishes.
+          patch(id, (s) => ({ ...s, live: [...s.live, { callId: e.callId, label: `${e.tool}(${preview(e.args)})`, start: Date.now() }] }));
+        else if (e.type === "tool.end")
+          // Move the running tool into the transcript as a finished row, atomically.
+          patch(id, (s) => {
+            const lt = s.live.find((t) => t.callId === e.callId);
+            const finished = `${lt?.label ?? "tool"} — ${[e.elapsedMs != null ? fmtMs(e.elapsedMs) : "", e.summary ?? e.status].filter(Boolean).join(" ")}`;
+            const nodes = [...s.nodes];
+            const gi = openGroup(nodes);
+            if (gi >= 0) {
+              const g = nodes[gi] as GroupNode;
+              nodes[gi] = { ...g, tools: [...g.tools, finished] };
+            } else nodes.push({ kind: "tool", text: finished });
+            return { ...s, nodes, live: s.live.filter((t) => t.callId !== e.callId) };
+          });
+        else if (e.type === "message.delta") addText(id, e.text);
         else if (e.type === "cost.update") patch(id, (s) => ({ ...s, cost: e.costUsd, ctxTokens: e.inputTokens }));
       },
     }).catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) }));
@@ -228,6 +254,7 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
     patch(id, (s) => ({
       ...s,
       running: false,
+      live: [], // clear any still-"running" tools the turn ended/aborted without an end event
       history: res.ok && res.messages ? res.messages : s.history,
       // Only ask for sign-off on a real resolution (a change / substantive answer) — not a greeting
       // or a clarifying question.
@@ -253,12 +280,19 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
     const answers = [...cur.answers];
     answers[cur.qIdx] = opt;
     if (cur.qIdx + 1 < cur.questions.length) {
-      patch(cur.id, (s) => ({ ...s, answers, qIdx: s.qIdx + 1 }));
+      const next = cur.questions[cur.qIdx + 1];
+      patch(cur.id, (s) => ({ ...s, answers, qIdx: s.qIdx + 1, qDeadline: next.timeoutSec ? Date.now() + next.timeoutSec * 1000 : undefined }));
       return;
     }
     const summary = cur.questions.map((q, i) => `• ${q.question} → ${q.options[answers[i]].label}`).join("\n");
-    patch(cur.id, (s) => ({ ...s, questions: undefined, answers: [], qIdx: 0 }));
+    patch(cur.id, (s) => ({ ...s, questions: undefined, answers: [], qIdx: 0, qDeadline: undefined }));
     void submit(cur.id, `Here are my answers — proceed:\n${summary}`);
+  };
+
+  // Fire the auto-default when a timed proposal's deadline passes (driven by the 1s ticker above).
+  fireTimeout.current = () => {
+    const c = sessions[active];
+    if (c?.questions?.length && c.qDeadline && Date.now() >= c.qDeadline) answerQuestion(c, c.answers[c.qIdx]);
   };
 
   useInput((char, key) => {
@@ -281,7 +315,8 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
     // Structured clarification takes over input: ↑/↓ pick, a–d / Enter select + advance, Esc cancels.
     if (cur.questions?.length) {
       const q = cur.questions[cur.qIdx];
-      if (key.escape) return patch(cur.id, (s) => ({ ...s, questions: undefined, answers: [], qIdx: 0 }));
+      if (cur.qDeadline) patch(cur.id, (s) => ({ ...s, qDeadline: undefined })); // engaged → stop the auto-default countdown
+      if (key.escape) return patch(cur.id, (s) => ({ ...s, questions: undefined, answers: [], qIdx: 0, qDeadline: undefined }));
       if (key.upArrow) return patch(cur.id, (s) => ({ ...s, answers: s.answers.map((a, i) => (i === s.qIdx ? Math.max(0, a - 1) : a)) }));
       if (key.downArrow) return patch(cur.id, (s) => ({ ...s, answers: s.answers.map((a, i) => (i === s.qIdx ? Math.min(q.options.length - 1, a + 1) : a)) }));
       const pick = "abcd".indexOf(char) >= 0 ? "abcd".indexOf(char) : "1234".indexOf(char);
@@ -331,14 +366,16 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
   const cur = sessions[active] ?? sessions[0];
   // A pending clarification takes over the screen as a modal (the alien scholar's question).
   if (cur.questions?.length) {
-    return <QuestionModal rows={rows} cols={cols} blink={blink} question={cur.questions[cur.qIdx]} selected={cur.answers[cur.qIdx]} step={cur.qIdx + 1} total={cur.questions.length} />;
+    const remaining = cur.qDeadline ? Math.max(0, Math.ceil((cur.qDeadline - Date.now()) / 1000)) : null;
+    return <QuestionModal rows={rows} cols={cols} blink={blink} question={cur.questions[cur.qIdx]} selected={cur.answers[cur.qIdx]} step={cur.qIdx + 1} total={cur.questions.length} remaining={remaining} />;
   }
-  const wrapW = Math.max(1, cols - 1);
+  // Reserve 2 cols for the gutter bar + its space; content wraps within the rest.
+  const CW = Math.max(1, cols - 2);
   // Render at most rows-1 lines total (1 tab + H transcript + 1 status + 1 input = rows-1). Filling
   // the FULL height makes the terminal scroll on the last newline, which corrupts Ink's redraw math
   // (stale lines overlap). The blank bottom line is the headroom that prevents that scroll.
   const H = Math.max(1, rows - 4);
-  const visibleRows = flatten(cur.nodes, wrapW, frame);
+  const visibleRows = flatten(cur.nodes, cur.live, CW, frame, Date.now());
   // Keep the selected node in view; otherwise pin to the bottom.
   let top = Math.max(0, visibleRows.length - H);
   if (cur.sel >= 0) {
@@ -357,7 +394,7 @@ function App({ root, modelId, provider, permissionMode }: InkChatOptions): JSX.E
       <Box>
         {sessions.map((s, i) => (
           <Text key={s.id} inverse={i === active} color={s.running ? "green" : undefined}>
-            {` ${s.running ? `${SPIN[frame]} ` : ""}${i + 1}${s.cpu > 0 ? ` ${s.cpu.toFixed(0)}% ${fmtBytes(s.rss)}` : ""} `}
+            {` ${s.running ? `${SPIN[frame]} ` : ""}${i + 1} `}
           </Text>
         ))}
       </Box>
@@ -430,6 +467,7 @@ function QuestionModal({
   selected,
   step,
   total,
+  remaining,
 }: {
   rows: number;
   cols: number;
@@ -438,6 +476,7 @@ function QuestionModal({
   selected: number;
   step: number;
   total: number;
+  remaining: number | null;
 }): JSX.Element {
   return (
     <Box height={rows - 1} width={cols} justifyContent="center" alignItems="center">
@@ -463,6 +502,9 @@ function QuestionModal({
             </Box>
           ))}
         </Box>
+        {remaining != null ? (
+          <Text color="yellow">⏳ auto-selecting the recommended option in {remaining}s · press any key to decide yourself</Text>
+        ) : null}
         <Text color="gray">↑/↓ move · a–d pick · Enter select · Esc cancel</Text>
       </Box>
     </Box>
@@ -516,69 +558,175 @@ function ChoicePreviewView({ preview }: { preview: ChoicePreview }): JSX.Element
 }
 
 // ── rendering ───────────────────────────────────────────────────────────────
-type RowKind = "user" | "msg" | "tool" | "group-head" | "child" | "verdict";
+type RowKind = "user" | "msg" | "tool" | "group-head" | "child" | "verdict" | "spacer";
+type MdRole = "plain" | "h1" | "h2" | "h3" | "bullet" | "quote" | "code" | "rule";
+type Gutter = "user" | "assistant" | "tool" | "group" | "none";
 interface Row {
-  node: number;
+  node: number; // -1 for a spacer (never matches sel)
   kind: RowKind;
-  text: string;
+  text: string; // marker + indent already baked in; never contains \n; ≤ content width
+  style?: MdRole;
+  gutter: Gutter;
 }
 
-function flatten(nodes: Node[], width: number, frame: number): Row[] {
+const GUTTER_COLOR: Record<Gutter, string | undefined> = { user: "cyan", assistant: "green", tool: "gray", group: "magenta", none: undefined };
+
+/** Format markdown text into one-physical-line rows. Classify each LOGICAL line (split on \n)
+ *  BEFORE wrapping so a wrapped continuation keeps its role and never gets a second marker. */
+function emitMarkdown(node: number, raw: string, gutter: Gutter, width: number): Row[] {
   const out: Row[] = [];
-  nodes.forEach((n, i) => {
-    if (n.kind === "user") for (const w of wrapLine(`› ${n.text}`, width)) out.push({ node: i, kind: "user", text: w });
-    else if (n.kind === "msg") for (const w of wrapLine(n.text, width)) out.push({ node: i, kind: "msg", text: w });
-    else if (n.kind === "tool") out.push({ node: i, kind: "tool", text: `· ${clip(n.text, width)}` });
-    else {
-      // A done group with no tools (e.g. a greeting / quick answer) is just an answer — render it
-      // plainly, no collapse chrome.
-      if (!n.running && n.tools.length === 0) {
-        for (const w of wrapLine(n.verdict, width)) out.push({ node: i, kind: "msg", text: w });
-        return;
-      }
-      // Collapse hides the TOOL NOISE, never the conclusion: the head + the verdict are always
-      // shown when done; expanding (▾) reveals the tool calls underneath.
-      const note = `[${n.tools.length} tool${n.tools.length === 1 ? "" : "s"}]`;
-      const head = n.running ? `${SPIN[frame]} ${n.label}… ${note}` : `${n.collapsed ? "▸" : "▾"} ${n.label} ${note}`;
-      out.push({ node: i, kind: "group-head", text: head });
-      if (n.running || !n.collapsed) for (const t of n.tools) out.push({ node: i, kind: "child", text: `   · ${clip(t, width - 5)}` });
-      if (!n.running) for (const w of wrapLine(n.verdict, width - 3)) out.push({ node: i, kind: "verdict", text: `   ${w}` });
+  let inFence = false;
+  for (const logical of raw.split("\n")) {
+    if (/^\s*```/.test(logical)) {
+      inFence = !inFence;
+      out.push({ node, kind: "verdict", text: "╶───╴", style: "rule", gutter });
+      continue;
     }
-  });
+    if (inFence) {
+      for (const w of wrapLine(logical, Math.max(1, width - 2))) out.push({ node, kind: "verdict", text: `  ${w}`, style: "code", gutter });
+      continue;
+    }
+    let style: MdRole = "plain";
+    let body = logical;
+    let marker = "";
+    let indent = "";
+    const h = logical.match(/^(#{1,3}) +(.*)/);
+    if (h) {
+      style = (["h1", "h2", "h3"] as const)[h[1].length - 1];
+      body = h[2];
+    } else if (/^\s*[-*] +/.test(logical)) {
+      style = "bullet";
+      body = logical.replace(/^\s*[-*] +/, "");
+      marker = "• ";
+      indent = "  ";
+    } else if (/^> ?/.test(logical)) {
+      style = "quote";
+      body = logical.replace(/^> ?/, "");
+    }
+    const lines = wrapLine(body, Math.max(1, width - marker.length));
+    if (!lines.length) out.push({ node, kind: "verdict", text: "", style, gutter });
+    lines.forEach((w, i) => out.push({ node, kind: "verdict", text: `${i === 0 ? marker : indent}${w}`, style, gutter }));
+  }
   return out;
 }
 
-/** One transcript row. Verdict/msg lines get light **bold** styling; group heads + selection stand out. */
+export function flatten(nodes: Node[], live: LiveTool[], width: number, frame: number, now: number): Row[] {
+  const out: Row[] = [];
+  nodes.forEach((n, i) => {
+    if (n.kind === "user") {
+      if (i > 0) out.push({ node: -1, kind: "spacer", text: "", gutter: "none" }); // breathing room between turns
+      // wrap to width-2 so the "› "/"  " prefix never pushes a line past the content width
+      wrapLine(n.text, Math.max(1, width - 2)).forEach((w, j) => out.push({ node: i, kind: "user", text: `${j === 0 ? "› " : "  "}${w}`, gutter: "user" }));
+    } else if (n.kind === "msg") {
+      out.push(...emitMarkdown(i, n.text, "assistant", width));
+    } else if (n.kind === "tool") {
+      out.push({ node: i, kind: "tool", text: `· ${clip(n.text, width - 2)}`, gutter: "tool" });
+    } else {
+      // A done group with no tools (e.g. a greeting / quick answer) is just an answer.
+      if (!n.running && n.tools.length === 0) {
+        out.push(...emitMarkdown(i, n.verdict, "assistant", width));
+        return;
+      }
+      // Collapse hides the TOOL NOISE, never the conclusion: head + verdict always show when done.
+      const note = `[${n.tools.length} tool${n.tools.length === 1 ? "" : "s"}]`;
+      const head = n.running ? `${SPIN[frame]} ${n.label}… ${note}` : `${n.collapsed ? "▸" : "▾"} ${n.label} ${note}`;
+      out.push({ node: i, kind: "group-head", text: head, gutter: "group" });
+      if (n.running || !n.collapsed) for (const t of n.tools) out.push({ node: i, kind: "child", text: `· ${clip(t, width - 2)}`, gutter: "tool" });
+      if (!n.running) out.push(...emitMarkdown(i, n.verdict, "assistant", width));
+    }
+  });
+  // Tools running RIGHT NOW — shown the moment they start, with a spinner + live elapsed clock.
+  for (const t of live) {
+    const secs = Math.max(0, Math.round((now - t.start) / 1000));
+    out.push({ node: -1, kind: "child", text: `${SPIN[frame]} ${clip(t.label, Math.max(1, width - 8))} · ${secs}s`, gutter: "tool" });
+  }
+  return out;
+}
+
+/** One transcript row = exactly one physical line: a colored gutter bar + styled content. */
 function RowText({ row, selected }: { row: Row; selected: boolean }): JSX.Element {
-  const base = row.kind === "user" ? "cyan" : row.kind === "tool" || row.kind === "child" ? "gray" : undefined;
+  const gColor = GUTTER_COLOR[row.gutter];
+  const gutter = (
+    <>
+      <Text color={gColor} dimColor={row.gutter === "tool"} inverse={selected} bold={selected}>
+        {row.gutter === "none" ? " " : "▍"}
+      </Text>
+      <Text> </Text>
+    </>
+  );
+  if (row.kind === "spacer") return <Text> </Text>;
   if (row.kind === "group-head") {
     return (
-      <Text bold inverse={selected} color={row.text.startsWith("▸") || row.text.startsWith("▾") ? "magenta" : "green"}>
-        {row.text || " "}
+      <Text>
+        {gutter}
+        <Text bold color={row.text.startsWith("▸") || row.text.startsWith("▾") ? "magenta" : "green"}>
+          {row.text}
+        </Text>
       </Text>
     );
   }
-  if (row.kind === "verdict" || row.kind === "msg") {
-    // inline **bold** segments
-    const parts = row.text.split(/(\*\*[^*]+\*\*)/g);
+  if (row.kind === "tool" || row.kind === "child") {
     return (
-      <Text inverse={selected} color={base}>
-        {parts.map((p, i) =>
-          p.startsWith("**") && p.endsWith("**") ? (
-            // biome-ignore lint/suspicious/noArrayIndexKey: stable split
-            <Text key={i} bold>
-              {p.slice(2, -2)}
-            </Text>
-          ) : (
-            p
-          ),
-        )}
+      <Text>
+        {gutter}
+        <Text color="gray" dimColor>
+          {row.text || " "}
+        </Text>
       </Text>
     );
   }
+  if (row.kind === "user") {
+    return (
+      <Text>
+        {gutter}
+        <Text color="cyan">{row.text || " "}</Text>
+      </Text>
+    );
+  }
+  // msg / verdict — markdown-styled by role
   return (
-    <Text inverse={selected} color={base}>
-      {row.text || " "}
+    <Text>
+      {gutter}
+      <MdText text={row.text} style={row.style ?? "plain"} />
+    </Text>
+  );
+}
+
+/** Renders a markdown line's content by role; bullet/quote/plain also get inline bold + `code`. */
+function MdText({ text, style }: { text: string; style: MdRole }): JSX.Element {
+  if (style === "h1" || style === "h2" || style === "h3") {
+    return (
+      <Text bold color={style === "h1" ? "greenBright" : "green"}>
+        {text || " "}
+      </Text>
+    );
+  }
+  if (style === "code" || style === "rule") {
+    return (
+      <Text color="gray" dimColor>
+        {text || " "}
+      </Text>
+    );
+  }
+  // bullet / quote / plain → inline tokenizer (**bold** + `code`)
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return (
+    <Text dimColor={style === "quote"}>
+      {parts.map((p, i) =>
+        p.startsWith("**") && p.endsWith("**") ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: stable split
+          <Text key={i} bold>
+            {p.slice(2, -2)}
+          </Text>
+        ) : p.startsWith("`") && p.endsWith("`") && p.length > 1 ? (
+          // biome-ignore lint/suspicious/noArrayIndexKey: stable split
+          <Text key={i} color="yellow" dimColor>
+            {p.slice(1, -1)}
+          </Text>
+        ) : (
+          p
+        ),
+      )}
     </Text>
   );
 }

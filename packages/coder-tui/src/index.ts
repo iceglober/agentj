@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { ensureCatalog, Ledger, type LedgerRollup, listModels, lookupModel, refreshProjectFacts, renderFacts, runOnce, startServer } from "coder-server";
 import type { Posture, Provider, SandboxKind } from "coder-server";
 import { POSTURES } from "coder-server";
+import { createWorktree } from "coder-core";
 import type { ServerEvent, Tier, Verdict } from "coder-core";
 import { AgentClient } from "./client.ts";
 import { createLineReader } from "./input.ts";
@@ -408,7 +409,21 @@ export async function main(argv: string[]): Promise<void> {
   // In-process (default).
   const base = parseRunOpts(argv);
   if (!base.modelId) base.modelId = (await readUserConfig()).model; // persisted choice; flags/env already won
-  const root = await repoRoot();
+  let root = await repoRoot();
+  // `--worktree`: run on a throwaway branch in an isolated git worktree (kept for review; remove when
+  // done). Self-contained — no glrs. The work never touches your working tree.
+  if (argv.includes("--worktree")) {
+    try {
+      const wt = await createWorktree(root);
+      console.error(`[coder] worktree ${wt.path}`);
+      console.error(`[coder] branch ${wt.branch} — review it, then: git -C ${root} worktree remove ${wt.path}\n`);
+      root = wt.path;
+    } catch (err) {
+      console.error(`[coder] --worktree failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
   if (task) {
     process.exitCode = await runOnceLocal(root, base, task, argv.includes("--investigate"));
     return;
