@@ -129,6 +129,10 @@ function App({ root, modelId: initialModelId, provider, permissionMode, onWorktr
   const [sessions, setSessions] = useState<Session[]>(() => [newSession("host", root, { isWorktree: true, pending: true })]);
   const [modelId, setModelId] = useState(initialModelId); // mutable so /model switches it live
   const [active, setActive] = useState(0);
+  // A mid-turn MCP auth prompt: { server, resolve } while waiting for the user's y/n.
+  const [authPrompt, setAuthPrompt] = useState<{ server: string; resolve: (ok: boolean) => void } | null>(null);
+  const authBusy = useRef(false); // one auth prompt at a time
+  const declinedAuth = useRef(new Set<string>()); // servers the user said no to — don't re-ask this session
   const [frame, setFrame] = useState(0);
   const [blink, setBlink] = useState(false);
   const [, bumpTick] = useState(0); // 1s re-render while a timed proposal counts down
@@ -255,6 +259,13 @@ function App({ root, modelId: initialModelId, provider, permissionMode, onWorktr
       sandbox: session?.sandbox ?? "host",
       history: session?.history,
       signal: ac.signal,
+      confirmMcpAuth: (server) =>
+        new Promise<boolean>((resolve) => {
+          // Don't re-nag a server declined this session, and only one prompt at a time.
+          if (declinedAuth.current.has(server) || authBusy.current) return resolve(false);
+          authBusy.current = true;
+          setAuthPrompt({ server, resolve });
+        }),
       onCommand: (pgid) => (pgid ? pgids.current.set(id, pgid) : pgids.current.delete(id)),
       emit: (e) => {
         if (e.type === "phase.start") patch(id, (s) => ({ ...s, nodes: [...s.nodes, { kind: "group", label: e.label, tools: [], verdict: "", running: true, collapsed: false }] }));
@@ -380,9 +391,26 @@ function App({ root, modelId: initialModelId, provider, permissionMode, onWorktr
     if (key.ctrl && char === "n") return setActive((a) => (a + 1) % sessions.length);
     if (key.ctrl && char === "p") return setActive((a) => (a - 1 + sessions.length) % sessions.length);
     if (key.ctrl && char === "c") {
+      if (authPrompt) {
+        authPrompt.resolve(false); // unblock the awaiting run before aborting
+        authBusy.current = false;
+        setAuthPrompt(null);
+      }
       if (cur.running) acs.current.get(cur.id)?.abort();
       else exit();
       return;
+    }
+    // A mid-turn MCP auth prompt takes over input until answered: y authorizes, n/Esc declines.
+    if (authPrompt) {
+      const settle = (ok: boolean) => {
+        if (!ok) declinedAuth.current.add(authPrompt.server);
+        authPrompt.resolve(ok);
+        authBusy.current = false;
+        setAuthPrompt(null);
+      };
+      if (char === "y" || char === "Y") settle(true);
+      else if (key.escape || char === "n" || char === "N") settle(false);
+      return; // swallow other keys while deciding
     }
     // Structured clarification takes over input: ↑/↓ pick, a–d / Enter select + advance, Esc cancels.
     if (cur.questions?.length) {
@@ -493,11 +521,17 @@ function App({ root, modelId: initialModelId, provider, permissionMode, onWorktr
         </Text>
       </Box>
       <Box>
-        <Text color={cur.pending && !cur.running ? "yellow" : undefined}>
-          {cur.pending && !cur.running ? "✓ accept? (y/n) › " : "› "}
-          {cur.input}
-        </Text>
-        <Text color="gray">{cur.running ? "" : "▏"}</Text>
+        {authPrompt ? (
+          <Text color="cyan" bold>{`🔑 Authorize "${authPrompt.server}" in your browser? (y/n)`}</Text>
+        ) : (
+          <>
+            <Text color={cur.pending && !cur.running ? "yellow" : undefined}>
+              {cur.pending && !cur.running ? "✓ accept? (y/n) › " : "› "}
+              {cur.input}
+            </Text>
+            <Text color="gray">{cur.running ? "" : "▏"}</Text>
+          </>
+        )}
       </Box>
     </Box>
   );

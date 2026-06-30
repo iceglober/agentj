@@ -204,6 +204,39 @@ commands are also the ones that stay on the host when the sandbox is on (see abo
 coder also writes runtime state under `.coder/` in the target repo — `proposals/`,
 `fixtures/`, `*.jsonl` receipts/verdicts. Those are gitignored by default.
 
+## MCP servers (Linear, etc.)
+
+coder connects to [MCP](https://modelcontextprotocol.io) servers and exposes their tools to the
+agent. It reads **Claude Code's `.mcp.json` format**, so an existing config works unchanged — a
+repo `.mcp.json` (project root) merged over a global `~/.coder/.mcp.json` (repo wins):
+
+```jsonc
+{
+  "mcpServers": {
+    "linear":  { "type": "http", "url": "https://mcp.linear.app/mcp" },         // OAuth (browser)
+    "github":  { "type": "http", "url": "https://api.githubcopilot.com/mcp/",
+                 "headers": { "Authorization": "Bearer ${GITHUB_MCP_TOKEN}" } }, // static token
+    "local":   { "command": "npx", "args": ["-y", "some-mcp-server"] }           // stdio
+  }
+}
+```
+
+- **stdio** (`command`/`args`/`env`), **remote** (`type: "http"|"sse"`, `url`, `headers`). String
+  values support `${VAR}` / `${VAR:-default}` expansion — that's how you supply tokens.
+- **OAuth** servers (like Linear) authenticate the same way Claude Code does: dynamic registration
+  (no app to create) + browser, tokens stored in `~/.coder/auth.json` and refreshed automatically.
+  When a configured server needs auth, coder **prompts you in-session** — *Authorize "linear" in your
+  browser? (y/n)* — and runs the flow without restarting; the tools become available in the same
+  turn. You can also do it up front with **`coder mcp login linear`**. A server with a static
+  `Authorization` header skips OAuth. `coder mcp list` shows status; `coder mcp logout <name>` forgets
+  the tokens.
+- Tools appear to the agent as `<server>__<tool>` (e.g. `linear__create_issue`). They carry the
+  **`write` effect** — so they obey permission modes (e.g. `--mode plan` refuses them) and the
+  read-only investigator never calls them.
+- A server that needs login (or fails to connect) is skipped with a warning naming it; the run
+  continues. **Cost note:** every configured server's tools are injected each run, and MCP tool
+  schemas are large (~550–1,400 tokens each) — relevance-gating them is a planned follow-up.
+
 ## Remote / multi-process
 
 The agent can run behind an HTTP/SSE server when the UI and engine live in different
