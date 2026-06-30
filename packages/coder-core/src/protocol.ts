@@ -93,6 +93,9 @@ export interface ClarifyOption {
 export interface ClarifyQuestion {
   question: string;
   options: ClarifyOption[];
+  /** If set, the client auto-selects the default option after this many seconds of no response and
+   *  moves on — for proposals that are safe to auto-default (e.g. a facts.json command amendment). */
+  timeoutSec?: number;
 }
 
 /** Permission policy per tool (reads auto-allow; writes/bash gated). */
