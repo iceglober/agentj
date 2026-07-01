@@ -41,7 +41,8 @@ const EFFECT_TTL: Duration = Duration::from_millis(700);
 /// A second Ctrl-C within this window quits.
 const DOUBLE_TAP: Duration = Duration::from_secs(2);
 const KEYBOARD_FLAGS: KeyboardEnhancementFlags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-    .union(KeyboardEnhancementFlags::REPORT_EVENT_TYPES);
+    .union(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
+    .union(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES);
 
 // ── a small cursor-tracked, multi-line text buffer ──
 // `cursor` is a byte index into `text`, always kept on a char boundary.
@@ -505,8 +506,9 @@ pub async fn run(
         EnableMouseCapture
     )?;
     // Ask for progressive keyboard reporting so modified Enter/Esc are distinguishable where the
-    // terminal supports it (kitty/ghostty/wezterm/newer iTerm2); avoid forcing all keys into CSI-u
-    // reporting because some terminals/consumer stacks handle printable shifted keys poorly there.
+    // terminal supports it (kitty/ghostty/wezterm/newer iTerm2). We also request CSI-u reporting for
+    // all keys so chords like Cmd/Ctrl+Backspace are surfaced distinctly instead of collapsing to a
+    // plain Backspace byte on PTYs.
     let _ = execute!(
         stdout,
         PushKeyboardEnhancementFlags(KEYBOARD_FLAGS)
@@ -1228,7 +1230,7 @@ mod tests {
     fn keyboard_flags_request_only_needed_progressive_reporting() {
         assert!(KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES));
         assert!(KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::REPORT_EVENT_TYPES));
-        assert!(!KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
+        assert!(KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES));
     }
 
     #[test]

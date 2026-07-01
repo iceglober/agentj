@@ -159,3 +159,16 @@ fn shifted_printable_input_round_trips_through_pty() {
         "expected shifted printable chars in submitted prompt, got:\n{output}"
     );
 }
+
+#[test]
+fn ctrl_backspace_byte_deletes_a_word_through_pty() {
+    let output = run_once_with_input(b"alpha beta\x17\r");
+    assert!(
+        output.contains("alpha"),
+        "expected PTY ctrl-backspace byte to edit the input before submit, got:\n{output}"
+    );
+    assert!(
+        !output.contains("alphabeta"),
+        "expected PTY ctrl-backspace byte not to leave the full original input intact, got:\n{output}"
+    );
+}
