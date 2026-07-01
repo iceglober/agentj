@@ -52,7 +52,7 @@ bin/agentj --provider custom --base-url http://localhost:8080/v1 --model <id>   
 > that it's staged. If those are your daily driver, wiring them is the top follow-up.
 
 Tuning env: `AGENTJ_MAX_STEPS` (step window, default 40), `AGENTJ_MAX_IDLE_NUDGES`,
-`AGENTJ_MAX_PARALLEL_SUBAGENTS`, `AGENTJ_STEER_MODEL`, `AGENTJ_COMPANY`.
+`AGENTJ_MAX_PARALLEL_SUBAGENTS`, `AGENTJ_CONTEXT_WINDOW`, `AGENTJ_STEER_MODEL`, `AGENTJ_COMPANY`.
 
 ## What it can do
 

@@ -55,6 +55,11 @@ AZURE_API_KEY=… \
 cargo run -- --provider azure --model gpt-5.4
 ```
 
+App config is also loaded from `~/.config/aj/aj.json`, `{PROJECT}/.aj/aj.json`, and
+`{PROJECT}/.aj/aj.local.json` with later files winning. Environment variables override file values, and
+CLI flags override both. Supported file keys are `provider`, `model`, `base_url`, `company`,
+`max_steps`, `max_idle_nudges`, and `job_idle_wait_s`.
+
 Env knobs: `AGENTJ_PROVIDER`, `AGENTJ_MODEL`, `AGENTJ_BASE_URL`, `AGENTJ_API_KEY`, `AGENTJ_MAX_STEPS`,
 `AGENTJ_COMPANY`, `AGENTJ_ALLOW_PRIMARY`, `AGENTJ_MAX_PARALLEL_SUBAGENTS`, `AGENTJ_MAX_IDLE_NUDGES`,
 `AGENTJ_JOB_IDLE_WAIT_S`, and `AGENTJ_CONTEXT_WINDOW` (overrides the model table behind the context

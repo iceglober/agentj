@@ -1,7 +1,60 @@
-//! Runtime knobs, resolved once from the environment at startup instead of re-read on every loop
+//! Runtime knobs and app config, resolved once at startup instead of re-read on every loop
 //! iteration.
 
+use serde::Deserialize;
+use std::path::Path;
 use std::time::Duration;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppConfig {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default, rename = "base_url")]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub company: Option<String>,
+    #[serde(default)]
+    pub max_steps: Option<u64>,
+    #[serde(default)]
+    pub max_idle_nudges: Option<u64>,
+    #[serde(default)]
+    pub job_idle_wait_s: Option<u64>,
+}
+
+impl AppConfig {
+    fn merge(&mut self, other: Self) {
+        self.provider = other.provider.or(self.provider.take());
+        self.model = other.model.or(self.model.take());
+        self.base_url = other.base_url.or(self.base_url.take());
+        self.company = other.company.or(self.company.take());
+        self.max_steps = other.max_steps.or(self.max_steps.take());
+        self.max_idle_nudges = other.max_idle_nudges.or(self.max_idle_nudges.take());
+        self.job_idle_wait_s = other.job_idle_wait_s.or(self.job_idle_wait_s.take());
+    }
+
+    pub fn load(root: &str) -> Self {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let mut cfg = AppConfig::default();
+        for path in [
+            Path::new(&home).join(".config").join("aj").join("aj.json"),
+            Path::new(root).join(".aj").join("aj.json"),
+            Path::new(root).join(".aj").join("aj.local.json"),
+        ] {
+            cfg.merge(read_config(&path));
+        }
+        cfg
+    }
+
+    pub fn env_or_file(key: &str, file: Option<&str>) -> Option<String> {
+        std::env::var(key)
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| file.filter(|s| !s.is_empty()).map(|s| s.to_string()))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -18,24 +71,59 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env(model_id: &str) -> Self {
-        Self::parse(|k| std::env::var(k).ok(), model_id)
+    pub fn from_sources(model_id: &str, app: &AppConfig) -> Self {
+        Self::parse(
+            |k| std::env::var(k).ok(),
+            model_id,
+            RuntimeFileConfig {
+                max_steps: app.max_steps,
+                max_idle_nudges: app.max_idle_nudges,
+                job_idle_wait_s: app.job_idle_wait_s,
+            },
+        )
     }
 
     /// Pure resolver (a `get` closure stands in for the environment) so it's testable without
     /// mutating process-global env in parallel tests.
-    fn parse(get: impl Fn(&str) -> Option<String>, model_id: &str) -> Self {
-        let num = |k: &str| get(k).and_then(|s| s.parse::<u64>().ok());
+    fn parse(
+        get: impl Fn(&str) -> Option<String>,
+        model_id: &str,
+        file: RuntimeFileConfig,
+    ) -> Self {
+        let env_num = |k: &str| get(k).and_then(|s| s.parse::<u64>().ok());
+        let num = |k: &str, file_value: Option<u64>| env_num(k).or(file_value);
         Config {
-            max_steps: num("AGENTJ_MAX_STEPS").filter(|n| *n >= 1).unwrap_or(40) as usize,
-            max_idle_nudges: num("AGENTJ_MAX_IDLE_NUDGES").unwrap_or(6) as usize,
-            idle_wait: Duration::from_secs(num("AGENTJ_JOB_IDLE_WAIT_S").unwrap_or(120)),
-            max_parallel_subagents: num("AGENTJ_MAX_PARALLEL_SUBAGENTS")
+            max_steps: num("AGENTJ_MAX_STEPS", file.max_steps)
+                .filter(|n| *n >= 1)
+                .unwrap_or(40) as usize,
+            max_idle_nudges: num("AGENTJ_MAX_IDLE_NUDGES", file.max_idle_nudges).unwrap_or(6) as usize,
+            idle_wait: Duration::from_secs(num("AGENTJ_JOB_IDLE_WAIT_S", file.job_idle_wait_s).unwrap_or(120)),
+            max_parallel_subagents: env_num("AGENTJ_MAX_PARALLEL_SUBAGENTS")
                 .filter(|n| *n >= 1)
                 .unwrap_or(4) as usize,
-            context_window: num("AGENTJ_CONTEXT_WINDOW")
+            context_window: env_num("AGENTJ_CONTEXT_WINDOW")
                 .or_else(|| crate::model::context_window(model_id)),
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RuntimeFileConfig {
+    max_steps: Option<u64>,
+    max_idle_nudges: Option<u64>,
+    job_idle_wait_s: Option<u64>,
+}
+
+fn read_config(path: &Path) -> AppConfig {
+    match std::fs::read_to_string(path) {
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                eprintln!("warning: ignoring invalid config file {}: {err}", path.display());
+                AppConfig::default()
+            }
+        },
+        Err(_) => AppConfig::default(),
     }
 }
 
@@ -45,15 +133,23 @@ mod tests {
     use std::collections::HashMap;
 
     fn from(pairs: &[(&str, &str)]) -> Config {
-        from_model(pairs, "unknown-model")
+        from_all(
+            pairs,
+            "unknown-model",
+            RuntimeFileConfig {
+                max_steps: None,
+                max_idle_nudges: None,
+                job_idle_wait_s: None,
+            },
+        )
     }
 
-    fn from_model(pairs: &[(&str, &str)], model_id: &str) -> Config {
+    fn from_all(pairs: &[(&str, &str)], model_id: &str, file: RuntimeFileConfig) -> Config {
         let map: HashMap<String, String> = pairs
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        Config::parse(|k| map.get(k).cloned(), model_id)
+        Config::parse(|k| map.get(k).cloned(), model_id, file)
     }
 
     #[test]
@@ -65,12 +161,10 @@ mod tests {
         assert_eq!(d.max_parallel_subagents, 4);
         assert_eq!(d.context_window, None);
 
-        // zero/garbage fall back to the default where a minimum applies
         assert_eq!(from(&[("AGENTJ_MAX_STEPS", "0")]).max_steps, 40);
         assert_eq!(from(&[("AGENTJ_MAX_STEPS", "nope")]).max_steps, 40);
         assert_eq!(from(&[("AGENTJ_MAX_PARALLEL_SUBAGENTS", "0")]).max_parallel_subagents, 4);
 
-        // valid overrides win
         let o = from(&[
             ("AGENTJ_MAX_STEPS", "10"),
             ("AGENTJ_MAX_IDLE_NUDGES", "2"),
@@ -84,15 +178,99 @@ mod tests {
     }
 
     #[test]
+    fn file_values_fill_in_and_env_overrides_them() {
+        let file = RuntimeFileConfig {
+            max_steps: Some(9),
+            max_idle_nudges: Some(3),
+            job_idle_wait_s: Some(15),
+        };
+        let d = from_all(&[], "unknown-model", file);
+        assert_eq!(d.max_steps, 9);
+        assert_eq!(d.max_idle_nudges, 3);
+        assert_eq!(d.idle_wait, Duration::from_secs(15));
+        assert_eq!(d.max_parallel_subagents, 4);
+        assert_eq!(d.context_window, None);
+
+        let e = from_all(&[("AGENTJ_MAX_STEPS", "11")], "unknown-model", file);
+        assert_eq!(e.max_steps, 11);
+    }
+
+    #[test]
     fn context_window_env_overrides_model_table() {
-        // known model → table value
-        assert_eq!(from_model(&[], "gpt-4o").context_window, Some(128_000));
-        // env override wins
         assert_eq!(
-            from_model(&[("AGENTJ_CONTEXT_WINDOW", "500000")], "gpt-4o").context_window,
+            from_all(
+                &[],
+                "gpt-4o",
+                RuntimeFileConfig {
+                    max_steps: None,
+                    max_idle_nudges: None,
+                    job_idle_wait_s: None,
+                }
+            )
+            .context_window,
+            Some(128_000)
+        );
+        assert_eq!(
+            from_all(
+                &[("AGENTJ_CONTEXT_WINDOW", "500000")],
+                "gpt-4o",
+                RuntimeFileConfig {
+                    max_steps: None,
+                    max_idle_nudges: None,
+                    job_idle_wait_s: None,
+                }
+            )
+            .context_window,
             Some(500_000)
         );
-        // unknown model, no override → None
-        assert_eq!(from_model(&[], "mystery").context_window, None);
+        assert_eq!(from(&[]).context_window, None);
+    }
+
+    #[test]
+    fn app_config_merge_is_layered() {
+        let mut cfg = AppConfig {
+            provider: Some("vertex".into()),
+            model: Some("one".into()),
+            ..Default::default()
+        };
+        cfg.merge(AppConfig {
+            model: Some("two".into()),
+            base_url: Some("http://x".into()),
+            ..Default::default()
+        });
+        cfg.merge(AppConfig {
+            company: Some("iceglober".into()),
+            ..Default::default()
+        });
+        assert_eq!(cfg.provider.as_deref(), Some("vertex"));
+        assert_eq!(cfg.model.as_deref(), Some("two"));
+        assert_eq!(cfg.base_url.as_deref(), Some("http://x"));
+        assert_eq!(cfg.company.as_deref(), Some("iceglober"));
+    }
+
+    #[test]
+    fn read_config_rejects_unknown_keys() {
+        let dir = std::env::temp_dir().join(format!(
+            "agentj-config-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("aj.json");
+        std::fs::write(&path, r#"{"provider":"custom","context_window":1}"#).unwrap();
+        assert_eq!(read_config(&path), AppConfig::default());
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn env_or_file_prefers_env_then_file_then_none() {
+        let map: HashMap<String, String> = [("K".to_string(), "env".to_string())].into();
+        let _ = map;
+        assert_eq!(AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("file")), Some("file".into()));
+        assert_eq!(AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("")), None);
     }
 }
