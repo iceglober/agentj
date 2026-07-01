@@ -93,6 +93,52 @@ impl Editor {
             self.cursor = self.next(self.cursor);
         }
     }
+    fn word_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let mut i = self.cursor;
+        while i > 0 {
+            let p = self.prev(i);
+            let ch = self.text[p..i].chars().next().unwrap();
+            if !ch.is_whitespace() {
+                break;
+            }
+            i = p;
+        }
+        while i > 0 {
+            let p = self.prev(i);
+            let ch = self.text[p..i].chars().next().unwrap();
+            if ch.is_whitespace() {
+                break;
+            }
+            i = p;
+        }
+        self.cursor = i;
+    }
+    fn word_right(&mut self) {
+        if self.cursor >= self.text.len() {
+            return;
+        }
+        let mut i = self.cursor;
+        while i < self.text.len() {
+            let n = self.next(i);
+            let ch = self.text[i..n].chars().next().unwrap();
+            if !ch.is_whitespace() {
+                break;
+            }
+            i = n;
+        }
+        while i < self.text.len() {
+            let n = self.next(i);
+            let ch = self.text[i..n].chars().next().unwrap();
+            if ch.is_whitespace() {
+                break;
+            }
+            i = n;
+        }
+        self.cursor = i;
+    }
     fn home(&mut self) {
         self.cursor = self.text[..self.cursor]
             .rfind('\n')
@@ -104,6 +150,12 @@ impl Editor {
             .find('\n')
             .map(|i| self.cursor + i)
             .unwrap_or(self.text.len());
+    }
+    fn buffer_home(&mut self) {
+        self.cursor = 0;
+    }
+    fn buffer_end(&mut self) {
+        self.cursor = self.text.len();
     }
     fn up(&mut self) {
         self.vmove(true);
@@ -163,8 +215,34 @@ impl Editor {
 }
 
 /// Rows the input area needs (logical lines, capped).
-fn input_rows(text: &str) -> u16 {
-    (text.split('\n').count().max(1) as u16).min(MAX_INPUT_ROWS)
+fn input_rows(text: &str, width: u16) -> u16 {
+    let content_width = width.saturating_sub(2).max(1) as usize;
+    let rows = text
+        .split('\n')
+        .map(|line| line.chars().count().max(1).div_ceil(content_width))
+        .sum::<usize>()
+        .max(1) as u16;
+    rows.min(MAX_INPUT_ROWS)
+}
+
+fn visual_cursor(text: &str, cursor: usize, width: u16) -> (u16, u16) {
+    let content_width = width.saturating_sub(2).max(1) as usize;
+    let before = &text[..cursor];
+    let mut row = 0usize;
+    let mut col = 0usize;
+    for ch in before.chars() {
+        if ch == '\n' {
+            row += 1;
+            col = 0;
+            continue;
+        }
+        if col == content_width {
+            row += 1;
+            col = 0;
+        }
+        col += 1;
+    }
+    (row as u16, col as u16)
 }
 
 /// Messages into the UI event loop.
@@ -185,10 +263,14 @@ enum Action {
     Newline,
     Left,
     Right,
+    WordLeft,
+    WordRight,
     Up,
     Down,
     Home,
     End,
+    BufferHome,
+    BufferEnd,
     Complete,
     AbortTurn,
     Submit(String),
@@ -202,6 +284,7 @@ fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
     let ctrl = k.modifiers.contains(KeyModifiers::CONTROL);
     let alt = k.modifiers.contains(KeyModifiers::ALT);
     let shift = k.modifiers.contains(KeyModifiers::SHIFT);
+    let super_ = k.modifiers.contains(KeyModifiers::SUPER);
     match k.code {
         // These work during a turn too (abort / scroll).
         KeyCode::Char('c') if ctrl => {
@@ -227,6 +310,10 @@ fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         KeyCode::Tab => Action::Complete,
         KeyCode::Backspace => Action::Backspace,
         KeyCode::Delete => Action::Delete,
+        KeyCode::Left if super_ => Action::BufferHome,
+        KeyCode::Right if super_ => Action::BufferEnd,
+        KeyCode::Left if alt => Action::WordLeft,
+        KeyCode::Right if alt => Action::WordRight,
         KeyCode::Left => Action::Left,
         KeyCode::Right => Action::Right,
         KeyCode::Up => Action::Up,
@@ -311,6 +398,14 @@ fn pulse_color(frame: usize, running: bool) -> Color {
     }
 }
 
+fn divider_color(running: bool) -> Color {
+    if running {
+        Color::Cyan
+    } else {
+        DIM
+    }
+}
+
 fn sparkle(frame: usize) -> &'static str {
     match frame % 6 {
         0 => "✦",
@@ -376,7 +471,7 @@ pub async fn run(
     let mut messages: Vec<ChatMessage> = vec![ChatMessage::system(system.clone())];
     let mut transcript: Vec<Line<'static>> = vec![
         dim_line(format!("agentj · {model_id} · {root}")),
-        dim_line("Enter submits · Alt/Shift/Ctrl+Enter (or Ctrl-J) = newline · ←/→/↑/↓ move cursor · PageUp/Dn or Ctrl+↑/↓ scroll · /task <pr|branch> · Ctrl-C interrupts · Ctrl-D or /exit quits"),
+        dim_line("Enter submits · Alt/Shift/Ctrl+Enter (or Ctrl-J) = newline · ⌥←/→ skip words · ⌘←/→ start/end · ←/→/↑/↓ move cursor · PageUp/Dn or Ctrl+↑/↓ scroll · /task <pr|branch> · Ctrl-C interrupts · Ctrl-D or /exit quits"),
     ];
     for n in &notices {
         transcript.push(dim_line(format!("! {n}")));
@@ -412,7 +507,8 @@ pub async fn run(
     while !quit {
         terminal.draw(|f| {
             let area = f.area();
-            let in_h = input_rows(editor.text());
+            let input_width = area.width;
+            let in_h = input_rows(editor.text(), input_width);
             let rows = Layout::vertical([
                 Constraint::Min(1),
                 Constraint::Length(1),
@@ -428,12 +524,13 @@ pub async fn run(
             }
             scroll = scroll.min(max);
             let accent = pulse_color(pulse, running);
+            let divider = divider_color(running);
             f.render_widget(
                 Paragraph::new(Text::from(transcript.clone()))
                     .block(
                         Block::default()
                             .borders(Borders::BOTTOM)
-                            .border_style(Style::default().fg(accent)),
+                            .border_style(Style::default().fg(divider)),
                     )
                     .wrap(Wrap { trim: false })
                     .scroll((scroll, 0)),
@@ -490,8 +587,11 @@ pub async fn run(
             f.render_widget(Paragraph::new(status_line), rows[1]);
 
             // Input line(s) + a real cursor.
-            f.render_widget(Paragraph::new(input_lines(editor.text())), rows[2]);
-            let (crow, ccol) = editor.row_col();
+            f.render_widget(
+                Paragraph::new(input_lines(editor.text())).wrap(Wrap { trim: false }),
+                rows[2],
+            );
+            let (crow, ccol) = visual_cursor(editor.text(), editor.cursor, rows[2].width);
             f.set_cursor_position(Position::new(
                 (rows[2].x + 2 + ccol).min(rows[2].x + rows[2].width.saturating_sub(1)),
                 (rows[2].y + crow).min(rows[2].y + rows[2].height.saturating_sub(1)),
@@ -521,10 +621,14 @@ pub async fn run(
                             Action::Delete => editor.delete(),
                             Action::Left => editor.left(),
                             Action::Right => editor.right(),
+                            Action::WordLeft => editor.word_left(),
+                            Action::WordRight => editor.word_right(),
                             Action::Up => editor.up(),
                             Action::Down => editor.down(),
                             Action::Home => editor.home(),
                             Action::End => editor.end(),
+                            Action::BufferHome => editor.buffer_home(),
+                            Action::BufferEnd => editor.buffer_end(),
                             Action::ScrollUp => { follow = false; scroll = scroll.saturating_sub(1); }
                             Action::ScrollDown => { scroll = scroll.saturating_add(1); }
                             Action::PageUp => { follow = false; scroll = scroll.saturating_sub(10); }
@@ -693,6 +797,32 @@ mod tests {
     }
 
     #[test]
+    fn word_and_buffer_motions_work() {
+        let mut e = ed("one  two\nthree");
+        e.word_left();
+        assert_eq!(e.cursor, "one  two\n".len());
+        e.word_left();
+        assert_eq!(e.cursor, "one  ".len());
+        e.word_left();
+        assert_eq!(e.cursor, 0);
+        e.word_right();
+        assert_eq!(e.cursor, "one".len());
+        e.word_right();
+        assert_eq!(e.cursor, "one  two".len());
+        e.buffer_end();
+        assert_eq!(e.cursor, e.text().len());
+        e.buffer_home();
+        assert_eq!(e.cursor, 0);
+    }
+
+    #[test]
+    fn wrapped_input_rows_and_cursor_are_tracked() {
+        assert_eq!(input_rows("abcdef", 5), 2);
+        assert_eq!(visual_cursor("abcdef", 6, 5), (1, 3));
+        assert_eq!(visual_cursor("ab\ncdef", 6, 5), (1, 3));
+    }
+
+    #[test]
     fn enter_submits_while_chords_insert_newlines() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let plain = |c| KeyEvent::new(c, KeyModifiers::NONE);
@@ -717,7 +847,7 @@ mod tests {
             ),
             Action::Newline
         ));
-        // Arrows move the cursor.
+        // Arrows move the cursor; Alt+arrows jump by word; Cmd/Super+arrows jump to buffer edges.
         assert!(matches!(
             key_to_action(plain(KeyCode::Left), false, "hi"),
             Action::Left
@@ -725,6 +855,34 @@ mod tests {
         assert!(matches!(
             key_to_action(plain(KeyCode::Up), false, "hi"),
             Action::Up
+        ));
+        assert!(matches!(
+            key_to_action(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT), false, "hi"),
+            Action::WordLeft
+        ));
+        assert!(matches!(
+            key_to_action(
+                KeyEvent::new(KeyCode::Right, KeyModifiers::ALT),
+                false,
+                "hi"
+            ),
+            Action::WordRight
+        ));
+        assert!(matches!(
+            key_to_action(
+                KeyEvent::new(KeyCode::Left, KeyModifiers::SUPER),
+                false,
+                "hi"
+            ),
+            Action::BufferHome
+        ));
+        assert!(matches!(
+            key_to_action(
+                KeyEvent::new(KeyCode::Right, KeyModifiers::SUPER),
+                false,
+                "hi"
+            ),
+            Action::BufferEnd
         ));
         // Typing is ignored mid-turn, but Ctrl-C still aborts and Ctrl+↑ still scrolls.
         assert!(matches!(
