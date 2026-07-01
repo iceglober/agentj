@@ -30,6 +30,11 @@ pub struct Session {
     pub cfg: Arc<Config>,
 }
 
+/// Direct (non-delegate) tool calls in one turn before the single SPEAR re-anchor nudge fires. The
+/// prompt's own heuristic is "delegate what you can't name the files for" — this is the backstop
+/// when execution sprawls anyway. Advisory, once per turn; primary loop only.
+const SPEAR_NUDGE_AFTER: usize = 8;
+
 /// One subagent's outcome: its batch index, final result text, and whether it succeeded.
 struct SubResult {
     index: usize,
@@ -198,6 +203,9 @@ pub async fn run_turn(
             let _ = c.send(delta);
         }
     };
+    let mut direct_calls = 0usize; // non-delegate tool calls this turn
+    let mut used_delegate = false;
+    let mut spear_nudged = false;
 
     for _ in 0..sess.cfg.max_steps {
         // Background jobs are the primary loop's concern only (subagents don't consume nudges).
@@ -208,6 +216,22 @@ pub async fn run_turn(
                 commit_delta(vec![m.clone()]);
                 messages.push(m);
             }
+        }
+
+        // SPEAR re-anchor: once per turn, if direct execution has run long with no delegation, remind
+        // the model to check its trajectory against PLAN. Advisory — the model decides what to do.
+        if allow_delegate && !spear_nudged && !used_delegate && direct_calls >= SPEAR_NUDGE_AFTER {
+            spear_nudged = true;
+            let msg = format!(
+                "[supervisor: SPEAR check — {direct_calls} direct tool calls this turn and no delegation yet. \
+                 If the remaining work is an investigation or splits into independent sub-tasks, hand it to \
+                 `delegate` now to keep your context focused; if direct execution is genuinely right for \
+                 what's left, continue.]"
+            );
+            let _ = tx.send(AgentEvent::Note(first_line(&msg, 120)));
+            let m = ChatMessage::user(msg);
+            commit_delta(vec![m.clone()]);
+            messages.push(m);
         }
 
         let turn = match sess.llm.chat(messages, &specs).await {
@@ -282,6 +306,11 @@ pub async fn run_turn(
             } else {
                 (tc.function.name.clone(), false)
             };
+            if is_delegate {
+                used_delegate = true;
+            } else {
+                direct_calls += 1;
+            }
             let _ = tx.send(AgentEvent::ToolStart {
                 name,
                 args: first_line(&tc.function.arguments, 100),
@@ -503,6 +532,55 @@ mod tests {
         assert!(deltas
             .iter()
             .any(|d| d.len() == 1 && d[0].role == "assistant" && d[0].tool_calls.is_empty()));
+    }
+
+    fn spear_notes(events: &[AgentEvent]) -> usize {
+        events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::Note(t) if t.contains("SPEAR check")))
+            .count()
+    }
+
+    #[tokio::test]
+    async fn spear_nudge_fires_once_after_sustained_direct_execution() {
+        // 10 direct tool calls, no delegation → exactly one advisory nudge (at the threshold), and
+        // the nudge enters committed history so the model sees it.
+        let mut steps: Vec<ScriptStep> = (0..10)
+            .map(|_| ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" }))))
+            .collect();
+        steps.push(ScriptStep::Turn(turn_text("done")));
+        let sess = session(steps);
+        let (events, deltas) = run_with_commit(&sess).await;
+
+        assert_eq!(spear_notes(&events), 1, "one nudge, not repeated: {events:?}");
+        assert!(deltas.iter().flatten().any(|m| m.role == "user"
+            && m.content.as_deref().is_some_and(|c| c.contains("SPEAR check"))));
+    }
+
+    #[tokio::test]
+    async fn spear_nudge_skipped_when_the_turn_delegates_or_stays_short() {
+        // Delegating early suppresses the nudge entirely…
+        let mut steps = vec![
+            ScriptStep::Turn(turn_delegate(&["investigate"])),
+            ScriptStep::Turn(turn_text("subagent result")),
+        ];
+        steps.extend(
+            (0..10).map(|_| {
+                ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" })))
+            }),
+        );
+        steps.push(ScriptStep::Turn(turn_text("done")));
+        let sess = session(steps);
+        let events = run_and_collect(&sess).await;
+        assert_eq!(spear_notes(&events), 0, "delegation suppresses the nudge: {events:?}");
+
+        // …and short direct turns never see it.
+        let sess = session(vec![
+            ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" }))),
+            ScriptStep::Turn(turn_text("done")),
+        ]);
+        let events = run_and_collect(&sess).await;
+        assert_eq!(spear_notes(&events), 0);
     }
 
     #[tokio::test]
