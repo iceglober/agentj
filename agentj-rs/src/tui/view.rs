@@ -10,7 +10,7 @@ use crate::commands::{classify, TokenClass, SLASH_COMMANDS};
 use ratatui::layout::{Constraint, Layout, Position};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::{Duration, Instant};
 
@@ -21,7 +21,9 @@ pub fn dim_line(s: impl Into<String>) -> Line<'static> {
 }
 
 /// An assistant message rendered as markdown, with a single dim bullet on the first line and a
-/// two-space indent on the rest so one message reads as one block.
+/// two-space indent on the rest so one message reads as one block. Blank separator lines stay truly
+/// empty: a whitespace-only line under `Wrap` renders as TWO rows (and breaks the row accounting),
+/// which used to double every paragraph gap.
 pub fn assistant_block(text: &str) -> Vec<Line<'static>> {
     let mut lines = render_markdown(text);
     if lines.is_empty() {
@@ -30,6 +32,8 @@ pub fn assistant_block(text: &str) -> Vec<Line<'static>> {
     for (i, line) in lines.iter_mut().enumerate() {
         let prefix = if i == 0 {
             Span::styled("● ", theme::dim())
+        } else if line.spans.is_empty() {
+            continue;
         } else {
             Span::raw("  ")
         };
@@ -628,9 +632,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    // Transcript (with a bottom divider). Auto-follow the tail unless the user scrolled up.
-    let viewport = rows[0].height.saturating_sub(1); // minus the border row
-    app.transcript.ensure_width(rows[0].width);
+    // Transcript (with a bottom divider). A little side padding, a moderate bottom gap above the
+    // divider; the top stays flush. Auto-follow the tail unless the user scrolled up.
+    const PAD_X: u16 = 1;
+    const PAD_BOTTOM: u16 = 2;
+    let viewport = rows[0].height.saturating_sub(1 + PAD_BOTTOM); // border + bottom padding
+    app.transcript.ensure_width(rows[0].width.saturating_sub(2 * PAD_X));
     let max = app.transcript.max_scroll(viewport);
     if app.follow {
         app.scroll = max;
@@ -641,7 +648,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(theme::divider_color())),
+                    .border_style(Style::default().fg(theme::divider_color()))
+                    .padding(Padding::new(PAD_X, PAD_X, 0, PAD_BOTTOM)),
             )
             .wrap(Wrap { trim: false })
             .scroll((app.scroll, 0)),
@@ -828,6 +836,17 @@ mod tests {
         assert_eq!(metrics.ui_batches, 1);
         assert_eq!(metrics.ui_events_total, 4);
         assert_eq!(metrics.ui_batch_max, 4);
+    }
+
+    #[test]
+    fn assistant_block_keeps_paragraph_separators_truly_empty() {
+        let lines = assistant_block("para one\n\npara two");
+        assert_eq!(row_text(&lines[0]), "● para one");
+        assert!(
+            lines[1].spans.is_empty(),
+            "separator must stay empty — an indented whitespace line renders as two rows under Wrap"
+        );
+        assert_eq!(row_text(&lines[2]), "  para two");
     }
 
     #[test]
@@ -1036,3 +1055,5 @@ mod tests {
         assert_eq!(view.max_scroll(3), 7);
     }
 }
+
+
