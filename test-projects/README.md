@@ -22,8 +22,9 @@ A task **PASSes** iff every grader it declares passes:
 - `verify` — a command exits 0 (e.g. the suite goes green).
 - `expect` — every listed substring appears in agentj's output.
 - `expectNoChange` — no source files changed vs `base` (read-only / diagnosis tasks).
-- `judge` — an LLM (Gemini, via `packages/agentj/src/eval/judge.ts`) grades agentj's diff + report
-  against a rubric (open-ended design tasks).
+- `judge` — an LLM grades agentj's diff + report against a rubric (open-ended design tasks).
+  **Temporarily disabled** — it depended on the removed TS judge; `judge` tasks grade on `verify`
+  alone until a Rust judge lands.
 
 Diff-based graders compare against `base`, so a agentj that commits its work is graded the same as one
 that leaves it uncommitted.

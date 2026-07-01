@@ -1,7 +1,8 @@
-# agentj-rs — ratatui edition
+# agentj-rs — the agentj crate (ratatui edition)
 
-A Rust port of `packages/agentj` (the TypeScript agent) with a full-screen **ratatui** UI instead of
-the inline raw-ANSI transcript. Same behavior, different terminal model.
+**This is agentj.** A Rust terminal coding agent with a full-screen **ratatui** UI. It began as a port
+of a now-retired TypeScript implementation (the `TS` column below is that reference); the TS package was
+removed in the Rust cutover, so this crate is the product.
 
 ```sh
 cd agentj-rs
