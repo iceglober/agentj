@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # agentj — launches the Rust (ratatui) build in agentj-rs/.
 # On first run (or after `cargo clean`) it builds the release binary, then execs it.
+# Resolves symlinks so this can be symlinked onto your PATH and run from any directory.
 set -euo pipefail
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ $src != /* ]] && src="$dir/$src"
+done
+here="$(cd -P "$(dirname "$src")/.." && pwd)"
 bin="$here/agentj-rs/target/release/agentj"
 if [ ! -x "$bin" ]; then
   echo "agentj: building the release binary (first run)…" >&2
