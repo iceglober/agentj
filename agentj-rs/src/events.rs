@@ -1,5 +1,7 @@
 //! Events the agent loop emits to the UI. Port of `events.ts` (AgentEvent).
 
+use crate::provider::TokenUsage;
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // `id`/`ok` are part of the event protocol; not every consumer reads them yet.
 pub enum AgentEvent {
@@ -25,6 +27,8 @@ pub enum AgentEvent {
         summary: String,
         elapsed_ms: u64,
     },
+    /// Token accounting for the model call just completed.
+    Usage(TokenUsage),
     /// A supervisor/lifecycle note (auto-continue, hit the cap, …).
     Note(String),
     /// A hard error ended the turn.

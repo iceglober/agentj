@@ -398,6 +398,7 @@ impl App {
                 )));
                 self.dirty = true;
             }
+            AgentEvent::Usage(_) => {} // surfaced in the status line — wired in the visual pass
             AgentEvent::Note(t) => {
                 self.transcript.push(dim_line(format!("» {t}")));
                 self.dirty = true;

@@ -116,6 +116,29 @@ pub fn preflight(sel: &Selector) -> Result<(), String> {
     }
 }
 
+/// Context-window size (total token budget) for a known model id, matched case-insensitively by
+/// prefix. `None` when unknown, so callers omit the context meter rather than guess. Values are
+/// approximate published limits; `AGENTJ_CONTEXT_WINDOW` overrides for a specific deployment.
+pub fn context_window(model_id: &str) -> Option<u64> {
+    const TABLE: &[(&str, u64)] = &[
+        ("gpt-5", 400_000),
+        ("gpt-4.1", 1_047_576),
+        ("gpt-4o", 128_000),
+        ("o4-mini", 200_000),
+        ("o3", 200_000),
+        ("o1", 200_000),
+        ("claude", 200_000),
+        ("gemini-2.5", 1_048_576),
+        ("gemini-1.5", 1_048_576),
+        ("gemini-2.0", 1_048_576),
+    ];
+    let id = model_id.to_ascii_lowercase();
+    TABLE
+        .iter()
+        .find(|(prefix, _)| id.starts_with(prefix))
+        .map(|(_, window)| *window)
+}
+
 /// Resolve a runnable model config. Callers preflight first.
 pub fn resolve_model(sel: &Selector) -> Result<ModelConfig, String> {
     let model_id = sel
@@ -160,6 +183,15 @@ mod tests {
         assert_eq!(resolve_provider(Some("custom")), Provider::Custom);
         assert_eq!(resolve_provider(Some("openai")), Provider::Vertex);
         assert_eq!(resolve_provider(None), Provider::Vertex);
+    }
+
+    #[test]
+    fn context_window_prefix_lookup() {
+        assert_eq!(context_window("gpt-4o-mini"), Some(128_000));
+        assert_eq!(context_window("GPT-5.2"), Some(400_000)); // case-insensitive
+        assert_eq!(context_window("claude-opus-4-8"), Some(200_000));
+        assert_eq!(context_window("gemini-2.5-pro"), Some(1_048_576));
+        assert_eq!(context_window("some-unknown-model"), None);
     }
 
     #[test]

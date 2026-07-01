@@ -206,6 +206,15 @@ pub async fn run_turn(
             }
         };
 
+        if let Some(usage) = turn.usage {
+            let _ = tx.send(AgentEvent::Usage(usage));
+        }
+        if turn.finish_reason == "length" {
+            let _ = tx.send(AgentEvent::Note(
+                "response truncated (finish_reason=length)".to_string(),
+            ));
+        }
+
         if let Some(text) = turn.content.clone() {
             if !text.trim().is_empty() {
                 let _ = tx.send(AgentEvent::Message(text.clone()));
@@ -307,7 +316,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::jobs::JobManager;
-    use crate::provider::{AssistantTurn, FunctionCall, ScriptStep, ToolCall};
+    use crate::provider::{AssistantTurn, FunctionCall, ScriptStep, TokenUsage, ToolCall};
     use crate::tools::{tool_specs, Tools};
     use std::collections::VecDeque;
     use std::path::PathBuf;
@@ -329,6 +338,7 @@ mod tests {
             max_idle_nudges: 6,
             idle_wait: Duration::from_secs(120),
             max_parallel_subagents: 4,
+            context_window: None,
         }
     }
 
@@ -347,6 +357,7 @@ mod tests {
             content: Some(s.to_string()),
             tool_calls: vec![],
             finish_reason: "stop".into(),
+            usage: None,
         }
     }
 
@@ -364,6 +375,7 @@ mod tests {
                 },
             }],
             finish_reason: "tool_calls".into(),
+            usage: None,
         }
     }
 
@@ -426,6 +438,23 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, .. })));
+    }
+
+    #[tokio::test]
+    async fn usage_event_emitted_per_model_call() {
+        let mut turn = turn_text("done");
+        turn.usage = Some(TokenUsage {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            total_tokens: 120,
+            cached_tokens: None,
+        });
+        let sess = session(vec![ScriptStep::Turn(turn)]);
+        let events = run_and_collect(&sess).await;
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::Usage(u) if u.total_tokens == 120 && u.prompt_tokens == 100
+        )));
     }
 
     #[tokio::test]

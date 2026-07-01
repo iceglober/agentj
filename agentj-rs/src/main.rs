@@ -195,7 +195,7 @@ async fn main() {
     let sess = agent::Session {
         llm: Arc::new(llm),
         tools: Arc::new(tools),
-        cfg: Arc::new(config::Config::from_env()),
+        cfg: Arc::new(config::Config::from_env(&cfg.model_id)),
     };
 
     if !std::io::stdin().is_terminal() && args.once.is_none() {
@@ -234,6 +234,10 @@ async fn main() {
                 } => println!(
                     "↳[{id}] {} ({elapsed_ms}ms) — {summary}",
                     if ok { "done" } else { "FAILED" }
+                ),
+                AgentEvent::Usage(u) => println!(
+                    "» tokens: {} in / {} out ({} total)",
+                    u.prompt_tokens, u.completion_tokens, u.total_tokens
                 ),
                 AgentEvent::Note(t) => println!("» {t}"),
                 AgentEvent::Error(e) => {

@@ -1,7 +1,7 @@
 //! OpenAI-compatible chat client (Azure AI Foundry `/openai/v1`, custom gateways like Bifrost, local
 //! servers). Non-streaming `/chat/completions` with tool calls.
 
-use super::{AssistantTurn, ChatMessage, ToolCall, ToolSpec};
+use super::{AssistantTurn, ChatMessage, TokenUsage, ToolCall, ToolSpec};
 use crate::model::ModelConfig;
 use serde::Deserialize;
 use serde_json::json;
@@ -68,6 +68,7 @@ impl OpenAiProvider {
                 text.chars().take(200).collect::<String>()
             )
         })?;
+        let usage = parsed.usage.map(Into::into);
         let choice = parsed
             .choices
             .into_iter()
@@ -77,6 +78,7 @@ impl OpenAiProvider {
             content: choice.message.content,
             tool_calls: choice.message.tool_calls,
             finish_reason: choice.finish_reason.unwrap_or_default(),
+            usage,
         })
     }
 }
@@ -84,6 +86,8 @@ impl OpenAiProvider {
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<Choice>,
+    #[serde(default)]
+    usage: Option<WireUsage>,
 }
 
 #[derive(Deserialize)]
@@ -99,4 +103,78 @@ struct RespMessage {
     content: Option<String>,
     #[serde(default)]
     tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Deserialize, Default)]
+struct WireUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    total_tokens: u64,
+    #[serde(default)]
+    prompt_tokens_details: Option<WirePromptDetails>,
+}
+
+#[derive(Deserialize, Default)]
+struct WirePromptDetails {
+    #[serde(default)]
+    cached_tokens: u64,
+}
+
+impl From<WireUsage> for TokenUsage {
+    fn from(u: WireUsage) -> Self {
+        TokenUsage {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+            cached_tokens: u.prompt_tokens_details.map(|d| d.cached_tokens),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(body: &str) -> AssistantTurn {
+        let parsed: ChatResponse = serde_json::from_str(body).unwrap();
+        let usage = parsed.usage.map(Into::into);
+        let choice = parsed.choices.into_iter().next().unwrap();
+        AssistantTurn {
+            content: choice.message.content,
+            tool_calls: choice.message.tool_calls,
+            finish_reason: choice.finish_reason.unwrap_or_default(),
+            usage,
+        }
+    }
+
+    #[test]
+    fn usage_deserializes_with_cached_details() {
+        let turn = parse(
+            r#"{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":120,"completion_tokens":30,"total_tokens":150,
+                         "prompt_tokens_details":{"cached_tokens":64}}}"#,
+        );
+        let u = turn.usage.expect("usage present");
+        assert_eq!(u.prompt_tokens, 120);
+        assert_eq!(u.completion_tokens, 30);
+        assert_eq!(u.total_tokens, 150);
+        assert_eq!(u.cached_tokens, Some(64));
+    }
+
+    #[test]
+    fn usage_without_details_or_absent() {
+        let turn = parse(
+            r#"{"choices":[{"message":{"content":"hi"}}],
+                "usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#,
+        );
+        let u = turn.usage.unwrap();
+        assert_eq!(u.cached_tokens, None);
+        assert_eq!(u.total_tokens, 15);
+
+        let none = parse(r#"{"choices":[{"message":{"content":"hi"}}]}"#);
+        assert!(none.usage.is_none());
+    }
 }

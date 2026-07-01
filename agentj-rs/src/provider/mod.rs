@@ -66,12 +66,22 @@ impl ChatMessage {
     }
 }
 
+/// Token accounting for one model call, when the provider reports it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub total_tokens: u64,
+    /// Cached input tokens (`prompt_tokens_details.cached_tokens`), when reported.
+    pub cached_tokens: Option<u64>,
+}
+
 /// What the model returned for one step.
 pub struct AssistantTurn {
     pub content: Option<String>,
     pub tool_calls: Vec<ToolCall>,
-    #[allow(dead_code)] // consumed by supervised auto-continue (stage 2).
     pub finish_reason: String,
+    pub usage: Option<TokenUsage>,
 }
 
 /// A scripted model step for tests: hand the loop a canned turn, an error, or a panic.
