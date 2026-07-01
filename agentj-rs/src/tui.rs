@@ -86,10 +86,35 @@ impl Editor {
             self.text.replace_range(self.cursor..n, "");
         }
     }
+    fn delete_word_left(&mut self) {
+        let end = self.cursor;
+        self.word_left();
+        if self.cursor < end {
+            self.text.replace_range(self.cursor..end, "");
+        }
+    }
+    fn delete_word_right(&mut self) {
+        let start = self.cursor;
+        self.word_right();
+        let end = self.cursor;
+        self.cursor = start;
+        if start < end {
+            self.text.replace_range(start..end, "");
+        }
+    }
     fn delete_to_buffer_home(&mut self) {
         if self.cursor > 0 {
             self.text.replace_range(0..self.cursor, "");
             self.cursor = 0;
+        }
+    }
+    fn delete_to_line_end(&mut self) {
+        let end = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+        if self.cursor < end {
+            self.text.replace_range(self.cursor..end, "");
         }
     }
     fn left(&mut self) {
@@ -269,7 +294,10 @@ enum Action {
     Char(char),
     Backspace,
     Delete,
+    DeleteWordLeft,
+    DeleteWordRight,
     DeleteToBufferHome,
+    DeleteToLineEnd,
     Newline,
     Left,
     Right,
@@ -315,7 +343,10 @@ fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         KeyCode::Enter => Action::Submit(input.trim().to_string()),
         KeyCode::Tab if no_mods => Action::Complete,
         KeyCode::Backspace if super_ => Action::DeleteToBufferHome,
+        KeyCode::Backspace if alt => Action::DeleteWordLeft,
         KeyCode::Backspace if no_mods => Action::Backspace,
+        KeyCode::Delete if super_ => Action::DeleteToLineEnd,
+        KeyCode::Delete if alt => Action::DeleteWordRight,
         KeyCode::Delete if no_mods => Action::Delete,
         KeyCode::Left if super_ => Action::Home,
         KeyCode::Right if super_ => Action::End,
@@ -635,7 +666,10 @@ pub async fn run(
                             Action::Newline => editor.insert_char('\n'),
                             Action::Backspace => editor.backspace(),
                             Action::Delete => editor.delete(),
+                            Action::DeleteWordLeft => editor.delete_word_left(),
+                            Action::DeleteWordRight => editor.delete_word_right(),
                             Action::DeleteToBufferHome => editor.delete_to_buffer_home(),
+                            Action::DeleteToLineEnd => editor.delete_to_line_end(),
                             Action::Left => editor.left(),
                             Action::Right => editor.right(),
                             Action::WordLeft => editor.word_left(),
@@ -810,7 +844,10 @@ mod tests {
             Action::Char(c) => editor.insert_char(c),
             Action::Backspace => editor.backspace(),
             Action::Delete => editor.delete(),
+            Action::DeleteWordLeft => editor.delete_word_left(),
+            Action::DeleteWordRight => editor.delete_word_right(),
             Action::DeleteToBufferHome => editor.delete_to_buffer_home(),
+            Action::DeleteToLineEnd => editor.delete_to_line_end(),
             Action::Newline => editor.insert_char('\n'),
             Action::Left => editor.left(),
             Action::Right => editor.right(),
@@ -1038,8 +1075,20 @@ mod tests {
             Action::DeleteToBufferHome
         ));
         assert!(matches!(
+            key_to_action(key(KeyCode::Backspace, KeyModifiers::ALT), false, "hi"),
+            Action::DeleteWordLeft
+        ));
+        assert!(matches!(
             key_to_action(key(KeyCode::Backspace, KeyModifiers::NONE), false, "hi"),
             Action::Backspace
+        ));
+        assert!(matches!(
+            key_to_action(key(KeyCode::Delete, KeyModifiers::SUPER), false, "hi"),
+            Action::DeleteToLineEnd
+        ));
+        assert!(matches!(
+            key_to_action(key(KeyCode::Delete, KeyModifiers::ALT), false, "hi"),
+            Action::DeleteWordRight
         ));
         assert!(matches!(
             key_to_action(key(KeyCode::Delete, KeyModifiers::NONE), false, "hi"),
@@ -1204,5 +1253,41 @@ mod tests {
         assert_eq!(e.text(), "acd");
         apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::NONE), false);
         assert_eq!(e.text(), "ad");
+    }
+
+    #[test]
+    fn cmd_delete_and_backspace_delete_to_line_edges() {
+        let mut e = ed("alpha beta\ngamma delta");
+        e.cursor = "alpha be".len();
+        apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::SUPER), false);
+        assert_eq!(e.text(), "ta\ngamma delta");
+        assert_eq!(e.cursor, 0);
+
+        let mut e = ed("alpha beta\ngamma delta");
+        e.cursor = "alpha be".len();
+        apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::SUPER), false);
+        assert_eq!(e.text(), "alpha be\ngamma delta");
+        assert_eq!(e.cursor, "alpha be".len());
+    }
+
+    #[test]
+    fn option_delete_and_backspace_delete_words_without_crossing_lines() {
+        let mut e = ed("alpha  beta\ngamma delta");
+        e.cursor = "alpha  beta".len();
+        apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::ALT), false);
+        assert_eq!(e.text(), "alpha  \ngamma delta");
+        assert_eq!(e.cursor, "alpha  ".len());
+        apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::ALT), false);
+        assert_eq!(e.text(), "\ngamma delta");
+        assert_eq!(e.cursor, 0);
+
+        let mut e = ed("alpha  beta\ngamma delta");
+        e.cursor = "alpha  ".len();
+        apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::ALT), false);
+        assert_eq!(e.text(), "alpha  \ngamma delta");
+        assert_eq!(e.cursor, "alpha  ".len());
+        apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::ALT), false);
+        assert_eq!(e.text(), "alpha   delta");
+        assert_eq!(e.cursor, "alpha  ".len());
     }
 }
