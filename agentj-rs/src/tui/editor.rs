@@ -23,12 +23,6 @@ impl Editor {
         self.cursor = 0;
         self.touch();
     }
-    /// Replace the whole buffer (used by Tab completion); cursor to the end.
-    pub fn set(&mut self, s: String) {
-        self.cursor = s.len();
-        self.text = s;
-        self.touch();
-    }
     pub fn insert_char(&mut self, c: char) {
         self.text.insert(self.cursor, c);
         self.cursor += c.len_utf8();
@@ -72,12 +66,20 @@ impl Editor {
             self.touch();
         }
     }
-    pub fn delete_to_buffer_home(&mut self) {
-        if self.cursor > 0 {
-            self.text.replace_range(0..self.cursor, "");
-            self.cursor = 0;
+    /// Delete from the start of the current line to the cursor (⌘⌫ / Ctrl-U).
+    pub fn delete_to_line_home(&mut self) {
+        let start = self.line_start_before(self.cursor);
+        if start < self.cursor {
+            self.text.replace_range(start..self.cursor, "");
+            self.cursor = start;
             self.touch();
         }
+    }
+    /// Replace `range` (byte indices on char boundaries) with `s`; cursor lands after the insert.
+    pub fn replace_range(&mut self, start: usize, end: usize, s: &str) {
+        self.text.replace_range(start..end, s);
+        self.cursor = start + s.len();
+        self.touch();
     }
     pub fn delete_to_line_end(&mut self) {
         let end = self.text[self.cursor..]
@@ -318,6 +320,26 @@ mod tests {
         assert_eq!(e.row_col(), (1, 0));
         e.end();
         assert_eq!(e.row_col(), (1, 2));
+    }
+
+    #[test]
+    fn delete_to_line_home_stops_at_the_line_start() {
+        let mut e = ed("alpha beta\ngamma delta");
+        e.cursor = "alpha beta\ngamma ".len();
+        e.delete_to_line_home();
+        assert_eq!(e.text(), "alpha beta\ndelta");
+        assert_eq!(e.cursor, "alpha beta\n".len());
+        // already at line start → no-op
+        e.delete_to_line_home();
+        assert_eq!(e.text(), "alpha beta\ndelta");
+    }
+
+    #[test]
+    fn replace_range_moves_cursor_after_insert() {
+        let mut e = ed("say /ta please");
+        e.replace_range(4, 7, "/task ");
+        assert_eq!(e.text(), "say /task  please");
+        assert_eq!(e.cursor, "say /task ".len());
     }
 
     #[test]

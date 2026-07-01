@@ -6,7 +6,7 @@ use super::editor::Editor;
 use super::keymap::{key_to_action, Action};
 use super::theme;
 use super::view::{assistant_block, dim_line, fmt_ms, tool_end_line, InputLayoutCache, TranscriptView};
-use crate::commands::{complete_command, SLASH_COMMANDS};
+use crate::commands::{fuzzy_commands, SlashCommand, SLASH_COMMANDS};
 use crate::events::AgentEvent;
 use crate::provider::{ChatMessage, TokenUsage};
 use crate::rekey::{is_linked_worktree, RekeyResult};
@@ -21,7 +21,34 @@ const EFFECT_TTL: Duration = Duration::from_millis(700);
 /// A second Ctrl-C within this window quits.
 const DOUBLE_TAP: Duration = Duration::from_secs(2);
 
-const CHEAT_SHEET: &str = "Enter send · Ctrl-J newline · Esc interrupt · Tab complete · mouse/PageUp-Dn scroll · Ctrl-C×2 quit · type / for commands";
+const CHEAT_SHEET: &str = "Enter send · Ctrl-J newline · Esc interrupt · / commands · ↑↓/wheel or PageUp/Dn scroll · Ctrl-C×2 quit";
+
+/// The slash token containing the cursor, when the completion popover should consider it: a maximal
+/// non-whitespace run ending at the cursor that starts with `/` at the start of the text or right
+/// after whitespace (so `a/b` or a mid-word `/` never triggers). Returns (start byte, token so far).
+fn slash_token(text: &str, cursor: usize) -> Option<(usize, String)> {
+    let before = &text[..cursor];
+    let start = before
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    let token = &before[start..];
+    if token.starts_with('/') {
+        Some((start, token.to_string()))
+    } else {
+        None
+    }
+}
+
+/// The slash-command completion popover: fuzzy matches for the token being typed.
+pub struct Popover {
+    pub items: Vec<&'static SlashCommand>,
+    pub selected: usize,
+    /// Byte offset where the token starts (replaced on accept).
+    token_start: usize,
+}
 
 /// Messages from the turn task into the UI event loop.
 pub enum UiMsg {
@@ -71,6 +98,9 @@ pub struct App {
     // input
     pub editor: Editor,
     pub input_cache: InputLayoutCache,
+    pub popover: Option<Popover>,
+    /// Token the user dismissed with Esc — stays closed until the token changes.
+    popover_dismissed: Option<String>,
     // turn state
     pub running: bool,
     pub turn: Option<TurnHandle>,
@@ -106,10 +136,7 @@ impl App {
         context_window: Option<u64>,
         notices: &[String],
     ) -> Self {
-        let mut transcript = TranscriptView::new(vec![
-            dim_line(format!("agentj · {model_id} · {root}")),
-            dim_line(CHEAT_SHEET),
-        ]);
+        let mut transcript = TranscriptView::new(vec![dim_line(CHEAT_SHEET)]);
         for n in notices {
             transcript.push(dim_line(format!("! {n}")));
         }
@@ -121,6 +148,8 @@ impl App {
             transcript,
             editor: Editor::default(),
             input_cache: InputLayoutCache::default(),
+            popover: None,
+            popover_dismissed: None,
             running: false,
             turn: None,
             since: Instant::now(),
@@ -188,6 +217,7 @@ impl App {
         match ev {
             Event::Paste(s) if !self.running => {
                 self.editor.insert_str(&s);
+                self.update_popover();
                 self.dirty = true;
                 AppEffect::None
             }
@@ -216,6 +246,18 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) -> AppEffect {
+        // The popover captures navigation/accept/dismiss keys before the normal keymap.
+        if self.popover.is_some() && !self.running && k.modifiers.is_empty() {
+            match k.code {
+                crossterm::event::KeyCode::Up => return self.popover_move(-1),
+                crossterm::event::KeyCode::Down => return self.popover_move(1),
+                crossterm::event::KeyCode::Tab | crossterm::event::KeyCode::Enter => {
+                    return self.popover_accept()
+                }
+                crossterm::event::KeyCode::Esc => return self.popover_dismiss(),
+                _ => {}
+            }
+        }
         match key_to_action(k, self.running, self.editor.text()) {
             Action::None => AppEffect::None,
             Action::Quit => AppEffect::Quit,
@@ -226,12 +268,16 @@ impl App {
             Action::Delete => self.edit(|e| e.delete()),
             Action::DeleteWordLeft => self.edit(|e| e.delete_word_left()),
             Action::DeleteWordRight => self.edit(|e| e.delete_word_right()),
-            Action::DeleteToBufferHome => self.edit(|e| e.delete_to_buffer_home()),
+            Action::DeleteToLineHome => self.edit(|e| e.delete_to_line_home()),
             Action::DeleteToLineEnd => self.edit(|e| e.delete_to_line_end()),
             Action::Left => self.edit(|e| e.left()),
             Action::Right => self.edit(|e| e.right()),
             Action::WordLeft => self.edit(|e| e.word_left()),
             Action::WordRight => self.edit(|e| e.word_right()),
+            // Single-line input: ↑/↓ scroll the transcript (what mouse wheels send under
+            // alternate-scroll); multi-line input: they move the cursor between lines.
+            Action::Up if !self.editor.text().contains('\n') => self.scroll_by(-1, true),
+            Action::Down if !self.editor.text().contains('\n') => self.scroll_by(1, false),
             Action::Up => self.edit(|e| e.up()),
             Action::Down => self.edit(|e| e.down()),
             Action::Home => self.edit(|e| e.home()),
@@ -241,7 +287,9 @@ impl App {
             Action::PageUp => self.scroll_by(-10, true),
             Action::PageDown => self.scroll_by(10, false),
             Action::Complete => {
-                self.complete();
+                // Tab with no popover open: try to open it for the token under the cursor.
+                self.update_popover();
+                self.dirty = true;
                 AppEffect::None
             }
             Action::AbortTurn => self.abort_turn(),
@@ -252,6 +300,74 @@ impl App {
 
     fn edit(&mut self, f: impl FnOnce(&mut Editor)) -> AppEffect {
         f(&mut self.editor);
+        self.update_popover();
+        self.dirty = true;
+        AppEffect::None
+    }
+
+    /// Recompute the popover from the token under the cursor. Opens on a `/` token (at start or
+    /// after whitespace), filters by fuzzy match, closes when nothing matches or the token is gone.
+    fn update_popover(&mut self) {
+        let Some((start, token)) = slash_token(self.editor.text(), self.editor.cursor) else {
+            self.popover = None;
+            self.popover_dismissed = None;
+            return;
+        };
+        if self.popover_dismissed.as_deref() == Some(token.as_str()) {
+            self.popover = None;
+            return;
+        }
+        self.popover_dismissed = None;
+        let items = fuzzy_commands(&token, SLASH_COMMANDS);
+        if items.is_empty() {
+            self.popover = None;
+            return;
+        }
+        let selected = self
+            .popover
+            .as_ref()
+            .map(|p| p.selected.min(items.len() - 1))
+            .unwrap_or(0);
+        self.popover = Some(Popover {
+            items,
+            selected,
+            token_start: start,
+        });
+    }
+
+    fn popover_move(&mut self, delta: i32) -> AppEffect {
+        if let Some(p) = &mut self.popover {
+            let n = p.items.len() as i32;
+            p.selected = ((p.selected as i32 + delta).rem_euclid(n)) as usize;
+            self.dirty = true;
+        }
+        AppEffect::None
+    }
+
+    fn popover_accept(&mut self) -> AppEffect {
+        if let Some(p) = self.popover.take() {
+            let cmd = p.items[p.selected];
+            let insert = if cmd.takes_arg {
+                format!("{} ", cmd.name)
+            } else {
+                cmd.name.to_string()
+            };
+            self.editor
+                .replace_range(p.token_start, self.editor.cursor, &insert);
+            // Stay closed for the accepted token (else a no-arg command like /exit would keep
+            // reopening and Enter could never submit); any further edit reopens it.
+            self.popover_dismissed =
+                slash_token(self.editor.text(), self.editor.cursor).map(|(_, t)| t);
+            self.dirty = true;
+        }
+        AppEffect::None
+    }
+
+    fn popover_dismiss(&mut self) -> AppEffect {
+        if let Some((_, token)) = slash_token(self.editor.text(), self.editor.cursor) {
+            self.popover_dismissed = Some(token);
+        }
+        self.popover = None;
         self.dirty = true;
         AppEffect::None
     }
@@ -267,19 +383,6 @@ impl App {
         };
         self.dirty = true;
         AppEffect::None
-    }
-
-    fn complete(&mut self) {
-        let c = complete_command(self.editor.text(), SLASH_COMMANDS);
-        let had_candidates = !c.candidates.is_empty();
-        self.editor.set(c.line);
-        self.dirty = true;
-        if had_candidates || self.editor.text() == "/" {
-            for cand in SLASH_COMMANDS {
-                self.transcript
-                    .push(dim_line(format!("  {}  {}", cand.name, cand.summary)));
-            }
-        }
     }
 
     fn abort_turn(&mut self) -> AppEffect {
@@ -319,6 +422,7 @@ impl App {
 
     fn submit(&mut self, text: String) -> AppEffect {
         self.editor.clear();
+        self.update_popover();
         self.follow = true;
         self.dirty = true;
         if text.is_empty() {
@@ -571,6 +675,105 @@ mod tests {
             .content
             .as_deref()
             .is_some_and(|c| c.contains("interrupted by the user"))));
+    }
+
+    fn type_str(a: &mut App, s: &str) {
+        for c in s.chars() {
+            a.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
+    #[test]
+    fn slash_popover_opens_filters_and_accepts() {
+        let mut a = app();
+        type_str(&mut a, "/");
+        let p = a.popover.as_ref().expect("popover opens on /");
+        assert_eq!(p.items.len(), SLASH_COMMANDS.len());
+
+        // fuzzy-filters as you type
+        type_str(&mut a, "ta");
+        let p = a.popover.as_ref().unwrap();
+        assert_eq!(p.items[0].name, "/task");
+
+        // Enter accepts the selection instead of submitting
+        let effect = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(effect, AppEffect::None));
+        assert_eq!(a.editor.text(), "/task ");
+        assert!(!a.running);
+        assert!(a.popover.is_none());
+    }
+
+    #[test]
+    fn accepting_a_no_arg_command_lets_the_next_enter_submit() {
+        let mut a = app();
+        type_str(&mut a, "/ex");
+        // First Enter accepts the completion…
+        assert!(matches!(
+            a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            AppEffect::None
+        ));
+        assert_eq!(a.editor.text(), "/exit");
+        assert!(a.popover.is_none(), "popover must stay closed after accept");
+        // …the second Enter submits (here: /exit quits).
+        assert!(matches!(
+            a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            AppEffect::Quit
+        ));
+    }
+
+    #[test]
+    fn slash_popover_works_mid_input_but_not_mid_word() {
+        let mut a = app();
+        type_str(&mut a, "see ");
+        type_str(&mut a, "/ex");
+        assert!(a.popover.is_some(), "slash after whitespace opens the popover");
+        let effect = a.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(matches!(effect, AppEffect::None));
+        assert_eq!(a.editor.text(), "see /exit");
+
+        let mut b = app();
+        type_str(&mut b, "a/b");
+        assert!(b.popover.is_none(), "slash glued to a word must not open the popover");
+    }
+
+    #[test]
+    fn slash_popover_arrows_select_and_esc_dismisses_until_token_changes() {
+        let mut a = app();
+        type_str(&mut a, "/");
+        a.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(a.popover.as_ref().unwrap().selected, 1);
+        a.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(a.popover.as_ref().unwrap().selected, 0);
+        a.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)); // wraps
+        assert_eq!(a.popover.as_ref().unwrap().selected, SLASH_COMMANDS.len() - 1);
+
+        // Esc closes it and keeps it closed for the same token…
+        a.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.popover.is_none());
+        assert!(!a.editor.text().is_empty(), "Esc dismisses the popover, not the input");
+        // …but typing more reopens it.
+        type_str(&mut a, "t");
+        assert!(a.popover.is_some());
+    }
+
+    #[test]
+    fn plain_up_down_scrolls_single_line_but_moves_cursor_in_multiline() {
+        let mut a = app();
+        type_str(&mut a, "hello");
+        a.scroll = 5;
+        a.follow = true;
+        a.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(a.scroll, 4, "single-line input: ↑ scrolls the transcript");
+        assert!(!a.follow);
+
+        let mut b = app();
+        type_str(&mut b, "one");
+        b.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+        type_str(&mut b, "two");
+        let before = b.scroll;
+        b.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(b.scroll, before, "multi-line input: ↑ moves the cursor, not the scroll");
+        assert!(b.editor.cursor < b.editor.text().len());
     }
 
     #[test]

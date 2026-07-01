@@ -15,10 +15,11 @@ use crate::provider::ChatMessage;
 use crate::rekey::rekey;
 use app::{App, AppEffect, TurnHandle, UiMsg};
 use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
-    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, EnableBracketedPaste, Event, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
+use crossterm::style::Print;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -74,11 +75,14 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
+    // Mouse capture is deliberately NOT enabled: it would swallow the terminal's native text
+    // selection in the transcript. Alternate-scroll mode (DECSET 1007) makes the wheel send ↑/↓
+    // arrow keys instead, which the keymap turns into transcript scrolling.
     execute!(
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableMouseCapture
+        Print("\x1b[?1007h")
     )?;
     // Ask for progressive keyboard reporting so modified Enter/Esc are distinguishable where the
     // terminal supports it (kitty/ghostty/wezterm/newer iTerm2), and chords like Cmd/Ctrl+Backspace
@@ -161,9 +165,9 @@ pub async fn run(
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     execute!(
         terminal.backend_mut(),
+        Print("\x1b[?1007l"),
         LeaveAlternateScreen,
-        DisableBracketedPaste,
-        DisableMouseCapture
+        DisableBracketedPaste
     )?;
     disable_raw_mode()?;
     Ok(())

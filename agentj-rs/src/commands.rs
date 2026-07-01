@@ -1,13 +1,13 @@
-//! Interactive slash commands — one registry shared by the input line (highlight + Tab completion)
-//! and the chat loop (dispatch). Port of `commands.ts` + the pure helpers from `input.ts`.
+//! Interactive slash commands — one registry shared by the input line (highlight + the fuzzy
+//! completion popover) and the chat loop (dispatch). Port of `commands.ts` + helpers from `input.ts`.
 
 #[derive(Debug, Clone, Copy)]
 pub struct SlashCommand {
     /// Including the leading slash, e.g. "/task".
     pub name: &'static str,
-    /// Whether the command expects an argument (Tab completes it with a trailing space).
+    /// Whether the command expects an argument (completion appends a trailing space).
     pub takes_arg: bool,
-    /// One line shown when Tab lists ambiguous matches.
+    /// One line shown next to the name in the completion popover.
     pub summary: &'static str,
 }
 
@@ -61,65 +61,44 @@ pub fn classify(line: &str, cmds: &[SlashCommand]) -> (String, String, TokenClas
     (token.to_string(), rest.to_string(), class)
 }
 
-/// The result of a Tab completion: the (possibly extended) line, plus candidates when ambiguous.
-pub struct Completion {
-    pub line: String,
-    pub candidates: Vec<SlashCommand>,
-}
-
-fn longest_common_prefix(names: &[&str]) -> String {
-    let mut p = names.first().map(|s| s.to_string()).unwrap_or_default();
-    for s in names {
-        while !s.starts_with(&p) {
-            p.pop();
+/// Case-insensitive fuzzy subsequence score: every pattern char must appear in order in the
+/// candidate. Higher is better — consecutive runs and a matching prefix score above scattered hits.
+/// `None` when the pattern isn't a subsequence.
+pub fn fuzzy_score(pattern: &str, candidate: &str) -> Option<i64> {
+    let pat: Vec<char> = pattern.chars().flat_map(|c| c.to_lowercase()).collect();
+    let cand: Vec<char> = candidate.chars().flat_map(|c| c.to_lowercase()).collect();
+    if pat.is_empty() {
+        return Some(0);
+    }
+    let mut score = 0i64;
+    let mut ci = 0usize;
+    let mut prev_hit: Option<usize> = None;
+    for &p in &pat {
+        let hit = (ci..cand.len()).find(|&i| cand[i] == p)?;
+        score += 1;
+        if prev_hit == Some(hit.wrapping_sub(1)) {
+            score += 3; // consecutive run
         }
+        if hit == 0 {
+            score += 2; // anchored at the start
+        }
+        score -= (hit - ci) as i64; // penalize gaps
+        prev_hit = Some(hit);
+        ci = hit + 1;
     }
-    p
+    Some(score)
 }
 
-/// Compute a Tab completion. Only completes the command token (before any space). Unique match →
-/// full command (+ trailing space if it takes an arg); ambiguous → extend to the common prefix, else
-/// return the candidates to list. No match / not a command ⇒ line unchanged.
-pub fn complete_command(line: &str, cmds: &[SlashCommand]) -> Completion {
-    if !line.starts_with('/') || line.contains(' ') {
-        return Completion {
-            line: line.to_string(),
-            candidates: vec![],
-        };
-    }
-    let matches: Vec<SlashCommand> = cmds
+/// Commands fuzzy-matching `pattern` (e.g. a typed `/ta` token), best score first; ties keep
+/// registry order.
+pub fn fuzzy_commands(pattern: &str, cmds: &'static [SlashCommand]) -> Vec<&'static SlashCommand> {
+    let mut scored: Vec<(i64, usize, &SlashCommand)> = cmds
         .iter()
-        .copied()
-        .filter(|c| c.name.starts_with(line))
+        .enumerate()
+        .filter_map(|(i, c)| fuzzy_score(pattern, c.name).map(|s| (s, i, c)))
         .collect();
-    match matches.len() {
-        0 => Completion {
-            line: line.to_string(),
-            candidates: vec![],
-        },
-        1 => {
-            let c = matches[0];
-            Completion {
-                line: format!("{}{}", c.name, if c.takes_arg { " " } else { "" }),
-                candidates: vec![],
-            }
-        }
-        _ => {
-            let names: Vec<&str> = matches.iter().map(|c| c.name).collect();
-            let lcp = longest_common_prefix(&names);
-            if lcp.len() > line.len() {
-                Completion {
-                    line: lcp,
-                    candidates: vec![],
-                }
-            } else {
-                Completion {
-                    line: line.to_string(),
-                    candidates: matches,
-                }
-            }
-        }
-    }
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, c)| c).collect()
 }
 
 #[cfg(test)]
@@ -138,17 +117,22 @@ mod tests {
     }
 
     #[test]
-    fn completion() {
-        assert_eq!(complete_command("/ta", SLASH_COMMANDS).line, "/task ");
-        assert_eq!(complete_command("/ex", SLASH_COMMANDS).line, "/exit");
-        let all = complete_command("/", SLASH_COMMANDS);
-        assert_eq!(all.line, "/");
-        assert_eq!(all.candidates.len(), 3);
-        assert_eq!(complete_command("/zzz", SLASH_COMMANDS).line, "/zzz");
-        assert_eq!(
-            complete_command("/task 27", SLASH_COMMANDS).line,
-            "/task 27"
-        );
-        assert_eq!(complete_command("hello", SLASH_COMMANDS).line, "hello");
+    fn fuzzy_scoring_orders_and_filters() {
+        // exact prefix beats scattered subsequence
+        assert!(fuzzy_score("/ta", "/task") > fuzzy_score("/ta", "/data"));
+        // subsequence match works with gaps ("tk" hits t..k in /task)
+        assert!(fuzzy_score("tk", "/task").is_some());
+        // not a subsequence → None
+        assert!(fuzzy_score("/xyz", "/task").is_none());
+        // case-insensitive
+        assert!(fuzzy_score("/TA", "/task").is_some());
+        // empty pattern matches everything
+        assert_eq!(fuzzy_commands("", SLASH_COMMANDS).len(), SLASH_COMMANDS.len());
+        // "/" matches all commands (they all start with /)
+        assert_eq!(fuzzy_commands("/", SLASH_COMMANDS).len(), SLASH_COMMANDS.len());
+        // "/t" ranks /task first
+        assert_eq!(fuzzy_commands("/t", SLASH_COMMANDS)[0].name, "/task");
+        // garbage filters everything out
+        assert!(fuzzy_commands("/zzz", SLASH_COMMANDS).is_empty());
     }
 }

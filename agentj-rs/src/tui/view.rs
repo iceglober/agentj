@@ -1,5 +1,6 @@
-//! Rendering: turns `App` state into the three-region ratatui layout (transcript / status / input),
-//! plus the transcript/input line builders and their cached row-count bookkeeping.
+//! Rendering: turns `App` state into the ratatui layout (transcript / subagent panel / status /
+//! input / footer, plus the floating slash-command popover), with the transcript/input line builders
+//! and their cached row-count bookkeeping.
 
 use super::app::App;
 use super::editor::Editor;
@@ -9,7 +10,7 @@ use crate::commands::{classify, TokenClass, SLASH_COMMANDS};
 use ratatui::layout::{Constraint, Layout, Position};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Instant;
 
@@ -55,30 +56,116 @@ pub fn tool_end_line(tool: &str, ok: bool, elapsed_ms: u128, summary: &str) -> L
     Line::from(spans)
 }
 
-/// Build the styled input lines: a dim prompt + the command token colored by class + plain remainder.
-pub fn input_lines(input: &str) -> Text<'static> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut raw = input.split('\n');
-    let first = raw.next().unwrap_or("");
-    let (token, rest, class) = classify(first, SLASH_COMMANDS);
-    let mut spans = vec![Span::styled("› ", theme::dim())];
-    match class {
-        TokenClass::Plain => spans.push(Span::raw(token)),
-        TokenClass::Exact => spans.push(Span::styled(token, theme::accent_bold())),
-        TokenClass::Prefix => spans.push(Span::styled(token, theme::accent())),
-        TokenClass::Unknown => spans.push(Span::styled(token, theme::err())),
+/// Styled content spans for one logical input line (no gutter). The first line gets its command
+/// token colored by `classify`.
+fn input_line_spans(line: &str, is_first: bool) -> Vec<Span<'static>> {
+    if !is_first {
+        if line.is_empty() {
+            return vec![];
+        }
+        return vec![Span::raw(line.to_string())];
+    }
+    let (token, rest, class) = classify(line, SLASH_COMMANDS);
+    let mut spans = Vec::new();
+    if !token.is_empty() {
+        spans.push(match class {
+            TokenClass::Plain => Span::raw(token),
+            TokenClass::Exact => Span::styled(token, theme::accent_bold()),
+            TokenClass::Prefix => Span::styled(token, theme::accent()),
+            TokenClass::Unknown => Span::styled(token, theme::err()),
+        });
     }
     if !rest.is_empty() {
         spans.push(Span::raw(rest));
     }
-    lines.push(Line::from(spans));
-    for line in raw {
-        lines.push(Line::from(vec![
-            Span::styled("  ", theme::dim()),
-            Span::raw(line.to_string()),
-        ]));
+    spans
+}
+
+/// Split styled spans into visual rows of at most `cw` characters, preserving styles across the
+/// split. Always yields at least one (possibly empty) row.
+fn chunk_spans(spans: Vec<Span<'static>>, cw: usize) -> Vec<Vec<Span<'static>>> {
+    let cw = cw.max(1);
+    let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut cur: Vec<Span<'static>> = Vec::new();
+    let mut used = 0usize;
+    for span in spans {
+        let style = span.style;
+        let mut content = span.content.into_owned();
+        loop {
+            let n = content.chars().count();
+            let avail = cw - used;
+            if n <= avail {
+                if n > 0 {
+                    used += n;
+                    cur.push(Span::styled(content, style));
+                }
+                break;
+            }
+            let split_at = content
+                .char_indices()
+                .nth(avail)
+                .map(|(i, _)| i)
+                .unwrap_or(content.len());
+            if avail > 0 {
+                cur.push(Span::styled(content[..split_at].to_string(), style));
+            }
+            content = content[split_at..].to_string();
+            rows.push(std::mem::take(&mut cur));
+            used = 0;
+        }
     }
-    Text::from(lines)
+    rows.push(cur);
+    rows
+}
+
+/// The input box, laid out exactly: every visual row is pre-wrapped at the content width (char
+/// wrapping, matching the cursor math — ratatui's word-wrapper is NOT used, so whitespace-only lines
+/// render and the cursor can never drift from the text).
+pub struct InputLayout {
+    /// Pre-wrapped visual rows, each prefixed with a 2-char gutter (`› ` on the first, spaces after).
+    pub lines: Vec<Line<'static>>,
+    pub total_rows: u16,
+    /// Cursor position: (visual row index, content column — add the 2-char gutter for screen x).
+    pub cursor: (u16, u16),
+}
+
+pub fn layout_input(text: &str, cursor: usize, width: u16) -> InputLayout {
+    let cw = width.saturating_sub(2).max(1) as usize;
+
+    // Locate the cursor: which logical line, and how many chars into it.
+    let cursor_line = text[..cursor].matches('\n').count();
+    let line_start = text[..cursor].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let cursor_chars = text[line_start..cursor].chars().count();
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut cursor_pos = (0u16, 0u16);
+    for (i, logical) in text.split('\n').enumerate() {
+        let rows = chunk_spans(input_line_spans(logical, i == 0), cw);
+        if i == cursor_line {
+            // Keep the cursor on its own line's last row when it sits exactly at a wrap boundary.
+            let (mut row, mut col) = (cursor_chars / cw, cursor_chars % cw);
+            if cursor_chars > 0 && col == 0 {
+                row -= 1;
+                col = cw;
+            }
+            cursor_pos = ((lines.len() + row) as u16, col as u16);
+        }
+        for (r, mut row_spans) in rows.into_iter().enumerate() {
+            let gutter = if lines.is_empty() && r == 0 {
+                Span::styled("› ", theme::dim())
+            } else {
+                Span::raw("  ")
+            };
+            row_spans.insert(0, gutter);
+            lines.push(Line::from(row_spans));
+        }
+    }
+    let total_rows = lines.len() as u16;
+    InputLayout {
+        lines,
+        total_rows,
+        cursor: cursor_pos,
+    }
 }
 
 pub fn fmt_ms(ms: u128) -> String {
@@ -89,36 +176,6 @@ pub fn fmt_ms(ms: u128) -> String {
     }
 }
 
-/// Rows the input area needs (logical lines, capped).
-pub fn input_rows(text: &str, width: u16) -> u16 {
-    let content_width = width.saturating_sub(2).max(1) as usize;
-    let rows = text
-        .split('\n')
-        .map(|line| line.chars().count().max(1).div_ceil(content_width))
-        .sum::<usize>()
-        .max(1) as u16;
-    rows.min(MAX_INPUT_ROWS)
-}
-
-pub fn visual_cursor(text: &str, cursor: usize, width: u16) -> (u16, u16) {
-    let content_width = width.saturating_sub(2).max(1) as usize;
-    let before = &text[..cursor];
-    let mut row = 0usize;
-    let mut col = 0usize;
-    for ch in before.chars() {
-        if ch == '\n' {
-            row += 1;
-            col = 0;
-            continue;
-        }
-        if col == content_width {
-            row += 1;
-            col = 0;
-        }
-        col += 1;
-    }
-    (row as u16, col as u16)
-}
 
 fn line_width(line: &Line<'_>) -> usize {
     line.spans
@@ -195,9 +252,13 @@ impl TranscriptView {
 pub struct InputLayoutCache {
     revision: u64,
     width: u16,
+    /// Visible rows (total capped at `MAX_INPUT_ROWS`; taller input scrolls).
     pub rows: u16,
     pub rendered: Text<'static>,
+    /// Cursor within the visible area: (row - scroll, content column).
     pub cursor: (u16, u16),
+    /// First visual row shown (input taller than the cap scrolls to keep the cursor visible).
+    pub scroll: u16,
 }
 
 impl Default for InputLayoutCache {
@@ -208,6 +269,7 @@ impl Default for InputLayoutCache {
             rows: 1,
             rendered: Text::from(""),
             cursor: (0, 0),
+            scroll: 0,
         }
     }
 }
@@ -237,9 +299,18 @@ impl InputLayoutCache {
         }
         self.revision = editor.revision();
         self.width = width;
-        self.rows = input_rows(editor.text(), width);
-        self.rendered = input_lines(editor.text());
-        self.cursor = visual_cursor(editor.text(), editor.cursor, width);
+        let layout = layout_input(editor.text(), editor.cursor, width);
+        let shown = layout.total_rows.clamp(1, MAX_INPUT_ROWS);
+        let max_scroll = layout.total_rows.saturating_sub(shown);
+        // Keep the previous scroll where possible, but always keep the cursor in view.
+        let scroll = self
+            .scroll
+            .min(max_scroll)
+            .clamp(layout.cursor.0.saturating_sub(shown - 1), layout.cursor.0);
+        self.rows = shown;
+        self.scroll = scroll;
+        self.cursor = (layout.cursor.0 - scroll, layout.cursor.1);
+        self.rendered = Text::from(layout.lines);
     }
 }
 
@@ -332,15 +403,10 @@ fn ctx_segment(app: &App) -> Option<(String, bool)> {
 }
 
 /// Assemble the right-status text, dropping lowest-priority parts until it fits `avail` columns.
-/// Display order: model · ctx · elapsed. Drop order (first dropped): model, then elapsed, then ctx.
-fn right_status_text(model: &str, ctx: Option<&str>, elapsed: &str, avail: usize) -> String {
-    for (with_model, with_elapsed, with_ctx) in
-        [(true, true, true), (false, true, true), (false, false, true), (false, false, false)]
-    {
+/// Display order: ctx · elapsed. Drop order (first dropped): elapsed, then ctx.
+fn right_status_text(ctx: Option<&str>, elapsed: &str, avail: usize) -> String {
+    for (with_elapsed, with_ctx) in [(true, true), (false, true), (false, false)] {
         let mut parts: Vec<&str> = Vec::new();
-        if with_model {
-            parts.push(model);
-        }
         if with_ctx {
             if let Some(ctx) = ctx {
                 parts.push(ctx);
@@ -400,7 +466,7 @@ fn span_width(spans: &[Span<'_>]) -> usize {
     spans.iter().map(|s| s.content.chars().count()).sum()
 }
 
-/// The full status row: left status + a right-aligned session segment (model · ctx · elapsed).
+/// The full status row: left status + a right-aligned session segment (ctx · elapsed).
 fn status_line(app: &App, now: Instant, width: u16) -> Line<'static> {
     let mut spans = status_left(app);
     let left_w = span_width(&spans);
@@ -408,7 +474,7 @@ fn status_line(app: &App, now: Instant, width: u16) -> Line<'static> {
     let ctx = ctx_segment(app);
     let ctx_text = ctx.as_ref().map(|(t, _)| t.as_str());
     let avail = (width as usize).saturating_sub(left_w + 1);
-    let right = right_status_text(&app.model_id, ctx_text, &elapsed, avail);
+    let right = right_status_text(ctx_text, &elapsed, avail);
     if !right.is_empty() {
         let right_w = right.chars().count();
         let pad = (width as usize).saturating_sub(left_w + right_w);
@@ -424,6 +490,36 @@ fn status_line(app: &App, now: Instant, width: u16) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The slash-command popover, anchored above the status row.
+fn popover_lines(app: &App) -> Vec<Line<'static>> {
+    const MAX_ITEMS: usize = 6;
+    let Some(p) = &app.popover else {
+        return Vec::new();
+    };
+    p.items
+        .iter()
+        .take(MAX_ITEMS)
+        .enumerate()
+        .map(|(i, cmd)| {
+            let selected = i == p.selected;
+            let (marker, name_style, summary_style) = if selected {
+                (
+                    Span::styled("▸ ", theme::accent()),
+                    theme::accent_bold().add_modifier(Modifier::REVERSED),
+                    theme::muted().add_modifier(Modifier::REVERSED),
+                )
+            } else {
+                (Span::raw("  "), theme::accent(), theme::dim())
+            };
+            Line::from(vec![
+                marker,
+                Span::styled(format!("{:<8}", cmd.name), name_style),
+                Span::styled(format!(" {}", cmd.summary), summary_style),
+            ])
+        })
+        .collect()
+}
+
 /// Render one frame from the current `App` state.
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
@@ -434,6 +530,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Constraint::Length(panel_h),
         Constraint::Length(1),
         Constraint::Length(in_h),
+        Constraint::Length(1),
     ])
     .split(area);
 
@@ -471,9 +568,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         rows[2],
     );
 
-    // Input line(s) + a real cursor.
+    // Input rows are pre-wrapped char-exact (no Wrap widget), so the cursor math is authoritative
+    // and whitespace-only lines render; taller-than-cap input scrolls to keep the cursor visible.
     f.render_widget(
-        Paragraph::new(app.input_cache.rendered.clone()).wrap(Wrap { trim: false }),
+        Paragraph::new(app.input_cache.rendered.clone()).scroll((app.input_cache.scroll, 0)),
         rows[3],
     );
     let (crow, ccol) = app.input_cache.cursor;
@@ -481,6 +579,36 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         (rows[3].x + 2 + ccol).min(rows[3].x + rows[3].width.saturating_sub(1)),
         (rows[3].y + crow).min(rows[3].y + rows[3].height.saturating_sub(1)),
     ));
+
+    // Footer: identity line, tucked by the prompt.
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("agentj · {} · {}", app.model_id, app.root),
+            theme::dim(),
+        ))),
+        rows[4],
+    );
+
+    // Slash-command popover, floated above the status row.
+    let popover = popover_lines(app);
+    if !popover.is_empty() {
+        let h = popover.len() as u16;
+        let w = popover
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.chars().count()).sum::<usize>())
+            .max()
+            .unwrap_or(0)
+            .min(area.width as usize) as u16;
+        let y = rows[2].y.saturating_sub(h);
+        let rect = ratatui::layout::Rect {
+            x: rows[3].x,
+            y,
+            width: w.max(1),
+            height: h.min(area.height),
+        };
+        f.render_widget(Clear, rect);
+        f.render_widget(Paragraph::new(popover), rect);
+    }
 }
 
 #[cfg(test)]
@@ -519,11 +647,62 @@ mod tests {
         e
     }
 
+    fn row_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
     #[test]
     fn wrapped_input_rows_and_cursor_are_tracked() {
-        assert_eq!(input_rows("abcdef", 5), 2);
-        assert_eq!(visual_cursor("abcdef", 6, 5), (1, 3));
-        assert_eq!(visual_cursor("ab\ncdef", 6, 5), (1, 3));
+        // width 5 → content width 3: "abcdef" wraps into 2 rows; cursor at the end sits on row 1.
+        let l = layout_input("abcdef", 6, 5);
+        assert_eq!(l.total_rows, 2);
+        assert_eq!(l.cursor, (1, 3));
+        assert_eq!(row_text(&l.lines[0]), "› abc");
+        assert_eq!(row_text(&l.lines[1]), "  def");
+
+        // cursor after "cde" = exactly at the wrap boundary → stays on its row at col 3
+        let l = layout_input("ab\ncdef", 6, 5);
+        assert_eq!(l.total_rows, 3); // "ab", "cde", "f"
+        assert_eq!(l.cursor, (1, 3));
+    }
+
+    #[test]
+    fn blank_lines_render_and_typing_after_them_lands_on_the_right_row() {
+        // Regression: newlines with no non-whitespace used to collapse under the word-wrapper,
+        // leaving typed text invisible / the cursor drifting.
+        let l = layout_input("\n\n\nword", 3 + "word".len(), 40);
+        assert_eq!(l.total_rows, 4);
+        assert_eq!(row_text(&l.lines[0]), "› ");
+        assert_eq!(row_text(&l.lines[1]), "  ");
+        assert_eq!(row_text(&l.lines[2]), "  ");
+        assert_eq!(row_text(&l.lines[3]), "  word");
+        assert_eq!(l.cursor, (3, 4));
+    }
+
+    #[test]
+    fn tall_input_scrolls_to_keep_the_cursor_visible() {
+        let mut cache = InputLayoutCache::default();
+        let mut editor = ed(&"line\n".repeat(11)); // 12 logical lines, cursor at end
+        cache.refresh(&editor, 40);
+        assert_eq!(cache.rows, MAX_INPUT_ROWS);
+        assert_eq!(cache.scroll, 12 - MAX_INPUT_ROWS);
+        assert_eq!(cache.cursor.0, MAX_INPUT_ROWS - 1); // cursor pinned to the last visible row
+
+        // Moving the cursor back to the top scrolls back up.
+        for _ in 0..12 {
+            editor.up();
+        }
+        cache.refresh(&editor, 40);
+        assert_eq!(cache.scroll, 0);
+        assert_eq!(cache.cursor.0, 0);
+    }
+
+    #[test]
+    fn cursor_stays_on_its_row_at_an_exact_wrap_boundary() {
+        // width 5 → content width 3; "abc" fills row 0 exactly; cursor at end stays on row 0.
+        let l = layout_input("abc", 3, 5);
+        assert_eq!(l.total_rows, 1);
+        assert_eq!(l.cursor, (0, 3));
     }
 
     #[test]
@@ -559,19 +738,14 @@ mod tests {
 
     #[test]
     fn right_status_drops_by_priority_as_width_shrinks() {
-        let full = right_status_text("gpt-5", Some("ctx 34%"), "12m", 100);
-        assert_eq!(full, "gpt-5 · ctx 34% · 12m");
-        // too narrow for the model → drop it first, keep ctx + elapsed
-        assert_eq!(
-            right_status_text("gpt-5", Some("ctx 34%"), "12m", 15),
-            "ctx 34% · 12m"
-        );
-        // narrower still → drop elapsed, keep ctx (highest priority)
-        assert_eq!(right_status_text("gpt-5", Some("ctx 34%"), "12m", 10), "ctx 34%");
+        let full = right_status_text(Some("ctx 34%"), "12m", 100);
+        assert_eq!(full, "ctx 34% · 12m");
+        // too narrow → drop elapsed first, keep ctx (highest priority)
+        assert_eq!(right_status_text(Some("ctx 34%"), "12m", 10), "ctx 34%");
         // nothing fits
-        assert_eq!(right_status_text("gpt-5", Some("ctx 34%"), "12m", 3), "");
-        // unknown context window → ctx omitted throughout
-        assert_eq!(right_status_text("gpt-5", None, "12m", 100), "gpt-5 · 12m");
+        assert_eq!(right_status_text(Some("ctx 34%"), "12m", 3), "");
+        // unknown context window → ctx omitted
+        assert_eq!(right_status_text(None, "12m", 100), "12m");
     }
 
     #[test]
@@ -629,11 +803,44 @@ mod tests {
         assert!(rendered.contains("code"));
         assert!(rendered.contains("● "), "assistant bullet missing");
         assert!(rendered.contains("ctx 34%"), "context meter missing: {rendered}");
-        assert!(rendered.contains("gpt-5"), "model name missing from status");
+        assert!(
+            rendered.contains("agentj · gpt-5 · ."),
+            "footer identity line missing"
+        );
         assert!(
             rendered.contains("port editor tests"),
             "subagent panel row missing"
         );
+    }
+
+    #[test]
+    fn frame_shows_the_slash_popover_above_the_status_row() {
+        use super::super::app::App;
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut app = App::new("gpt-5", ".".to_string(), "/repo".to_string(), None, &[]);
+        for c in "/t".chars() {
+            app.on_input(crossterm::event::Event::Key(KeyEvent::new(
+                KeyCode::Char(c),
+                KeyModifiers::NONE,
+            )));
+        }
+        assert!(app.popover.is_some());
+
+        let mut term = Terminal::new(TestBackend::new(80, 16)).unwrap();
+        app.refresh_input(80);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let rendered: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(rendered.contains("▸ /task"), "selected popover row missing: {rendered}");
+        assert!(rendered.contains("wipe + re-key"), "popover summary missing");
     }
 
     #[test]

@@ -18,7 +18,7 @@ The TS version leans entirely on the Vercel AI SDK (`ai` / `@ai-sdk/*`). There's
 Rust, so the provider HTTP clients, the tool-call loop, and structured output are hand-written
 (reqwest + serde). And ratatui is full-screen/immediate-mode, so the UI *replicates the behavior*
 (per-step transcript with markdown-rendered replies, tool lines, spinner/status, `/task`, slash
-highlight + Tab completion, Ctrl-C) in a proper full-screen layout rather than the TS inline-scroll
+highlight + a fuzzy completion popover, Ctrl-C) in a proper full-screen layout rather than the TS inline-scroll
 model. The loop is non-streaming on purpose (Vertex mangles Gemini thought-signatures on streamed
 tool replay), so the transcript updates once per model step, not per token.
 
@@ -31,7 +31,7 @@ The UI code lives under `src/tui/` — `app.rs` (state + transitions), `view.rs`
 |---|---|---|
 | Full-screen TUI + per-step transcript | inline raw-ANSI | ✅ ratatui, markdown-rendered replies |
 | Live subagent panel + context/token meter | — | ✅ Rust-first (`tui/view.rs`) |
-| Slash-command highlight + Tab completion | ✅ | ✅ (`commands.rs`, tested) |
+| Slash-command highlight + fuzzy completion popover | ✅ | ✅ (`commands.rs` + `tui`, tested) |
 | `/task` LRW re-key (wipe → fetch → checkout) | ✅ | ✅ (`rekey.rs`, tested) |
 | Built-in tools (read/write/edit/ls/glob/grep/bash) | ✅ | ✅ (`tools.rs`) |
 | Process-group command runner (kill the tree) | ✅ | ✅ (`exec.rs`, `process_group` + killpg) |

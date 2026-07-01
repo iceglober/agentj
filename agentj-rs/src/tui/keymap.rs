@@ -3,10 +3,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, KeyboardEnhancementFlags};
 
+// REPORT_ALTERNATE_KEYS matters: with REPORT_ALL_KEYS_AS_ESCAPE_CODES alone, terminals report the
+// BASE key for shifted input (Shift+a arrives as 'a'+SHIFT, Shift+1 as '1'+SHIFT) and capitals /
+// shifted punctuation stop working. Alternate keys carry the shifted codepoint so crossterm can
+// translate ('A', '!').
 pub const KEYBOARD_FLAGS: KeyboardEnhancementFlags =
     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
         .union(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
-        .union(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES);
+        .union(KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES)
+        .union(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS);
 
 /// What a keystroke means, resolved so the async loop can act (some actions await).
 pub enum Action {
@@ -18,7 +23,7 @@ pub enum Action {
     Delete,
     DeleteWordLeft,
     DeleteWordRight,
-    DeleteToBufferHome,
+    DeleteToLineHome,
     DeleteToLineEnd,
     Newline,
     Left,
@@ -56,6 +61,10 @@ pub fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         KeyCode::PageDown => Action::PageDown,
         KeyCode::Up if ctrl => Action::ScrollUp,
         KeyCode::Down if ctrl => Action::ScrollDown,
+        // While a turn runs the input is read-only, so plain ↑/↓ scroll the transcript (this is also
+        // what mouse wheels send under alternate-scroll mode).
+        KeyCode::Up if running && no_mods => Action::ScrollUp,
+        KeyCode::Down if running && no_mods => Action::ScrollDown,
         // Below here: ignored while a turn runs, except terminals that encode ⌥←/→ as Esc+b/f.
         _ if running && !alt_char_word => Action::None,
         KeyCode::Esc => Action::ClearInput, // idle: Esc clears the input line
@@ -64,12 +73,19 @@ pub fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         KeyCode::Char('j') if ctrl => Action::Newline,
         KeyCode::Enter => Action::Submit(input.trim().to_string()),
         KeyCode::Tab if no_mods => Action::Complete,
-        KeyCode::Backspace if super_ || (ctrl && !alt && !shift) => Action::DeleteToBufferHome,
+        KeyCode::Backspace if super_ || (ctrl && !alt && !shift) => Action::DeleteToLineHome,
         KeyCode::Backspace if alt => Action::DeleteWordLeft,
         KeyCode::Backspace if no_mods => Action::Backspace,
         KeyCode::Delete if super_ => Action::DeleteToLineEnd,
         KeyCode::Delete if alt => Action::DeleteWordRight,
         KeyCode::Delete if no_mods => Action::Delete,
+        // Readline chords (also cover terminals that send ⌘⌫ as ^U, ⌘⌦ as ^K, etc.).
+        KeyCode::Char('u' | 'U') if ctrl => Action::DeleteToLineHome,
+        KeyCode::Char('k' | 'K') if ctrl => Action::DeleteToLineEnd,
+        KeyCode::Char('w' | 'W') if ctrl => Action::DeleteWordLeft,
+        KeyCode::Char('a' | 'A') if ctrl => Action::Home,
+        KeyCode::Char('e' | 'E') if ctrl => Action::End,
+        KeyCode::Char('h' | 'H') if ctrl => Action::Backspace,
         KeyCode::Left if super_ => Action::Home,
         KeyCode::Right if super_ => Action::End,
         KeyCode::Left if alt => Action::WordLeft,
@@ -82,7 +98,17 @@ pub fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         KeyCode::End if no_mods => Action::End,
         KeyCode::Char(c) if alt && matches!(c, 'b' | 'B') => Action::WordLeft,
         KeyCode::Char(c) if alt && matches!(c, 'f' | 'F') => Action::WordRight,
-        KeyCode::Char(c) if !ctrl && !alt && !super_ => Action::Char(c),
+        KeyCode::Char(c) if !ctrl && !alt && !super_ => {
+            // Fallback for terminals that report the base key for shifted input ('a'+SHIFT):
+            // uppercase alphabetics ourselves. Shifted punctuation needs REPORT_ALTERNATE_KEYS
+            // (requested above) since the mapping is layout-dependent.
+            let ch = if shift && c.is_lowercase() {
+                c.to_uppercase().next().unwrap_or(c)
+            } else {
+                c
+            };
+            Action::Char(ch)
+        }
         _ => Action::None,
     }
 }
@@ -106,7 +132,7 @@ mod tests {
             Action::Delete => editor.delete(),
             Action::DeleteWordLeft => editor.delete_word_left(),
             Action::DeleteWordRight => editor.delete_word_right(),
-            Action::DeleteToBufferHome => editor.delete_to_buffer_home(),
+            Action::DeleteToLineHome => editor.delete_to_line_home(),
             Action::DeleteToLineEnd => editor.delete_to_line_end(),
             Action::Newline => editor.insert_char('\n'),
             Action::Left => editor.left(),
@@ -151,7 +177,7 @@ mod tests {
         Newline,
         Submit,
         Complete,
-        DeleteToBufferHome,
+        DeleteToLineHome,
         DeleteWordLeft,
         Backspace,
         DeleteToLineEnd,
@@ -183,7 +209,7 @@ mod tests {
                 Action::Newline => Self::Newline,
                 Action::Submit(_) => Self::Submit,
                 Action::Complete => Self::Complete,
-                Action::DeleteToBufferHome => Self::DeleteToBufferHome,
+                Action::DeleteToLineHome => Self::DeleteToLineHome,
                 Action::DeleteWordLeft => Self::DeleteWordLeft,
                 Action::Backspace => Self::Backspace,
                 Action::DeleteToLineEnd => Self::DeleteToLineEnd,
@@ -222,23 +248,32 @@ mod tests {
         KeymapCase { code: KeyCode::Char('B'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordLeft },
         KeymapCase { code: KeyCode::Char('f'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordRight },
         KeymapCase { code: KeyCode::Char('F'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordRight },
+        KeymapCase { code: KeyCode::Up, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::ScrollUp },
+        KeymapCase { code: KeyCode::Down, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::ScrollDown },
         KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
         KeymapCase { code: KeyCode::Tab, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
         KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
         KeymapCase { code: KeyCode::Char('x'), modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
+        KeymapCase { code: KeyCode::Char('u'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::None },
         KeymapCase { code: KeyCode::Esc, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::ClearInput },
         KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, running: false, expected: ActionKind::Newline },
         KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::Newline },
         KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Newline },
         KeymapCase { code: KeyCode::Char('j'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Newline },
         KeymapCase { code: KeyCode::Tab, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Complete },
-        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::DeleteToBufferHome },
-        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToBufferHome },
+        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::DeleteToLineHome },
+        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToLineHome },
         KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::DeleteWordLeft },
         KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Backspace },
         KeymapCase { code: KeyCode::Delete, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::DeleteToLineEnd },
         KeymapCase { code: KeyCode::Delete, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::DeleteWordRight },
         KeymapCase { code: KeyCode::Delete, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Delete },
+        KeymapCase { code: KeyCode::Char('u'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToLineHome },
+        KeymapCase { code: KeyCode::Char('k'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToLineEnd },
+        KeymapCase { code: KeyCode::Char('w'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteWordLeft },
+        KeymapCase { code: KeyCode::Char('a'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Home },
+        KeymapCase { code: KeyCode::Char('e'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::End },
+        KeymapCase { code: KeyCode::Char('h'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Backspace },
         KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::Home },
         KeymapCase { code: KeyCode::Right, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::End },
         KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordLeft },
@@ -346,6 +381,31 @@ mod tests {
     }
 
     #[test]
+    fn base_key_shift_reports_uppercase() {
+        // Terminals in kitty full-reporting mode without alternate keys send Shift+a as 'a'+SHIFT;
+        // the keymap must uppercase it rather than insert lowercase.
+        assert!(matches!(
+            key_to_action(key(KeyCode::Char('a'), KeyModifiers::SHIFT), false, ""),
+            Action::Char('A')
+        ));
+        // Already-translated capitals pass through.
+        assert!(matches!(
+            key_to_action(key(KeyCode::Char('Z'), KeyModifiers::SHIFT), false, ""),
+            Action::Char('Z')
+        ));
+        // No shift → unchanged.
+        assert!(matches!(
+            key_to_action(key(KeyCode::Char('a'), KeyModifiers::NONE), false, ""),
+            Action::Char('a')
+        ));
+    }
+
+    #[test]
+    fn keyboard_flags_include_alternate_keys_for_shifted_input() {
+        assert!(KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS));
+    }
+
+    #[test]
     fn keyboard_flags_request_only_needed_progressive_reporting() {
         assert!(KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES));
         assert!(KEYBOARD_FLAGS.contains(KeyboardEnhancementFlags::REPORT_EVENT_TYPES));
@@ -388,11 +448,35 @@ mod tests {
         assert_eq!(e.text(), "ta\ngamma delta");
         assert_eq!(e.cursor, 0);
 
+        // ⌘⌫ on a later line deletes to THAT line's start, not the buffer start.
+        let mut e = ed("alpha beta\ngamma delta");
+        e.cursor = "alpha beta\ngamma ".len();
+        apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::SUPER), false);
+        assert_eq!(e.text(), "alpha beta\ndelta");
+        assert_eq!(e.cursor, "alpha beta\n".len());
+
         let mut e = ed("alpha beta\ngamma delta");
         e.cursor = "alpha be".len();
         apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::SUPER), false);
         assert_eq!(e.text(), "alpha be\ngamma delta");
         assert_eq!(e.cursor, "alpha be".len());
+    }
+
+    #[test]
+    fn readline_chords_edit_the_line() {
+        let mut e = ed("alpha beta");
+        apply_key(&mut e, key(KeyCode::Char('u'), KeyModifiers::CONTROL), false);
+        assert_eq!(e.text(), "");
+
+        let mut e = ed("alpha beta");
+        apply_key(&mut e, key(KeyCode::Char('a'), KeyModifiers::CONTROL), false);
+        assert_eq!(e.cursor, 0);
+        apply_key(&mut e, key(KeyCode::Char('k'), KeyModifiers::CONTROL), false);
+        assert_eq!(e.text(), "");
+
+        let mut e = ed("alpha beta");
+        apply_key(&mut e, key(KeyCode::Char('w'), KeyModifiers::CONTROL), false);
+        assert_eq!(e.text(), "alpha ");
     }
 
     #[test]
