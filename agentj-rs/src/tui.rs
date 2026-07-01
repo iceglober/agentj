@@ -84,6 +84,12 @@ impl Editor {
             self.text.replace_range(self.cursor..n, "");
         }
     }
+    fn delete_to_buffer_home(&mut self) {
+        if self.cursor > 0 {
+            self.text.replace_range(0..self.cursor, "");
+            self.cursor = 0;
+        }
+    }
     fn left(&mut self) {
         if self.cursor > 0 {
             self.cursor = self.prev(self.cursor);
@@ -261,6 +267,7 @@ enum Action {
     Char(char),
     Backspace,
     Delete,
+    DeleteToBufferHome,
     Newline,
     Left,
     Right,
@@ -288,6 +295,8 @@ fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
     let alt = k.modifiers.contains(KeyModifiers::ALT);
     let shift = k.modifiers.contains(KeyModifiers::SHIFT);
     let super_ = k.modifiers.contains(KeyModifiers::SUPER);
+    let no_mods = k.modifiers.is_empty();
+    let alt_char_word = matches!(k.code, KeyCode::Char('b' | 'B' | 'f' | 'F'));
     match k.code {
         // These work during a turn too (interrupt / quit / scroll).
         KeyCode::Esc if running => Action::AbortTurn, // Esc interrupts the running turn
@@ -297,27 +306,30 @@ fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         KeyCode::PageDown => Action::PageDown,
         KeyCode::Up if ctrl => Action::ScrollUp,
         KeyCode::Down if ctrl => Action::ScrollDown,
-        // Below here: ignored while a turn runs.
-        _ if running => Action::None,
+        // Below here: ignored while a turn runs, except terminals that encode ⌥←/→ as Esc+b/f.
+        _ if running && !alt_char_word => Action::None,
         KeyCode::Esc => Action::ClearInput, // idle: Esc clears the input line
         // Newline chords for multi-line input (Enter alone submits).
         KeyCode::Enter if alt || shift || ctrl => Action::Newline,
         KeyCode::Char('j') if ctrl => Action::Newline,
         KeyCode::Enter => Action::Submit(input.trim().to_string()),
-        KeyCode::Tab => Action::Complete,
-        KeyCode::Backspace => Action::Backspace,
-        KeyCode::Delete => Action::Delete,
+        KeyCode::Tab if no_mods => Action::Complete,
+        KeyCode::Backspace if super_ => Action::DeleteToBufferHome,
+        KeyCode::Backspace if no_mods => Action::Backspace,
+        KeyCode::Delete if no_mods => Action::Delete,
         KeyCode::Left if super_ => Action::BufferHome,
         KeyCode::Right if super_ => Action::BufferEnd,
         KeyCode::Left if alt => Action::WordLeft,
         KeyCode::Right if alt => Action::WordRight,
-        KeyCode::Left => Action::Left,
-        KeyCode::Right => Action::Right,
-        KeyCode::Up => Action::Up,
-        KeyCode::Down => Action::Down,
-        KeyCode::Home => Action::Home,
-        KeyCode::End => Action::End,
-        KeyCode::Char(c) if !ctrl => Action::Char(c),
+        KeyCode::Left if no_mods => Action::Left,
+        KeyCode::Right if no_mods => Action::Right,
+        KeyCode::Up if no_mods => Action::Up,
+        KeyCode::Down if no_mods => Action::Down,
+        KeyCode::Home if no_mods => Action::Home,
+        KeyCode::End if no_mods => Action::End,
+        KeyCode::Char(c) if alt && matches!(c, 'b' | 'B') => Action::WordLeft,
+        KeyCode::Char(c) if alt && matches!(c, 'f' | 'F') => Action::WordRight,
+        KeyCode::Char(c) if !ctrl && !alt && !super_ => Action::Char(c),
         _ => Action::None,
     }
 }
@@ -465,7 +477,10 @@ pub async fn run(
     // terminal supports it (kitty/ghostty/wezterm/newer iTerm2); a no-op elsewhere.
     let _ = execute!(
         stdout,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        )
     );
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
@@ -622,6 +637,7 @@ pub async fn run(
                             Action::Newline => editor.insert_char('\n'),
                             Action::Backspace => editor.backspace(),
                             Action::Delete => editor.delete(),
+                            Action::DeleteToBufferHome => editor.delete_to_buffer_home(),
                             Action::Left => editor.left(),
                             Action::Right => editor.right(),
                             Action::WordLeft => editor.word_left(),
