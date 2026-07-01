@@ -3,15 +3,13 @@
 use crate::provider::TokenUsage;
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // `id`/`ok` are part of the event protocol; not every consumer reads them yet.
 pub enum AgentEvent {
     /// A chunk of assistant text (one per model step).
     Message(String),
     /// A tool call started.
-    ToolStart { id: u64, name: String, args: String },
-    /// A tool call finished.
+    ToolStart { name: String, args: String },
+    /// A tool call finished. `ok` is false when the tool reported failure.
     ToolEnd {
-        id: u64,
         ok: bool,
         elapsed_ms: u128,
         summary: String,

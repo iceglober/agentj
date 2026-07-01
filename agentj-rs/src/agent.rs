@@ -190,7 +190,6 @@ pub async fn run_turn(
 ) -> String {
     let mut specs = tool_specs(allow_delegate);
     specs.extend(sess.tools.mcp_specs()); // MCP tools sit alongside the built-ins (subagents inherit them)
-    let mut id: u64 = 0;
     let mut idle_nudges = 0usize;
     let mut final_text = String::new();
     let commit_delta = |delta: Vec<ChatMessage>| {
@@ -273,7 +272,6 @@ pub async fn run_turn(
         // a dangling `tool_calls` request without its matching tool responses in the committed history.
         let mut delta = vec![assistant];
         for tc in &turn.tool_calls {
-            id += 1;
             let args: Value = serde_json::from_str(&tc.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
 
@@ -284,7 +282,6 @@ pub async fn run_turn(
                 (tc.function.name.clone(), false)
             };
             let _ = tx.send(AgentEvent::ToolStart {
-                id,
                 name,
                 args: first_line(&tc.function.arguments, 100),
             });
@@ -296,7 +293,6 @@ pub async fn run_turn(
                 (o.text, o.ok)
             };
             let _ = tx.send(AgentEvent::ToolEnd {
-                id,
                 ok,
                 elapsed_ms: start.elapsed().as_millis(),
                 summary: first_line(&text, 60),

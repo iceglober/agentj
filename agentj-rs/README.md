@@ -17,14 +17,20 @@ cargo run                                                    # full-screen ratat
 The TS version leans entirely on the Vercel AI SDK (`ai` / `@ai-sdk/*`). There's no equivalent in
 Rust, so the provider HTTP clients, the tool-call loop, and structured output are hand-written
 (reqwest + serde). And ratatui is full-screen/immediate-mode, so the UI *replicates the behavior*
-(streaming transcript, tool lines, spinner/status, `/task`, slash highlight + Tab completion, Ctrl-C)
-in a proper full-screen layout rather than the TS inline-scroll model.
+(per-step transcript with markdown-rendered replies, tool lines, spinner/status, `/task`, slash
+highlight + Tab completion, Ctrl-C) in a proper full-screen layout rather than the TS inline-scroll
+model. The loop is non-streaming on purpose (Vertex mangles Gemini thought-signatures on streamed
+tool replay), so the transcript updates once per model step, not per token.
+
+The UI code lives under `src/tui/` — `app.rs` (state + transitions), `view.rs` (rendering),
+`markdown.rs`, `editor.rs`, `keymap.rs`, `theme.rs` — with the event loop in `tui/mod.rs`.
 
 ## Parity status
 
 | Area | TS (`packages/agentj`) | Rust (`agentj-rs`) |
 |---|---|---|
-| Full-screen TUI + streaming transcript | inline raw-ANSI | ✅ ratatui |
+| Full-screen TUI + per-step transcript | inline raw-ANSI | ✅ ratatui, markdown-rendered replies |
+| Live subagent panel + context/token meter | — | ✅ Rust-first (`tui/view.rs`) |
 | Slash-command highlight + Tab completion | ✅ | ✅ (`commands.rs`, tested) |
 | `/task` LRW re-key (wipe → fetch → checkout) | ✅ | ✅ (`rekey.rs`, tested) |
 | Built-in tools (read/write/edit/ls/glob/grep/bash) | ✅ | ✅ (`tools.rs`) |
@@ -49,12 +55,16 @@ AZURE_API_KEY=… \
 cargo run -- --provider azure --model gpt-5.4
 ```
 
-Env knobs mirror the TS side: `AGENTJ_PROVIDER`, `AGENTJ_MODEL`, `AGENTJ_BASE_URL`, `AGENTJ_API_KEY`,
-`AGENTJ_MAX_STEPS`, `AGENTJ_COMPANY`, `AGENTJ_ALLOW_PRIMARY`.
+Env knobs: `AGENTJ_PROVIDER`, `AGENTJ_MODEL`, `AGENTJ_BASE_URL`, `AGENTJ_API_KEY`, `AGENTJ_MAX_STEPS`,
+`AGENTJ_COMPANY`, `AGENTJ_ALLOW_PRIMARY`, `AGENTJ_MAX_PARALLEL_SUBAGENTS`, `AGENTJ_MAX_IDLE_NUDGES`,
+`AGENTJ_JOB_IDLE_WAIT_S`, and `AGENTJ_CONTEXT_WINDOW` (overrides the model table behind the context
+meter). Runtime knobs are resolved once at startup into `config::Config`.
 
 ## Verified / not
 
-- **Verified here:** `cargo build` warning-clean, `cargo test` (5 tests: highlight/completion, ref
-  classification, provider preflight), `--help` / `--version` / preflight error paths.
-- **Not verified here:** a live model turn (needs Azure creds) and the interactive TUI (needs a real
-  TTY — `enable_raw_mode` won't run under a pipe). Same caveats as the TS provider paths.
+- **Verified here:** `cargo build` warning-clean, `cargo clippy --all-targets -D warnings` clean,
+  `cargo test` (unit tests across commands/model/rekey/jobs/mcp/config/agent/tui — the agent loop is
+  driven by a scripted-model test seam; the TUI is rendered to a `TestBackend` and asserted; plus the
+  `tests/pty_input.rs` PTY integration suite), `--help` / `--version` / preflight error paths.
+- **Not verified here:** a live model turn (needs real credentials) and the interactive TUI against a
+  real TTY (`enable_raw_mode` won't run under a pipe).
