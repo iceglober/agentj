@@ -1,0 +1,10 @@
+#!/usr/bin/env bun
+// agentj — binary entry point.
+//
+// A single-package terminal coding agent: built-in file/exec tools + MCP, run directly in the cwd.
+import { main } from "agentj";
+
+main(process.argv.slice(2)).catch((err) => {
+  console.error(err instanceof Error ? err.stack ?? err.message : String(err));
+  process.exit(1);
+});

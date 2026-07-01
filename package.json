@@ -1,7 +1,7 @@
 {
-  "name": "coder",
+  "name": "agentj",
   "private": true,
-  "description": "A coding agent that prefers computation to inference and actively manages its context budget. Self-contained; multi-provider via the Vercel AI SDK.",
+  "description": "agentj: a simple, effective terminal coding agent. Self-contained; multi-provider via the Vercel AI SDK.",
   "license": "MIT",
   "packageManager": "bun@1.2.0",
   "workspaces": [
@@ -12,10 +12,10 @@
     "test": "bun run --filter='*' test",
     "typecheck": "bun run --filter='*' typecheck",
     "lint": "bun run --filter='*' lint",
-    "coder": "bun bin/coder"
+    "agentj": "bun bin/agentj"
   },
   "dependencies": {
-    "coder-tui": "workspace:*"
+    "agentj": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

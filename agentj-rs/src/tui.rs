@@ -35,10 +35,9 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::time::interval;
 
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const FUN_SPINNER: [&str; 8] = ["✦", "✧", "⋆", "✧", "✦", "✺", "✹", "✺"];
 const DIM: Color = Color::DarkGray;
 const MAX_INPUT_ROWS: u16 = 8;
-const EFFECT_TTL: Duration = Duration::from_millis(900);
+const EFFECT_TTL: Duration = Duration::from_millis(700);
 
 // ── a small cursor-tracked, multi-line text buffer ──
 // `cursor` is a byte index into `text`, always kept on a char boundary.
@@ -379,42 +378,43 @@ fn fmt_ms(ms: u128) -> String {
     }
 }
 
-fn max_scroll(lines: usize, viewport: u16) -> u16 {
-    lines.saturating_sub(viewport as usize) as u16
+fn line_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>()
 }
 
-fn pulse_color(frame: usize, running: bool) -> Color {
+fn transcript_rows(lines: &[Line<'_>], width: u16) -> usize {
+    let content_width = width.max(1) as usize;
+    lines
+        .iter()
+        .map(|line| line_width(line).max(1).div_ceil(content_width))
+        .sum()
+}
+
+fn max_scroll(lines: &[Line<'_>], width: u16, viewport: u16) -> u16 {
+    transcript_rows(lines, width).saturating_sub(viewport as usize) as u16
+}
+
+fn pulse_color(_frame: usize, running: bool) -> Color {
     if running {
-        match frame % 6 {
-            0 | 3 => Color::Cyan,
-            1 | 4 => Color::Blue,
-            _ => Color::Magenta,
-        }
+        Color::Cyan
     } else {
-        match frame % 4 {
-            0 | 2 => Color::DarkGray,
-            _ => Color::Gray,
-        }
+        Color::Gray
     }
 }
 
 fn divider_color(running: bool) -> Color {
     if running {
-        Color::Cyan
+        Color::DarkGray
     } else {
         DIM
     }
 }
 
-fn sparkle(frame: usize) -> &'static str {
-    match frame % 6 {
-        0 => "✦",
-        1 => "✧",
-        2 => "⋆",
-        3 => "·",
-        4 => "⋆",
-        _ => "✧",
-    }
+fn sparkle(_frame: usize) -> &'static str {
+    "·"
 }
 
 /// Spawn a turn: clone history + append the user message, run it in the background, forward its events
@@ -523,7 +523,7 @@ pub async fn run(
 
             // Transcript (with a bottom divider). Auto-follow the tail unless the user scrolled up.
             let viewport = rows[0].height.saturating_sub(1); // minus the border row
-            let max = max_scroll(transcript.len(), viewport);
+            let max = max_scroll(&transcript, rows[0].width, viewport);
             if follow {
                 scroll = max;
             }
@@ -546,11 +546,7 @@ pub async fn run(
             let effect_active = effect_until.is_some_and(|until| until > Instant::now());
             let status_line = if running {
                 let elapsed = since.elapsed().as_secs();
-                let base = if pulse % 5 == 0 {
-                    FUN_SPINNER[spinner % FUN_SPINNER.len()]
-                } else {
-                    SPINNER[spinner % SPINNER.len()]
-                };
+                let base = SPINNER[spinner % SPINNER.len()];
                 let label = if status.is_empty() {
                     "thinking".to_string()
                 } else {
@@ -564,9 +560,7 @@ pub async fn run(
                 if effect_active && !effect_label.is_empty() {
                     spans.push(Span::styled(
                         format!("  {} {}", sparkle(pulse), effect_label),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::Gray),
                     ));
                 }
                 Line::from(spans)
@@ -574,14 +568,9 @@ pub async fn run(
                 Line::from(vec![
                     Span::styled(
                         format!("{} ", sparkle(pulse)),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(Color::Gray),
                     ),
-                    Span::styled(
-                        effect_label.clone(),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(effect_label.clone(), Style::default().fg(Color::Gray)),
                 ])
             } else {
                 Line::from(vec![Span::styled(
@@ -650,9 +639,12 @@ pub async fn run(
                             Action::PageDown => { scroll = scroll.saturating_add(10); }
                             Action::Complete => {
                                 let c = complete_command(editor.text(), SLASH_COMMANDS);
+                                let had_candidates = !c.candidates.is_empty();
                                 editor.set(c.line);
-                                for cand in &c.candidates {
-                                    transcript.push(dim_line(format!("  {}  {}", cand.name, cand.summary)));
+                                if had_candidates || editor.text() == "/" {
+                                    for cand in SLASH_COMMANDS {
+                                        transcript.push(dim_line(format!("  {}  {}", cand.name, cand.summary)));
+                                    }
                                 }
                             }
                             Action::AbortTurn => {
@@ -870,6 +862,17 @@ mod tests {
         }
         assert_eq!(scroll, 5);
         assert_eq!(follow, before);
+    }
+
+    #[test]
+    fn max_scroll_counts_wrapped_transcript_rows() {
+        let transcript = vec![
+            Line::from("1234567890"),
+            Line::from("1234567890"),
+            Line::from("tiny"),
+        ];
+        assert_eq!(transcript_rows(&transcript, 5), 5);
+        assert_eq!(max_scroll(&transcript, 5, 3), 2);
     }
 
     #[test]
