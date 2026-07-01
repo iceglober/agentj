@@ -395,7 +395,7 @@ fn line_width(line: &Line<'_>) -> usize {
 }
 
 fn transcript_rows(lines: &[Line<'_>], width: u16) -> usize {
-    let content_width = width.max(1) as usize;
+    let content_width = width.saturating_sub(2).max(1) as usize;
     lines
         .iter()
         .map(|line| line_width(line).max(1).div_ceil(content_width))
@@ -894,8 +894,8 @@ mod tests {
             Line::from("1234567890"),
             Line::from("tiny"),
         ];
-        assert_eq!(transcript_rows(&transcript, 5), 5);
-        assert_eq!(max_scroll(&transcript, 5, 3), 2);
+        assert_eq!(transcript_rows(&transcript, 5), 10);
+        assert_eq!(max_scroll(&transcript, 5, 3), 7);
     }
 
     #[test]
