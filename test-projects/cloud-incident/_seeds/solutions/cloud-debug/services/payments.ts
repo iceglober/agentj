@@ -2,11 +2,10 @@
 // tracks auth holds. A hold is placed per ORDER — charging the same order twice must never create a
 // second hold (that's a double charge on the customer's card).
 import { makeLogger } from "../lib/log";
+import { pspCharge } from "../lib/psp-sim";
 
 // Upstream PSP connections are expensive; the pool bounds how many charges run at once.
 export const PAYMENT_CONNECTION_POOL = 4;
-// Simulated PSP round-trip.
-export const PSP_LATENCY_MS = 100;
 
 export function createPayments(port = 0) {
   const log = makeLogger("payments");
@@ -55,9 +54,13 @@ export function createPayments(port = 0) {
         }
         const holdId = `hold-${holdSeq++}`;
         holds.set(holdId, { holdId, orderId, amountCents });
-        await withConnection(async () => {
-          await new Promise((r) => setTimeout(r, PSP_LATENCY_MS));
-        });
+        try {
+          await withConnection(() => pspCharge(orderId, amountCents));
+        } catch (err) {
+          holds.delete(holdId);
+          log.log("error", "psp charge failed", { orderId, error: String(err) });
+          return Response.json({ error: "psp error" }, { status: 502 });
+        }
         log.log("info", "auth hold created", { orderId, holdId, amountCents });
         return Response.json({ holdId });
       }

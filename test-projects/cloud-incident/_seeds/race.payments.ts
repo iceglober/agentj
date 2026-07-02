@@ -2,11 +2,10 @@
 // tracks auth holds. A hold is placed per ORDER — charging the same order twice must never create a
 // second hold (that's a double charge on the customer's card).
 import { makeLogger } from "../lib/log";
+import { pspCharge } from "../lib/psp-sim";
 
 // Upstream PSP connections are expensive; the pool bounds how many charges run at once.
 export const PAYMENT_CONNECTION_POOL = 4;
-// Simulated PSP round-trip.
-export const PSP_LATENCY_MS = 100;
 
 export function createPayments(port = 0) {
   const log = makeLogger("payments");
@@ -46,16 +45,20 @@ export function createPayments(port = 0) {
           log.log("warn", "charge declined", { orderId });
           return Response.json({ error: "declined" }, { status: 402 });
         }
-        // One hold per order: a duplicate charge returns the existing hold instead of double-charging.
+        // One hold per order: record the hold BEFORE awaiting the PSP, so a concurrent duplicate
+        // request (e.g. a gateway retry) sees it and returns the same hold instead of double-charging.
         const existing = [...holds.values()].find((h) => h.orderId === orderId);
         if (existing) {
           log.log("info", "duplicate charge — returning existing hold", { orderId, holdId: existing.holdId });
           return Response.json({ holdId: existing.holdId, deduped: true });
         }
         const holdId = `hold-${holdSeq++}`;
-        await withConnection(async () => {
-          await new Promise((r) => setTimeout(r, PSP_LATENCY_MS));
-        });
+        try {
+          await withConnection(() => pspCharge(orderId, amountCents));
+        } catch (err) {
+          log.log("error", "psp charge failed", { orderId, error: String(err) });
+          return Response.json({ error: "psp error" }, { status: 502 });
+        }
         holds.set(holdId, { holdId, orderId, amountCents });
         log.log("info", "auth hold created", { orderId, holdId, amountCents });
         return Response.json({ holdId });

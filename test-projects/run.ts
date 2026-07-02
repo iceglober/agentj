@@ -55,6 +55,7 @@ interface Task {
   // Task quality proofs / limits:
   solution?: string; // shell applying the reference solution — --selftest proves verify FAILs before it and PASSes after
   timeoutSec?: number; // kill the agent after this long (default 600) — a hung run is a FAIL, not a stuck harness
+  budgetTokensIn?: number; // context budget: fail the task if the run consumes more input tokens than this
 }
 
 /** Tolerant JSONC: strip `//` line comments (not inside strings) so we can keep the manifest annotated. */
@@ -176,6 +177,15 @@ for (const { vname, vtext } of variantsOf(t)) {
     // to `base`, so they capture agentj's whole solution whether or not it committed.
     const fails: string[] = [];
     if (timedOut) fails.push(`agent killed after ${t.timeoutSec ?? 600}s`);
+    // Token accounting: the primary loop prints per-call usage; delegated subagents report a total
+    // in their end line. Approximate but consistent — and enough to grade context discipline.
+    const tokensIn = [...out.matchAll(/tokens: (\d+) in \/ (\d+) out/g)].reduce((a, m) => a + Number(m[1]), 0);
+    const tokensOut = [...out.matchAll(/tokens: (\d+) in \/ (\d+) out/g)].reduce((a, m) => a + Number(m[2]), 0);
+    const subTokens = [...out.matchAll(/· (\d+) tok\b/g)].reduce((a, m) => a + Number(m[1]), 0);
+    const totalTokens = tokensIn + subTokens;
+    if (t.budgetTokensIn && totalTokens > t.budgetTokensIn) {
+      fails.push(`context budget blown: ~${totalTokens} tokens used > ${t.budgetTokensIn} budget`);
+    }
     if (t.verify) {
       const v = await $`bash -lc ${t.verify}`.cwd(cwd).env(runEnv).nothrow().quiet();
       if (v.exitCode !== 0) {
@@ -203,7 +213,7 @@ for (const { vname, vtext } of variantsOf(t)) {
     results.push({ id: label, pass, note: changed, secs });
     await appendFile(
       join(RESULTS, "history.jsonl"),
-      `${JSON.stringify({ ts: new Date().toISOString(), run: RUN_STAMP, id: t.id, variant: vname || undefined, pass, secs, changedFiles: changedFiles.length, fails })}\n`,
+      `${JSON.stringify({ ts: new Date().toISOString(), run: RUN_STAMP, id: t.id, variant: vname || undefined, pass, secs, tokensIn: totalTokens, tokensOut, changedFiles: changedFiles.length, fails })}\n`,
     );
     console.log(`  ${pass ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"} · ${secs}s · ${changed}`);
     if (!pass) for (const f of fails) console.log(`    \x1b[31m✗\x1b[0m ${f}`);

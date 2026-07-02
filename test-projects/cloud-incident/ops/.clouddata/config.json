@@ -9,6 +9,21 @@
           "deploy": "d-8801"
         }
       ]
+    },
+    {
+      "key": "ADMIN_MAINTENANCE",
+      "history": [
+        {
+          "value": false,
+          "since": "2026-05-11T00:00:00Z",
+          "deploy": "d-8801"
+        },
+        {
+          "value": true,
+          "since": "2026-07-01T10:05:02Z",
+          "deploy": "d-9188"
+        }
+      ]
     }
   ],
   "orders": [

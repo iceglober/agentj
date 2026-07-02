@@ -3,6 +3,7 @@
 // for what that policy did to us in production.
 import { fetchJson } from "../lib/http";
 import { makeLogger } from "../lib/log";
+import { rankResults } from "../lib/search";
 
 export const UPSTREAM_TIMEOUT_MS = 250;
 
@@ -13,6 +14,15 @@ export function createGateway(ordersUrl: string, port = 0) {
     async fetch(req) {
       const url = new URL(req.url);
       if (req.method === "GET" && url.pathname === "/__logs") return Response.json(log.lines);
+      if (req.method === "GET" && url.pathname === "/admin/search") {
+        // Ops can drain admin search during reindexing via the deployed ADMIN_MAINTENANCE flag.
+        if (process.env.ADMIN_MAINTENANCE === "true") {
+          log.log("warn", "admin search in maintenance mode — 503", { path: "/admin/search" });
+          return Response.json({ error: "maintenance" }, { status: 503 });
+        }
+        const q = url.searchParams.get("q") ?? "";
+        return Response.json({ query: q, results: rankResults(q) });
+      }
       if (req.method === "POST" && url.pathname === "/checkout") {
         const body = await req.json();
         for (let attempt = 1; attempt <= 2; attempt++) {

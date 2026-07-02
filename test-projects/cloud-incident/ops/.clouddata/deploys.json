@@ -26,5 +26,12 @@
     "version": "v2026.06.29-2",
     "at": "2026-07-01T08:55:12Z",
     "notes": "connection hygiene: reduce PAYMENT_CONNECTION_POOL 16 -> 4 to cut idle PSP connections"
+  },
+  {
+    "id": "d-9188",
+    "service": "gateway",
+    "version": "v2026.06.29-1+flags",
+    "at": "2026-07-01T10:05:02Z",
+    "notes": "ops: set ADMIN_MAINTENANCE=true for catalog reindex — REMEMBER to unset when reindex completes"
   }
 ]

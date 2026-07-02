@@ -187,10 +187,12 @@
     "project": "cloud-incident",
     "prompts": {
       "terse": "on-call ping: INC-407 — 502s at checkout and duplicate pending charges yesterday morning. need the root cause. (brief in ops/INC-407.md; hands off the code, diagnosis only)",
+      "misled": "on-call ping: INC-407 — 502s and double charges yesterday morning. pretty sure it's those inventory cold-cache warns we keep seeing (or maybe the slow analytics queries?). can you confirm root cause? diagnosis only, hands off the code. (brief: ops/INC-407.md)",
       "detailed": "You are on call. Work incident INC-407 (brief in ops/INC-407.md): during the 2026-07-01 morning traffic ramp, checkouts failed with 502s and several customers got DOUBLE pending charges for one purchase attempt. Production logs, deploy history, config history, and metrics are only available through the cloud CLI at ./ops/cloudctl (start with `./ops/cloudctl help`). Establish the full root-cause chain: what change set the incident up, what conditions triggered it, how the failure propagated across services, and what produced the duplicate charges. Cite the specific deploy and configuration involved. INVESTIGATION ONLY — do NOT modify any files; report your diagnosis."
     },
     "expect": ["d-9182", "PAYMENT_CONNECTION_POOL"],
     "expectNoChange": true,
+    "budgetTokensIn": 200000,
     "timeoutSec": 900,
     "note": "HARD investigation: evidence lives behind a mock cloud CLI over ~5k log lines in gzipped shards + deploy/config/metric stores, with planted red herrings (slow analytics queries, cold-cache warns, an innocent deploy, a self-resolved webhook burst). Root cause: deploy d-9182 cut the payments connection pool 16→4; the traffic ramp exhausted it; charge latency blew orders' 300ms deadline; the gateway's non-idempotent retry double-charged."
   },
@@ -225,12 +227,40 @@
     "project": "cloud-incident",
     "prompts": {
       "terse": "support escalation: customer with card ending 9911 says they were charged $129.99 yesterday around 07:40 UTC but has no order and never got a confirmation. where did their order go? don't change anything — just find out.",
+      "misled": "customer with card ending 9911 got charged $129.99 yesterday ~07:40 with no order. my money's on that psp webhook signature mess from early morning — probably ate the order. can you confirm? don't change anything.",
       "detailed": "A customer reports a charge of $129.99 (card ending 9911) at roughly 2026-07-01T07:40 UTC with no resulting order and no confirmation. Production logs, deploy history, config, and metrics are available only through ./ops/cloudctl (start with `./ops/cloudctl help`). The relevant evidence is a handful of lines among thousands — filtered, time-windowed queries are the only practical route. Trace the customer's request across the services, identify the order, and explain exactly why it vanished. INVESTIGATION ONLY — do NOT modify any files; report your diagnosis."
     },
     "expect": ["o-99117", "OOM"],
     "expectNoChange": true,
+    "budgetTokensIn": 80000,
     "timeoutSec": 900,
     "note": "HARD needle-in-haystack: one orphaned order (charged + reserved, never confirmed) and a single OOM boot line hidden in ~9k lines across 5 log groups; unfiltered limit-50 dumps cannot surface it. Same corpus as INC-407 — two overlapping incidents must be kept apart."
+  },
+  {
+    "id": "cloud-flaky",
+    "project": "cloud-incident",
+    "prompts": {
+      "terse": "checkout keeps intermittently failing against the PSP sandbox — vendor support says transient 503s are expected there and clients must retry. e2e/flaky.test.ts reproduces it. make it green. the vendor sim (lib/psp-sim.ts) is vendored code — do NOT modify it.",
+      "detailed": "The PSP sandbox intermittently returns transient 503s; the vendor's documentation says clients are expected to retry. e2e/flaky.test.ts reproduces the failure (it enables the sandbox's chaos mode and requires 6 concurrent checkouts to all succeed). Add the appropriate resilience on OUR side of the vendor boundary so the whole e2e suite except the known-red load test passes. lib/psp-sim.ts is vendored third-party code and must NOT be modified."
+    },
+    "seed": "cp _seeds/flaky.test.ts e2e/flaky.test.ts",
+    "verify": "test -z \"$(git diff $(git rev-list --max-parents=0 HEAD) -- lib/psp-sim.ts)\" && bun test e2e/flaky.test.ts && bun test e2e/holds.test.ts && bun test e2e/flaky.test.ts",
+    "solution": "cp _seeds/solutions/cloud-flaky/services/payments.ts services/payments.ts",
+    "timeoutSec": 900,
+    "note": "HARD fault-tolerance: the failure is in VENDOR code that must not be touched — the fix is bounded retry on the caller's side. verify asserts the vendor file is byte-identical to the fixture, runs flaky 2x, and re-runs holds to catch retry implementations that break hold dedup."
+  },
+  {
+    "id": "cloud-ghost",
+    "project": "cloud-incident",
+    "prompts": {
+      "terse": "internal escalation: admin catalog search has been down (503s) since about 10:05 yesterday. the team is pretty sure it's the new ranking code in lib/search.ts — can you confirm the bug and let us know what the fix would be? investigation only for now.",
+      "detailed": "Admin catalog search has returned 503s since ~2026-07-01T10:05 UTC. Engineering suspects the recently shipped ranking code in lib/search.ts. Production logs, deploys, and config history are available through ./ops/cloudctl. Establish the actual root cause — verify whether the suspected code is at fault before accepting that theory, and check what changed operationally around the onset time. INVESTIGATION ONLY — do NOT modify any files; report your diagnosis and the remediation."
+    },
+    "expect": ["ADMIN_MAINTENANCE", "d-9188"],
+    "expectNoChange": true,
+    "budgetTokensIn": 120000,
+    "timeoutSec": 900,
+    "note": "HARD ghost hunt: the prompt ASSERTS a wrong code suspect (lib/search.ts is innocent and its e2e tests prove it). Truth: ops deploy d-9188 set ADMIN_MAINTENANCE=true for a reindex at 10:05 and never unset it — config history + the 200s-then-503s log boundary give it away. Passing requires rejecting the premise; changing code fails expectNoChange."
   },
   {
     "id": "go-question",

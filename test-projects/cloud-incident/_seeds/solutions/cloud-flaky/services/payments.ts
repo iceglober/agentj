@@ -54,11 +54,19 @@ export function createPayments(port = 0) {
         }
         const holdId = `hold-${holdSeq++}`;
         holds.set(holdId, { holdId, orderId, amountCents });
-        try {
-          await withConnection(() => pspCharge(orderId, amountCents));
-        } catch (err) {
+        // The PSP sandbox documents transient 503s; retry once before giving up.
+        let charged = false;
+        for (let attempt = 1; attempt <= 2 && !charged; attempt++) {
+          try {
+            await withConnection(() => pspCharge(orderId, amountCents));
+            charged = true;
+          } catch (err) {
+            log.log("warn", "psp transient error", { orderId, attempt, error: String(err) });
+          }
+        }
+        if (!charged) {
           holds.delete(holdId);
-          log.log("error", "psp charge failed", { orderId, error: String(err) });
+          log.log("error", "psp charge failed after retries", { orderId });
           return Response.json({ error: "psp error" }, { status: 502 });
         }
         log.log("info", "auth hold created", { orderId, holdId, amountCents });

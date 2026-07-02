@@ -108,10 +108,20 @@ put("svc-inventory", { ts: ts(7, 41, 12, 344), service: "inventory", level: "inf
 put("svc-payments", { ts: ts(7, 41, 12, 501), service: "payments", level: "info", msg: "auth hold created", orderId: "o-99117", holdId: "hold-77012", amountCents: 12999, cardLast4: "9911", durationMs: 96 });
 put("svc-orders", { ts: ts(7, 42, 3, 90), service: "orders", level: "warn", msg: "process start — cold boot; previous instance OOM-killed", rss_mb_at_kill: 1893, pid: 22841 });
 
+// INC-418 (the ghost): admin search 503s from 10:05 on. Innocent 200s before the flag flip,
+// steady maintenance 503s after — the code never changed; the deployed flag did.
+for (let m = 0; m < 60; m += 7) {
+  put("svc-gateway", { ts: ts(9, m, 33, jitterMs(999)), service: "gateway", level: "info", msg: "admin search ok", path: "/admin/search", q: pick(["widget", "sprocket", "clearance"]), results: 1 + Math.floor(rand() * 3), durationMs: 4 + Math.floor(rand() * 6) });
+}
+put("svc-gateway", { ts: "2026-07-01T10:02:11.401Z", service: "gateway", level: "info", msg: "admin search ok", path: "/admin/search", q: "bestseller", results: 2, durationMs: 5 });
+for (let m = 5; m < 55; m += 3) {
+  put("svc-gateway", { ts: ts(10, m, 12, jitterMs(999)), service: "gateway", level: "warn", msg: "admin search in maintenance mode — 503", path: "/admin/search" });
+}
+
 // Write hourly gz shards, sorted by time.
 for (const [g, lines] of Object.entries(groups)) {
   lines.sort((a, b) => (a.ts < b.ts ? -1 : 1));
-  for (let h = 5; h <= 9; h++) {
+  for (let h = 5; h <= 10; h++) {
     const hour = lines.filter((l) => l.ts.startsWith(`${DAY}T${String(h).padStart(2, "0")}`));
     if (!hour.length) continue;
     const dir = join(OUT, "logs", g);
@@ -128,6 +138,7 @@ writeFileSync(
       { id: "d-9168", service: "orders", version: "v2026.06.28-3", at: "2026-06-30T18:40:00Z", notes: "structured logging fields for reservations" },
       { id: "d-9170", service: "gateway", version: "v2026.06.29-1", at: "2026-07-01T06:30:00Z", notes: "static asset cache headers" },
       { id: "d-9182", service: "payments", version: "v2026.06.29-2", at: "2026-07-01T08:55:12Z", notes: "connection hygiene: reduce PAYMENT_CONNECTION_POOL 16 -> 4 to cut idle PSP connections" },
+      { id: "d-9188", service: "gateway", version: "v2026.06.29-1+flags", at: "2026-07-01T10:05:02Z", notes: "ops: set ADMIN_MAINTENANCE=true for catalog reindex — REMEMBER to unset when reindex completes" },
     ],
     null,
     2,
@@ -138,7 +149,16 @@ writeFileSync(
   join(OUT, "config.json"),
   JSON.stringify(
     {
-      gateway: [{ key: "UPSTREAM_TIMEOUT_MS", history: [{ value: 250, since: "2026-05-11T00:00:00Z", deploy: "d-8801" }] }],
+      gateway: [
+        { key: "UPSTREAM_TIMEOUT_MS", history: [{ value: 250, since: "2026-05-11T00:00:00Z", deploy: "d-8801" }] },
+        {
+          key: "ADMIN_MAINTENANCE",
+          history: [
+            { value: false, since: "2026-05-11T00:00:00Z", deploy: "d-8801" },
+            { value: true, since: "2026-07-01T10:05:02Z", deploy: "d-9188" },
+          ],
+        },
+      ],
       orders: [{ key: "PAYMENTS_DEADLINE_MS", history: [{ value: 300, since: "2026-06-02T00:00:00Z", deploy: "d-9004" }] }],
       payments: [
         {
