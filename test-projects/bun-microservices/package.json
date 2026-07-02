@@ -1,0 +1,7 @@
+{
+  "name": "bun-microservices",
+  "private": true,
+  "scripts": {
+    "test": "bun test e2e"
+  }
+}

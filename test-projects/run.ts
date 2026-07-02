@@ -6,11 +6,16 @@
 // `setup` to install deps, run agentj ONCE with the prompt, then GRADE. Graders are diffed against
 // `base`, so a agentj that commits its work is graded the same as one that leaves it uncommitted.
 //
-//   bun test-projects/run.ts            # all tasks
-//   bun test-projects/run.ts py         # only tasks whose id contains "py"
-//   KEEP=1 bun test-projects/run.ts     # don't delete the throwaway dirs (to inspect the diff)
+//   bun test-projects/run.ts               # all tasks
+//   bun test-projects/run.ts py             # only tasks whose id contains "py"
+//   bun test-projects/run.ts --selftest     # no agent: prove graders FAIL unsolved + PASS on the
+//                                           # reference `solution` (validates every Full task)
+//   KEEP=1 bun test-projects/run.ts         # don't delete the throwaway dirs (to inspect the diff)
+//
+// Every run appends one JSON line per task to results/history.jsonl and captures the agent's full
+// output under results/out/ — the evidence trail behind pass-rate claims.
 import { $ } from "bun";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +47,9 @@ interface Task {
   expect?: string[]; // every substring must appear in agentj's output (Question/Investigation)
   expectNoChange?: boolean; // no source files changed vs the fixture (read-only / diagnosis tasks)
   judge?: string; // a rubric — an LLM grades agentj's DIFF + report against it (ambiguous-hard tasks)
+  // Task quality proofs / limits:
+  solution?: string; // shell applying the reference solution — --selftest proves verify FAILs before it and PASSes after
+  timeoutSec?: number; // kill the agent after this long (default 600) — a hung run is a FAIL, not a stuck harness
 }
 
 /** Tolerant JSONC: strip `//` line comments (not inside strings) so we can keep the manifest annotated. */
@@ -64,10 +72,31 @@ const env = {
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
 };
 
-const filter = process.argv[2];
+const argv = process.argv.slice(2);
+const selftest = argv.includes("--selftest");
+const filter = argv.find((a) => !a.startsWith("--"));
 const tasks = parseJsonc(await readFile(join(HERE, "tasks.jsonc"), "utf8")).filter((t) => !filter || t.id.includes(filter));
 
+const RESULTS = join(HERE, "results");
+const RUN_STAMP = new Date().toISOString().replace(/[:.]/g, "-");
+await mkdir(join(RESULTS, "out"), { recursive: true });
+await writeFile(join(RESULTS, ".gitignore"), "*\n!.gitignore\n");
+
 const results: { id: string; pass: boolean; skip?: boolean; note: string; secs: number }[] = [];
+
+/** Run the agent with a hard timeout; returns its combined output (killed run ⇒ graded as-is). */
+async function runAgent(cwd: string, prompt: string, runEnv: Record<string, string | undefined>, timeoutSec: number) {
+  const proc = Bun.spawn([AGENTJ, "--once", prompt], { cwd, env: runEnv as Record<string, string>, stdout: "pipe", stderr: "pipe" });
+  let timedOut = false;
+  const killer = setTimeout(() => {
+    timedOut = true;
+    proc.kill(9);
+  }, timeoutSec * 1000);
+  const [so, se] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  await proc.exited;
+  clearTimeout(killer);
+  return { out: stripAnsi(so + se), timedOut };
+}
 
 for (const t of tasks) {
   console.log(`\n\x1b[1m▶ ${t.id}\x1b[0m  (${t.project})`);
@@ -75,6 +104,11 @@ for (const t of tasks) {
   if (lack.length) {
     console.log(`  \x1b[33mSKIP\x1b[0m — needs ${lack.join(", ")} on PATH`);
     results.push({ id: t.id, pass: true, skip: true, note: `skipped (no ${lack.join(",")})`, secs: 0 });
+    continue;
+  }
+  if (selftest && (!t.solution || !t.verify)) {
+    console.log("  \x1b[33mSKIP\x1b[0m — selftest needs `solution` + `verify`");
+    results.push({ id: t.id, pass: true, skip: true, note: "selftest n/a", secs: 0 });
     continue;
   }
   const cwd = await mkdtemp(join(tmpdir(), `agentj-eval-${t.id}-`));
@@ -96,13 +130,34 @@ for (const t of tasks) {
       console.log(`  setup: ${t.setup}`);
       await $`bash -lc ${t.setup}`.cwd(cwd).env(runEnv).quiet();
     }
+    // --selftest: no agent. Prove the task is real (graders FAIL on the unsolved fixture) and the
+    // graders are sound (they PASS on the reference solution).
+    if (selftest && t.solution && t.verify) {
+      const pre = await $`bash -lc ${t.verify}`.cwd(cwd).env(runEnv).nothrow().quiet();
+      await $`bash -lc ${t.solution}`.cwd(cwd).env(runEnv).quiet();
+      const post = await $`bash -lc ${t.verify}`.cwd(cwd).env(runEnv).nothrow().quiet();
+      const fails: string[] = [];
+      if (pre.exitCode === 0) fails.push("verify already passes on the UNSOLVED fixture — the task tests nothing");
+      if (post.exitCode !== 0) {
+        const tail = (post.stdout.toString() + post.stderr.toString()).split("\n").filter(Boolean).slice(-4).join(" ").slice(0, 220);
+        fails.push(`reference solution does NOT satisfy verify: ${tail}`);
+      }
+      const pass = fails.length === 0;
+      const secs = Math.round((Date.now() - started) / 1000);
+      results.push({ id: t.id, pass, note: "selftest", secs });
+      console.log(`  ${pass ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"} · ${secs}s · selftest (fails unsolved ✓, solution passes ✓)`);
+      if (!pass) for (const f of fails) console.log(`    \x1b[31m✗\x1b[0m ${f}`);
+      continue;
+    }
+
     console.log(`  agentj: "${t.prompt.slice(0, 70)}…"`);
-    const r = await $`${AGENTJ} --once ${t.prompt}`.cwd(cwd).env(runEnv).nothrow().quiet();
-    const out = stripAnsi(r.stdout.toString() + r.stderr.toString());
+    const { out, timedOut } = await runAgent(cwd, t.prompt, runEnv, t.timeoutSec ?? 600);
+    await writeFile(join(RESULTS, "out", `${RUN_STAMP}-${t.id}.txt`), out);
 
     // Grade. Every grader present must pass. Diff-based graders compare the index (after `git add -A`)
     // to `base`, so they capture agentj's whole solution whether or not it committed.
     const fails: string[] = [];
+    if (timedOut) fails.push(`agent killed after ${t.timeoutSec ?? 600}s`);
     if (t.verify) {
       const v = await $`bash -lc ${t.verify}`.cwd(cwd).env(runEnv).nothrow().quiet();
       if (v.exitCode !== 0) {
@@ -128,6 +183,10 @@ for (const t of tasks) {
     const pass = fails.length === 0;
     const secs = Math.round((Date.now() - started) / 1000);
     results.push({ id: t.id, pass, note: changed, secs });
+    await appendFile(
+      join(RESULTS, "history.jsonl"),
+      `${JSON.stringify({ ts: new Date().toISOString(), run: RUN_STAMP, id: t.id, pass, secs, changedFiles: changedFiles.length, fails })}\n`,
+    );
     console.log(`  ${pass ? "\x1b[32mPASS\x1b[0m" : "\x1b[31mFAIL\x1b[0m"} · ${secs}s · ${changed}`);
     if (!pass) for (const f of fails) console.log(`    \x1b[31m✗\x1b[0m ${f}`);
   } catch (err) {

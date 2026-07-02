@@ -117,6 +117,53 @@
     "note": "AMBIGUOUS-HARD (staff+): no spec — agentj designs the abstraction. LLM-judge graded on design + verify the baseline stays green."
   },
   {
+    "id": "dist-question",
+    "project": "bun-microservices",
+    "prompt": "In this system, which service owns stock reservations, and which HTTP endpoint releases a reservation? Answer; don't change anything.",
+    "expect": ["inventory", "/release"],
+    "expectNoChange": true,
+    "note": "Question (distributed): requires mapping the service topology, read-only."
+  },
+  {
+    "id": "dist-investigation",
+    "project": "bun-microservices",
+    "prompt": "Incident INC-231 (see ops/incident.md): a customer clicked buy ONCE for two WIDGET-9, was charged twice, and stock dropped 5 -> 1. Using the captured logs in ops/logs/ and the service code, trace what happened across the services and report the root cause chain: which configured value set it off, which behavior amplified it, and what the customer-visible + inventory effects were. INVESTIGATION ONLY — do NOT modify any files; report your diagnosis.",
+    "expect": ["250", "WIDGET-9"],
+    "expectNoChange": true,
+    "timeoutSec": 600,
+    "note": "Investigation (distributed): correlate three services' JSON logs by time/ids + the gateway's timeout config. Root cause: 250ms upstream timeout + non-idempotent retry => duplicate orders/reservations."
+  },
+  {
+    "id": "dist-debug",
+    "project": "bun-microservices",
+    "prompt": "An end-to-end test is failing: after a declined payment, the reserved stock is never returned to the pool. The bug is somewhere in the cross-service checkout flow (gateway -> orders -> inventory). Trace the flow, find the root cause, and fix it so the whole e2e suite passes. Fix the source, not the tests.",
+    "seed": "cp _seeds/release-bug.inventory.ts services/inventory.ts",
+    "verify": "bun test e2e",
+    "solution": "cp _seeds/solutions/dist-debug/services/inventory.ts services/inventory.ts",
+    "timeoutSec": 900,
+    "note": "Full[Distributed debug]: the release request crosses two service boundaries and dies on a silent key mismatch (handler logs success either way). Finding it requires tracing the reservationId hand-off across services."
+  },
+  {
+    "id": "dist-tracing",
+    "project": "bun-microservices",
+    "prompt": "Implement end-to-end request tracing across all three services. Contract (defined by e2e/tracing.test.ts): the gateway honors an inbound x-request-id header or generates one; the id is propagated to orders and inventory on every internal HTTP call; every log line each service writes while handling that request includes a requestId field; and the gateway echoes the id back as an x-request-id response header. Make the whole e2e suite pass.",
+    "seed": "cp _seeds/tracing.test.ts e2e/tracing.test.ts",
+    "verify": "bun test e2e",
+    "solution": "cp -R _seeds/solutions/dist-tracing/services/. services/",
+    "timeoutSec": 900,
+    "note": "Full[Distributed tracing]: a cross-cutting feature touching all three services + the shared client; the spec asserts on each service's /__logs debug endpoint."
+  },
+  {
+    "id": "dist-feature",
+    "project": "bun-microservices",
+    "prompt": "Make checkout retry-safe with idempotency keys — this is the proper fix for incident INC-231 (ops/incident.md). Contract (defined by e2e/idempotency.test.ts): a client may send an Idempotency-Key header on POST /checkout; the gateway forwards it to the orders service; replaying a checkout with the same key returns the SAME order (no new reservation, stock reserved exactly once); different keys are independent orders; requests without a key behave as today. Make the whole e2e suite pass.",
+    "seed": "cp _seeds/idempotency.test.ts e2e/idempotency.test.ts",
+    "verify": "bun test e2e",
+    "solution": "cp -R _seeds/solutions/dist-feature/services/. services/",
+    "timeoutSec": 900,
+    "note": "Full[Distributed feature]: cross-service state semantics (gateway header plumbing + an idempotency store in orders) motivated by the incident the investigation task diagnoses."
+  },
+  {
     "id": "go-question",
     "project": "go-stdlib",
     "prompt": "Which file in the store package formats currency, and what is the exact name of the function it exports for that? Answer; don't change anything.",
