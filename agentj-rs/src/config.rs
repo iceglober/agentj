@@ -73,6 +73,16 @@ pub struct Config {
     pub max_parallel_subagents: usize,
     /// Model context window for the context meter: `AGENTJ_CONTEXT_WINDOW` > model table > `None`.
     pub context_window: Option<u64>,
+    /// Compact older tool-result bodies once a model call's prompt exceeds this many tokens. ABSOLUTE
+    /// (not a fraction of the window): a 400k-window model whose task context peaks at 40k would never
+    /// trip a window-relative threshold, so compaction was dead weight exactly where it was needed.
+    /// `AGENTJ_COMPACT_THRESHOLD` > default 12000, clamped to ≤ 70% of the window when known. This is a
+    /// context-management safety valve, NOT a token-tail fix: a live A/B on the runaway fixture showed
+    /// it only reclaims tokens when the OLD tool results are large (>200 chars) — measured cutting a
+    /// 14.4k-token call to 8.5k when big file reads had aged out. Runs whose bloat is accumulation of
+    /// many SMALL messages (edits, brief test output, tool-call args) get no benefit; that tail needs a
+    /// different lever (fewer round-trips / summarize-restart), not tool-body elision.
+    pub compact_threshold: u64,
     /// The project's check command (`AGENTJ_CHECK` > aj.json `check` > None → heuristics).
     pub check: Option<String>,
 }
@@ -111,6 +121,13 @@ impl Config {
                 .unwrap_or(4) as usize,
             context_window: env_num("AGENTJ_CONTEXT_WINDOW")
                 .or_else(|| crate::model::context_window(model_id)),
+            compact_threshold: {
+                let base = env_num("AGENTJ_COMPACT_THRESHOLD").filter(|n| *n >= 1000).unwrap_or(12_000);
+                match env_num("AGENTJ_CONTEXT_WINDOW").or_else(|| crate::model::context_window(model_id)) {
+                    Some(w) => base.min(w * 7 / 10),
+                    None => base,
+                }
+            },
             check: get("AGENTJ_CHECK").filter(|s| !s.is_empty()).or(file.check),
         }
     }
@@ -219,6 +236,21 @@ mod tests {
             from_all(&[("AGENTJ_CHECK", "bun test")], "unknown-model", e_file()).check.as_deref(),
             Some("bun test")
         );
+    }
+
+    #[test]
+    fn compact_threshold_is_absolute_and_window_clamped() {
+        // Unknown window → the plain absolute default (compaction still works, unlike the old
+        // window-relative rule that never fired without a known window).
+        assert_eq!(from(&[]).compact_threshold, 12_000);
+        // Env override, clamped to a floor of 1000.
+        assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "40000")]).compact_threshold, 40_000);
+        assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "500")]).compact_threshold, 12_000);
+        // A big window leaves the absolute default untouched (the whole point: a 400k-window model
+        // compacts at 12k, not 280k).
+        assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "400000")]).compact_threshold, 12_000);
+        // A tiny window clamps the threshold below the default so it stays ≤ 70% of the window.
+        assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "8000")]).compact_threshold, 5_600);
     }
 
     #[test]

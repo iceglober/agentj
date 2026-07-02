@@ -37,6 +37,7 @@
 - File tools must stay confined to repo-relative safe paths; preserve `safe_resolve` semantics.
 - Command execution and background jobs must keep process-group kill behavior so interrupts/timeouts kill descendants.
 - Config is resolved once at startup (`src/config.rs`); avoid dynamic rereads unless the task explicitly requires it.
+- Context compaction elides older already-seen tool-result bodies once a model call's prompt passes `compact_threshold` (`AGENTJ_COMPACT_THRESHOLD`, default 12000, clamped ≤70% of the window). It is an ABSOLUTE token count on purpose: a window-relative rule (70% of a 400k window = 280k) never fires on tasks whose context peaks at ~20k. `keep_recent` (8) tool bodies always stay verbatim and unseen results are never elided (`seen_before` watermark). Scope: this is a safety valve that reclaims context only when the OLD tool results are large — a live A/B confirmed it does NOT dent the many-round-trip token tail (bloat there is accumulation of many small messages, not big old bodies).
 - Slash commands are centrally defined in `src/commands.rs`; keep completion/highlighting and execution in sync through that registry.
 
 ## Verified commands

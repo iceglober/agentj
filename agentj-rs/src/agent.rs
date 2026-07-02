@@ -351,19 +351,17 @@ pub async fn run_turn(
             }
         }
 
-        // Context compaction: past ~70% of the window, elide older (already-seen) tool-result bodies
-        // so long tasks don't hit the wall. Triggered by the accurate prior `prompt_tokens` OR a
-        // cheap size estimate (so the FIRST call of a turn with huge prior history compacts too). The
-        // durable (TUI) history keeps full text; this trims only the working copy.
-        if let Some(window) = sess.cfg.context_window {
-            let size = last_prompt_tokens.max(estimate_prompt_tokens(messages));
-            if size > window * 7 / 10 {
-                let n = compact_history(messages, COMPACT_KEEP_RECENT, seen_before);
-                if n > 0 {
-                    let _ = tx.send(AgentEvent::Note(format!(
-                        "context compacted — elided {n} older tool results"
-                    )));
-                }
+        // Context compaction: once a call's prompt exceeds the (absolute) threshold, elide older
+        // already-seen tool-result bodies so a flailing turn's context stops re-growing every call.
+        // Triggered by the accurate prior `prompt_tokens` OR a cheap size estimate (so the first call
+        // of a turn with huge prior history compacts too). The durable (TUI) history keeps full text.
+        let size = last_prompt_tokens.max(estimate_prompt_tokens(messages));
+        if size > sess.cfg.compact_threshold {
+            let n = compact_history(messages, COMPACT_KEEP_RECENT, seen_before);
+            if n > 0 {
+                let _ = tx.send(AgentEvent::Note(format!(
+                    "context compacted — elided {n} older tool results"
+                )));
             }
         }
 
@@ -598,6 +596,7 @@ mod tests {
             idle_wait: Duration::from_secs(120),
             max_parallel_subagents: 4,
             context_window: None,
+            compact_threshold: 12_000,
             check: None,
         }
     }
@@ -971,6 +970,38 @@ mod tests {
         assert_eq!(compact_history(&mut msgs, 8, n), 0, "idempotent");
         // small results and non-tool roles are untouched
         assert_eq!(msgs[0].content.as_deref(), Some("sys"));
+    }
+
+    fn turn_tool_usage(name: &str, args: serde_json::Value, prompt_tokens: u64) -> AssistantTurn {
+        let mut t = turn_tool(name, args);
+        t.usage = Some(TokenUsage {
+            prompt_tokens,
+            completion_tokens: 0,
+            total_tokens: prompt_tokens,
+            cached_tokens: None,
+        });
+        t
+    }
+
+    #[tokio::test]
+    async fn compaction_fires_in_the_loop_once_prompt_exceeds_threshold() {
+        // Reproduce the runaway shape live: many big (>200-char) tool results with reported
+        // prompt_tokens already past the 12k threshold. The loop MUST elide older bodies and emit the
+        // compaction note. Guards against the trigger silently never firing (as observed in the A/B).
+        let big_cmd = serde_json::json!({ "command": "printf 'X%.0s' $(seq 500)" });
+        let mut steps = Vec::new();
+        for _ in 0..11 {
+            steps.push(ScriptStep::Turn(turn_tool_usage("bash", big_cmd.clone(), 20_000)));
+        }
+        steps.push(ScriptStep::Turn(turn_text("done")));
+        let sess = session(steps);
+        let events = run_and_collect(&sess).await;
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Note(t) if t.contains("context compacted"))),
+            "compaction should fire once prompt_tokens exceeds the threshold; events={events:?}"
+        );
     }
 
     #[test]
