@@ -1,0 +1,40 @@
+name: ci
+
+# Validates BOTH the agent (Rust) and the eval corpus (harness --selftest), with no model
+# credentials — so every push proves the code compiles clean, the tests pass, and every Full task's
+# graders still fail on the unsolved fixture and pass on its reference solution.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agentj-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agentj-rs
+      - name: build (warning-clean)
+        run: cargo build --all-targets
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: test
+        run: cargo test
+
+  eval-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: selftest (no model — proves each task's graders are real)
+        # Every Full task with a reference solution must FAIL on the unsolved fixture and PASS on the
+        # solution. Browser tasks (needs Chrome) SKIP on the runner; that's expected, not a failure.
+        run: bun test-projects/run.ts --selftest
