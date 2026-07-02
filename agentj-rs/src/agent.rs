@@ -332,6 +332,7 @@ pub async fn run_turn(
     let mut used_delegate = false;
     let mut spear_nudged = false;
     let mut edited_since_check = false; // a write/edit landed with no passing check after it
+    let mut mutated_this_turn = false; // any write/edit has landed — turn is past exploration
     let mut assess_nudged = false;
     let mut committed_this_turn = false;
     let mut commit_nudged = false;
@@ -355,8 +356,14 @@ pub async fn run_turn(
         // already-seen tool-result bodies so a flailing turn's context stops re-growing every call.
         // Triggered by the accurate prior `prompt_tokens` OR a cheap size estimate (so the first call
         // of a turn with huge prior history compacts too). The durable (TUI) history keeps full text.
+        //
+        // But hold off while the turn is still READ-ONLY exploration: every read is design context
+        // until the model starts acting on it, and eliding it there shreds the picture it needs to
+        // design from. Once an edit has landed, older reads may age out. A near-window backstop still
+        // fires regardless so a pathological pure-exploration turn can't overrun the context.
         let size = last_prompt_tokens.max(estimate_prompt_tokens(messages));
-        if size > sess.cfg.compact_threshold {
+        let near_window = sess.cfg.context_window.is_some_and(|w| size > w * 7 / 10);
+        if size > sess.cfg.compact_threshold && (mutated_this_turn || near_window) {
             let n = compact_history(messages, COMPACT_KEEP_RECENT, seen_before);
             if n > 0 {
                 let _ = tx.send(AgentEvent::Note(format!(
@@ -369,13 +376,28 @@ pub async fn run_turn(
         // the model to check its trajectory against PLAN. Advisory — the model decides what to do.
         if allow_delegate && !spear_nudged && !used_delegate && direct_calls >= SPEAR_NUDGE_AFTER {
             spear_nudged = true;
-            let msg = format!(
-                "[supervisor: SPEAR checkpoint — {direct_calls} tool calls into this turn. If you're \
-                 making steady progress on a well-scoped change, keep going — no need to change course. \
-                 Only if you've been exploring without converging, or the work has fanned out into \
-                 several INDEPENDENT threads, consider handing the rest to `delegate` to keep your \
-                 context focused.]"
-            );
+            // Design-aware: if the model is STILL exploring (no edit yet) after this many calls, the
+            // risk isn't slowness — it's diving in before the design is settled. Push it to write the
+            // design first. Only once it's already editing does "keep going / delegate if sprawling"
+            // become the right reminder.
+            let msg = if mutated_this_turn {
+                format!(
+                    "[supervisor: SPEAR checkpoint — {direct_calls} tool calls into this turn. If you're \
+                     making steady progress on a well-scoped change, keep going — no need to change \
+                     course. Only if you've been exploring without converging, or the work has fanned \
+                     out into several INDEPENDENT threads, consider handing the rest to `delegate` to \
+                     keep your context focused.]"
+                )
+            } else {
+                format!(
+                    "[supervisor: SPEAR checkpoint — {direct_calls} tool calls in and no edits yet, so \
+                     you're still in SCOPE/PLAN. Before your first edit, settle the DESIGN: if this \
+                     introduces or reshapes an abstraction, data model, config schema, interface, or \
+                     precedence rule, write that design out now — data model, order/precedence, edge \
+                     cases, back-compat — rather than discovering the shape mid-edit. If the shape is \
+                     already obvious and the change is well-scoped, go ahead.]"
+                )
+            };
             let _ = tx.send(AgentEvent::Note(first_line(&msg, 120)));
             let m = ChatMessage::user(msg);
             commit_delta(vec![m.clone()]);
@@ -528,7 +550,10 @@ pub async fn run_turn(
             // git commit arms the RESOLVE completeness gate.
             if !is_delegate {
                 match tc.function.name.as_str() {
-                    "write_file" | "edit_file" if ok => edited_since_check = true,
+                    "write_file" | "edit_file" if ok => {
+                        edited_since_check = true;
+                        mutated_this_turn = true;
+                    }
                     // A passing web_check IS frontend verification — it clears the ASSESS gate.
                     "web_check" if ok => edited_since_check = false,
                     "bash" => {
@@ -602,12 +627,16 @@ mod tests {
     }
 
     fn session(steps: Vec<ScriptStep>) -> Session {
+        session_cfg(steps, test_cfg())
+    }
+
+    fn session_cfg(steps: Vec<ScriptStep>, cfg: Config) -> Session {
         let jobs = JobManager::new(".".to_string());
         let tools = Tools::new(PathBuf::from("."), jobs, None);
         Session {
             llm: Arc::new(Llm::Script(std::sync::Mutex::new(VecDeque::from(steps)))),
             tools: Arc::new(tools),
-            cfg: Arc::new(test_cfg()),
+            cfg: Arc::new(cfg),
         }
     }
 
@@ -983,24 +1012,41 @@ mod tests {
         t
     }
 
-    #[tokio::test]
-    async fn compaction_fires_in_the_loop_once_prompt_exceeds_threshold() {
-        // Reproduce the runaway shape live: many big (>200-char) tool results with reported
-        // prompt_tokens already past the 12k threshold. The loop MUST elide older bodies and emit the
-        // compaction note. Guards against the trigger silently never firing (as observed in the A/B).
+    /// 11 big (>200-char) read-only tool results with reported prompt_tokens already past the 12k
+    /// threshold — the runaway shape, but no edits.
+    fn exploration_steps() -> Vec<ScriptStep> {
         let big_cmd = serde_json::json!({ "command": "printf 'X%.0s' $(seq 500)" });
-        let mut steps = Vec::new();
-        for _ in 0..11 {
-            steps.push(ScriptStep::Turn(turn_tool_usage("bash", big_cmd.clone(), 20_000)));
-        }
+        let mut steps: Vec<ScriptStep> = (0..11)
+            .map(|_| ScriptStep::Turn(turn_tool_usage("bash", big_cmd.clone(), 20_000)))
+            .collect();
         steps.push(ScriptStep::Turn(turn_text("done")));
-        let sess = session(steps);
-        let events = run_and_collect(&sess).await;
+        steps
+    }
+
+    fn note_seen(events: &[AgentEvent], needle: &str) -> bool {
+        events.iter().any(|e| matches!(e, AgentEvent::Note(t) if t.contains(needle)))
+    }
+
+    #[tokio::test]
+    async fn compaction_fires_near_the_window_even_while_exploring() {
+        // The near-window backstop: a read-only turn that approaches the context window MUST still
+        // compact so a pathological pure-exploration turn can't overrun it. window 24k → 70% = 16.8k;
+        // prompt_tokens 20k trips both the threshold and the backstop.
+        let mut cfg = test_cfg();
+        cfg.context_window = Some(24_000);
+        let events = run_and_collect(&session_cfg(exploration_steps(), cfg)).await;
+        assert!(note_seen(&events, "context compacted"), "near-window backstop must fire; {events:?}");
+    }
+
+    #[tokio::test]
+    async fn compaction_holds_during_readonly_exploration() {
+        // No edits and no window info: pure exploration must NOT be compacted even past the threshold —
+        // every read is design context until the model acts on it. (test_cfg has context_window None,
+        // so the near-window backstop can't fire either.)
+        let events = run_and_collect(&session(exploration_steps())).await;
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, AgentEvent::Note(t) if t.contains("context compacted"))),
-            "compaction should fire once prompt_tokens exceeds the threshold; events={events:?}"
+            !note_seen(&events, "context compacted"),
+            "read-only exploration must not be compacted below the window; {events:?}"
         );
     }
 
