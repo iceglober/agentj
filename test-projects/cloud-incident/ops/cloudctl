@@ -1,0 +1,142 @@
+#!/usr/bin/env bun
+// cloudctl — query this system's production observability (logs, deploys, config, metrics).
+// Data volume is real-world-ish: dumping whole groups is slow reading — use --since/--until/--filter.
+import { readdirSync } from "node:fs";
+import { gunzipSync } from "bun";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const DATA = join(dirname(fileURLToPath(import.meta.url)), ".clouddata");
+
+const HELP = `cloudctl — production observability for this system
+
+USAGE
+  cloudctl logs groups                          list log groups
+  cloudctl logs query <group> [flags]           query a group's log lines (JSON lines)
+      --since <ISO8601>    only lines at/after this time (e.g. 2026-07-01T09:00)
+      --until <ISO8601>    only lines before this time
+      --filter <substr>    only lines containing the substring
+      --limit <N>          max lines to print (default 50)
+  cloudctl deploys [service]                    deploy history (all services, or one)
+  cloudctl config <service>                     config keys with full change history
+  cloudctl metrics <service>                    available metrics for a service
+  cloudctl metrics <service> <metric>           5-minute buckets for a metric
+
+EXAMPLES
+  cloudctl logs query svc-payments --since 2026-07-01T09:10 --filter "pool" --limit 20
+  cloudctl config payments
+  cloudctl metrics payments charge_p99_ms`;
+
+function flag(args: string[], name: string): string | undefined {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+function readGroup(group: string): string[] {
+  const dir = join(DATA, "logs", group);
+  let shards: string[];
+  try {
+    shards = readdirSync(dir).sort();
+  } catch {
+    const groups = readdirSync(join(DATA, "logs")).sort();
+    console.error(`unknown log group "${group}". Groups:\n  ${groups.join("\n  ")}`);
+    process.exit(2);
+  }
+  const lines: string[] = [];
+  for (const shard of shards) {
+    const raw = gunzipSync(new Uint8Array(require("node:fs").readFileSync(join(dir, shard))));
+    lines.push(...new TextDecoder().decode(raw).split("\n").filter(Boolean));
+  }
+  return lines;
+}
+
+const [cmd, sub, ...rest] = process.argv.slice(2);
+
+if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
+  console.log(HELP);
+  process.exit(0);
+}
+
+if (cmd === "logs" && sub === "groups") {
+  for (const g of readdirSync(join(DATA, "logs")).sort()) console.log(g);
+  process.exit(0);
+}
+
+if (cmd === "logs" && sub === "query") {
+  const group = rest.find((a) => !a.startsWith("--"));
+  if (!group) {
+    console.error("usage: cloudctl logs query <group> [--since ISO] [--until ISO] [--filter substr] [--limit N]");
+    process.exit(2);
+  }
+  const since = flag(rest, "since");
+  const until = flag(rest, "until");
+  const filter = flag(rest, "filter");
+  const limit = Number(flag(rest, "limit") ?? 50);
+  const matched = readGroup(group).filter((l) => {
+    // ts is the first field of every line; lexicographic compare works for ISO8601 prefixes.
+    const t = l.slice(7, 31);
+    if (since && t < since) return false;
+    if (until && t >= until) return false;
+    if (filter && !l.includes(filter)) return false;
+    return true;
+  });
+  for (const l of matched.slice(0, limit)) console.log(l);
+  if (matched.length > limit) {
+    console.log(`… ${matched.length - limit} more lines matched — narrow with --since/--filter or raise --limit`);
+  }
+  process.exit(0);
+}
+
+if (cmd === "deploys") {
+  const deploys = JSON.parse(await Bun.file(join(DATA, "deploys.json")).text());
+  for (const d of deploys) {
+    if (sub && d.service !== sub) continue;
+    console.log(`${d.at}  ${d.id}  ${d.service.padEnd(10)} ${d.version.padEnd(15)} ${d.notes}`);
+  }
+  process.exit(0);
+}
+
+if (cmd === "config") {
+  if (!sub) {
+    console.error("usage: cloudctl config <service>");
+    process.exit(2);
+  }
+  const config = JSON.parse(await Bun.file(join(DATA, "config.json")).text());
+  const entries = config[sub];
+  if (!entries) {
+    console.error(`unknown service "${sub}". Services: ${Object.keys(config).join(", ")}`);
+    process.exit(2);
+  }
+  for (const e of entries) {
+    console.log(e.key);
+    for (const h of e.history) console.log(`  = ${h.value}  since ${h.since}  (deploy ${h.deploy})`);
+  }
+  process.exit(0);
+}
+
+if (cmd === "metrics") {
+  const metrics = JSON.parse(await Bun.file(join(DATA, "metrics.json")).text());
+  if (!sub) {
+    console.error(`usage: cloudctl metrics <service> [metric]. Services: ${Object.keys(metrics).join(", ")}`);
+    process.exit(2);
+  }
+  const svc = metrics[sub];
+  if (!svc) {
+    console.error(`unknown service "${sub}". Services: ${Object.keys(metrics).join(", ")}`);
+    process.exit(2);
+  }
+  const metric = rest[0];
+  if (!metric) {
+    for (const m of Object.keys(svc)) console.log(m);
+    process.exit(0);
+  }
+  if (!svc[metric]) {
+    console.error(`unknown metric "${metric}". Metrics: ${Object.keys(svc).join(", ")}`);
+    process.exit(2);
+  }
+  for (const b of svc[metric]) console.log(`${b.t}  ${typeof b.value === "number" ? b.value.toFixed(2) : b.value}`);
+  process.exit(0);
+}
+
+console.error(`unknown command. Run: cloudctl help`);
+process.exit(2);

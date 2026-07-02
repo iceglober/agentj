@@ -1,0 +1,65 @@
+{
+  "gateway": [
+    {
+      "key": "UPSTREAM_TIMEOUT_MS",
+      "history": [
+        {
+          "value": 250,
+          "since": "2026-05-11T00:00:00Z",
+          "deploy": "d-8801"
+        }
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "key": "PAYMENTS_DEADLINE_MS",
+      "history": [
+        {
+          "value": 300,
+          "since": "2026-06-02T00:00:00Z",
+          "deploy": "d-9004"
+        }
+      ]
+    }
+  ],
+  "payments": [
+    {
+      "key": "PAYMENT_CONNECTION_POOL",
+      "history": [
+        {
+          "value": 16,
+          "since": "2026-03-19T00:00:00Z",
+          "deploy": "d-7719"
+        },
+        {
+          "value": 4,
+          "since": "2026-07-01T08:55:12Z",
+          "deploy": "d-9182"
+        }
+      ]
+    },
+    {
+      "key": "PSP_LATENCY_BUDGET_MS",
+      "history": [
+        {
+          "value": 100,
+          "since": "2026-03-19T00:00:00Z",
+          "deploy": "d-7719"
+        }
+      ]
+    }
+  ],
+  "inventory": [
+    {
+      "key": "CACHE_TTL_S",
+      "history": [
+        {
+          "value": 900,
+          "since": "2026-06-30T14:02:00Z",
+          "deploy": "d-9155"
+        }
+      ]
+    }
+  ]
+}

@@ -164,6 +164,35 @@
     "note": "Full[Distributed feature]: cross-service state semantics (gateway header plumbing + an idempotency store in orders) motivated by the incident the investigation task diagnoses."
   },
   {
+    "id": "cloud-investigation",
+    "project": "cloud-incident",
+    "prompt": "You are on call. Work incident INC-407 (brief in ops/INC-407.md): during the 2026-07-01 morning traffic ramp, checkouts failed with 502s and several customers got DOUBLE pending charges for one purchase attempt. Production logs, deploy history, config history, and metrics are only available through the cloud CLI at ./ops/cloudctl (start with `./ops/cloudctl help`). Establish the full root-cause chain: what change set the incident up, what conditions triggered it, how the failure propagated across services, and what produced the duplicate charges. Cite the specific deploy and configuration involved. INVESTIGATION ONLY — do NOT modify any files; report your diagnosis.",
+    "expect": ["d-9182", "PAYMENT_CONNECTION_POOL"],
+    "expectNoChange": true,
+    "timeoutSec": 900,
+    "note": "HARD investigation: evidence lives behind a mock cloud CLI over ~5k log lines in gzipped shards + deploy/config/metric stores, with planted red herrings (slow analytics queries, cold-cache warns, an innocent deploy, a self-resolved webhook burst). Root cause: deploy d-9182 cut the payments connection pool 16→4; the traffic ramp exhausted it; charge latency blew orders' 300ms deadline; the gateway's non-idempotent retry double-charged."
+  },
+  {
+    "id": "cloud-debug",
+    "project": "cloud-incident",
+    "prompt": "An e2e test is failing: when the SAME order is charged twice CONCURRENTLY (a gateway retry racing the original request), the payments service places two auth holds — a double charge. Sequential duplicates are handled fine. Find the root cause and fix it so `bun test e2e/holds.test.ts` passes reliably. Fix the source, not the tests.",
+    "seed": "cp _seeds/race.payments.ts services/payments.ts",
+    "verify": "bun test e2e/holds.test.ts && bun test e2e/holds.test.ts && bun test e2e/holds.test.ts",
+    "solution": "cp _seeds/solutions/cloud-debug/services/payments.ts services/payments.ts",
+    "timeoutSec": 900,
+    "note": "HARD debug: a TOCTOU race across an await boundary — the dedup check passes for both in-flight requests because the hold is recorded only after the awaited PSP call. The sequential-dup test passing makes the guard LOOK correct. Verify runs the suite 3x to reject flaky non-fixes."
+  },
+  {
+    "id": "cloud-capstone",
+    "project": "cloud-incident",
+    "prompt": "The load-burst e2e test (e2e/load.test.ts, guarding against a repeat of incident INC-407) is failing: a 16-checkout burst no longer fully succeeds. Something regressed this system's capacity. Use the production evidence available through ./ops/cloudctl (logs, deploys, config history, metrics — start with `./ops/cloudctl help`) to establish what changed and why it breaks the burst, then fix the source so the WHOLE e2e suite passes. In your final report, cite the specific deploy that introduced the regression.",
+    "verify": "bun test e2e",
+    "expect": ["d-9182"],
+    "solution": "cp _seeds/solutions/cloud-capstone/services/payments.ts services/payments.ts",
+    "timeoutSec": 1200,
+    "note": "HARD capstone: diagnose-then-fix. The committed fixture ships the regressed pool (4); the failing load test reproduces INC-407. Graded on BOTH the suite going green and the report citing deploy d-9182 — evidence-guided repair, not just turning a knob until tests pass."
+  },
+  {
     "id": "go-question",
     "project": "go-stdlib",
     "prompt": "Which file in the store package formats currency, and what is the exact name of the function it exports for that? Answer; don't change anything.",
