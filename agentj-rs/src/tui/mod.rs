@@ -5,6 +5,7 @@
 mod app;
 mod editor;
 mod keymap;
+mod knowledge;
 mod markdown;
 mod theme;
 mod view;
@@ -64,6 +65,21 @@ fn spawn_turn(history: &[ChatMessage], sess: Session, ui: UnboundedSender<UiMsg>
         abort: handle.abort_handle(),
         job_watermark,
     }
+}
+
+/// Diff the tree against the stored knowledge index. `Ok((changes, unchanged_count))`, or a
+/// user-facing message when the diff can't run.
+async fn knowledge_changes(root: &str) -> Result<(knowledge::Changes, usize), String> {
+    let Some(manifest) = knowledge::load_manifest(root) else {
+        return Err("no knowledge index yet — run /init first".to_string());
+    };
+    let files = knowledge::tracked_files(root)
+        .await
+        .map_err(|e| e.to_string())?;
+    let current = knowledge::hash_files(root, &files);
+    let changes = knowledge::diff_manifest(&manifest.files, &current);
+    let unchanged = current.len() - changes.added.len() - changes.modified.len();
+    Ok((changes, unchanged))
 }
 
 pub async fn run(
@@ -140,6 +156,48 @@ pub async fn run(
                         AppEffect::KillJobsAfter(watermark) => {
                             sess.tools.jobs.kill_after(watermark).await;
                         }
+                        AppEffect::Init => {
+                            match knowledge::write_boilerplate_config(&app.root, &app.model_id) {
+                                Ok(true) => app.notice("created .aj/aj.json"),
+                                Ok(false) => {}
+                                Err(e) => app.notice(format!("couldn't write .aj/aj.json: {e}")),
+                            }
+                            app.start_command_turn(
+                                knowledge::init_directive(),
+                                "mapping the codebase",
+                            );
+                            app.turn =
+                                Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));
+                        }
+                        AppEffect::Knowledge => {
+                            match knowledge_changes(&app.root).await {
+                                Err(e) => app.notice(e),
+                                Ok((changes, unchanged)) if changes.is_empty() => {
+                                    app.notice(format!(
+                                        "docs are in sync — {unchanged} files unchanged since the last snapshot"
+                                    ));
+                                }
+                                Ok((changes, unchanged)) => {
+                                    app.notice(format!(
+                                        "since the last snapshot: {} added · {} modified · {} removed",
+                                        changes.added.len(),
+                                        changes.modified.len(),
+                                        changes.removed.len(),
+                                    ));
+                                    app.start_command_turn(
+                                        knowledge::knowledge_directive(&changes, unchanged),
+                                        "syncing the docs",
+                                    );
+                                    app.turn = Some(spawn_turn(
+                                        &app.messages,
+                                        sess.clone(),
+                                        ui_tx.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                        // on_input never yields Snapshot; it comes from TurnDone below.
+                        AppEffect::Snapshot => {}
                     }
                     if app.quit {
                         break;
@@ -156,7 +214,12 @@ pub async fn run(
                     let _ = pending.len();
                 }
                 for msg in pending {
-                    app.on_ui(msg);
+                    if matches!(app.on_ui(msg), AppEffect::Snapshot) {
+                        match knowledge::snapshot(&app.root).await {
+                            Ok(n) => app.notice(format!("knowledge index updated — {n} files hashed")),
+                            Err(e) => app.notice(format!("knowledge snapshot failed: {e}")),
+                        }
+                    }
                 }
             }
         }

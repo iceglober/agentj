@@ -95,6 +95,12 @@ pub enum AppEffect {
     Rekey { reference: String, desc: String },
     /// SIGKILL background jobs started at or after this watermark (an interrupted turn's jobs).
     KillJobsAfter(u64),
+    /// `/init`: write boilerplate config, then start the orchestrated mapping turn.
+    Init,
+    /// `/knowledge`: diff the tree against the knowledge index, then start a doc-sync turn.
+    Knowledge,
+    /// A snapshot-tracked turn finished cleanly — rebuild the knowledge index.
+    Snapshot,
 }
 
 pub struct App {
@@ -117,6 +123,11 @@ pub struct App {
     pub since: Instant,
     pub status: String,
     pub current_tool: String,
+    /// Rebuild the knowledge index when this turn completes cleanly (/init and /knowledge turns).
+    pub pending_snapshot: bool,
+    /// The current turn hit a hard error — a pending snapshot is skipped so a failed doc run
+    /// doesn't mark everything as documented.
+    turn_saw_error: bool,
     // live subagents (delegate batch), keyed by index for stable ordering
     pub subagents: BTreeMap<usize, SubagentRow>,
     // session status meter
@@ -165,6 +176,8 @@ impl App {
             since: Instant::now(),
             status: String::new(),
             current_tool: String::new(),
+            pending_snapshot: false,
+            turn_saw_error: false,
             subagents: BTreeMap::new(),
             session_start: Instant::now(),
             last_usage: None,
@@ -214,6 +227,26 @@ impl App {
             self.transcript.push(Line::from(spans));
         }
         self.dirty = true;
+    }
+
+    /// A dim `»` note line in the transcript (lifecycle chatter, not conversation content).
+    pub fn notice(&mut self, s: impl Into<String>) {
+        self.transcript.push(dim_line(format!("» {}", s.into())));
+        self.dirty = true;
+    }
+
+    /// Start a directive-driven turn (`/init`, `/knowledge`): the visible echo was already pushed
+    /// by submit; the actual user message is the full directive. The knowledge index is rebuilt
+    /// when this turn completes cleanly.
+    pub fn start_command_turn(&mut self, directive: String, effect_label: &str) {
+        self.messages.push(ChatMessage::user(directive));
+        self.running = true;
+        self.since = Instant::now();
+        self.status.clear();
+        self.pending_snapshot = true;
+        self.turn_saw_error = false;
+        self.follow = true;
+        self.set_effect(effect_label.to_string());
     }
 
     /// Push a user prompt line, preceded by a blank line to separate turns visually.
@@ -424,6 +457,7 @@ impl App {
     fn abort_turn(&mut self) -> AppEffect {
         self.running = false;
         self.status.clear();
+        self.pending_snapshot = false; // an interrupted doc run must not stamp the index
         self.flush_subagent_summaries();
         self.transcript.push(dim_line("[interrupted]"));
         self.follow = true;
@@ -465,6 +499,12 @@ impl App {
             AppEffect::None
         } else if text == "/exit" || text == "/quit" {
             AppEffect::Quit
+        } else if text == "/init" {
+            self.push_user_line(&text);
+            AppEffect::Init
+        } else if text == "/knowledge" {
+            self.push_user_line(&text);
+            AppEffect::Knowledge
         } else if text == "/task" || text.starts_with("/task ") {
             self.submit_task(&text)
         } else {
@@ -532,11 +572,15 @@ impl App {
         }
     }
 
-    pub fn on_ui(&mut self, msg: UiMsg) {
+    pub fn on_ui(&mut self, msg: UiMsg) -> AppEffect {
         match msg {
-            UiMsg::Agent(ev) => self.on_agent(ev),
+            UiMsg::Agent(ev) => {
+                self.on_agent(ev);
+                AppEffect::None
+            }
             UiMsg::HistoryDelta(delta) => {
                 self.messages.extend(delta);
+                AppEffect::None
             }
             UiMsg::TurnDone => {
                 self.running = false;
@@ -549,6 +593,17 @@ impl App {
                     self.last_effect_active = true;
                 }
                 self.dirty = true;
+                if self.pending_snapshot {
+                    self.pending_snapshot = false;
+                    if self.turn_saw_error {
+                        self.notice("skipping the knowledge snapshot — the run hit an error");
+                        AppEffect::None
+                    } else {
+                        AppEffect::Snapshot
+                    }
+                } else {
+                    AppEffect::None
+                }
             }
         }
     }
@@ -635,6 +690,7 @@ impl App {
                 self.dirty = true;
             }
             AgentEvent::Error(e) => {
+                self.turn_saw_error = true;
                 self.transcript
                     .push(Line::from(Span::styled(format!("✗ {e}"), theme::err())));
                 self.set_effect("error");
@@ -870,6 +926,56 @@ mod tests {
         let t = transcript_text(&a);
         assert!(t.contains("✓ [0] port the tests"), "transcript: {t}");
         assert!(t.contains("all 4 tests pass"));
+    }
+
+    #[test]
+    fn init_and_knowledge_commands_dispatch_their_effects() {
+        let mut a = app();
+        a.editor.insert_str("/init");
+        assert!(matches!(
+            a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            AppEffect::Init
+        ));
+        assert!(!a.running, "the turn starts only once the loop builds the directive");
+
+        let mut b = app();
+        b.editor.insert_str("/knowledge");
+        assert!(matches!(
+            b.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            AppEffect::Knowledge
+        ));
+    }
+
+    #[test]
+    fn command_turns_snapshot_on_clean_completion_only() {
+        use crate::events::AgentEvent;
+
+        // Clean run → TurnDone yields a Snapshot effect exactly once.
+        let mut a = app();
+        a.start_command_turn("directive".to_string(), "mapping");
+        assert!(a.running && a.pending_snapshot);
+        assert!(matches!(a.on_ui(UiMsg::TurnDone), AppEffect::Snapshot));
+        assert!(!a.pending_snapshot);
+        assert!(matches!(a.on_ui(UiMsg::TurnDone), AppEffect::None));
+
+        // A turn that errored skips the snapshot.
+        let mut b = app();
+        b.start_command_turn("directive".to_string(), "mapping");
+        b.on_ui(UiMsg::Agent(AgentEvent::Error("boom".to_string())));
+        assert!(matches!(b.on_ui(UiMsg::TurnDone), AppEffect::None));
+
+        // An aborted turn drops the pending snapshot.
+        let mut c = app();
+        c.start_command_turn("directive".to_string(), "mapping");
+        c.abort_turn();
+        assert!(!c.pending_snapshot);
+        assert!(matches!(c.on_ui(UiMsg::TurnDone), AppEffect::None));
+
+        // Ordinary turns never snapshot.
+        let mut d = app();
+        d.editor.insert_str("hello");
+        d.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(d.on_ui(UiMsg::TurnDone), AppEffect::None));
     }
 
     #[test]

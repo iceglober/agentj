@@ -18,6 +18,16 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         summary: "wipe + re-key the worktree onto a PR or branch, then start a fresh task",
     },
     SlashCommand {
+        name: "/init",
+        takes_arg: false,
+        summary: "map the codebase → AGENTS.md docs, .aj/aj.json, and a knowledge index",
+    },
+    SlashCommand {
+        name: "/knowledge",
+        takes_arg: false,
+        summary: "re-sync the docs with everything that changed since the last snapshot",
+    },
+    SlashCommand {
         name: "/exit",
         takes_arg: false,
         summary: "quit agentj",

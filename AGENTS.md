@@ -18,8 +18,10 @@ design notes live in `docs/`.)
   keystroke/event transitions, which return an `AppEffect` for anything the loop must `.await`),
   `view.rs` (rendering: transcript / subagent panel / status / input, plus the row-count caches),
   `markdown.rs` (CommonMark → styled lines for assistant replies), `editor.rs` (multi-line input
-  buffer), `keymap.rs` (pure keystroke → `Action`), `theme.rs` (palette), and `mod.rs` (the
-  `tokio::select!` event loop + `spawn_turn`).
+  buffer), `keymap.rs` (pure keystroke → `Action`), `theme.rs` (palette), `knowledge.rs` (the
+  `/init` + `/knowledge` doc workflow: FNV hash snapshot of tracked files in `.aj/knowledge.json`,
+  Rust-computed change diffs, and the directive prompts that drive the orchestrated doc turns), and
+  `mod.rs` (the `tokio::select!` event loop + `spawn_turn`).
 - `config.rs` — runtime knobs resolved once from the environment (`Config`).
 - `agent.rs` — the model loop (`run_turn`). Non-streaming: call the model, run its tool calls, repeat.
   Layered on: **background-job nudging** (drain finished/timeout nudges each iteration; idle-wait only
