@@ -92,7 +92,14 @@ if (cmd === "logs" && sub === "query") {
   const since = flags.since;
   const until = flags.until;
   const filter = flags.filter;
-  const limit = Number(flags.limit ?? 50);
+  let limit = 50;
+  if (flags.limit !== undefined) {
+    limit = Number(flags.limit);
+    if (!Number.isInteger(limit) || limit < 1) {
+      console.error(`--limit needs a positive integer, got "${flags.limit}"`);
+      process.exit(2);
+    }
+  }
   const matched = readGroup(group).filter((l) => {
     // ts is the first field of every line; lexicographic compare works for ISO8601 prefixes.
     const t = l.slice(7, 31);

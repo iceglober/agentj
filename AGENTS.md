@@ -56,7 +56,7 @@ Ran from repo root:
 ```sh
 cargo build --release --manifest-path agentj-rs/Cargo.toml
 cargo test --manifest-path agentj-rs/Cargo.toml
-bun test-projects/run.ts --help
+bun test-projects/run.ts --selftest
 ```
 
 Convenience equivalents defined in `package.json`:
@@ -75,4 +75,4 @@ bin/aj
 ## Verification evidence
 - `cargo build --release --manifest-path agentj-rs/Cargo.toml` — passed.
 - `cargo test --manifest-path agentj-rs/Cargo.toml` — passed: 94 unit tests + 5 PTY integration tests.
-- `bun test-projects/run.ts --help` — exits 0 and prints the harness summary banner.
+- `bun test-projects/run.ts --selftest` — no agent, no paid calls: proves each grader fails unsolved and passes on the reference solution.

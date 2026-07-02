@@ -296,8 +296,14 @@ mod tests {
 
     #[test]
     fn env_or_file_prefers_env_then_file_then_none() {
-        let map: HashMap<String, String> = [("K".to_string(), "env".to_string())].into();
-        let _ = map;
+        // Uniquely-named key so setting it can't race other tests reading process-global env.
+        let key = "__AGENTJ_TEST_ENV_WINS__";
+        std::env::set_var(key, "from-env");
+        assert_eq!(AppConfig::env_or_file(key, Some("file")), Some("from-env".into()), "env wins over file");
+        // An empty env value is treated as unset and falls through to the file.
+        std::env::set_var(key, "");
+        assert_eq!(AppConfig::env_or_file(key, Some("file")), Some("file".into()));
+        std::env::remove_var(key);
         assert_eq!(AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("file")), Some("file".into()));
         assert_eq!(AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("")), None);
     }

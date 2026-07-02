@@ -39,6 +39,20 @@ fn tail(s: &str, n: usize) -> String {
     lines[start..].join("\n")
 }
 
+/// Trim `s` in place to keep roughly its last `cap` bytes. The cut is advanced to the next char
+/// boundary so `split_off` can't panic when a lossy-decoded multibyte char straddles the cap.
+fn trim_to_cap(s: &mut String, cap: usize) {
+    let over = s.len().saturating_sub(cap);
+    if over == 0 {
+        return;
+    }
+    let mut cut = over;
+    while cut < s.len() && !s.is_char_boundary(cut) {
+        cut += 1;
+    }
+    *s = s.split_off(cut);
+}
+
 pub struct JobManager {
     root: String,
     jobs: Mutex<HashMap<u64, Arc<JobHandle>>>,
@@ -112,10 +126,7 @@ impl JobManager {
                         Ok(n) => {
                             let mut st = h.state.lock().await;
                             st.output.push_str(&String::from_utf8_lossy(&buf[..n]));
-                            let over = st.output.len().saturating_sub(OUTPUT_CAP);
-                            if over > 0 {
-                                st.output = st.output.split_off(over);
-                            }
+                            trim_to_cap(&mut st.output, OUTPUT_CAP);
                         }
                     }
                 }
@@ -283,6 +294,24 @@ impl Pipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_to_cap_never_splits_a_multibyte_char() {
+        // '€' is 3 bytes; 10 of them = 30 bytes. Cap 20 → over=10, which lands mid-char.
+        let mut s = "€".repeat(10);
+        trim_to_cap(&mut s, 20); // must not panic on the non-boundary cut
+        assert!(s.len() <= 20);
+        assert!(s.chars().all(|c| c == '€'));
+        // The cut advanced forward to a boundary, keeping the last 6 chars (18 bytes).
+        assert_eq!(s.chars().count(), 6);
+    }
+
+    #[test]
+    fn trim_to_cap_is_a_noop_under_the_cap() {
+        let mut s = "hello".to_string();
+        trim_to_cap(&mut s, 16 * 1024);
+        assert_eq!(s, "hello");
+    }
 
     #[tokio::test]
     async fn finish_nudge_carries_output_and_exit() {

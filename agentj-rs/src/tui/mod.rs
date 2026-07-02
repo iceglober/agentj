@@ -134,10 +134,6 @@ pub async fn run(
                 while let Ok(ev) = in_rx.try_recv() {
                     pending.push(ev);
                 }
-                #[cfg(test)]
-                {
-                    let _ = pending.len();
-                }
                 for ev in pending {
                     match app.on_input(ev) {
                         AppEffect::None => {}
@@ -208,10 +204,6 @@ pub async fn run(
                 let mut pending = vec![msg];
                 while let Ok(msg) = ui_rx.try_recv() {
                     pending.push(msg);
-                }
-                #[cfg(test)]
-                {
-                    let _ = pending.len();
                 }
                 for msg in pending {
                     if matches!(app.on_ui(msg), AppEffect::Snapshot) {

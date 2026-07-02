@@ -143,10 +143,12 @@ impl McpClients {
         self.by_tool.len()
     }
 
-    /// Call an MCP tool by its fully-qualified name, returning flattened text.
-    pub async fn call(&self, name: &str, args: &Value) -> String {
+    /// Call an MCP tool by its fully-qualified name, returning flattened text and a structural
+    /// success flag. `ok` comes from the rmcp result's `is_error` (false on a transport error), so
+    /// callers don't have to re-sniff it from the rendered string.
+    pub async fn call(&self, name: &str, args: &Value) -> (String, bool) {
         let Some(&idx) = self.by_tool.get(name) else {
-            return format!("error: unknown MCP tool `{name}`");
+            return (format!("error: unknown MCP tool `{name}`"), false);
         };
         let server = &self.servers[idx];
         let short = server
@@ -160,8 +162,11 @@ impl McpClients {
             params = params.with_arguments(obj.clone());
         }
         match server.service.call_tool(params).await {
-            Ok(res) => render_result(res),
-            Err(e) => format!("error: {e}"),
+            Ok(res) => {
+                let ok = !res.is_error.unwrap_or(false);
+                (render_result(res), ok)
+            }
+            Err(e) => (format!("error: {e}"), false),
         }
     }
 }

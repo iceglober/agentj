@@ -35,8 +35,18 @@ pub fn fnv1a_hex(bytes: &[u8]) -> String {
 /// Tracked + untracked-but-not-ignored files relative to `root` (same lens as the glob tool), with
 /// `.aj/` internals excluded — the index shouldn't index itself.
 pub async fn tracked_files(root: &str) -> anyhow::Result<Vec<String>> {
+    // core.quotepath=off keeps non-ASCII paths verbatim; git otherwise octal-escapes them, which would
+    // corrupt the manifest keys and the change lists handed to the model.
     let o = exec::run(
-        &["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        &[
+            "git",
+            "-c",
+            "core.quotepath=off",
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ],
         root,
         None,
     )

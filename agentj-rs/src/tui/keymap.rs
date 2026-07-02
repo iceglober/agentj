@@ -443,20 +443,20 @@ mod tests {
     #[test]
     fn cmd_delete_and_backspace_delete_to_line_edges() {
         let mut e = ed("alpha beta\ngamma delta");
-        e.cursor = "alpha be".len();
+        e.set_cursor("alpha be".len());
         apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::SUPER), false);
         assert_eq!(e.text(), "ta\ngamma delta");
         assert_eq!(e.cursor, 0);
 
         // ⌘⌫ on a later line deletes to THAT line's start, not the buffer start.
         let mut e = ed("alpha beta\ngamma delta");
-        e.cursor = "alpha beta\ngamma ".len();
+        e.set_cursor("alpha beta\ngamma ".len());
         apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::SUPER), false);
         assert_eq!(e.text(), "alpha beta\ndelta");
         assert_eq!(e.cursor, "alpha beta\n".len());
 
         let mut e = ed("alpha beta\ngamma delta");
-        e.cursor = "alpha be".len();
+        e.set_cursor("alpha be".len());
         apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::SUPER), false);
         assert_eq!(e.text(), "alpha be\ngamma delta");
         assert_eq!(e.cursor, "alpha be".len());
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn option_delete_and_backspace_delete_words_without_crossing_lines() {
         let mut e = ed("alpha  beta\ngamma delta");
-        e.cursor = "alpha  beta".len();
+        e.set_cursor("alpha  beta".len());
         apply_key(&mut e, key(KeyCode::Backspace, KeyModifiers::ALT), false);
         assert_eq!(e.text(), "alpha  \ngamma delta");
         assert_eq!(e.cursor, "alpha  ".len());
@@ -491,7 +491,7 @@ mod tests {
         assert_eq!(e.cursor, 0);
 
         let mut e = ed("alpha  beta\ngamma delta");
-        e.cursor = "alpha  ".len();
+        e.set_cursor("alpha  ".len());
         apply_key(&mut e, key(KeyCode::Delete, KeyModifiers::ALT), false);
         assert_eq!(e.text(), "alpha  \ngamma delta");
         assert_eq!(e.cursor, "alpha  ".len());

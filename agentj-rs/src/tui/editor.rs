@@ -15,6 +15,17 @@ impl Editor {
     pub fn revision(&self) -> u64 {
         self.revision
     }
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+    /// Move the cursor to a byte index, which must sit on a char boundary. Test-only: production
+    /// cursor moves go through the motion methods above; tests use this to seat the cursor directly.
+    #[cfg(test)]
+    pub fn set_cursor(&mut self, i: usize) {
+        debug_assert!(self.text.is_char_boundary(i));
+        self.cursor = i;
+        self.touch();
+    }
     fn touch(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }

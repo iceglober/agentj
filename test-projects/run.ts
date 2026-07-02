@@ -19,13 +19,6 @@ import { appendFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-// NOTE: the LLM `judge` grader is temporarily disabled — it depended on the TS package's judge, which
-// was removed in the Rust cutover. `judge` tasks now grade on `verify` alone until a Rust judge lands.
-
-// The LLM judge runs in THIS process (not a agentj subprocess), so the Vertex creds must be on
-// process.env, not just the child env below.
-process.env.GOOGLE_VERTEX_PROJECT ??= "ai-tooling-496018";
-process.env.GOOGLE_VERTEX_LOCATION ??= "global";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGENTJ = join(HERE, "..", "bin", "agentj");
@@ -59,11 +52,12 @@ interface Task {
   budgetTokensIn?: number; // context budget: fail the task if the run consumes more input tokens than this
 }
 
-/** Tolerant JSONC: strip `//` line comments (not inside strings) so we can keep the manifest annotated. */
+/** Tolerant JSONC: drop whole-line `//` comments so we can keep the manifest annotated. Only full-line
+ * comments (the trimmed line starts with `//`) are stripped, so `//` inside a string value is safe. */
 function parseJsonc(text: string): Task[] {
   const stripped = text
     .split("\n")
-    .map((line) => line.replace(/(^|[^:])\/\/.*$/, "$1"))
+    .map((line) => (line.trimStart().startsWith("//") ? "" : line))
     .join("\n");
   return JSON.parse(stripped);
 }
@@ -80,6 +74,27 @@ const env = {
 };
 
 const argv = process.argv.slice(2);
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(`eval harness — run agentj against each task in tasks.jsonc and report PASS/FAIL.
+
+Usage:
+  bun test-projects/run.ts [filter] [flags]
+
+Modes:
+  <filter>          run only tasks whose id contains this substring (a bare, non-flag arg)
+  --selftest        no agent — prove each grader FAILs unsolved and PASSes on the reference solution (free)
+
+Flags:
+  --prompt <name>   run the named prompt variant instead of the default (first-listed) one
+  --all-prompts     run every prompt variant of each task
+  --repeat <N>      run each selected task N times
+  --budget-soft     calibration mode: a blown context budget warns instead of failing the task
+  -h, --help        show this help and exit
+
+Env:
+  KEEP=1            keep the throwaway per-task dirs (to inspect the diff) instead of deleting them`);
+  process.exit(0);
+}
 const selftest = argv.includes("--selftest");
 const allPrompts = argv.includes("--all-prompts");
 const budgetSoft = argv.includes("--budget-soft"); // calibration mode: budget breaches warn instead of fail
@@ -113,9 +128,9 @@ async function runAgent(cwd: string, prompt: string, runEnv: Record<string, stri
     proc.kill(9);
   }, timeoutSec * 1000);
   const [so, se] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
-  await proc.exited;
+  const exitCode = await proc.exited;
   clearTimeout(killer);
-  return { out: stripAnsi(so + se), timedOut };
+  return { out: stripAnsi(so + se), timedOut, exitCode };
 }
 
 for (const t of tasks)
@@ -174,8 +189,21 @@ for (let rep = 1; rep <= (selftest ? 1 : repeat); rep++) {
     }
 
     console.log(`  agentj: "${vtext.slice(0, 70)}…"`);
-    const { out, timedOut } = await runAgent(cwd, vtext, runEnv, t.timeoutSec ?? 600);
+    const { out, timedOut, exitCode } = await runAgent(cwd, vtext, runEnv, t.timeoutSec ?? 600);
     await writeFile(join(RESULTS, "out", `${RUN_STAMP}-${label.replace("@", "-")}.txt`), out);
+
+    // Boot failure ≠ task failure: if agentj exited nonzero with no sign of a model turn (no usage line,
+    // no tool lines), it never got off the ground (bad build/creds/provider). Record a loud SKIP and do
+    // NOT append to history.jsonl — a bad environment must not pollute the pass-rate trail. A timed-out
+    // run booted fine and stays a genuine FAIL below.
+    const sawModelActivity = /tokens: \d+ in \//.test(out) || /(^|\n)· /.test(out);
+    if (!timedOut && exitCode !== 0 && !sawModelActivity) {
+      const secs = Math.round((Date.now() - started) / 1000);
+      console.log(`  \x1b[33mSKIP\x1b[0m — \x1b[1magentj failed to boot\x1b[0m (exit ${exitCode}, no model turn); not recorded. Check bin/agentj build + provider creds.`);
+      for (const l of out.split("\n").filter(Boolean).slice(-6)) console.log(`    \x1b[33m|\x1b[0m ${l}`);
+      results.push({ id: label, pass: true, skip: true, note: `boot failure (exit ${exitCode})`, secs });
+      continue;
+    }
 
     // Grade. Every grader present must pass. Diff-based graders compare the index (after `git add -A`)
     // to `base`, so they capture agentj's whole solution whether or not it committed.

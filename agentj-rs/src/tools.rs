@@ -127,9 +127,7 @@ impl Tools {
             },
             other => match &self.mcp {
                 Some(mcp) if mcp.has_tool(other) => {
-                    let text = mcp.call(other, args).await;
-                    // rmcp errors are stringified with an "error" prefix in mcp/client.rs.
-                    let ok = !text.trim_start().to_ascii_lowercase().starts_with("error");
+                    let (text, ok) = mcp.call(other, args).await;
                     ToolOutcome { text, ok }
                 }
                 _ => ToolOutcome::err(format!("error: unknown tool `{other}`")),
@@ -244,15 +242,33 @@ impl Tools {
         };
         let count = text.matches(old).count();
         if count == 0 {
-            return ToolOutcome::err(format!("old_string not found in {path}"));
-        }
-        if count > 1 {
             return ToolOutcome::err(format!(
-                "old_string is not unique in {path} ({count} matches) — add more context"
+                "old_string not found in {path} — re-read the file; it may have changed since you last saw it"
             ));
         }
-        match fs::write(&abs, text.replacen(old, new, 1)) {
-            Ok(_) => ToolOutcome::ok(format!("edited {path}")),
+        let replace_all = args
+            .get("replace_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if count > 1 && !replace_all {
+            return ToolOutcome::err(format!(
+                "old_string is not unique in {path} ({count} matches) — add more context, or pass replace_all to replace every occurrence"
+            ));
+        }
+        let updated = if replace_all {
+            text.replace(old, new)
+        } else {
+            text.replacen(old, new, 1)
+        };
+        match fs::write(&abs, updated) {
+            Ok(_) => ToolOutcome::ok(if replace_all {
+                format!(
+                    "edited {path} ({count} replacement{})",
+                    if count == 1 { "" } else { "s" }
+                )
+            } else {
+                format!("edited {path}")
+            }),
             Err(e) => ToolOutcome::err(format!("error: {e}")),
         }
     }
@@ -364,12 +380,16 @@ impl Tools {
             Some(p) => p,
             None => return ToolOutcome::err("error: grep needs a pattern"),
         };
-        let where_ = arg_str(args, "path").unwrap_or(".");
+        // An empty path arg means "search the whole repo", not an empty (invalid) path.
+        let where_ = match arg_str(args, "path") {
+            Some(p) if !p.is_empty() => p,
+            _ => ".",
+        };
         if let Err(e) = safe_resolve(&self.root, where_) {
             return ToolOutcome::err(format!("error: {e}"));
         }
         let root = self.root_str();
-        let (out, code) = match run(
+        let (out, err, code) = match run(
             &[
                 "rg",
                 "--line-number",
@@ -384,7 +404,7 @@ impl Tools {
         )
         .await
         {
-            Ok(o) => (o.stdout, o.exit_code),
+            Ok(o) => (o.stdout, o.stderr, o.exit_code),
             Err(_) => match run(
                 &["git", "grep", "-n", "-E", pattern, "--", where_],
                 &root,
@@ -392,10 +412,20 @@ impl Tools {
             )
             .await
             {
-                Ok(o) => (o.stdout, o.exit_code),
+                Ok(o) => (o.stdout, o.stderr, o.exit_code),
                 Err(e) => return ToolOutcome::err(format!("error: {e}")),
             },
         };
+        // rg/git-grep exit 0 = matches, 1 = no matches; anything else is a real error (invalid
+        // regex, unreadable path). Surface it so the model doesn't read it as "no matches".
+        if code != 0 && code != 1 {
+            let detail: String = err.lines().take(3).collect::<Vec<_>>().join("\n");
+            return ToolOutcome::err(if detail.trim().is_empty() {
+                format!("search failed (exit {code})")
+            } else {
+                format!("search failed: {detail}")
+            });
+        }
         if code == 1 || out.trim().is_empty() {
             return ToolOutcome::ok("no matches");
         }
@@ -418,13 +448,13 @@ impl Tools {
             Some(c) => c,
             None => return ToolOutcome::err("error: bash needs a command"),
         };
-        match run(
-            &["bash", "-lc", command],
-            &self.root_str(),
-            Some(BASH_TIMEOUT),
-        )
-        .await
-        {
+        // Optional per-call timeout, clamped to 1..=600s; falls back to the default.
+        let timeout = args
+            .get("timeout_s")
+            .and_then(|v| v.as_u64())
+            .map(|s| Duration::from_secs(s.clamp(1, 600)))
+            .unwrap_or(BASH_TIMEOUT);
+        match run(&["bash", "-lc", command], &self.root_str(), Some(timeout)).await {
             Ok(o) => {
                 let raw: String = [o.stdout.trim_end(), o.stderr.trim_end()]
                     .iter()
@@ -433,7 +463,7 @@ impl Tools {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let note = if o.timed_out {
-                    format!("\n[timed out after {}s]", BASH_TIMEOUT.as_secs())
+                    format!("\n[timed out after {}s]", timeout.as_secs())
                 } else {
                     String::new()
                 };
@@ -470,8 +500,8 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "edit_file".into(),
-            description: "Replace an exact, unique string in a file. old_string must occur exactly once.".into(),
-            parameters: json!({ "type": "object", "properties": { "path": { "type": "string" }, "old_string": { "type": "string" }, "new_string": { "type": "string" } }, "required": ["path", "old_string", "new_string"] }),
+            description: "Replace an exact, unique string in a file. old_string must occur exactly once, unless replace_all is set — then every occurrence is replaced and the count reported.".into(),
+            parameters: json!({ "type": "object", "properties": { "path": { "type": "string" }, "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean", "description": "replace every occurrence of old_string instead of requiring it be unique" } }, "required": ["path", "old_string", "new_string"] }),
         },
         ToolSpec {
             name: "list_dir".into(),
@@ -490,8 +520,8 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "bash".into(),
-            description: "Run a shell command from the repo root (bash -lc). Use for builds, tests, git, etc. Output truncated; bounded to 120s.".into(),
-            parameters: json!({ "type": "object", "properties": { "command": { "type": "string" } }, "required": ["command"] }),
+            description: "Run a shell command from the repo root (bash -lc). Use for builds, tests, git, etc. Output truncated; bounded to 120s by default, or `timeout_s` (1..=600) if given.".into(),
+            parameters: json!({ "type": "object", "properties": { "command": { "type": "string" }, "timeout_s": { "type": "number", "description": "kill the command after this many seconds (clamped to 1..=600; default 120)" } }, "required": ["command"] }),
         },
         ToolSpec {
             name: "job_start".into(),
@@ -541,9 +571,24 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
 mod tests {
     use super::*;
     use crate::jobs::JobManager;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn tools() -> Tools {
         Tools::new(PathBuf::from("."), JobManager::new(".".to_string()), None)
+    }
+
+    static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    /// A `Tools` rooted at a fresh temp dir, so file-mutating tests don't touch the crate tree.
+    fn temp_tools() -> (Tools, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "agentj-tools-test-{}-{}",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let jm = JobManager::new(dir.to_string_lossy().into_owned());
+        (Tools::new(dir.clone(), jm, None), dir)
     }
 
     #[tokio::test]
@@ -572,5 +617,90 @@ mod tests {
         // the crate manifest is always present when tests run from the crate root
         let o = tools().call("read_file", &json!({ "path": "Cargo.toml" })).await;
         assert!(o.ok, "expected ok, got: {}", o.text);
+    }
+
+    #[tokio::test]
+    async fn grep_invalid_regex_reports_failure() {
+        // An unmatched '(' is invalid for both rg and git grep; the tool must not read the
+        // resulting non-1 exit code as "no matches".
+        let o = tools().call("grep", &json!({ "pattern": "(" })).await;
+        assert!(!o.ok, "expected failure, got ok: {}", o.text);
+        assert!(
+            o.text.to_ascii_lowercase().contains("fail"),
+            "expected a failure message, got: {}",
+            o.text
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_empty_path_searches_the_repo() {
+        // Empty path must behave like "." (whole repo), not error out.
+        let o = tools()
+            .call("grep", &json!({ "pattern": "fn ", "path": "" }))
+            .await;
+        assert!(o.ok, "expected ok, got: {}", o.text);
+    }
+
+    #[tokio::test]
+    async fn bash_honors_timeout_s() {
+        let o = tools()
+            .call("bash", &json!({ "command": "sleep 5", "timeout_s": 1 }))
+            .await;
+        assert!(
+            o.text.contains("timed out"),
+            "expected a timeout note, got: {}",
+            o.text
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_replace_all_replaces_every_occurrence() {
+        let (t, dir) = temp_tools();
+        fs::write(dir.join("f.txt"), "a a a").unwrap();
+        let o = t
+            .call(
+                "edit_file",
+                &json!({ "path": "f.txt", "old_string": "a", "new_string": "b", "replace_all": true }),
+            )
+            .await;
+        assert!(o.ok, "expected ok, got: {}", o.text);
+        assert!(o.text.contains('3'), "expected a count of 3, got: {}", o.text);
+        assert_eq!(fs::read_to_string(dir.join("f.txt")).unwrap(), "b b b");
+    }
+
+    #[tokio::test]
+    async fn edit_file_not_unique_suggests_replace_all() {
+        let (t, dir) = temp_tools();
+        fs::write(dir.join("f.txt"), "a a a").unwrap();
+        let o = t
+            .call(
+                "edit_file",
+                &json!({ "path": "f.txt", "old_string": "a", "new_string": "b" }),
+            )
+            .await;
+        assert!(!o.ok);
+        assert!(
+            o.text.contains("replace_all"),
+            "expected a replace_all hint, got: {}",
+            o.text
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_not_found_suggests_reread() {
+        let (t, dir) = temp_tools();
+        fs::write(dir.join("f.txt"), "hello").unwrap();
+        let o = t
+            .call(
+                "edit_file",
+                &json!({ "path": "f.txt", "old_string": "nope", "new_string": "x" }),
+            )
+            .await;
+        assert!(!o.ok);
+        assert!(
+            o.text.contains("re-read"),
+            "expected a re-read hint, got: {}",
+            o.text
+        );
     }
 }

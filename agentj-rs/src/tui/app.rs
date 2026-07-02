@@ -24,6 +24,12 @@ const DOUBLE_TAP: Duration = Duration::from_secs(2);
 
 const CHEAT_SHEET: &str = "Enter send · Ctrl-J newline · Esc interrupt · / commands · ↑↓/wheel or PageUp/Dn scroll · Ctrl-C×2 quit";
 
+/// Orients the model after an interrupt: side effects (edits, commits) may already have applied.
+/// Deferred to the head of the next turn so any history deltas the aborted turn already queued land
+/// in front of it.
+const INTERRUPT_NOTE: &str =
+    "[note: the previous request was interrupted by the user; some tool actions may have already applied]";
+
 /// The slash token containing the cursor, when the completion popover should consider it: a maximal
 /// non-whitespace run ending at the cursor that starts with `/` at the start of the text or right
 /// after whitespace (so `a/b` or a mid-word `/` never triggers). Returns (start byte, token so far).
@@ -129,6 +135,9 @@ pub struct App {
     /// The current turn hit a hard error — a pending snapshot is skipped so a failed doc run
     /// doesn't mark everything as documented.
     turn_saw_error: bool,
+    /// An aborted turn owes an interrupt note; it is pushed at the start of the next turn so any
+    /// history deltas the aborted turn already queued land before it.
+    pending_interrupt_note: bool,
     // live subagents (delegate batch), keyed by index for stable ordering
     pub subagents: BTreeMap<usize, SubagentRow>,
     /// A brief coalesce effect over the tray when a batch spins up (tachyonfx).
@@ -183,6 +192,7 @@ impl App {
             current_tool: String::new(),
             pending_snapshot: false,
             turn_saw_error: false,
+            pending_interrupt_note: false,
             subagents: BTreeMap::new(),
             tray_fx: None,
             last_draw: None,
@@ -247,14 +257,29 @@ impl App {
     /// by submit; the actual user message is the full directive. The knowledge index is rebuilt
     /// when this turn completes cleanly.
     pub fn start_command_turn(&mut self, directive: String, effect_label: &str) {
+        self.flush_interrupt_note();
         self.messages.push(ChatMessage::user(directive));
-        self.running = true;
-        self.since = Instant::now();
-        self.status.clear();
         self.pending_snapshot = true;
         self.turn_saw_error = false;
         self.follow = true;
-        self.set_effect(effect_label.to_string());
+        self.begin_running(effect_label.to_string());
+    }
+
+    /// Common turn-start bookkeeping: mark the turn running, reset the elapsed clock and status line,
+    /// and flash the given effect label.
+    fn begin_running(&mut self, effect_label: impl Into<String>) {
+        self.running = true;
+        self.since = Instant::now();
+        self.status.clear();
+        self.set_effect(effect_label);
+    }
+
+    /// Push the deferred interrupt note, if an earlier turn was aborted. Called at the head of the next
+    /// turn so the aborted turn's already-queued history deltas land in front of it.
+    fn flush_interrupt_note(&mut self) {
+        if std::mem::take(&mut self.pending_interrupt_note) {
+            self.messages.push(ChatMessage::user(INTERRUPT_NOTE));
+        }
     }
 
     /// Push a user prompt line, preceded by a blank line to separate turns visually.
@@ -385,7 +410,7 @@ impl App {
     /// Recompute the popover from the token under the cursor. Opens on a `/` token (at start or
     /// after whitespace), filters by fuzzy match, closes when nothing matches or the token is gone.
     fn update_popover(&mut self) {
-        let Some((start, token)) = slash_token(self.editor.text(), self.editor.cursor) else {
+        let Some((start, token)) = slash_token(self.editor.text(), self.editor.cursor()) else {
             self.popover = None;
             self.popover_dismissed = None;
             return;
@@ -430,18 +455,18 @@ impl App {
                 cmd.name.to_string()
             };
             self.editor
-                .replace_range(p.token_start, self.editor.cursor, &insert);
+                .replace_range(p.token_start, self.editor.cursor(), &insert);
             // Stay closed for the accepted token (else a no-arg command like /exit would keep
             // reopening and Enter could never submit); any further edit reopens it.
             self.popover_dismissed =
-                slash_token(self.editor.text(), self.editor.cursor).map(|(_, t)| t);
+                slash_token(self.editor.text(), self.editor.cursor()).map(|(_, t)| t);
             self.dirty = true;
         }
         AppEffect::None
     }
 
     fn popover_dismiss(&mut self) -> AppEffect {
-        if let Some((_, token)) = slash_token(self.editor.text(), self.editor.cursor) {
+        if let Some((_, token)) = slash_token(self.editor.text(), self.editor.cursor()) {
             self.popover_dismissed = Some(token);
         }
         self.popover = None;
@@ -473,10 +498,9 @@ impl App {
         match self.turn.take() {
             Some(t) => {
                 t.abort.abort();
-                // Orient the model next turn: side effects (edits, commits) may already have applied.
-                self.messages.push(ChatMessage::user(
-                    "[note: the previous request was interrupted by the user; some tool actions may have already applied]",
-                ));
+                // Defer the orientation note to the next turn so history deltas still queued in the ui
+                // channel are appended ahead of it (else the note would jump in front of them).
+                self.pending_interrupt_note = true;
                 AppEffect::KillJobsAfter(t.job_watermark)
             }
             None => AppEffect::None,
@@ -517,11 +541,9 @@ impl App {
             self.submit_task(&text)
         } else {
             self.push_user_line(&text);
+            self.flush_interrupt_note();
             self.messages.push(ChatMessage::user(text));
-            self.running = true;
-            self.since = Instant::now();
-            self.status.clear();
-            self.set_effect("let's cook");
+            self.begin_running("let's cook");
             AppEffect::SpawnTurn
         }
     }
@@ -564,18 +586,17 @@ impl App {
         let branch = rk.branch.unwrap_or_default();
         self.transcript
             .push(dim_line(format!("» clean on {branch}, synced to origin")));
-        self.set_effect(format!("switched to {branch}"));
+        // A re-key wipes history for the new worktree, so a deferred interrupt note from the old
+        // conversation is now moot.
+        self.pending_interrupt_note = false;
         self.messages = vec![ChatMessage::system(self.system.clone())];
         if desc.is_empty() {
+            self.set_effect(format!("switched to {branch}"));
             AppEffect::None
         } else {
             self.push_user_line(&desc);
             self.messages.push(ChatMessage::user(desc));
-            self.running = true;
-            self.since = Instant::now();
-            self.status.clear();
-            self.last_effect_active = true;
-            self.dirty = true;
+            self.begin_running(format!("switched to {branch}"));
             AppEffect::SpawnTurn
         }
     }
@@ -769,7 +790,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn abort_pushes_interrupt_marker_and_kills_jobs() {
+    async fn abort_defers_interrupt_marker_behind_queued_deltas() {
         let mut a = app();
         let abort = tokio::spawn(std::future::pending::<()>()).abort_handle();
         a.turn = Some(TurnHandle {
@@ -780,10 +801,26 @@ mod tests {
         let effect = a.abort_turn();
         assert!(matches!(effect, AppEffect::KillJobsAfter(7)));
         assert!(!a.running);
-        assert!(a.messages.iter().any(|m| m
+        // The note is NOT pushed at abort time — deltas the aborted turn already queued land first.
+        assert!(!a.messages.iter().any(|m| m
             .content
             .as_deref()
             .is_some_and(|c| c.contains("interrupted by the user"))));
+
+        // A late history delta from the aborted turn arrives, then the user sends the next message.
+        a.on_ui(UiMsg::HistoryDelta(vec![ChatMessage::user("late delta")]));
+        a.editor.insert_str("next");
+        a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let idx = |needle: &str| {
+            a.messages
+                .iter()
+                .position(|m| m.content.as_deref().is_some_and(|c| c.contains(needle)))
+                .unwrap_or_else(|| panic!("missing {needle}"))
+        };
+        // History order: late delta, then the interrupt note, then the new user message.
+        assert!(idx("late delta") < idx("interrupted by the user"));
+        assert!(idx("interrupted by the user") < idx("next"));
     }
 
     fn type_str(a: &mut App, s: &str) {
@@ -882,7 +919,7 @@ mod tests {
         let before = b.scroll;
         b.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
         assert_eq!(b.scroll, before, "multi-line input: ↑ moves the cursor, not the scroll");
-        assert!(b.editor.cursor < b.editor.text().len());
+        assert!(b.editor.cursor() < b.editor.text().len());
     }
 
     fn transcript_text(a: &App) -> String {

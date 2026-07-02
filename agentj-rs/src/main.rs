@@ -183,8 +183,10 @@ async fn main() {
     };
 
     let company = config::AppConfig::env_or_file("AGENTJ_COMPANY", app_cfg.company.as_deref());
-    let check = config::AppConfig::env_or_file("AGENTJ_CHECK", app_cfg.check.as_deref());
-    let system = prompt::system_prompt(&root, company.as_deref(), check.as_deref());
+    // Resolve the runtime config once, before the prompt, so the check command shown to the model and
+    // the one the ASSESS gate enforces come from the same source and can't diverge.
+    let run_cfg = config::Config::from_sources(&cfg.model_id, &app_cfg);
+    let system = prompt::system_prompt(&root, company.as_deref(), run_cfg.check.as_deref());
 
     // Connect MCP servers once at startup; failures become one-line notices.
     let mcp_configs = mcp::config::load_mcp_servers(&root);
@@ -200,7 +202,7 @@ async fn main() {
     let sess = agent::Session {
         llm: Arc::new(llm),
         tools: Arc::new(tools),
-        cfg: Arc::new(config::Config::from_sources(&cfg.model_id, &app_cfg)),
+        cfg: Arc::new(run_cfg),
     };
 
     if !std::io::stdin().is_terminal() && args.once.is_none() {
