@@ -668,6 +668,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Live subagent panel (only present while a delegate batch runs). A fresh batch coalesces into
     // place; the effect rides the running-turn ticker, so idle frames never animate.
     if panel_h > 0 {
+        // Clear the tray region before drawing its text/effect. The coalesce effect overdraws this
+        // rect and the tray's height can change frame-to-frame; without an explicit clear, stale
+        // cells can remain pinned to screen coordinates after the tray collapses or reflows.
+        f.render_widget(Clear, rows[1]);
         f.render_widget(
             Paragraph::new(subagent_panel(app, Instant::now(), rows[1].width)),
             rows[1],
