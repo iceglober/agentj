@@ -31,14 +31,34 @@ pub struct Session {
 
 /// Direct (non-delegate) tool calls in one turn before the single SPEAR re-anchor nudge fires. The
 /// prompt's own heuristic is "delegate what you can't name the files for" — this is the backstop
-/// when execution sprawls anyway. Advisory, once per turn; primary loop only.
-const SPEAR_NUDGE_AFTER: usize = 8;
+/// when execution sprawls anyway. Advisory, once per turn; primary loop only. Set high (12): at a
+/// dozen calls the agent is usually legitimately deep in one focused change, and an earlier nudge
+/// was observed to push wasteful delegation whose subagents re-derive the parent's context.
+const SPEAR_NUDGE_AFTER: usize = 12;
 
 /// One subagent's outcome: its batch index, final result text, and whether it succeeded.
 struct SubResult {
     index: usize,
     result: String,
     ok: bool,
+}
+
+/// Ceiling on how much of each subagent's result re-enters the parent context. Subagents are told to
+/// return a tight self-contained result, but nothing enforces it — an over-long one would bloat the
+/// parent's context (the exact thing delegation exists to avoid). Keeps the head (where the answer
+/// and changed-files summary sit) plus a short tail, over char (not byte) boundaries.
+const SUBAGENT_RESULT_CAP: usize = 6000;
+
+fn cap_result(s: &str, cap: usize) -> String {
+    if s.chars().count() <= cap {
+        return s.to_string();
+    }
+    let head: String = s.chars().take(cap * 3 / 4).collect();
+    let tail: String = {
+        let t: Vec<char> = s.chars().collect();
+        t[t.len() - cap / 4..].iter().collect()
+    };
+    format!("{head}\n… [subagent result truncated — {} chars omitted] …\n{tail}", s.chars().count() - cap)
 }
 
 /// The label a subagent shows in the tray: the model-supplied `title` when present, else the first
@@ -124,7 +144,13 @@ async fn run_delegate(sess: &Session, args: &Value, tx: &UnboundedSender<AgentEv
             let fwd = parent.clone();
             let forward = async move {
                 let mut saw_error = false;
+                let mut sub_tokens: u64 = 0; // input tokens this subagent spent (for the budget meter)
                 while let Some(ev) = arx.recv().await {
+                    // Subagent Usage is accumulated, not forwarded as a top-level Usage — that would
+                    // corrupt the primary loop's context-fill meter.
+                    if let AgentEvent::Usage(u) = &ev {
+                        sub_tokens += u.prompt_tokens;
+                    }
                     let status = match ev {
                         AgentEvent::ToolStart { name, args, .. } => Some(format!("{name}({args})")),
                         AgentEvent::Message(t) => Some(first_line(&t, 80)),
@@ -139,7 +165,7 @@ async fn run_delegate(sess: &Session, args: &Value, tx: &UnboundedSender<AgentEv
                         let _ = fwd.send(AgentEvent::SubagentProgress { id: i, status });
                     }
                 }
-                saw_error
+                (saw_error, sub_tokens)
             };
             let run = async {
                 // Subagents don't commit deltas — only their final result re-enters the parent.
@@ -147,12 +173,17 @@ async fn run_delegate(sess: &Session, args: &Value, tx: &UnboundedSender<AgentEv
                 drop(atx); // close the channel so the forwarder finishes
                 r
             };
-            let (result, saw_error) = tokio::join!(run, forward);
+            let (result, (saw_error, sub_tokens)) = tokio::join!(run, forward);
             let ok = !saw_error && !result.trim_start().starts_with("error:");
+            let mut summary = first_line(&result, 80);
+            if sub_tokens > 0 {
+                // The " · N tok" suffix is what the TUI tray and the eval harness read per subagent.
+                summary = format!("{summary} · {sub_tokens} tok");
+            }
             let _ = parent.send(AgentEvent::SubagentEnd {
                 id: i,
                 ok,
-                summary: first_line(&result, 80),
+                summary,
                 elapsed_ms: started.elapsed().as_millis() as u64,
             });
             SubResult {
@@ -190,15 +221,12 @@ async fn run_delegate(sess: &Session, args: &Value, tx: &UnboundedSender<AgentEv
     let joined = results
         .into_iter()
         .map(|s| {
-            format!(
-                "[subagent {}] {}",
-                s.index,
-                if s.result.trim().is_empty() {
-                    "(no result)".to_string()
-                } else {
-                    s.result
-                }
-            )
+            let body = if s.result.trim().is_empty() {
+                "(no result)".to_string()
+            } else {
+                cap_result(&s.result, SUBAGENT_RESULT_CAP)
+            };
+            format!("[subagent {}] {}", s.index, body)
         })
         .collect::<Vec<_>>()
         .join("\n---\n");
@@ -224,11 +252,18 @@ fn is_check_command(cmd: &str, configured: Option<&str>) -> bool {
 /// Once the context is past the compaction threshold, elide the BODIES of older tool results —
 /// the last `keep_recent` stay intact, and the messages themselves remain (the OpenAI wire format
 /// requires a tool reply per tool_call id). Returns how many results were elided.
-fn compact_history(messages: &mut [ChatMessage], keep_recent: usize) -> usize {
+/// Elide the BODIES of older tool results to reclaim context. Two protections keep it safe:
+///  - `seen_before`: only messages at an index below this are touched — a tool result produced
+///    since the last model call (index >= seen_before) has never been shown to the model, so
+///    eliding it would make the model reason over an "[elided]" placeholder for output it never saw.
+///  - `keep_recent`: the most recent tool results stay verbatim regardless, so recent context stays
+///    rich. Messages themselves are never removed — the OpenAI wire format requires a tool reply per
+///    tool_call id. Returns how many bodies were elided.
+fn compact_history(messages: &mut [ChatMessage], keep_recent: usize, seen_before: usize) -> usize {
     let tool_idxs: Vec<usize> = messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| m.role == "tool")
+        .filter(|(i, m)| m.role == "tool" && *i < seen_before)
         .map(|(i, _)| i)
         .collect();
     if tool_idxs.len() <= keep_recent {
@@ -247,6 +282,23 @@ fn compact_history(messages: &mut [ChatMessage], keep_recent: usize) -> usize {
         }
     }
     elided
+}
+
+/// Cheap upper-bound estimate of the prompt's token count (~4 chars/token over message content and
+/// tool-call arguments), used to trigger compaction BEFORE the first model call of a turn — where
+/// the accurate post-response `prompt_tokens` isn't available yet but the history may already be huge.
+fn estimate_prompt_tokens(messages: &[ChatMessage]) -> u64 {
+    let chars: usize = messages
+        .iter()
+        .map(|m| {
+            m.content.as_ref().map_or(0, |c| c.len())
+                + m.tool_calls
+                    .iter()
+                    .map(|tc| tc.function.arguments.len() + tc.function.name.len())
+                    .sum::<usize>()
+        })
+        .sum();
+    (chars / 4) as u64
 }
 
 /// Tool results older than this many stay verbatim during compaction.
@@ -282,6 +334,9 @@ pub async fn run_turn(
     let mut committed_this_turn = false;
     let mut commit_nudged = false;
     let mut last_prompt_tokens: u64 = 0;
+    // Everything present when the turn begins was already shown to the model in prior turns; only
+    // messages appended past this point are "unseen" and must not be compacted until sent.
+    let mut seen_before = messages.len();
 
     for _ in 0..sess.cfg.max_steps {
         // Background jobs are the primary loop's concern only (subagents don't consume nudges).
@@ -294,11 +349,14 @@ pub async fn run_turn(
             }
         }
 
-        // Context compaction: past ~70% of the window, elide older tool-result bodies so long tasks
-        // don't hit the wall. The durable (TUI) history keeps full text; this trims the working copy.
+        // Context compaction: past ~70% of the window, elide older (already-seen) tool-result bodies
+        // so long tasks don't hit the wall. Triggered by the accurate prior `prompt_tokens` OR a
+        // cheap size estimate (so the FIRST call of a turn with huge prior history compacts too). The
+        // durable (TUI) history keeps full text; this trims only the working copy.
         if let Some(window) = sess.cfg.context_window {
-            if last_prompt_tokens > window * 7 / 10 {
-                let n = compact_history(messages, COMPACT_KEEP_RECENT);
+            let size = last_prompt_tokens.max(estimate_prompt_tokens(messages));
+            if size > window * 7 / 10 {
+                let n = compact_history(messages, COMPACT_KEEP_RECENT, seen_before);
                 if n > 0 {
                     let _ = tx.send(AgentEvent::Note(format!(
                         "context compacted — elided {n} older tool results"
@@ -312,10 +370,11 @@ pub async fn run_turn(
         if allow_delegate && !spear_nudged && !used_delegate && direct_calls >= SPEAR_NUDGE_AFTER {
             spear_nudged = true;
             let msg = format!(
-                "[supervisor: SPEAR check — {direct_calls} direct tool calls this turn and no delegation yet. \
-                 If the remaining work is an investigation or splits into independent sub-tasks, hand it to \
-                 `delegate` now to keep your context focused; if direct execution is genuinely right for \
-                 what's left, continue.]"
+                "[supervisor: SPEAR checkpoint — {direct_calls} tool calls into this turn. If you're \
+                 making steady progress on a well-scoped change, keep going — no need to change course. \
+                 Only if you've been exploring without converging, or the work has fanned out into \
+                 several INDEPENDENT threads, consider handing the rest to `delegate` to keep your \
+                 context focused.]"
             );
             let _ = tx.send(AgentEvent::Note(first_line(&msg, 120)));
             let m = ChatMessage::user(msg);
@@ -323,6 +382,8 @@ pub async fn run_turn(
             messages.push(m);
         }
 
+        // About to send the whole history — after this call, everything in it counts as seen.
+        seen_before = messages.len();
         let turn = match sess.llm.chat(messages, &specs).await {
             Ok(t) => t,
             Err(e) => {
@@ -650,6 +711,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subagent_token_spend_rides_the_end_summary() {
+        // Subagent's model call reports usage → SubagentEnd summary carries "· N tok" (what the tray
+        // and the eval budget grader read), and NO top-level Usage event leaks from the subagent.
+        let mut sub_turn = turn_text("mapped it");
+        sub_turn.usage = Some(TokenUsage {
+            prompt_tokens: 1234,
+            completion_tokens: 50,
+            total_tokens: 1284,
+            cached_tokens: None,
+        });
+        let sess = session(vec![
+            ScriptStep::Turn(turn_delegate(&["map the crate"])),
+            ScriptStep::Turn(sub_turn),
+            ScriptStep::Turn(turn_text("done")),
+        ]);
+        let events = run_and_collect(&sess).await;
+        assert!(events.iter().any(
+            |e| matches!(e, AgentEvent::SubagentEnd { summary, .. } if summary.contains("1234 tok"))
+        ));
+    }
+
+    #[tokio::test]
     async fn panicked_subagent_surfaces_as_failed_end() {
         let sess = session(vec![
             ScriptStep::Turn(turn_delegate(&["trigger a crash"])),
@@ -861,24 +944,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir2);
     }
 
+    fn tool_msg(body: &str, id: usize) -> ChatMessage {
+        ChatMessage {
+            role: "tool".into(),
+            content: Some(body.to_string()),
+            tool_calls: vec![],
+            tool_call_id: Some(format!("c{id}")),
+        }
+    }
+
     #[test]
     fn compaction_elides_old_tool_bodies_and_is_idempotent() {
         let big = "x".repeat(300);
         let mut msgs = vec![ChatMessage::system("sys"), ChatMessage::user("go")];
         for i in 0..12 {
-            msgs.push(ChatMessage {
-                role: "tool".into(),
-                content: Some(big.clone()),
-                tool_calls: vec![],
-                tool_call_id: Some(format!("c{i}")),
-            });
+            msgs.push(tool_msg(&big, i));
         }
-        assert_eq!(compact_history(&mut msgs, 8), 4);
+        let n = msgs.len();
+        assert_eq!(compact_history(&mut msgs, 8, n), 4);
         assert!(msgs[2].content.as_deref().unwrap().starts_with("[elided"));
         assert!(!msgs[6].content.as_deref().unwrap().starts_with("[elided"), "recent kept");
-        assert_eq!(compact_history(&mut msgs, 8), 0, "idempotent");
+        assert_eq!(compact_history(&mut msgs, 8, n), 0, "idempotent");
         // small results and non-tool roles are untouched
         assert_eq!(msgs[0].content.as_deref(), Some("sys"));
+    }
+
+    #[test]
+    fn compaction_never_elides_a_result_the_model_has_not_seen() {
+        // 10 tool results the model has seen (seen_before covers them) + 2 produced since. With
+        // keep_recent=0 every SEEN result is eligible, but the 2 unseen ones must be untouched.
+        let big = "y".repeat(300);
+        let mut msgs = vec![ChatMessage::system("sys")];
+        for i in 0..10 {
+            msgs.push(tool_msg(&big, i));
+        }
+        let seen_before = msgs.len(); // the model was last sent everything up to here
+        msgs.push(tool_msg(&big, 100));
+        msgs.push(tool_msg(&big, 101));
+        let elided = compact_history(&mut msgs, 0, seen_before);
+        assert_eq!(elided, 10, "all seen results elide");
+        assert!(msgs[11].content.as_deref().unwrap().starts_with('y'), "unseen result 1 intact");
+        assert!(msgs[12].content.as_deref().unwrap().starts_with('y'), "unseen result 2 intact");
+    }
+
+    #[test]
+    fn estimate_prompt_tokens_scales_with_content() {
+        let small = vec![ChatMessage::user("hi")];
+        let big = vec![ChatMessage::user("x".repeat(4000))];
+        assert!(estimate_prompt_tokens(&small) < 10);
+        assert!(estimate_prompt_tokens(&big) >= 900); // ~4000/4
+    }
+
+    #[test]
+    fn cap_result_keeps_head_and_tail_under_the_cap() {
+        assert_eq!(cap_result("short", 100), "short");
+        let long = "A".to_string() + &"m".repeat(10_000) + "Z";
+        let capped = cap_result(&long, 6000);
+        assert!(capped.chars().count() < long.chars().count());
+        assert!(capped.starts_with('A'), "head kept");
+        assert!(capped.ends_with('Z'), "tail kept");
+        assert!(capped.contains("truncated"));
     }
 
     #[test]
@@ -893,15 +1018,15 @@ mod tests {
     fn spear_notes(events: &[AgentEvent]) -> usize {
         events
             .iter()
-            .filter(|e| matches!(e, AgentEvent::Note(t) if t.contains("SPEAR check")))
+            .filter(|e| matches!(e, AgentEvent::Note(t) if t.contains("SPEAR checkpoint")))
             .count()
     }
 
     #[tokio::test]
     async fn spear_nudge_fires_once_after_sustained_direct_execution() {
-        // 10 direct tool calls, no delegation → exactly one advisory nudge (at the threshold), and
-        // the nudge enters committed history so the model sees it.
-        let mut steps: Vec<ScriptStep> = (0..10)
+        // 14 direct tool calls (past SPEAR_NUDGE_AFTER=12), no delegation → exactly one advisory
+        // nudge, entering committed history so the model sees it.
+        let mut steps: Vec<ScriptStep> = (0..14)
             .map(|_| ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" }))))
             .collect();
         steps.push(ScriptStep::Turn(turn_text("done")));
@@ -910,7 +1035,7 @@ mod tests {
 
         assert_eq!(spear_notes(&events), 1, "one nudge, not repeated: {events:?}");
         assert!(deltas.iter().flatten().any(|m| m.role == "user"
-            && m.content.as_deref().is_some_and(|c| c.contains("SPEAR check"))));
+            && m.content.as_deref().is_some_and(|c| c.contains("SPEAR checkpoint"))));
     }
 
     #[tokio::test]

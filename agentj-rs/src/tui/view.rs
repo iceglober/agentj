@@ -194,6 +194,7 @@ fn wrapped_rows_for_line(line: &Line<'_>, width: u16) -> usize {
     line_width(line).max(1).div_ceil(content_width)
 }
 
+#[cfg(test)]
 fn transcript_rows(lines: &[Line<'_>], width: u16) -> usize {
     lines
         .iter()
@@ -201,46 +202,73 @@ fn transcript_rows(lines: &[Line<'_>], width: u16) -> usize {
         .sum()
 }
 
-/// The scrollback buffer: pre-rendered lines plus a cached wrapped-row count so appending and
-/// scrolling don't re-measure the whole transcript each frame.
+/// The scrollback buffer: pre-rendered lines plus cumulative wrapped-row counts, so a dirty frame
+/// clones only the visible window instead of the whole (unbounded) transcript.
 pub struct TranscriptView {
     lines: Vec<Line<'static>>,
-    text: Text<'static>,
-    total_rows: usize,
+    /// `row_prefix[i]` = total wrapped rows of `lines[0..i]`; line `i` begins at wrapped row
+    /// `row_prefix[i]`, and the whole transcript is `*row_prefix.last()`. Kept in sync incrementally.
+    row_prefix: Vec<usize>,
     cached_width: u16,
 }
 
 impl TranscriptView {
     pub fn new(lines: Vec<Line<'static>>) -> Self {
-        let text = Text::from(lines.clone());
         Self {
             lines,
-            text,
-            total_rows: 0,
+            row_prefix: vec![0],
             cached_width: 0,
         }
     }
 
-    pub fn text(&self) -> Text<'static> {
-        self.text.clone()
+    fn total_rows(&self) -> usize {
+        *self.row_prefix.last().unwrap_or(&0)
     }
 
     pub fn ensure_width(&mut self, width: u16) {
-        if self.cached_width != width {
+        // Rebuild the prefix sums on a width change, or if pushes happened before a width was known.
+        if self.cached_width != width || self.row_prefix.len() != self.lines.len() + 1 {
             self.cached_width = width;
-            self.total_rows = transcript_rows(&self.lines, width);
+            self.row_prefix.clear();
+            self.row_prefix.push(0);
+            let mut acc = 0;
+            for line in &self.lines {
+                acc += wrapped_rows_for_line(line, width);
+                self.row_prefix.push(acc);
+            }
         }
     }
 
     pub fn max_scroll(&self, viewport: u16) -> u16 {
-        self.total_rows.saturating_sub(viewport as usize) as u16
+        self.total_rows().saturating_sub(viewport as usize) as u16
+    }
+
+    /// The lines needed to fill `viewport` rows starting at wrapped-row `scroll`, plus the intra-line
+    /// wrapped-row offset to hand ratatui's `Paragraph::scroll`. O(log n + viewport), not O(n).
+    pub fn visible(&self, scroll: u16, viewport: u16) -> (Text<'static>, u16) {
+        let scroll = scroll as usize;
+        // The line the top of the viewport sits inside: last line whose start row is <= scroll.
+        let first = self
+            .row_prefix
+            .partition_point(|&r| r <= scroll)
+            .saturating_sub(1)
+            .min(self.lines.len().saturating_sub(1));
+        let intra = (scroll.saturating_sub(self.row_prefix[first])) as u16;
+        let need = intra as usize + viewport as usize;
+        let mut taken = 0;
+        let mut end = first;
+        while end < self.lines.len() && taken < need {
+            taken += wrapped_rows_for_line(&self.lines[end], self.cached_width.max(1));
+            end += 1;
+        }
+        (Text::from(self.lines[first..end].to_vec()), intra)
     }
 
     pub fn push(&mut self, line: Line<'static>) {
-        if self.cached_width != 0 {
-            self.total_rows += wrapped_rows_for_line(&line, self.cached_width);
+        if self.cached_width != 0 && self.row_prefix.len() == self.lines.len() + 1 {
+            let rows = wrapped_rows_for_line(&line, self.cached_width);
+            self.row_prefix.push(self.total_rows() + rows);
         }
-        self.text.lines.push(line.clone());
         self.lines.push(line);
     }
 
@@ -251,6 +279,16 @@ impl TranscriptView {
         for line in iter {
             self.push(line);
         }
+    }
+
+    /// All transcript text joined with newlines (for assertions).
+    #[cfg(test)]
+    pub fn plain(&self) -> String {
+        self.lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -652,8 +690,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.scroll = max;
     }
     app.scroll = app.scroll.min(max);
+    // Clone + wrap only the on-screen window, not the whole transcript, each dirty frame.
+    let (visible, intra) = app.transcript.visible(app.scroll, viewport);
     f.render_widget(
-        Paragraph::new(app.transcript.text())
+        Paragraph::new(visible)
             .block(
                 Block::default()
                     .borders(Borders::BOTTOM)
@@ -661,7 +701,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     .padding(Padding::new(PAD_X, PAD_X, 0, PAD_BOTTOM)),
             )
             .wrap(Wrap { trim: false })
-            .scroll((app.scroll, 0)),
+            .scroll((intra, 0)),
         rows[0],
     );
 
@@ -1081,6 +1121,26 @@ mod tests {
         view.ensure_width(5);
         assert_eq!(view.max_scroll(3), 7);
     }
+
+    #[test]
+    fn visible_windows_the_transcript_without_cloning_all_of_it() {
+        // 20 lines, each wraps to 2 rows at width 5 (content width 3, "123456" → 2 rows) → 40 rows.
+        let lines: Vec<Line> = (0..20).map(|_| Line::from("123456")).collect();
+        let mut view = TranscriptView::new(lines);
+        view.ensure_width(5);
+        assert_eq!(view.max_scroll(6), 34); // 40 - 6
+
+        // Scrolled to row 10 (start of line 5) with a 6-row viewport → returns a small window.
+        let (text, intra) = view.visible(10, 6);
+        assert_eq!(intra, 0);
+        assert!(text.lines.len() <= 5, "clones only the window, not all 20: {}", text.lines.len());
+
+        // Mid-line scroll (row 11 = second wrapped row of line 5) → first line included, intra=1.
+        let (text2, intra2) = view.visible(11, 6);
+        assert_eq!(intra2, 1);
+        assert!(!text2.lines.is_empty());
+    }
 }
+
 
 
