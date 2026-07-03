@@ -150,15 +150,12 @@ pub struct Config {
     pub max_parallel_subagents: usize,
     /// Model context window for the context meter: `AGENTJ_CONTEXT_WINDOW` > model table > `None`.
     pub context_window: Option<u64>,
-    /// Compact older tool-result bodies once a model call's prompt exceeds this many tokens. ABSOLUTE
-    /// (not a fraction of the window): a 400k-window model whose task context peaks at 40k would never
-    /// trip a window-relative threshold, so compaction was dead weight exactly where it was needed.
-    /// `AGENTJ_COMPACT_THRESHOLD` > default 12000, clamped to ≤ 70% of the window when known. This is a
-    /// context-management safety valve, NOT a token-tail fix: a live A/B on the runaway fixture showed
-    /// it only reclaims tokens when the OLD tool results are large (>200 chars) — measured cutting a
-    /// 14.4k-token call to 8.5k when big file reads had aged out. Runs whose bloat is accumulation of
-    /// many SMALL messages (edits, brief test output, tool-call args) get no benefit; that tail needs a
-    /// different lever (fewer round-trips / summarize-restart), not tool-body elision.
+    /// Compact older tool-result bodies once a model call's prompt exceeds this many tokens. This is a
+    /// window-safety valve, NOT a token-tail fix (a live A/B showed body-elision doesn't dent the
+    /// many-round-trip tail): `AGENTJ_COMPACT_THRESHOLD` > 70% of the model window > 96000 when the
+    /// window is unknown. Keyed to the window on purpose — a low absolute default (an earlier 12000)
+    /// fired on every call of a genuinely large task and shredded the exploration context the model
+    /// still needed (e.g. reading a whole monorepo, then writing per-package docs FROM those reads).
     pub compact_threshold: u64,
     /// The project's check command (`AGENTJ_CHECK` > aj.json `check` > None → heuristics).
     pub check: Option<String>,
@@ -202,8 +199,8 @@ impl Config {
             // window when one is known so a small-window model never compacts too late.
             compact_threshold: env_num("AGENTJ_COMPACT_THRESHOLD")
                 .filter(|n| *n >= 1000)
-                .unwrap_or(12_000)
-                .min(context_window.map_or(u64::MAX, |w| w * 7 / 10)),
+                .or_else(|| context_window.map(|w| w * 7 / 10))
+                .unwrap_or(96_000),
             check: get("AGENTJ_CHECK").filter(|s| !s.is_empty()).or(file.check),
         }
     }
@@ -367,17 +364,15 @@ mod tests {
     }
 
     #[test]
-    fn compact_threshold_is_absolute_and_window_clamped() {
-        // Unknown window → the plain absolute default (compaction still works, unlike the old
-        // window-relative rule that never fired without a known window).
-        assert_eq!(from(&[]).compact_threshold, 12_000);
-        // Env override, clamped to a floor of 1000.
+    fn compact_threshold_tracks_the_window_with_an_absolute_fallback() {
+        // Unknown window → a high absolute fallback (compaction is a rare safety valve, not per-call).
+        assert_eq!(from(&[]).compact_threshold, 96_000);
+        // Env override wins (floor of 1000; below it, fall back to the window/default).
         assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "40000")]).compact_threshold, 40_000);
-        assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "500")]).compact_threshold, 12_000);
-        // A big window leaves the absolute default untouched (the whole point: a 400k-window model
-        // compacts at 12k, not 280k).
-        assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "400000")]).compact_threshold, 12_000);
-        // A tiny window clamps the threshold below the default so it stays ≤ 70% of the window.
+        assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "500")]).compact_threshold, 96_000);
+        // A known window sets the threshold to 70% of it — so a 400k model compacts near 280k, not on
+        // every call of a large task.
+        assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "400000")]).compact_threshold, 280_000);
         assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "8000")]).compact_threshold, 5_600);
     }
 
