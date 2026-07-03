@@ -42,6 +42,33 @@ AZURE_BASE_URL=https://<resource>.openai.azure.com/openai/v1 AZURE_API_KEY=… \
 bin/agentj --provider custom --base-url http://localhost:8080/v1 --model <id>   # + optional AGENTJ_API_KEY
 ```
 
+Or put non-secret provider defaults in `~/.config/aj/aj.json` once and reuse them:
+
+```json
+{
+  "provider": "azure",
+  "providers": {
+    "azure": {
+      "base_url": "https://<resource>.openai.azure.com/openai/v1",
+      "model": "my-deployment",
+      "api_version": "2025-05-01-preview"
+    },
+    "custom": {
+      "base_url": "http://localhost:8080/v1",
+      "model": "gpt-4.1"
+    }
+  }
+}
+```
+
+Keep secrets out of config files. Set provider keys per developer via environment / secure local setup:
+
+```sh
+export AZURE_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export AGENTJ_API_KEY=...
+```
+
 | Flag | Values | Env |
 |---|---|---|
 | `--provider` | `azure` `custom` (wired) · `vertex` `anthropic` (staged) | `AGENTJ_PROVIDER` |

@@ -42,9 +42,12 @@ Options:
   -v, --version       show version
 
 Notes: app config is loaded from ~/.config/aj/aj.json, ./.aj/aj.json, and ./.aj/aj.local.json
-(project-local wins; env overrides files; CLI overrides env). Azure/custom (OpenAI-compatible)
-providers are wired; vertex/anthropic are staged. MCP works for stdio + no-auth streamable-http
-servers (from .mcp.json); static-header/OAuth servers are staged.";
+(project-local wins; env overrides files; CLI overrides env). Provider-specific config can live under
+`providers.<name>` in aj.json, e.g. `providers.azure.model` / `providers.custom.base_url`, so you can
+set non-secret provider defaults once and reuse them. API keys remain environment-only and per-developer.
+Azure/custom (OpenAI-compatible) providers are wired;
+vertex/anthropic are staged. MCP works for stdio + no-auth streamable-http servers (from .mcp.json);
+static-header/OAuth servers are staged.";
 
 struct Args {
     provider: Option<Provider>,

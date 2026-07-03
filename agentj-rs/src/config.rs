@@ -7,6 +7,71 @@ use std::time::Duration;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ProviderConfig {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default, rename = "base_url")]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub api_version: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
+impl ProviderConfig {
+    fn merge(&mut self, other: Self) {
+        self.model = other.model.or(self.model.take());
+        self.base_url = other.base_url.or(self.base_url.take());
+        self.api_version = other.api_version.or(self.api_version.take());
+        self.project = other.project.or(self.project.take());
+    }
+
+    fn value(field: &Option<String>) -> Option<String> {
+        field.as_deref().filter(|s| !s.is_empty()).map(|s| s.to_string())
+    }
+
+    pub fn model(&self) -> Option<String> {
+        Self::value(&self.model)
+    }
+
+    pub fn base_url(&self) -> Option<String> {
+        Self::value(&self.base_url)
+    }
+
+
+    pub fn api_version(&self) -> Option<String> {
+        Self::value(&self.api_version)
+    }
+
+    pub fn project(&self) -> Option<String> {
+        Self::value(&self.project)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProvidersConfig {
+    #[serde(default)]
+    pub vertex: ProviderConfig,
+    #[serde(default)]
+    pub anthropic: ProviderConfig,
+    #[serde(default)]
+    pub azure: ProviderConfig,
+    #[serde(default)]
+    pub custom: ProviderConfig,
+}
+
+impl ProvidersConfig {
+    fn merge(&mut self, other: Self) {
+        self.vertex.merge(other.vertex);
+        self.anthropic.merge(other.anthropic);
+        self.azure.merge(other.azure);
+        self.custom.merge(other.custom);
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     #[serde(default)]
     pub provider: Option<String>,
@@ -14,6 +79,8 @@ pub struct AppConfig {
     pub model: Option<String>,
     #[serde(default, rename = "base_url")]
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub providers: ProvidersConfig,
     #[serde(default)]
     pub company: Option<String>,
     #[serde(default)]
@@ -33,6 +100,7 @@ impl AppConfig {
         self.provider = other.provider.or(self.provider.take());
         self.model = other.model.or(self.model.take());
         self.base_url = other.base_url.or(self.base_url.take());
+        self.providers.merge(other.providers);
         self.company = other.company.or(self.company.take());
         self.max_steps = other.max_steps.or(self.max_steps.take());
         self.max_idle_nudges = other.max_idle_nudges.or(self.max_idle_nudges.take());
@@ -295,16 +363,32 @@ mod tests {
         cfg.merge(AppConfig {
             model: Some("two".into()),
             base_url: Some("http://x".into()),
+            providers: ProvidersConfig {
+                azure: ProviderConfig {
+                    model: Some("deployment-a".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             ..Default::default()
         });
         cfg.merge(AppConfig {
             company: Some("iceglober".into()),
+            providers: ProvidersConfig {
+                azure: ProviderConfig {
+                    api_version: Some("2025-01-01".into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             ..Default::default()
         });
         assert_eq!(cfg.provider.as_deref(), Some("vertex"));
         assert_eq!(cfg.model.as_deref(), Some("two"));
         assert_eq!(cfg.base_url.as_deref(), Some("http://x"));
         assert_eq!(cfg.company.as_deref(), Some("iceglober"));
+        assert_eq!(cfg.providers.azure.model(), Some("deployment-a".into()));
+        assert_eq!(cfg.providers.azure.api_version(), Some("2025-01-01".into()));
     }
 
     #[test]
@@ -319,7 +403,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("aj.json");
-        std::fs::write(&path, r#"{"provider":"custom","context_window":1}"#).unwrap();
+        std::fs::write(&path, r#"{"provider":"custom","providers":{"custom":{"api_key":"x"}}}"#).unwrap();
         assert_eq!(read_config(&path), AppConfig::default());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
