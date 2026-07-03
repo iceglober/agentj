@@ -84,6 +84,7 @@ async fn knowledge_changes(root: &str) -> Result<(knowledge::Changes, usize), St
     Ok((changes, unchanged))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     provider: String,
     model_id: String,
@@ -92,6 +93,7 @@ pub async fn run(
     app_cfg: AppConfig,
     sess: Session,
     notices: Vec<String>,
+    needs_setup: bool,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -110,8 +112,17 @@ pub async fn run(
     let _ = execute!(stdout, PushKeyboardEnhancementFlags(KEYBOARD_FLAGS));
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
-    let mut app = App::new(&provider, &model_id, root, system, sess.cfg.context_window, &notices);
+    let mut app = App::new(
+        &provider,
+        &model_id,
+        root.clone(),
+        system,
+        sess.cfg.context_window,
+        &notices,
+        needs_setup,
+    );
     let mut sess = sess;
+    let mut app_cfg = app_cfg; // reloaded from disk after the setup wizard writes a provider block
 
     let (ui_tx, mut ui_rx) = unbounded_channel::<UiMsg>();
     let (in_tx, mut in_rx) = unbounded_channel::<Event>();
@@ -231,6 +242,56 @@ pub async fn run(
                         }
                         // on_input never yields Snapshot; it comes from TurnDone below.
                         AppEffect::Snapshot => {}
+                        AppEffect::ConfigureProvider(setup) => {
+                            // Persist to the global config, reload it, then reuse the normal
+                            // build-and-swap path so the new provider is live with no restart.
+                            match crate::config::write_provider_config(
+                                setup.provider.as_str(),
+                                &setup.model,
+                                &setup.base_url,
+                                &setup.api_key,
+                                None, // the Foundry /openai/v1 endpoint needs no api-version
+                            ) {
+                                Ok(path) => {
+                                    app_cfg = AppConfig::load(&root);
+                                    let sel = Selector {
+                                        provider: setup.provider,
+                                        model: Some(&setup.model),
+                                        base_url: None,
+                                    };
+                                    match preflight(&sel, &app_cfg)
+                                        .and_then(|_| resolve_model(&sel, &app_cfg))
+                                        .and_then(|cfg| {
+                                            let llm = Llm::from_config(&cfg)
+                                                .map_err(|e| e.to_string())?;
+                                            let run_cfg = crate::config::Config::from_sources(
+                                                &cfg.model_id,
+                                                &app_cfg,
+                                            );
+                                            Ok((cfg, llm, run_cfg))
+                                        }) {
+                                        Ok((cfg, llm, run_cfg)) => {
+                                            app.provider = setup.provider.as_str().to_string();
+                                            app.model_id = cfg.model_id.clone();
+                                            app.context_window = run_cfg.context_window;
+                                            app.finish_setup(format!(
+                                                "saved to {} — ready ({}/{})",
+                                                path.display(),
+                                                app.provider,
+                                                app.model_id
+                                            ));
+                                            sess = Session {
+                                                llm: std::sync::Arc::new(llm),
+                                                tools: sess.tools.clone(),
+                                                cfg: std::sync::Arc::new(run_cfg),
+                                            };
+                                        }
+                                        Err(e) => app.setup_failed(format!("that didn't work — {e}")),
+                                    }
+                                }
+                                Err(e) => app.setup_failed(format!("couldn't write config: {e}")),
+                            }
+                        }
                     }
                     if app.quit {
                         break;

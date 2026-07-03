@@ -167,19 +167,18 @@ async fn main() {
         model: args.model.as_deref(),
         base_url: args.base_url.as_deref(),
     };
-    if let Err(e) = preflight(&sel, &app_cfg) {
-        eprintln!("{e}");
-        std::process::exit(1);
-    }
-    let cfg = match resolve_model(&sel, &app_cfg) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
+    let interactive = std::io::stdin().is_terminal() && args.once.is_none();
+
+    // Build a working client. If it fails AND we're interactive, launch into the setup wizard instead
+    // of exiting — the user configures a provider in-app. Headless (`--once`) still hard-errors.
+    let (llm, provider_name, model_id, needs_setup) = match preflight(&sel, &app_cfg)
+        .and_then(|_| resolve_model(&sel, &app_cfg))
+        .and_then(|cfg| Llm::from_config(&cfg).map(|l| (cfg, l)).map_err(|e| e.to_string()))
+    {
+        Ok((cfg, llm)) => (llm, cfg.provider.as_str().to_string(), cfg.model_id, false),
+        Err(_) if interactive => {
+            (Llm::Unconfigured, provider.as_str().to_string(), "(none)".to_string(), true)
         }
-    };
-    let llm = match Llm::from_config(&cfg) {
-        Ok(l) => l,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
@@ -189,7 +188,7 @@ async fn main() {
     let company = config::AppConfig::env_or_file("AGENTJ_COMPANY", app_cfg.company.as_deref());
     // Resolve the runtime config once, before the prompt, so the check command shown to the model and
     // the one the ASSESS gate enforces come from the same source and can't diverge.
-    let run_cfg = config::Config::from_sources(&cfg.model_id, &app_cfg);
+    let run_cfg = config::Config::from_sources(&model_id, &app_cfg);
     let system = prompt::system_prompt(&root, company.as_deref(), run_cfg.check.as_deref());
 
     // Connect MCP servers once at startup; failures become one-line notices.
@@ -267,13 +266,14 @@ async fn main() {
     }
 
     let result = tui::run(
-        cfg.provider.as_str().to_string(),
-        cfg.model_id.clone(),
+        provider_name,
+        model_id,
         root,
         system,
         app_cfg,
         sess,
         mcp_notices,
+        needs_setup,
     )
     .await;
     jobs.kill_all().await;

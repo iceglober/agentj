@@ -16,6 +16,10 @@ pub struct ProviderConfig {
     pub api_version: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
+    /// API key stored in the config (the onboarding wizard writes this). Env still wins; keeping it
+    /// here is what lets agentj "just work" without exporting a key every session.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl ProviderConfig {
@@ -24,6 +28,7 @@ impl ProviderConfig {
         self.base_url = other.base_url.or(self.base_url.take());
         self.api_version = other.api_version.or(self.api_version.take());
         self.project = other.project.or(self.project.take());
+        self.api_key = other.api_key.or(self.api_key.take());
     }
 
     fn value(field: &Option<String>) -> Option<String> {
@@ -45,6 +50,10 @@ impl ProviderConfig {
 
     pub fn project(&self) -> Option<String> {
         Self::value(&self.project)
+    }
+
+    pub fn api_key(&self) -> Option<String> {
+        Self::value(&self.api_key)
     }
 }
 
@@ -206,6 +215,58 @@ struct RuntimeFileConfig {
     max_idle_nudges: Option<u64>,
     job_idle_wait_s: Option<u64>,
     check: Option<String>,
+}
+
+/// Persist a provider setup to the GLOBAL config (`~/.config/aj/aj.json`) so every repo picks it up.
+/// Merges into any existing file (keeping other settings and provider blocks), makes it the default
+/// provider+model, and tightens the file to 0600 since it now holds a key. Returns the written path.
+pub fn write_provider_config(
+    provider: &str,
+    model: &str,
+    base_url: &str,
+    api_key: &str,
+    api_version: Option<&str>,
+) -> std::io::Result<std::path::PathBuf> {
+    use serde_json::{json, Value};
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = Path::new(&home).join(".config").join("aj");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("aj.json");
+
+    let mut root: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+
+    root["provider"] = json!(provider);
+    root["model"] = json!(model);
+    if !root["providers"].is_object() {
+        root["providers"] = json!({});
+    }
+    let block = root["providers"]
+        .as_object_mut()
+        .expect("providers is an object")
+        .entry(provider.to_string())
+        .or_insert_with(|| json!({}));
+    if !block.is_object() {
+        *block = json!({});
+    }
+    let b = block.as_object_mut().expect("block is an object");
+    b.insert("base_url".into(), json!(base_url));
+    b.insert("model".into(), json!(model));
+    b.insert("api_key".into(), json!(api_key));
+    if let Some(v) = api_version {
+        b.insert("api_version".into(), json!(v));
+    }
+
+    std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".into()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(path)
 }
 
 fn read_config(path: &Path) -> AppConfig {
@@ -403,7 +464,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("aj.json");
-        std::fs::write(&path, r#"{"provider":"custom","providers":{"custom":{"api_key":"x"}}}"#).unwrap();
+        std::fs::write(&path, r#"{"provider":"custom","providers":{"custom":{"not_a_field":"x"}}}"#).unwrap();
         assert_eq!(read_config(&path), AppConfig::default());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);

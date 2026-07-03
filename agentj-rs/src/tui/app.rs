@@ -114,6 +114,33 @@ pub enum AppEffect {
     Knowledge,
     /// A snapshot-tracked turn finished cleanly — rebuild the knowledge index.
     Snapshot,
+    /// First-run setup: persist a provider to the global config and build a live client from it.
+    ConfigureProvider(ProviderSetup),
+}
+
+/// Values collected by the setup wizard, handed to the event loop to persist + build a client.
+#[derive(Clone, Debug)]
+pub struct ProviderSetup {
+    pub provider: Provider,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SetupStep {
+    Provider,
+    BaseUrl,
+    ApiKey,
+    Model,
+}
+
+/// The guided first-run provider setup. Collects one field per Enter; the ApiKey step masks input.
+pub struct SetupWizard {
+    pub step: SetupStep,
+    pub provider: Option<Provider>,
+    pub base_url: String,
+    pub api_key: String,
 }
 
 pub struct App {
@@ -168,9 +195,12 @@ pub struct App {
     // loop control
     pub dirty: bool,
     pub quit: bool,
+    /// The first-run provider setup wizard, while it's active.
+    pub setup: Option<SetupWizard>,
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: &str,
         model_id: &str,
@@ -178,12 +208,13 @@ impl App {
         system: String,
         context_window: Option<u64>,
         notices: &[String],
+        needs_setup: bool,
     ) -> Self {
         let mut transcript = TranscriptView::new(vec![dim_line(CHEAT_SHEET)]);
         for n in notices {
             transcript.push(dim_line(format!("! {n}")));
         }
-        Self {
+        let mut app = Self {
             system: system.clone(),
             root,
             provider: provider.to_string(),
@@ -218,11 +249,113 @@ impl App {
             follow: true,
             dirty: true,
             quit: false,
+            setup: None,
+        };
+        if needs_setup {
+            app.start_setup();
         }
+        app
     }
 
     pub fn refresh_input(&mut self, width: u16) {
-        self.input_cache.refresh(&self.editor, width);
+        // Mask the key as it's typed during that step of the wizard.
+        if self.setup.as_ref().map(|w| w.step) == Some(SetupStep::ApiKey) {
+            self.input_cache.refresh_masked(&self.editor, width);
+        } else {
+            self.input_cache.refresh(&self.editor, width);
+        }
+    }
+
+    /// Open the guided provider-setup wizard: greet, then ask for the provider.
+    pub fn start_setup(&mut self) {
+        self.setup = Some(SetupWizard {
+            step: SetupStep::Provider,
+            provider: None,
+            base_url: String::new(),
+            api_key: String::new(),
+        });
+        self.transcript.push(Line::default());
+        self.transcript
+            .push(dim_line("Welcome to agentj — let's set up a provider."));
+        self.transcript.push(dim_line(
+            "● Which provider?   1) azure    2) custom (OpenAI-compatible)",
+        ));
+        self.dirty = true;
+    }
+
+    /// Feed one submitted line into the wizard, advancing a step or (on the last) emitting the effect
+    /// that persists the config and builds the client.
+    fn advance_setup(&mut self, line: &str) -> AppEffect {
+        let line = line.trim().to_string();
+        let Some(w) = self.setup.as_mut() else {
+            return AppEffect::None;
+        };
+        self.dirty = true;
+        match w.step {
+            SetupStep::Provider => {
+                let provider = match line.to_lowercase().as_str() {
+                    "1" | "azure" => Provider::Azure,
+                    "2" | "custom" => Provider::Custom,
+                    _ => {
+                        self.transcript
+                            .push(dim_line("» pick 1 (azure) or 2 (custom)"));
+                        return AppEffect::None;
+                    }
+                };
+                w.provider = Some(provider);
+                w.step = SetupStep::BaseUrl;
+                let hint = match provider {
+                    Provider::Azure => {
+                        "your Foundry endpoint, e.g. https://<resource>.openai.azure.com/openai/v1"
+                    }
+                    _ => "the OpenAI-compatible base URL, e.g. http://localhost:8080/v1",
+                };
+                self.transcript.push(dim_line(format!("● Base URL?   ({hint})")));
+            }
+            SetupStep::BaseUrl => {
+                if line.is_empty() {
+                    self.transcript.push(dim_line("» the base URL can't be empty"));
+                    return AppEffect::None;
+                }
+                w.base_url = line;
+                w.step = SetupStep::ApiKey;
+                self.transcript
+                    .push(dim_line("● API key?   (leave blank if your gateway needs none)"));
+            }
+            SetupStep::ApiKey => {
+                w.api_key = line;
+                w.step = SetupStep::Model;
+                self.transcript
+                    .push(dim_line("● Model / deployment name?   e.g. gpt-5.4"));
+            }
+            SetupStep::Model => {
+                if line.is_empty() {
+                    self.transcript.push(dim_line("» the model can't be empty"));
+                    return AppEffect::None;
+                }
+                let setup = ProviderSetup {
+                    provider: w.provider.unwrap_or(Provider::Custom),
+                    base_url: w.base_url.clone(),
+                    api_key: w.api_key.clone(),
+                    model: line,
+                };
+                self.transcript.push(dim_line("» configuring…"));
+                return AppEffect::ConfigureProvider(setup);
+            }
+        }
+        AppEffect::None
+    }
+
+    /// The wizard succeeded: drop it and confirm.
+    pub fn finish_setup(&mut self, msg: impl Into<String>) {
+        self.setup = None;
+        self.notice(msg.into());
+    }
+
+    /// The wizard's values didn't produce a working client: report and restart it.
+    pub fn setup_failed(&mut self, msg: impl Into<String>) {
+        self.transcript.push(dim_line(format!("» {}", msg.into())));
+        self.start_setup();
     }
 
     pub fn effect_active(&self) -> bool {
@@ -536,6 +669,11 @@ impl App {
         self.update_popover();
         self.follow = true;
         self.dirty = true;
+        if self.setup.is_some() {
+            // In the setup wizard every line is an answer (including a blank key), so route before the
+            // empty/command checks below.
+            return self.advance_setup(&text);
+        }
         if text.is_empty() {
             AppEffect::None
         } else if text == "/exit" || text == "/quit" {
@@ -787,7 +925,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent};
 
     fn app() -> App {
-        App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, &[])
+        App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, &[], false)
     }
 
     fn mouse(kind: MouseEventKind) -> Event {
@@ -816,6 +954,43 @@ mod tests {
         // a non-scroll mouse event is a no-op
         a.on_input(mouse(MouseEventKind::Down(MouseButton::Left)));
         assert_eq!(a.scroll, 5);
+    }
+
+    #[test]
+    fn setup_wizard_collects_details_then_emits_configure() {
+        let mut a = app();
+        a.start_setup();
+        assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::Provider);
+        // a bad provider choice stays put
+        assert!(matches!(a.advance_setup("nonsense"), AppEffect::None));
+        assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::Provider);
+        // walk the happy path
+        assert!(matches!(a.advance_setup("2"), AppEffect::None));
+        assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::BaseUrl);
+        assert!(matches!(a.advance_setup("http://localhost:8080/v1"), AppEffect::None));
+        assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::ApiKey);
+        assert!(matches!(a.advance_setup("sk-123"), AppEffect::None));
+        assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::Model);
+        match a.advance_setup("gpt-4.1") {
+            AppEffect::ConfigureProvider(s) => {
+                assert_eq!(s.provider, Provider::Custom);
+                assert_eq!(s.base_url, "http://localhost:8080/v1");
+                assert_eq!(s.api_key, "sk-123");
+                assert_eq!(s.model, "gpt-4.1");
+            }
+            _ => panic!("last step should emit ConfigureProvider"),
+        }
+    }
+
+    #[test]
+    fn wizard_submit_is_not_treated_as_a_turn_or_command() {
+        let mut a = app();
+        a.start_setup();
+        a.editor.insert_str("azure");
+        let effect = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(effect, AppEffect::None), "wizard input never spawns a turn");
+        assert!(!a.running);
+        assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::BaseUrl);
     }
 
     #[test]

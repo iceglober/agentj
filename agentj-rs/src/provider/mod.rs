@@ -97,6 +97,9 @@ pub enum ScriptStep {
 /// vertex/anthropic are wired.
 pub enum Llm {
     OpenAi(OpenAiProvider),
+    /// No provider configured yet — the app launched into the setup wizard. Any turn started before a
+    /// provider is chosen fails with a friendly nudge instead of a crash.
+    Unconfigured,
     /// A test seam: pops scripted steps so the agent loop is exercisable without a network.
     #[cfg(test)]
     Script(std::sync::Mutex<std::collections::VecDeque<ScriptStep>>),
@@ -120,6 +123,9 @@ impl Llm {
     ) -> anyhow::Result<AssistantTurn> {
         match self {
             Llm::OpenAi(p) => p.chat(messages, tools).await,
+            Llm::Unconfigured => {
+                anyhow::bail!("no provider configured yet — run /setup to add one")
+            }
             #[cfg(test)]
             Llm::Script(steps) => {
                 // Pop under the lock, then release it before acting — so a scripted panic doesn't

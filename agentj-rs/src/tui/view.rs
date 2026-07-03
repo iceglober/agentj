@@ -376,6 +376,18 @@ impl InputLayoutCache {
         self.refresh_with_metrics(editor, width, None);
     }
 
+    /// Render the input as bullets (the wizard's API-key step). Uncached and self-invalidating so the
+    /// real key never lands in the layout and the next normal refresh always rebuilds.
+    pub fn refresh_masked(&mut self, editor: &Editor, width: u16) {
+        let n = editor.text().chars().count();
+        self.revision = u64::MAX;
+        self.width = width;
+        self.rows = 1;
+        self.rendered = Text::from(Line::from("•".repeat(n)));
+        self.cursor = (0, n.min(u16::MAX as usize) as u16);
+        self.scroll = 0;
+    }
+
     pub fn refresh_with_metrics(
         &mut self,
         editor: &Editor,
@@ -1000,7 +1012,7 @@ mod tests {
     fn tray_app(rows: &[(&str, &str, Option<bool>)]) -> super::super::app::App {
         use super::super::app::{App, UiMsg};
         use crate::events::AgentEvent;
-        let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, &[]);
+        let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, &[], false);
         for (i, (desc, status, done)) in rows.iter().enumerate() {
             app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
                 id: i,
@@ -1108,7 +1120,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), &[]);
+        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), &[], false);
         app.running = true;
         app.on_ui(UiMsg::Agent(AgentEvent::Message(
             "**bold** and `code`".to_string(),
@@ -1161,7 +1173,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), None, &[]);
+        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), None, &[], false);
         for c in "/t".chars() {
             app.on_input(crossterm::event::Event::Key(KeyEvent::new(
                 KeyCode::Char(c),

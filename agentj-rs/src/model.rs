@@ -55,7 +55,7 @@ fn _env(k: &str) -> Option<String> {
     env::var(k).ok().filter(|s| !s.is_empty())
 }
 
-fn provider_config<'a>(provider: Provider, app: &'a AppConfig) -> &'a ProviderConfig {
+fn provider_config(provider: Provider, app: &AppConfig) -> &ProviderConfig {
     match provider {
         Provider::Vertex => &app.providers.vertex,
         Provider::Anthropic => &app.providers.anthropic,
@@ -113,20 +113,20 @@ fn azure_base_url(app: &AppConfig) -> String {
         .unwrap_or_default()
 }
 
-fn azure_api_key(_app: &AppConfig) -> Option<String> {
-    _env("AZURE_API_KEY")
+fn azure_api_key(app: &AppConfig) -> Option<String> {
+    _env("AZURE_API_KEY").or_else(|| provider_config(Provider::Azure, app).api_key())
 }
 
 fn azure_api_version(app: &AppConfig) -> Option<String> {
     _env("AZURE_API_VERSION").or_else(|| provider_config(Provider::Azure, app).api_version())
 }
 
-fn anthropic_api_key(_app: &AppConfig) -> Option<String> {
-    _env("ANTHROPIC_API_KEY")
+fn anthropic_api_key(app: &AppConfig) -> Option<String> {
+    _env("ANTHROPIC_API_KEY").or_else(|| provider_config(Provider::Anthropic, app).api_key())
 }
 
-fn custom_api_key(_app: &AppConfig) -> Option<String> {
-    _env("AGENTJ_API_KEY")
+fn custom_api_key(app: &AppConfig) -> Option<String> {
+    _env("AGENTJ_API_KEY").or_else(|| provider_config(Provider::Custom, app).api_key())
 }
 
 fn vertex_project(app: &AppConfig) -> Option<String> {
@@ -285,6 +285,7 @@ mod tests {
                     base_url: Some("https://azure.example/openai/v1".into()),
                     model: Some("deployment-a".into()),
                     api_version: Some("2025-05-01-preview".into()),
+                    api_key: Some("azure-key".into()),
                     ..Default::default()
                 },
                 custom: crate::config::ProviderConfig {
