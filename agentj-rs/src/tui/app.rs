@@ -9,6 +9,7 @@ use super::view::{assistant_block, dim_line, fmt_ms, tool_end_line, InputLayoutC
 use crate::commands::{fuzzy_commands, SlashCommand, SLASH_COMMANDS};
 use crate::events::AgentEvent;
 use crate::jobs::JobInfo;
+use crate::mcp::client::McpStatus;
 use crate::model::{Provider, SelectorOverride};
 use crate::provider::{ChatMessage, TokenUsage};
 use crate::rekey::{is_linked_worktree, RekeyResult};
@@ -257,6 +258,9 @@ pub struct App {
     pub quit: bool,
     /// The first-run provider setup wizard, while it's active.
     pub setup: Option<SetupWizard>,
+    /// Per-server MCP connect results, shown in a dismissible startup modal.
+    pub mcp_status: Vec<McpStatus>,
+    pub show_mcp_modal: bool,
 }
 
 impl App {
@@ -267,13 +271,12 @@ impl App {
         root: String,
         system: String,
         context_window: Option<u64>,
-        notices: &[String],
+        mcp_status: Vec<McpStatus>,
         needs_setup: bool,
     ) -> Self {
-        let mut transcript = TranscriptView::new(vec![dim_line(CHEAT_SHEET)]);
-        for n in notices {
-            transcript.push(dim_line(format!("! {n}")));
-        }
+        let transcript = TranscriptView::new(vec![dim_line(CHEAT_SHEET)]);
+        // Surface MCP failures as a dismissible modal (below), not as transcript noise.
+        let show_mcp_modal = mcp_status.iter().any(|s| s.outcome.is_err());
         let mut app = Self {
             system: system.clone(),
             root,
@@ -314,11 +317,18 @@ impl App {
             dirty: true,
             quit: false,
             setup: None,
+            mcp_status,
+            show_mcp_modal,
         };
         if needs_setup {
             app.start_setup();
         }
         app
+    }
+
+    /// True while the MCP status modal should be shown (and no setup wizard is in front of it).
+    pub fn mcp_modal_open(&self) -> bool {
+        self.show_mcp_modal && self.setup.is_none()
     }
 
     pub fn refresh_input(&mut self, width: u16) {
@@ -626,6 +636,12 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) -> AppEffect {
+        // The MCP status modal is informational — any key dismisses it and is consumed.
+        if self.mcp_modal_open() {
+            self.show_mcp_modal = false;
+            self.dirty = true;
+            return AppEffect::None;
+        }
         // While the setup modal is open, Esc cancels it (rather than interrupting a turn); typing and
         // Enter fall through to the editor/submit, which routes into the wizard.
         if self.setup.is_some()
@@ -1100,7 +1116,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent};
 
     fn app() -> App {
-        App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, &[], false)
+        App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, Vec::new(), false)
     }
 
     fn mouse(kind: MouseEventKind) -> Event {

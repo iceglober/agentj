@@ -127,10 +127,13 @@ async fn run_mcp(sub: &[String]) {
             for c in &configs {
                 println!("  {:20} {:?}", c.name, c.transport);
             }
-            let (clients, notices) = mcp::client::connect_all(&configs).await;
+            let (clients, statuses) = mcp::client::connect_all(&configs).await;
             println!("Connected: {} tool(s) available.", clients.tool_count());
-            for n in notices {
-                println!("  ! {n}");
+            for s in statuses {
+                match s.outcome {
+                    Ok(n) => println!("  ✓ {:20} {n} tool(s)", s.name),
+                    Err(e) => println!("  ✗ {:20} {e}", s.name),
+                }
             }
         }
         Some("login") | Some("logout") => {
@@ -191,9 +194,10 @@ async fn main() {
     let run_cfg = config::Config::from_sources(&model_id, &app_cfg);
     let system = prompt::system_prompt(&root, company.as_deref(), run_cfg.check.as_deref());
 
-    // Connect MCP servers once at startup; failures become one-line notices.
+    // Connect MCP servers once at startup; results are surfaced in the TUI (a modal on failure), not
+    // spewed to the terminal.
     let mcp_configs = mcp::config::load_mcp_servers(&root);
-    let (mcp_clients, mcp_notices) = if mcp_configs.is_empty() {
+    let (mcp_clients, mcp_status) = if mcp_configs.is_empty() {
         (None, Vec::new())
     } else {
         let (c, n) = mcp::client::connect_all(&mcp_configs).await;
@@ -215,8 +219,10 @@ async fn main() {
 
     if let Some(task) = args.once {
         // Headless one-shot: run a turn, print events to stdout, exit on the result.
-        for n in &mcp_notices {
-            eprintln!("! {n}");
+        for s in &mcp_status {
+            if let Err(e) = &s.outcome {
+                eprintln!("! MCP \"{}\": {e}", s.name);
+            }
         }
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
         let turn_sess = sess.clone();
@@ -272,7 +278,7 @@ async fn main() {
         system,
         app_cfg,
         sess,
-        mcp_notices,
+        mcp_status,
         needs_setup,
     )
     .await;

@@ -93,7 +93,7 @@ pub async fn run(
     system: String,
     app_cfg: AppConfig,
     sess: Session,
-    notices: Vec<String>,
+    mcp_status: Vec<crate::mcp::client::McpStatus>,
     needs_setup: bool,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
@@ -120,7 +120,7 @@ pub async fn run(
         root.clone(),
         system,
         sess.cfg.context_window,
-        &notices,
+        mcp_status,
         needs_setup,
     );
     let mut sess = sess;

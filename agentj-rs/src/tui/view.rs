@@ -944,6 +944,63 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // First-run provider setup, as a centered modal form over everything.
     if app.setup.is_some() {
         render_setup_modal(f, app, area);
+    } else if app.mcp_modal_open() {
+        render_mcp_modal(f, app, area);
+    }
+}
+
+/// A centered modal listing each MCP server's connect result (tools on success, the captured error on
+/// failure), so startup problems are surfaced cleanly instead of spewed to the terminal.
+fn render_mcp_modal(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use ratatui::layout::Rect;
+    let mw = 78.min(area.width.saturating_sub(4)).max(24);
+    let err_width = (mw as usize).saturating_sub(24); // box minus borders/padding/name column
+
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled("MCP servers", theme::accent_bold())),
+        Line::default(),
+    ];
+    for s in &app.mcp_status {
+        lines.push(match &s.outcome {
+            Ok(n) => Line::from(vec![
+                Span::styled("✓ ", theme::ok()),
+                Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
+                Span::styled(format!("{n} tool{}", if *n == 1 { "" } else { "s" }), theme::dim()),
+            ]),
+            Err(e) => Line::from(vec![
+                Span::styled("✗ ", theme::err()),
+                Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
+                Span::styled(trunc(e, err_width), theme::dim()),
+            ]),
+        });
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        "Any key: dismiss   ·   fix a failing server in your MCP config (.aj/aj.json)",
+        theme::dim(),
+    )));
+
+    let mh = (lines.len() as u16 + 3).min(area.height);
+    let rect = Rect {
+        x: area.x + area.width.saturating_sub(mw) / 2,
+        y: area.y + area.height.saturating_sub(mh) / 2,
+        width: mw,
+        height: mh,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::accent())
+        .padding(Padding::new(2, 2, 1, 0));
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// Truncate to `max` chars with an ellipsis when it doesn't fit.
+fn trunc(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
     }
 }
 
@@ -1204,7 +1261,7 @@ mod tests {
     fn tray_app(rows: &[(&str, &str, Option<bool>)]) -> super::super::app::App {
         use super::super::app::{App, UiMsg};
         use crate::events::AgentEvent;
-        let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, &[], false);
+        let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
         for (i, (desc, status, done)) in rows.iter().enumerate() {
             app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
                 id: i,
@@ -1312,7 +1369,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), &[], false);
+        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), Vec::new(), false);
         app.running = true;
         app.on_ui(UiMsg::Agent(AgentEvent::Message(
             "**bold** and `code`".to_string(),
@@ -1361,7 +1418,7 @@ mod tests {
     #[test]
     fn jobs_panel_lists_running_jobs_with_elapsed_and_timeout() {
         use crate::jobs::JobInfo;
-        let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, &[], false);
+        let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, Vec::new(), false);
         let start = Instant::now();
         app.jobs = vec![JobInfo {
             id: 2,
@@ -1381,12 +1438,35 @@ mod tests {
     }
 
     #[test]
+    fn mcp_modal_lists_server_statuses() {
+        use crate::mcp::client::McpStatus;
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mcp = vec![
+            McpStatus { name: "linear".into(), outcome: Ok(12) },
+            McpStatus { name: "atlassian".into(), outcome: Err("address already in use 127.0.0.1:3736".into()) },
+        ];
+        let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, mcp, false);
+        assert!(app.mcp_modal_open(), "a failure opens the modal");
+        let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        app.refresh_input(90);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let rendered: String = term.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+        assert!(rendered.contains("MCP servers"), "title: {rendered}");
+        assert!(rendered.contains("linear"));
+        assert!(rendered.contains("12 tools"));
+        assert!(rendered.contains("atlassian"));
+        assert!(rendered.contains("address already in use"), "error shown: {rendered}");
+    }
+
+    #[test]
     fn setup_modal_renders_the_form_over_the_transcript() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
         // needs_setup opens the wizard on launch.
-        let mut app = App::new("(none)", "(none)", ".".to_string(), "/repo".to_string(), None, &[], true);
+        let mut app = App::new("(none)", "(none)", ".".to_string(), "/repo".to_string(), None, Vec::new(), true);
         assert!(app.setup.is_some());
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
         app.refresh_input(80);
@@ -1411,7 +1491,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), None, &[], false);
+        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), None, Vec::new(), false);
         for c in "/t".chars() {
             app.on_input(crossterm::event::Event::Key(KeyEvent::new(
                 KeyCode::Char(c),
