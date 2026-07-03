@@ -8,6 +8,7 @@ use super::theme;
 use super::view::{assistant_block, dim_line, fmt_ms, tool_end_line, InputLayoutCache, TranscriptView};
 use crate::commands::{fuzzy_commands, SlashCommand, SLASH_COMMANDS};
 use crate::events::AgentEvent;
+use crate::jobs::JobInfo;
 use crate::model::{Provider, SelectorOverride};
 use crate::provider::{ChatMessage, TokenUsage};
 use crate::rekey::{is_linked_worktree, RekeyResult};
@@ -178,6 +179,8 @@ pub struct App {
     pending_interrupt_note: bool,
     // live subagents (delegate batch), keyed by index for stable ordering
     pub subagents: BTreeMap<usize, SubagentRow>,
+    /// Snapshot of running background jobs, refreshed each tick for the activity panel.
+    pub jobs: Vec<JobInfo>,
     /// A brief coalesce effect over the tray when a batch spins up (tachyonfx).
     pub tray_fx: Option<Effect>,
     /// Previous frame time, for effect delta timing (owned by `view::draw`).
@@ -238,6 +241,7 @@ impl App {
             turn_saw_error: false,
             pending_interrupt_note: false,
             subagents: BTreeMap::new(),
+            jobs: Vec::new(),
             tray_fx: None,
             last_draw: None,
             session_start: Instant::now(),

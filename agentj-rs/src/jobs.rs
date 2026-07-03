@@ -9,7 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
@@ -24,7 +24,18 @@ enum JobStatus {
 
 struct JobHandle {
     command: String,
+    started: Instant,
+    timeout: Option<Duration>,
     state: Mutex<JobState>,
+}
+
+/// A running job's live status, snapshotted for the UI's activity panel.
+#[derive(Clone)]
+pub struct JobInfo {
+    pub id: u64,
+    pub command: String,
+    pub started: Instant,
+    pub timeout: Option<Duration>,
 }
 
 struct JobState {
@@ -100,6 +111,8 @@ impl JobManager {
         let pid = child.id().map(|p| p as i32);
         let handle = Arc::new(JobHandle {
             command: command.to_string(),
+            started: Instant::now(),
+            timeout,
             state: Mutex::new(JobState {
                 status: JobStatus::Running,
                 output: String::new(),
@@ -191,6 +204,25 @@ impl JobManager {
     /// without draining (the turn drains them itself).
     pub fn has_nudges(&self) -> bool {
         !self.nudges.lock().unwrap().is_empty()
+    }
+
+    /// Snapshot of the still-running jobs (id, command, start, timeout), for the UI activity panel.
+    /// Sorted by id. Async because the job map is behind a tokio mutex.
+    pub async fn running_snapshot(&self) -> Vec<JobInfo> {
+        let jobs = self.jobs.lock().await;
+        let mut out = Vec::new();
+        for (&id, h) in jobs.iter() {
+            if matches!(h.state.lock().await.status, JobStatus::Running) {
+                out.push(JobInfo {
+                    id,
+                    command: h.command.clone(),
+                    started: h.started,
+                    timeout: h.timeout,
+                });
+            }
+        }
+        out.sort_by_key(|j| j.id);
+        out
     }
 
     /// Await the next nudge (used to idle-wait when the model has nothing else to do). The notified

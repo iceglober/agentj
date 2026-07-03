@@ -413,6 +413,43 @@ impl InputLayoutCache {
 
 /// Agents shown in the tray at once; more collapse into an "… and N more" line.
 const SUBAGENT_TRAY_MAX: usize = 6;
+/// Running background jobs shown in the activity panel at once.
+const JOBS_PANEL_MAX: usize = 4;
+
+/// Rows the running-jobs list occupies (one per job, capped, plus an overflow line).
+fn jobs_panel_rows(count: usize) -> u16 {
+    if count == 0 {
+        return 0;
+    }
+    (count.min(JOBS_PANEL_MAX) + usize::from(count > JOBS_PANEL_MAX)) as u16
+}
+
+/// Live rows for running background jobs: `⚙ [id] <command> · <elapsed> · ⏱<timeout>`.
+fn jobs_panel(app: &App, now: Instant) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let show = app.jobs.len().min(JOBS_PANEL_MAX);
+    for job in app.jobs.iter().take(show) {
+        let cmd: String = job.command.lines().next().unwrap_or_default().chars().take(44).collect();
+        let elapsed = fmt_mmss(now.saturating_duration_since(job.started).as_secs());
+        let mut spans = vec![
+            Span::styled(" ⚙ ", theme::accent()),
+            Span::styled(format!("[{}] ", job.id), theme::dim()),
+            Span::styled(cmd, theme::muted()),
+            Span::styled(format!(" · {elapsed}"), theme::dim()),
+        ];
+        if let Some(t) = job.timeout {
+            spans.push(Span::styled(format!(" · ⏱{}", fmt_mmss(t.as_secs())), theme::dim()));
+        }
+        lines.push(Line::from(spans));
+    }
+    if app.jobs.len() > JOBS_PANEL_MAX {
+        lines.push(Line::from(Span::styled(
+            format!("   … and {} more", app.jobs.len() - JOBS_PANEL_MAX),
+            theme::dim(),
+        )));
+    }
+    lines
+}
 /// How long a row's status stays "lit" after a progress event before fading to muted.
 const ACTIVITY_FLASH: Duration = Duration::from_millis(600);
 
@@ -723,7 +760,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let area = f.area();
     let in_h = app.input_cache.rows;
-    let panel_h = subagent_panel_rows(app.subagents.len());
+    let panel_h = subagent_panel_rows(app.subagents.len()) + jobs_panel_rows(app.jobs.len());
     let rows = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(panel_h),
@@ -770,10 +807,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // rect and the tray's height can change frame-to-frame; without an explicit clear, stale
         // cells can remain pinned to screen coordinates after the tray collapses or reflows.
         f.render_widget(Clear, rows[1]);
-        f.render_widget(
-            Paragraph::new(subagent_panel(app, Instant::now(), rows[1].width)),
-            rows[1],
-        );
+        let mut panel = subagent_panel(app, Instant::now(), rows[1].width);
+        panel.extend(jobs_panel(app, Instant::now()));
+        f.render_widget(Paragraph::new(panel), rows[1]);
         if let Some(fx_) = app.tray_fx.as_mut() {
             f.render_effect(fx_, rows[1], frame_dt.into());
             if fx_.done() {
@@ -1255,6 +1291,28 @@ mod tests {
             rendered.contains("port editor tests"),
             "subagent panel row missing"
         );
+    }
+
+    #[test]
+    fn jobs_panel_lists_running_jobs_with_elapsed_and_timeout() {
+        use crate::jobs::JobInfo;
+        let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, &[], false);
+        let start = Instant::now();
+        app.jobs = vec![JobInfo {
+            id: 2,
+            command: "gh pr checks 2805 --watch".to_string(),
+            started: start,
+            timeout: Some(Duration::from_secs(120)),
+        }];
+        let lines = jobs_panel(&app, start + Duration::from_secs(65));
+        let text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(text.contains("[2]"), "job id: {text}");
+        assert!(text.contains("gh pr checks 2805"), "command: {text}");
+        assert!(text.contains("1m05"), "elapsed: {text}");
+        assert!(text.contains('⏱'), "timeout: {text}");
     }
 
     #[test]

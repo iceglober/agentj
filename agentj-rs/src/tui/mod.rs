@@ -146,6 +146,12 @@ pub async fn run(
         tokio::select! {
             _ = ticker.tick() => {
                 app.on_tick(Instant::now());
+                // Refresh the running-jobs snapshot for the activity panel (and keep redrawing so the
+                // elapsed times tick even when no turn is running).
+                if sess.tools.jobs.has_running() || !app.jobs.is_empty() {
+                    app.jobs = sess.tools.jobs.running_snapshot().await;
+                    app.dirty = true;
+                }
                 // Autonomous continuation: when idle, a finished background job wakes a turn to act
                 // on its result (drained inside run_turn) instead of waiting for the next user prompt.
                 if !app.running && app.turn.is_none() && sess.tools.jobs.has_nudges() {
