@@ -21,6 +21,21 @@ impl Provider {
             Provider::Custom => "custom",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "vertex" => Some(Provider::Vertex),
+            "anthropic" => Some(Provider::Anthropic),
+            "azure" => Some(Provider::Azure),
+            "custom" => Some(Provider::Custom),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SelectorOverride {
+    pub model: Option<String>,
 }
 
 /// Resolve the active provider from a string (flag or `AGENTJ_PROVIDER`), then app config; default Vertex.

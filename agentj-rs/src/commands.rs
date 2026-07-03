@@ -28,6 +28,11 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         summary: "re-sync the docs with everything that changed since the last snapshot",
     },
     SlashCommand {
+        name: "/model",
+        takes_arg: true,
+        summary: "show or switch the active provider/model for future turns",
+    },
+    SlashCommand {
         name: "/exit",
         takes_arg: false,
         summary: "quit agentj",

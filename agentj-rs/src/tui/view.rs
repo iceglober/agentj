@@ -751,7 +751,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // Footer: identity line, tucked by the prompt.
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            format!("agentj · {} · {}", app.model_id, app.root),
+            format!("agentj · {}/{} · {}", app.provider, app.model_id, app.root),
             theme::dim(),
         ))),
         rows[4],
@@ -946,7 +946,7 @@ mod tests {
     fn tray_app(rows: &[(&str, &str, Option<bool>)]) -> super::super::app::App {
         use super::super::app::{App, UiMsg};
         use crate::events::AgentEvent;
-        let mut app = App::new("m", ".".to_string(), "sys".to_string(), None, &[]);
+        let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, &[]);
         for (i, (desc, status, done)) in rows.iter().enumerate() {
             app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
                 id: i,
@@ -1036,7 +1036,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut app = App::new("gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), &[]);
+        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), &[]);
         app.running = true;
         app.on_ui(UiMsg::Agent(AgentEvent::Message(
             "**bold** and `code`".to_string(),
@@ -1073,7 +1073,7 @@ mod tests {
         assert!(rendered.contains("● "), "assistant bullet missing");
         assert!(rendered.contains("ctx 34%"), "context meter missing: {rendered}");
         assert!(
-            rendered.contains("agentj · gpt-5 · ."),
+            rendered.contains("agentj · vertex/gpt-5 · ."),
             "footer identity line missing"
         );
         assert!(
@@ -1089,7 +1089,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
 
-        let mut app = App::new("gpt-5", ".".to_string(), "/repo".to_string(), None, &[]);
+        let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), None, &[]);
         for c in "/t".chars() {
             app.on_input(crossterm::event::Event::Key(KeyEvent::new(
                 KeyCode::Char(c),

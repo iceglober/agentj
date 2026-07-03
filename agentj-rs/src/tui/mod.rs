@@ -11,8 +11,10 @@ mod theme;
 mod view;
 
 use crate::agent::{run_turn, Session};
+use crate::config::AppConfig;
 use crate::events::AgentEvent;
-use crate::provider::ChatMessage;
+use crate::model::{preflight, resolve_model, Selector};
+use crate::provider::{ChatMessage, Llm};
 use crate::rekey::rekey;
 use app::{App, AppEffect, TurnHandle, UiMsg};
 use crossterm::event::{
@@ -83,9 +85,11 @@ async fn knowledge_changes(root: &str) -> Result<(knowledge::Changes, usize), St
 }
 
 pub async fn run(
+    provider: String,
     model_id: String,
     root: String,
     system: String,
+    app_cfg: AppConfig,
     sess: Session,
     notices: Vec<String>,
 ) -> anyhow::Result<()> {
@@ -106,7 +110,8 @@ pub async fn run(
     let _ = execute!(stdout, PushKeyboardEnhancementFlags(KEYBOARD_FLAGS));
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
 
-    let mut app = App::new(&model_id, root, system, sess.cfg.context_window, &notices);
+    let mut app = App::new(&provider, &model_id, root, system, sess.cfg.context_window, &notices);
+    let mut sess = sess;
 
     let (ui_tx, mut ui_rx) = unbounded_channel::<UiMsg>();
     let (in_tx, mut in_rx) = unbounded_channel::<Event>();
@@ -138,6 +143,38 @@ pub async fn run(
                     match app.on_input(ev) {
                         AppEffect::None => {}
                         AppEffect::Quit => app.quit = true,
+                        AppEffect::SwitchModel { provider, selector } => {
+                            let model_override = selector.model.as_deref();
+                            let sel = Selector {
+                                provider,
+                                model: model_override,
+                                base_url: None,
+                            };
+                            match preflight(&sel, &app_cfg)
+                                .and_then(|_| resolve_model(&sel, &app_cfg))
+                                .and_then(|cfg| {
+                                    let llm = Llm::from_config(&cfg).map_err(|e| e.to_string())?;
+                                    let run_cfg = crate::config::Config::from_sources(&cfg.model_id, &app_cfg);
+                                    Ok((cfg, llm, run_cfg))
+                                })
+                            {
+                                Ok((cfg, llm, run_cfg)) => {
+                                    app.provider = provider.as_str().to_string();
+                                    app.model_id = cfg.model_id.clone();
+                                    app.context_window = run_cfg.context_window;
+                                    app.notice(format!(
+                                        "switched to provider/model: {}/{}",
+                                        app.provider, app.model_id
+                                    ));
+                                    sess = Session {
+                                        llm: std::sync::Arc::new(llm),
+                                        tools: sess.tools.clone(),
+                                        cfg: std::sync::Arc::new(run_cfg),
+                                    };
+                                }
+                                Err(e) => app.notice(format!("couldn't switch provider/model: {e}")),
+                            }
+                        }
                         AppEffect::SpawnTurn => {
                             app.turn =
                                 Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));

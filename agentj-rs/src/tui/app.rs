@@ -8,6 +8,7 @@ use super::theme;
 use super::view::{assistant_block, dim_line, fmt_ms, tool_end_line, InputLayoutCache, TranscriptView};
 use crate::commands::{fuzzy_commands, SlashCommand, SLASH_COMMANDS};
 use crate::events::AgentEvent;
+use crate::model::{Provider, SelectorOverride};
 use crate::provider::{ChatMessage, TokenUsage};
 use crate::rekey::{is_linked_worktree, RekeyResult};
 use crossterm::event::{Event, KeyEvent, KeyEventKind, MouseEventKind};
@@ -96,6 +97,11 @@ pub struct SubagentRow {
 pub enum AppEffect {
     None,
     Quit,
+    /// Switch the active provider/model for future turns.
+    SwitchModel {
+        provider: Provider,
+        selector: SelectorOverride,
+    },
     /// Spawn a turn from the current committed history; the loop stores the handle in `App::turn`.
     SpawnTurn,
     /// Run a `/task` re-key, then feed the result back via `apply_rekey_result`.
@@ -114,6 +120,7 @@ pub struct App {
     // context for building turns / re-keying
     pub system: String,
     pub root: String,
+    pub provider: String,
     pub model_id: String,
     // conversation
     pub messages: Vec<ChatMessage>,
@@ -165,6 +172,7 @@ pub struct App {
 
 impl App {
     pub fn new(
+        provider: &str,
         model_id: &str,
         root: String,
         system: String,
@@ -178,6 +186,7 @@ impl App {
         Self {
             system: system.clone(),
             root,
+            provider: provider.to_string(),
             model_id: model_id.to_string(),
             messages: vec![ChatMessage::system(system)],
             transcript,
@@ -537,6 +546,8 @@ impl App {
         } else if text == "/knowledge" {
             self.push_user_line(&text);
             AppEffect::Knowledge
+        } else if text == "/model" || text.starts_with("/model ") {
+            self.submit_model(&text)
         } else if text == "/task" || text.starts_with("/task ") {
             self.submit_task(&text)
         } else {
@@ -545,6 +556,39 @@ impl App {
             self.messages.push(ChatMessage::user(text));
             self.begin_running("let's cook");
             AppEffect::SpawnTurn
+        }
+    }
+
+    fn submit_model(&mut self, text: &str) -> AppEffect {
+        self.push_user_line(text);
+        let rest = text["/model".len()..].trim();
+        if rest.is_empty() {
+            self.transcript.push(dim_line(format!(
+                "usage: /model <provider> [model]  (current: {} / {})",
+                self.provider, self.model_id
+            )));
+            return AppEffect::None;
+        }
+        if self.running {
+            self.transcript.push(dim_line(
+                "» wait for the current turn to finish before switching provider/model",
+            ));
+            return AppEffect::None;
+        }
+        let mut parts = rest.split_whitespace();
+        let provider_name = parts.next().unwrap_or_default();
+        let Some(provider) = Provider::parse(provider_name) else {
+            self.transcript.push(dim_line(format!(
+                "» unknown provider `{provider_name}`; expected one of: vertex, anthropic, azure, custom"
+            )));
+            return AppEffect::None;
+        };
+        let model = parts.collect::<Vec<_>>().join(" ");
+        AppEffect::SwitchModel {
+            provider,
+            selector: SelectorOverride {
+                model: (!model.is_empty()).then_some(model),
+            },
         }
     }
 
@@ -743,7 +787,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent};
 
     fn app() -> App {
-        App::new("dummy", ".".to_string(), "sys".to_string(), None, &[])
+        App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, &[])
     }
 
     fn mouse(kind: MouseEventKind) -> Event {

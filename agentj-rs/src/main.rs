@@ -266,7 +266,16 @@ async fn main() {
         return;
     }
 
-    let result = tui::run(cfg.model_id.clone(), root, system, sess, mcp_notices).await;
+    let result = tui::run(
+        cfg.provider.as_str().to_string(),
+        cfg.model_id.clone(),
+        root,
+        system,
+        app_cfg,
+        sess,
+        mcp_notices,
+    )
+    .await;
     jobs.kill_all().await;
     if let Err(e) = result {
         eprintln!("agentj: {e}");
