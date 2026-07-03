@@ -692,6 +692,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.scroll = app.scroll.min(max);
     // Clone + wrap only the on-screen window, not the whole transcript, each dirty frame.
     let (visible, intra) = app.transcript.visible(app.scroll, viewport);
+    // Clear the whole region first: the Paragraph fills only its inner text area, and a default Block
+    // doesn't paint its padding cells, so without this the side/bottom padding retains stale glyphs
+    // that stay pinned to screen coordinates as the transcript scrolls underneath them.
+    f.render_widget(Clear, rows[0]);
     f.render_widget(
         Paragraph::new(visible)
             .block(
