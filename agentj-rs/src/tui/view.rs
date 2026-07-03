@@ -21,6 +21,59 @@ pub fn dim_line(s: impl Into<String>) -> Line<'static> {
     Line::from(Span::styled(s.into(), theme::dim()))
 }
 
+/// Make external text (tool output, file contents, model text) safe to draw. Ratatui models a raw
+/// `\t` as ONE cell, but the terminal advances to a tab stop, so every character after a tab lands
+/// cells to the right of where ratatui thinks it is — leaving stale glyphs pinned to the screen that
+/// no redraw (not even a full `Clear`) overwrites, because ratatui's buffer never knew about them.
+/// ESC/CR/backspace corrupt worse. Tabs expand to 4-col stops; other control chars are dropped. The
+/// model still sees the original text — only the on-screen copy is cleaned.
+fn sanitize_display(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    let mut col = 0usize;
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\t' => {
+                let n = 4 - (col % 4);
+                for _ in 0..n {
+                    out.push(' ');
+                }
+                col += n;
+            }
+            // Drop a whole escape sequence, not just the ESC byte, so ANSI color codes in tool output
+            // (`\x1b[31m…`) don't leave `[31m` litter. CSI = `ESC [` params up to a final byte @..~.
+            '\x1b' => {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                } else {
+                    chars.next();
+                }
+            }
+            c if c.is_control() => {} // CR, BS, stray NL within a span, …
+            c => {
+                out.push(c);
+                col += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Sanitize a line's span contents in place. A fast byte scan skips the common all-clean case.
+fn sanitize_line(mut line: Line<'static>) -> Line<'static> {
+    for span in &mut line.spans {
+        if span.content.bytes().any(|b| b < 0x20 || b == 0x7f) {
+            span.content = sanitize_display(&span.content).into();
+        }
+    }
+    line
+}
+
 /// An assistant message rendered as markdown, with a single dim bullet on the first line and a
 /// two-space indent on the rest so one message reads as one block. Blank separator lines stay truly
 /// empty: a whitespace-only line under `Wrap` renders as TWO rows (and breaks the row accounting),
@@ -215,7 +268,7 @@ pub struct TranscriptView {
 impl TranscriptView {
     pub fn new(lines: Vec<Line<'static>>) -> Self {
         Self {
-            lines,
+            lines: lines.into_iter().map(sanitize_line).collect(),
             row_prefix: vec![0],
             cached_width: 0,
         }
@@ -265,6 +318,7 @@ impl TranscriptView {
     }
 
     pub fn push(&mut self, line: Line<'static>) {
+        let line = sanitize_line(line);
         if self.cached_width != 0 && self.row_prefix.len() == self.lines.len() + 1 {
             let rows = wrapped_rows_for_line(&line, self.cached_width);
             self.row_prefix.push(self.total_rows() + rows);
@@ -1026,6 +1080,24 @@ mod tests {
         assert_eq!(fmt_mmss(47), "47s");
         assert_eq!(fmt_mmss(64), "1m04");
         assert_eq!(fmt_mmss(750), "12m30");
+    }
+
+    #[test]
+    fn sanitize_expands_tabs_and_drops_control_chars() {
+        assert_eq!(sanitize_display("1\t//! doc"), "1   //! doc"); // tab at col 1 → to stop 4
+        assert_eq!(sanitize_display("\tx"), "    x"); // tab at col 0 → 4 spaces
+        assert_eq!(sanitize_display("a\x1b[31mb\rc"), "abc"); // ESC/CSI/CR stripped
+        assert_eq!(sanitize_display("plain"), "plain"); // untouched
+    }
+
+    #[test]
+    fn pushed_lines_are_sanitized_so_raw_tabs_never_reach_the_terminal() {
+        // A read_file result looks like "3\t    fn main()". The raw tab would desync the terminal;
+        // the transcript must store it expanded.
+        let mut view = TranscriptView::new(vec![]);
+        view.push(dim_line("3\tfn main()"));
+        assert!(!view.plain().contains('\t'), "no raw tab survives a push");
+        assert!(view.plain().contains("3   fn main()"));
     }
 
     #[test]
