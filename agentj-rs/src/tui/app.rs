@@ -749,7 +749,20 @@ impl App {
         } else {
             self.transcript
                 .push(dim_line(format!("» re-keying worktree → {reference}")));
+            // A bare `/task <ref>` (no inline description) should still start the work after re-keying,
+            // not just switch branches and idle. Synthesize a directive from the reference so the agent
+            // fetches the task and implements it.
             let desc = rest[reference.len()..].trim().to_string();
+            let desc = if desc.is_empty() {
+                format!(
+                    "Work on `{reference}` end to end. First find out what it requires — `{reference}` \
+                     looks like a tracker issue, so fetch its details from a connected issue tracker \
+                     (e.g. Linear via MCP) or infer the goal from the branch and its recent commits. \
+                     Then scope, plan, implement, and verify your work."
+                )
+            } else {
+                desc
+            };
             AppEffect::Rekey { reference, desc }
         }
     }
@@ -994,6 +1007,33 @@ mod tests {
         assert!(matches!(effect, AppEffect::None), "wizard input never spawns a turn");
         assert!(!a.running);
         assert_eq!(a.setup.as_ref().unwrap().step, SetupStep::BaseUrl);
+    }
+
+    #[test]
+    fn bare_task_reference_synthesizes_a_directive_so_work_starts() {
+        let mut a = app();
+        std::env::set_var("AGENTJ_ALLOW_PRIMARY", "1"); // bypass the worktree guard in the test
+        let effect = a.submit_task("/task GEN-3300");
+        std::env::remove_var("AGENTJ_ALLOW_PRIMARY");
+        match effect {
+            AppEffect::Rekey { reference, desc } => {
+                assert_eq!(reference, "GEN-3300");
+                assert!(!desc.is_empty(), "a bare /task must still produce a task directive");
+                assert!(desc.contains("GEN-3300"), "directive references the task");
+            }
+            _ => panic!("expected a Rekey effect that carries a directive"),
+        }
+        // An explicit description is passed through unchanged.
+        let effect = {
+            std::env::set_var("AGENTJ_ALLOW_PRIMARY", "1");
+            let e = a.submit_task("/task GEN-3300 fix the login bug");
+            std::env::remove_var("AGENTJ_ALLOW_PRIMARY");
+            e
+        };
+        match effect {
+            AppEffect::Rekey { desc, .. } => assert_eq!(desc, "fix the login bug"),
+            _ => panic!("expected Rekey"),
+        }
     }
 
     #[test]
