@@ -191,11 +191,16 @@ pub async fn run(
                                 Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));
                         }
                         AppEffect::Rekey { reference, desc } => {
-                            let rk = rekey(&app.root, &reference).await;
-                            if let AppEffect::SpawnTurn = app.apply_rekey_result(rk, desc) {
-                                app.turn =
-                                    Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));
-                            }
+                            // Run the (blocking, network-bound) worktree re-key off the event loop so
+                            // the UI stays live — a spinner and "re-keying →" status instead of a
+                            // frozen screen. The result comes back as UiMsg::RekeyDone.
+                            app.begin_rekey(&reference);
+                            let root = app.root.clone();
+                            let tx = ui_tx.clone();
+                            tokio::spawn(async move {
+                                let rk = rekey(&root, &reference).await;
+                                let _ = tx.send(UiMsg::RekeyDone { rk, desc });
+                            });
                         }
                         AppEffect::KillJobsAfter(watermark) => {
                             sess.tools.jobs.kill_after(watermark).await;
@@ -304,6 +309,14 @@ pub async fn run(
                     pending.push(msg);
                 }
                 for msg in pending {
+                    // A finished re-key applies its result here (it may start a turn, which needs the
+                    // loop's sess/ui_tx that on_ui can't reach).
+                    if let UiMsg::RekeyDone { rk, desc } = msg {
+                        if let AppEffect::SpawnTurn = app.apply_rekey_result(rk, desc) {
+                            app.turn = Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));
+                        }
+                        continue;
+                    }
                     if matches!(app.on_ui(msg), AppEffect::Snapshot) {
                         match knowledge::snapshot(&app.root).await {
                             Ok(n) => app.notice(format!("knowledge index updated — {n} files hashed")),

@@ -66,6 +66,8 @@ pub enum UiMsg {
     HistoryDelta(Vec<ChatMessage>),
     /// The turn task finished (natural completion or clean stop).
     TurnDone,
+    /// A `/task` re-key finished off-thread; carries its result and the task directive to start.
+    RekeyDone { rk: RekeyResult, desc: String },
 }
 
 /// A running turn: its abort handle plus the job-id watermark captured at spawn, so an interrupt can
@@ -769,7 +771,20 @@ impl App {
 
     /// Fold a completed `/task` re-key into state. Returns `SpawnTurn` when a task description should
     /// start a turn, else `None`.
+    /// Enter the re-keying busy state (spinner + status) while the worktree switch runs off the event
+    /// loop, so the UI stays live instead of freezing on the blocking git work.
+    pub fn begin_rekey(&mut self, reference: &str) {
+        self.running = true;
+        self.since = Instant::now();
+        self.status = format!("re-keying → {reference}");
+        self.set_effect("re-keying");
+        self.dirty = true;
+    }
+
     pub fn apply_rekey_result(&mut self, rk: RekeyResult, desc: String) -> AppEffect {
+        // Leave the re-keying busy state; the turn path below re-enters `running` via begin_running.
+        self.running = false;
+        self.status.clear();
         for s in &rk.steps {
             self.transcript.push(dim_line(format!("  · {s}")));
         }
@@ -832,6 +847,8 @@ impl App {
                     AppEffect::None
                 }
             }
+            // Applied directly in the event loop (it may start a turn); never reaches here.
+            UiMsg::RekeyDone { .. } => AppEffect::None,
         }
     }
 
