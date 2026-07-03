@@ -26,6 +26,11 @@ pub fn accent() -> Style {
 pub fn accent_bold() -> Style {
     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
+/// Highlight for selected transcript text. REVERSED (swap fg/bg) rather than a background color, to
+/// stay within the palette-respecting, no-background-color theme and show over any content.
+pub fn selection_style() -> Style {
+    Style::default().add_modifier(Modifier::REVERSED)
+}
 pub fn err() -> Style {
     Style::default().fg(ERROR)
 }

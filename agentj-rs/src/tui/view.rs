@@ -2,7 +2,7 @@
 //! input / footer, plus the floating slash-command popover), with the transcript/input line builders
 //! and their cached row-count bookkeeping.
 
-use super::app::{App, SetupStep};
+use super::app::{App, Selection, SetupStep, TextPos, TranscriptGeom};
 use super::editor::Editor;
 use super::markdown::render_markdown;
 use super::theme;
@@ -10,7 +10,8 @@ use crate::commands::{classify, TokenClass, SLASH_COMMANDS};
 use ratatui::layout::{Constraint, Layout, Position};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap};
+use super::wrap;
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 use ratatui::Frame;
 use std::time::{Duration, Instant};
 use tachyonfx::EffectRenderer;
@@ -235,16 +236,53 @@ pub fn fmt_ms(ms: u128) -> String {
 }
 
 
-fn line_width(line: &Line<'_>) -> usize {
-    line.spans
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum::<usize>()
+/// Physical rows a logical line takes at `content_width` (the true text-area width, already net of
+/// padding). Uses agentj's own word-wrap so this count matches what's drawn and the selection map
+/// exactly. (The old char-wrap estimate subtracted padding a second time, drifting scroll from render.)
+fn wrapped_rows_for_line(line: &Line<'_>, content_width: u16) -> usize {
+    wrap::rows_for_line(line, content_width)
 }
 
-fn wrapped_rows_for_line(line: &Line<'_>, width: u16) -> usize {
-    let content_width = width.saturating_sub(2).max(1) as usize;
-    line_width(line).max(1).div_ceil(content_width)
+/// The exact physical rows to draw for the transcript: wrap the window's logical lines ourselves,
+/// skip the `intra` rows scrolled past at the top, take `viewport` rows, and reverse-video any cells
+/// inside the selection. Owning the wrap here (vs. ratatui's `Wrap`) is what makes the highlight land
+/// on the same characters the selection map computed.
+fn visible_transcript_rows(
+    window: &[Line<'static>],
+    first: usize,
+    content_width: u16,
+    viewport: u16,
+    intra: u16,
+    sel: Option<Selection>,
+) -> Text<'static> {
+    let hl = theme::selection_style();
+    let range = sel.map(|s| s.range());
+    let width = content_width.max(1) as usize;
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut skip = intra as usize;
+    'outer: for (k, line) in window.iter().enumerate() {
+        let logical = first + k;
+        for row in wrap::wrap_line(line, width) {
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            if out.len() >= viewport as usize {
+                break 'outer;
+            }
+            let mut cells = row.cells;
+            if let Some((a, b)) = range {
+                for (c, cell) in cells.iter_mut().enumerate() {
+                    let pos = TextPos { line: logical, col: row.char_start + c };
+                    if a <= pos && pos < b {
+                        cell.1 = cell.1.patch(hl);
+                    }
+                }
+            }
+            out.push(wrap::cells_to_line(&cells));
+        }
+    }
+    Text::from(out)
 }
 
 #[cfg(test)]
@@ -296,11 +334,11 @@ impl TranscriptView {
         self.total_rows().saturating_sub(viewport as usize) as u16
     }
 
-    /// The lines needed to fill `viewport` rows starting at wrapped-row `scroll`, plus the intra-line
-    /// wrapped-row offset to hand ratatui's `Paragraph::scroll`. O(log n + viewport), not O(n).
-    pub fn visible(&self, scroll: u16, viewport: u16) -> (Text<'static>, u16) {
+    /// The window of logical lines needed to fill `viewport` rows starting at wrapped-row `scroll`:
+    /// the index of the first line, the line slice (cloned by the caller, not the whole transcript),
+    /// and the intra-line wrapped-row offset scrolled past at the top. O(log n + viewport).
+    pub fn window(&self, scroll: u16, viewport: u16) -> (usize, &[Line<'static>], u16) {
         let scroll = scroll as usize;
-        // The line the top of the viewport sits inside: last line whose start row is <= scroll.
         let first = self
             .row_prefix
             .partition_point(|&r| r <= scroll)
@@ -314,7 +352,26 @@ impl TranscriptView {
             taken += wrapped_rows_for_line(&self.lines[end], self.cached_width.max(1));
             end += 1;
         }
-        (Text::from(self.lines[first..end].to_vec()), intra)
+        (first, &self.lines[first..end], intra)
+    }
+
+    /// The (logical line index, physical-segment offset within that line) a global physical row lands
+    /// in. Used to turn a mouse position into a stable text position.
+    pub fn locate_row(&self, phys_row: usize) -> (usize, usize) {
+        let line = self
+            .row_prefix
+            .partition_point(|&r| r <= phys_row)
+            .saturating_sub(1)
+            .min(self.lines.len().saturating_sub(1));
+        (line, phys_row.saturating_sub(self.row_prefix[line]))
+    }
+
+    pub fn line(&self, i: usize) -> Option<&Line<'static>> {
+        self.lines.get(i)
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
     }
 
     pub fn push(&mut self, line: Line<'static>) {
@@ -775,28 +832,36 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     const PAD_X: u16 = 1;
     const PAD_BOTTOM: u16 = 2;
     let viewport = rows[0].height.saturating_sub(1 + PAD_BOTTOM); // border + bottom padding
-    app.transcript.ensure_width(rows[0].width.saturating_sub(2 * PAD_X));
+    let content_width = rows[0].width.saturating_sub(2 * PAD_X);
+    app.transcript.ensure_width(content_width);
     let max = app.transcript.max_scroll(viewport);
     if app.follow {
         app.scroll = max;
     }
     app.scroll = app.scroll.min(max);
-    // Clone + wrap only the on-screen window, not the whole transcript, each dirty frame.
-    let (visible, intra) = app.transcript.visible(app.scroll, viewport);
-    // Clear the whole region first: the Paragraph fills only its inner text area, and a default Block
-    // doesn't paint its padding cells, so without this the side/bottom padding retains stale glyphs
-    // that stay pinned to screen coordinates as the transcript scrolls underneath them.
+    // Record the content geometry so between-frame mouse events can map a cell back to a text
+    // position (x/y are the top-left of the text area, inside the side padding).
+    app.tgeom = Some(TranscriptGeom {
+        x: rows[0].x + PAD_X,
+        y: rows[0].y,
+        width: content_width,
+        viewport,
+        scroll: app.scroll,
+    });
+    // Wrap only the on-screen window ourselves (not ratatui's Wrap widget) so the wrap, the scroll
+    // math, and the selection map agree; tint any selected cells while we're at it.
+    let (first, window, intra) = app.transcript.window(app.scroll, viewport);
+    let visible = visible_transcript_rows(window, first, content_width, viewport, intra, app.selection);
+    // Clear the whole region first: a default Block doesn't paint its padding cells, so without this
+    // the side/bottom padding retains stale glyphs pinned to screen coordinates as content scrolls.
     f.render_widget(Clear, rows[0]);
     f.render_widget(
-        Paragraph::new(visible)
-            .block(
-                Block::default()
-                    .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(theme::divider_color()))
-                    .padding(Padding::new(PAD_X, PAD_X, 0, PAD_BOTTOM)),
-            )
-            .wrap(Wrap { trim: false })
-            .scroll((intra, 0)),
+        Paragraph::new(visible).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme::divider_color()))
+                .padding(Padding::new(PAD_X, PAD_X, 0, PAD_BOTTOM)),
+        ),
         rows[0],
     );
 
@@ -1376,30 +1441,29 @@ mod tests {
             Line::from("1234567890"),
             Line::from("tiny"),
         ];
-        assert_eq!(wrapped_rows_for_line(&transcript[0], 5), 4);
-        assert_eq!(transcript_rows(&transcript, 5), 10);
+        // content_width 5 used directly (no second padding subtraction): "1234567890" (10 chars)
+        // hard-wraps to 2 rows, "tiny" (4) to 1 → 2 + 2 + 1 = 5 rows.
+        assert_eq!(wrapped_rows_for_line(&transcript[0], 5), 2);
+        assert_eq!(transcript_rows(&transcript, 5), 5);
         let mut view = TranscriptView::new(transcript);
         view.ensure_width(5);
-        assert_eq!(view.max_scroll(3), 7);
+        assert_eq!(view.max_scroll(3), 2);
     }
 
     #[test]
-    fn visible_windows_the_transcript_without_cloning_all_of_it() {
-        // 20 lines, each wraps to 2 rows at width 5 (content width 3, "123456" → 2 rows) → 40 rows.
+    fn window_slices_the_transcript_without_cloning_all_of_it() {
+        // 20 lines, each hard-wraps to 2 rows at content width 5 ("123456" → "12345"+"6") → 40 rows.
         let lines: Vec<Line> = (0..20).map(|_| Line::from("123456")).collect();
         let mut view = TranscriptView::new(lines);
         view.ensure_width(5);
         assert_eq!(view.max_scroll(6), 34); // 40 - 6
 
-        // Scrolled to row 10 (start of line 5) with a 6-row viewport → returns a small window.
-        let (text, intra) = view.visible(10, 6);
-        assert_eq!(intra, 0);
-        assert!(text.lines.len() <= 5, "clones only the window, not all 20: {}", text.lines.len());
+        let (first, window, intra) = view.window(10, 6);
+        assert_eq!((first, intra), (5, 0));
+        assert!(window.len() <= 5, "clones only the window, not all 20: {}", window.len());
 
-        // Mid-line scroll (row 11 = second wrapped row of line 5) → first line included, intra=1.
-        let (text2, intra2) = view.visible(11, 6);
-        assert_eq!(intra2, 1);
-        assert!(!text2.lines.is_empty());
+        let (first2, _w2, intra2) = view.window(11, 6);
+        assert_eq!((first2, intra2), (5, 1));
     }
 }
 

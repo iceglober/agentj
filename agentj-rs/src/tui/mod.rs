@@ -3,6 +3,7 @@
 //! from the turn task). State and transitions live in `app`; rendering in `view`.
 
 mod app;
+mod wrap;
 mod editor;
 mod keymap;
 mod knowledge;
@@ -18,8 +19,8 @@ use crate::provider::{ChatMessage, Llm};
 use crate::rekey::rekey;
 use app::{App, AppEffect, TurnHandle, UiMsg};
 use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, Event, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::style::Print;
@@ -97,14 +98,15 @@ pub async fn run(
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    // Mouse capture is deliberately NOT enabled: it would swallow the terminal's native text
-    // selection in the transcript. Alternate-scroll mode (DECSET 1007) makes the wheel send ↑/↓
-    // arrow keys instead, which the keymap turns into transcript scrolling.
+    // Mouse capture IS enabled: agentj runs its own transcript selection (click-drag with
+    // auto-scroll, copy via OSC 52), which needs the drag/scroll events capture delivers. This
+    // supersedes the terminal's native selection (users can still fall back with Shift/Option in most
+    // terminals).
     execute!(
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
-        Print("\x1b[?1007h")
+        EnableMouseCapture
     )?;
     // Ask for progressive keyboard reporting so modified Enter/Esc are distinguishable where the
     // terminal supports it (kitty/ghostty/wezterm/newer iTerm2), and chords like Cmd/Ctrl+Backspace
@@ -261,6 +263,12 @@ pub async fn run(
                         }
                         // on_input never yields Snapshot; it comes from TurnDone below.
                         AppEffect::Snapshot => {}
+                        AppEffect::Copy(text) => {
+                            // OSC 52: hand the selection to the terminal's clipboard (local or over
+                            // SSH). Bypasses ratatui — write it straight to the backend.
+                            let _ = execute!(terminal.backend_mut(), Print(osc52_copy(&text)));
+                            app.notice(format!("copied {} chars", text.chars().count()));
+                        }
                         AppEffect::ConfigureProvider(setup) => {
                             // Persist to the global config, reload it, then reuse the normal
                             // build-and-swap path so the new provider is live with no restart.
@@ -345,10 +353,49 @@ pub async fn run(
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     execute!(
         terminal.backend_mut(),
-        Print("\x1b[?1007l"),
+        DisableMouseCapture,
         LeaveAlternateScreen,
         DisableBracketedPaste
     )?;
     disable_raw_mode()?;
     Ok(())
+}
+
+/// Wrap text in an OSC 52 clipboard-write sequence (`c` = the CLIPBOARD selection), terminated with
+/// BEL. Terminals that support OSC 52 (kitty, iTerm2, wezterm, tmux with `set-clipboard on`, …) copy
+/// it — including over SSH, unlike a local clipboard command.
+fn osc52_copy(text: &str) -> String {
+    format!("\x1b]52;c;{}\x07", base64_encode(text.as_bytes()))
+}
+
+/// Minimal standard base64 (RFC 4648) so OSC 52 needs no dependency.
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0];
+        let b1 = *chunk.get(1).unwrap_or(&0);
+        let b2 = *chunk.get(2).unwrap_or(&0);
+        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
+        out.push(T[(n >> 18 & 63) as usize] as char);
+        out.push(T[(n >> 12 & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6 & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::base64_encode;
+
+    #[test]
+    fn base64_matches_known_vectors() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"hello world"), "aGVsbG8gd29ybGQ=");
+    }
 }
