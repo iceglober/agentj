@@ -403,7 +403,7 @@ impl App {
 
     /// Common turn-start bookkeeping: mark the turn running, reset the elapsed clock and status line,
     /// and flash the given effect label.
-    fn begin_running(&mut self, effect_label: impl Into<String>) {
+    pub fn begin_running(&mut self, effect_label: impl Into<String>) {
         self.running = true;
         self.since = Instant::now();
         self.status.clear();

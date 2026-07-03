@@ -144,7 +144,15 @@ pub async fn run(
         }
 
         tokio::select! {
-            _ = ticker.tick() => app.on_tick(Instant::now()),
+            _ = ticker.tick() => {
+                app.on_tick(Instant::now());
+                // Autonomous continuation: when idle, a finished background job wakes a turn to act
+                // on its result (drained inside run_turn) instead of waiting for the next user prompt.
+                if !app.running && app.turn.is_none() && sess.tools.jobs.has_nudges() {
+                    app.begin_running("continuing — a background job finished");
+                    app.turn = Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));
+                }
+            }
             Some(ev) = in_rx.recv() => {
                 let mut pending = vec![ev];
                 while let Ok(ev) = in_rx.try_recv() {

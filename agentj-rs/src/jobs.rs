@@ -187,6 +187,12 @@ impl JobManager {
         self.nudges.lock().unwrap().drain(..).collect()
     }
 
+    /// Whether any nudge is queued — a cheap peek so the idle UI loop can decide to wake a turn
+    /// without draining (the turn drains them itself).
+    pub fn has_nudges(&self) -> bool {
+        !self.nudges.lock().unwrap().is_empty()
+    }
+
     /// Await the next nudge (used to idle-wait when the model has nothing else to do). The notified
     /// future is armed before the queue is re-checked, so a nudge queued in the gap isn't lost.
     pub async fn next_nudge(&self) -> String {
