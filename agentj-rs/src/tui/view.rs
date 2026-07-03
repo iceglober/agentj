@@ -2,7 +2,7 @@
 //! input / footer, plus the floating slash-command popover), with the transcript/input line builders
 //! and their cached row-count bookkeeping.
 
-use super::app::App;
+use super::app::{App, SetupStep};
 use super::editor::Editor;
 use super::markdown::render_markdown;
 use super::theme;
@@ -374,18 +374,6 @@ impl Default for InputLayoutCache {
 impl InputLayoutCache {
     pub fn refresh(&mut self, editor: &Editor, width: u16) {
         self.refresh_with_metrics(editor, width, None);
-    }
-
-    /// Render the input as bullets (the wizard's API-key step). Uncached and self-invalidating so the
-    /// real key never lands in the layout and the next normal refresh always rebuilds.
-    pub fn refresh_masked(&mut self, editor: &Editor, width: u16) {
-        let n = editor.text().chars().count();
-        self.revision = u64::MAX;
-        self.width = width;
-        self.rows = 1;
-        self.rendered = Text::from(Line::from("•".repeat(n)));
-        self.cursor = (0, n.min(u16::MAX as usize) as u16);
-        self.scroll = 0;
     }
 
     pub fn refresh_with_metrics(
@@ -804,15 +792,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Input rows are pre-wrapped char-exact (no Wrap widget), so the cursor math is authoritative
     // and whitespace-only lines render; taller-than-cap input scrolls to keep the cursor visible.
-    f.render_widget(
-        Paragraph::new(app.input_cache.rendered.clone()).scroll((app.input_cache.scroll, 0)),
-        rows[3],
-    );
-    let (crow, ccol) = app.input_cache.cursor;
-    f.set_cursor_position(Position::new(
-        (rows[3].x + 2 + ccol).min(rows[3].x + rows[3].width.saturating_sub(1)),
-        (rows[3].y + crow).min(rows[3].y + rows[3].height.saturating_sub(1)),
-    ));
+    // During setup the modal owns the input (and the cursor), so the box just shows a hint.
+    if app.setup.is_some() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled("  ⏎ next · Esc cancel", theme::dim()))),
+            rows[3],
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new(app.input_cache.rendered.clone()).scroll((app.input_cache.scroll, 0)),
+            rows[3],
+        );
+        let (crow, ccol) = app.input_cache.cursor;
+        f.set_cursor_position(Position::new(
+            (rows[3].x + 2 + ccol).min(rows[3].x + rows[3].width.saturating_sub(1)),
+            (rows[3].y + crow).min(rows[3].y + rows[3].height.saturating_sub(1)),
+        ));
+    }
 
     // Footer: identity line, tucked by the prompt.
     f.render_widget(
@@ -843,6 +839,101 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.render_widget(Clear, rect);
         f.render_widget(Paragraph::new(popover), rect);
     }
+
+    // First-run provider setup, as a centered modal form over everything.
+    if app.setup.is_some() {
+        render_setup_modal(f, app, area);
+    }
+}
+
+/// Draw the provider-setup wizard as a centered modal form: one row per field, the active one showing
+/// the live input (the key masked) with the terminal cursor placed in it.
+fn render_setup_modal(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use ratatui::layout::Rect;
+    let Some(w) = app.setup.as_ref() else { return };
+
+    let cur = step_index(w.step);
+    let masked_key = "•".repeat(w.api_key.chars().count());
+    let fields = [
+        (SetupStep::Provider, "Provider", w.provider.map(provider_label).unwrap_or_default()),
+        (SetupStep::BaseUrl, "Base URL", w.base_url.clone()),
+        (SetupStep::ApiKey, "API key", masked_key),
+        (SetupStep::Model, "Model", String::new()),
+    ];
+
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled("Set up a provider", theme::accent_bold())),
+        Line::default(),
+    ];
+    let mut cursor: Option<(u16, u16)> = None; // (row, col) within the inner area
+    for (i, (step, label, stored)) in fields.iter().enumerate() {
+        let active = i == cur;
+        let value = if active {
+            let t = app.editor.text();
+            if *step == SetupStep::ApiKey {
+                "•".repeat(t.chars().count())
+            } else {
+                t.to_string()
+            }
+        } else if i < cur {
+            stored.clone()
+        } else {
+            String::new()
+        };
+        let marker = if active { "› " } else { "  " };
+        let label_style = if active { theme::accent() } else { theme::dim() };
+        let prefix = format!("{marker}{label:<9} "); // 2 + 9 + 1 = 12 cols before the value
+        if active {
+            cursor = Some((lines.len() as u16, prefix.chars().count() as u16 + value.chars().count() as u16));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(prefix, label_style),
+            Span::raw(value),
+        ]));
+        if active && *step == SetupStep::Provider {
+            lines.push(Line::from(Span::styled("            1) azure    2) custom", theme::dim())));
+        }
+    }
+    lines.push(Line::default());
+    if let Some(err) = &w.error {
+        lines.push(Line::from(Span::styled(format!("✗ {err}"), theme::err())));
+    }
+    lines.push(Line::from(Span::styled("Enter: continue    Esc: cancel", theme::dim())));
+
+    let mw = 66.min(area.width.saturating_sub(4)).max(20);
+    let mh = (lines.len() as u16 + 3).min(area.height); // + top/bottom border + 1 top padding row
+    let rect = Rect {
+        x: area.x + area.width.saturating_sub(mw) / 2,
+        y: area.y + area.height.saturating_sub(mh) / 2,
+        width: mw,
+        height: mh,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::accent())
+        .padding(Padding::new(2, 2, 1, 0));
+    let inner = block.inner(rect);
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+    if let Some((r, c)) = cursor {
+        f.set_cursor_position(Position::new(
+            (inner.x + c).min(inner.x + inner.width.saturating_sub(1)),
+            (inner.y + r).min(inner.y + inner.height.saturating_sub(1)),
+        ));
+    }
+}
+
+fn step_index(s: SetupStep) -> usize {
+    match s {
+        SetupStep::Provider => 0,
+        SetupStep::BaseUrl => 1,
+        SetupStep::ApiKey => 2,
+        SetupStep::Model => 3,
+    }
+}
+
+fn provider_label(p: crate::model::Provider) -> String {
+    p.as_str().to_string()
 }
 
 #[cfg(test)]
@@ -1164,6 +1255,30 @@ mod tests {
             rendered.contains("port editor tests"),
             "subagent panel row missing"
         );
+    }
+
+    #[test]
+    fn setup_modal_renders_the_form_over_the_transcript() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        // needs_setup opens the wizard on launch.
+        let mut app = App::new("(none)", "(none)", ".".to_string(), "/repo".to_string(), None, &[], true);
+        assert!(app.setup.is_some());
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        app.refresh_input(80);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let rendered: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(rendered.contains("Set up a provider"), "modal title missing: {rendered}");
+        assert!(rendered.contains("Provider"), "provider field missing");
+        assert!(rendered.contains("1) azure"), "provider choices missing");
+        assert!(rendered.contains("Esc: cancel"), "modal hint missing");
     }
 
     #[test]

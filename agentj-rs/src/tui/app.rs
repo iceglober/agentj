@@ -135,12 +135,14 @@ pub enum SetupStep {
     Model,
 }
 
-/// The guided first-run provider setup. Collects one field per Enter; the ApiKey step masks input.
+/// The guided first-run provider setup, rendered as a modal form. Collects one field per Enter; the
+/// ApiKey step masks input. `error` holds the last validation message, shown in the modal.
 pub struct SetupWizard {
     pub step: SetupStep,
     pub provider: Option<Provider>,
     pub base_url: String,
     pub api_key: String,
+    pub error: Option<String>,
 }
 
 pub struct App {
@@ -258,104 +260,94 @@ impl App {
     }
 
     pub fn refresh_input(&mut self, width: u16) {
-        // Mask the key as it's typed during that step of the wizard.
-        if self.setup.as_ref().map(|w| w.step) == Some(SetupStep::ApiKey) {
-            self.input_cache.refresh_masked(&self.editor, width);
-        } else {
-            self.input_cache.refresh(&self.editor, width);
-        }
+        self.input_cache.refresh(&self.editor, width);
     }
 
-    /// Open the guided provider-setup wizard: greet, then ask for the provider.
+    /// Open the guided provider-setup modal at the first field.
     pub fn start_setup(&mut self) {
+        self.editor.clear();
         self.setup = Some(SetupWizard {
             step: SetupStep::Provider,
             provider: None,
             base_url: String::new(),
             api_key: String::new(),
+            error: None,
         });
-        self.transcript.push(Line::default());
-        self.transcript
-            .push(dim_line("Welcome to agentj — let's set up a provider."));
-        self.transcript.push(dim_line(
-            "● Which provider?   1) azure    2) custom (OpenAI-compatible)",
-        ));
         self.dirty = true;
     }
 
-    /// Feed one submitted line into the wizard, advancing a step or (on the last) emitting the effect
-    /// that persists the config and builds the client.
+    /// Cancel the wizard (Esc). Leaves the session unconfigured; `/setup` reopens it.
+    pub fn cancel_setup(&mut self) -> AppEffect {
+        self.setup = None;
+        self.editor.clear();
+        self.notice("setup canceled — run /setup to configure a provider");
+        AppEffect::None
+    }
+
+    /// Feed one submitted field into the wizard, advancing a step or (on the last) emitting the effect
+    /// that persists the config and builds the client. Validation messages go into `error` for the
+    /// modal to show; nothing touches the transcript.
     fn advance_setup(&mut self, line: &str) -> AppEffect {
         let line = line.trim().to_string();
         let Some(w) = self.setup.as_mut() else {
             return AppEffect::None;
         };
         self.dirty = true;
+        w.error = None;
         match w.step {
             SetupStep::Provider => {
                 let provider = match line.to_lowercase().as_str() {
                     "1" | "azure" => Provider::Azure,
                     "2" | "custom" => Provider::Custom,
                     _ => {
-                        self.transcript
-                            .push(dim_line("» pick 1 (azure) or 2 (custom)"));
+                        w.error = Some("pick 1 (azure) or 2 (custom)".into());
                         return AppEffect::None;
                     }
                 };
                 w.provider = Some(provider);
                 w.step = SetupStep::BaseUrl;
-                let hint = match provider {
-                    Provider::Azure => {
-                        "your Foundry endpoint, e.g. https://<resource>.openai.azure.com/openai/v1"
-                    }
-                    _ => "the OpenAI-compatible base URL, e.g. http://localhost:8080/v1",
-                };
-                self.transcript.push(dim_line(format!("● Base URL?   ({hint})")));
             }
             SetupStep::BaseUrl => {
                 if line.is_empty() {
-                    self.transcript.push(dim_line("» the base URL can't be empty"));
+                    w.error = Some("the base URL can't be empty".into());
                     return AppEffect::None;
                 }
                 w.base_url = line;
                 w.step = SetupStep::ApiKey;
-                self.transcript
-                    .push(dim_line("● API key?   (leave blank if your gateway needs none)"));
             }
             SetupStep::ApiKey => {
                 w.api_key = line;
                 w.step = SetupStep::Model;
-                self.transcript
-                    .push(dim_line("● Model / deployment name?   e.g. gpt-5.4"));
             }
             SetupStep::Model => {
                 if line.is_empty() {
-                    self.transcript.push(dim_line("» the model can't be empty"));
+                    w.error = Some("the model can't be empty".into());
                     return AppEffect::None;
                 }
-                let setup = ProviderSetup {
+                return AppEffect::ConfigureProvider(ProviderSetup {
                     provider: w.provider.unwrap_or(Provider::Custom),
                     base_url: w.base_url.clone(),
                     api_key: w.api_key.clone(),
                     model: line,
-                };
-                self.transcript.push(dim_line("» configuring…"));
-                return AppEffect::ConfigureProvider(setup);
+                });
             }
         }
         AppEffect::None
     }
 
-    /// The wizard succeeded: drop it and confirm.
+    /// The wizard succeeded: close the modal and confirm.
     pub fn finish_setup(&mut self, msg: impl Into<String>) {
         self.setup = None;
+        self.editor.clear();
         self.notice(msg.into());
     }
 
-    /// The wizard's values didn't produce a working client: report and restart it.
+    /// The wizard's values didn't produce a working client: reopen at the first field with the error.
     pub fn setup_failed(&mut self, msg: impl Into<String>) {
-        self.transcript.push(dim_line(format!("» {}", msg.into())));
         self.start_setup();
+        if let Some(w) = self.setup.as_mut() {
+            w.error = Some(msg.into());
+        }
     }
 
     pub fn effect_active(&self) -> bool {
@@ -490,6 +482,14 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) -> AppEffect {
+        // While the setup modal is open, Esc cancels it (rather than interrupting a turn); typing and
+        // Enter fall through to the editor/submit, which routes into the wizard.
+        if self.setup.is_some()
+            && k.modifiers.is_empty()
+            && k.code == crossterm::event::KeyCode::Esc
+        {
+            return self.cancel_setup();
+        }
         // The popover captures navigation/accept/dismiss keys before the normal keymap.
         if self.popover.is_some() && !self.running && k.modifiers.is_empty() {
             match k.code {
@@ -678,6 +678,9 @@ impl App {
             AppEffect::None
         } else if text == "/exit" || text == "/quit" {
             AppEffect::Quit
+        } else if text == "/setup" {
+            self.start_setup();
+            AppEffect::None
         } else if text == "/init" {
             self.push_user_line(&text);
             AppEffect::Init

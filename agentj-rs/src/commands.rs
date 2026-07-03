@@ -33,6 +33,11 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         summary: "show or switch the active provider/model for future turns",
     },
     SlashCommand {
+        name: "/setup",
+        takes_arg: false,
+        summary: "configure a provider (endpoint, key, model) in a guided form",
+    },
+    SlashCommand {
         name: "/exit",
         takes_arg: false,
         summary: "quit agentj",
