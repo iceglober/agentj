@@ -66,6 +66,9 @@ struct McpTool {
 struct Server {
     service: RunningService<RoleClient, ()>,
     tools: Vec<McpTool>,
+    /// PID of a stdio server's child (group leader), so its whole `npx → npm → node` tree can be
+    /// killed on shutdown. `None` for http/sse.
+    pid: Option<u32>,
 }
 
 /// Connected MCP servers + a lookup from fully-qualified tool name to its server.
@@ -100,21 +103,25 @@ fn render_result(res: rmcp::model::CallToolResult) -> String {
 }
 
 async fn connect_one(cfg: &McpServerConfig) -> anyhow::Result<Server> {
-    let service = match cfg.transport {
+    let (service, pid) = match cfg.transport {
         Transport::Stdio => {
             let mut command = tokio::process::Command::new(cfg.command.clone().unwrap_or_default());
             command.args(&cfg.args);
             for (k, v) in &cfg.env {
                 command.env(k, v);
             }
+            // Own process group so we can kill the whole `npx → npm → node` tree on shutdown instead
+            // of orphaning children that keep holding ports (the mcp-remote EADDRINUSE zombie).
+            command.process_group(0);
             // Capture the child's stderr rather than inheriting agentj's terminal — otherwise a
             // server's npm warnings, auth prompts, and crash traces spew over the screen before the
             // TUI even opens.
             let (transport, stderr) = TokioChildProcess::builder(command)
                 .stderr(Stdio::piped())
                 .spawn()?;
+            let pid = transport.id();
             let errbuf = drain_stderr(stderr);
-            match ().serve(transport).await {
+            let service = match ().serve(transport).await {
                 Ok(s) => s,
                 Err(e) => {
                     // The transport error ("channel closed") is usually opaque; the real reason is in
@@ -125,14 +132,15 @@ async fn connect_one(cfg: &McpServerConfig) -> anyhow::Result<Server> {
                         None => return Err(e.into()),
                     }
                 }
-            }
+            };
+            (service, pid)
         }
         Transport::Http | Transport::Sse => {
             // Stage 1: plain streamable-http. Static `Authorization` headers + OAuth are staged (a
             // server needing either just surfaces as a connect notice for now).
             let url = cfg.url.clone().unwrap_or_default();
             let transport = StreamableHttpClientTransport::from_uri(url);
-            ().serve(transport).await?
+            (().serve(transport).await?, None)
         }
     };
 
@@ -147,7 +155,7 @@ async fn connect_one(cfg: &McpServerConfig) -> anyhow::Result<Server> {
                 .unwrap_or_else(|_| json!({ "type": "object" })),
         })
         .collect();
-    Ok(Server { service, tools })
+    Ok(Server { service, tools, pid })
 }
 
 /// Connect to every configured server, each bounded by a timeout so one hung server can't freeze
@@ -181,6 +189,19 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
 }
 
 impl McpClients {
+    /// Kill every stdio server's process GROUP. Called on every agentj exit path so `npx → npm →
+    /// node` trees never orphan — a leaked mcp-remote keeps holding its OAuth callback port, and the
+    /// next launch dies with EADDRINUSE. (rmcp's drop only reaps the direct child, not descendants.)
+    pub fn shutdown(&self) {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        for s in &self.servers {
+            if let Some(pid) = s.pid {
+                let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL);
+            }
+        }
+    }
+
     /// Tool specs advertised to the model (each `<server>__<tool>`).
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.servers

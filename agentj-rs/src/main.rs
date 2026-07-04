@@ -205,6 +205,9 @@ async fn main() {
     };
 
     let jobs = jobs::JobManager::new(root.clone());
+    // Kept so every exit path below can kill MCP child-process trees (else an orphaned mcp-remote
+    // keeps holding its OAuth callback port and the next launch dies with EADDRINUSE).
+    let mcp_for_shutdown = mcp_clients.clone();
     let tools = Tools::new(PathBuf::from(&root), jobs.clone(), mcp_clients);
     let sess = agent::Session {
         llm: Arc::new(llm),
@@ -265,6 +268,9 @@ async fn main() {
         }
         let _ = turn.await;
         jobs.kill_all().await;
+        if let Some(m) = &mcp_for_shutdown {
+            m.shutdown();
+        }
         if failed {
             std::process::exit(1);
         }
@@ -283,6 +289,9 @@ async fn main() {
     )
     .await;
     jobs.kill_all().await;
+    if let Some(m) = &mcp_for_shutdown {
+        m.shutdown();
+    }
     if let Err(e) = result {
         eprintln!("agentj: {e}");
         std::process::exit(1);
