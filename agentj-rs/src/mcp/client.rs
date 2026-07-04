@@ -226,7 +226,23 @@ impl McpClients {
                 let ok = !res.is_error.unwrap_or(false);
                 (render_result(res), ok)
             }
-            Err(e) => (format!("error: {e}"), false),
+            Err(e) => {
+                let m = e.to_string();
+                // A dead transport is opaque as raw rmcp text ("Send message error … worker …").
+                // Name the server and explain, so it's actionable rather than cryptic.
+                let dead = m.contains("transport") || m.contains("worker") || m.contains("closed");
+                let text = if dead {
+                    format!(
+                        "error: MCP `{name}` is disconnected — its transport died (the server crashed, \
+                         the connection dropped, or auth expired/was never established, e.g. an OAuth \
+                         server used over plain http instead of via `mcp-remote`). Restart agentj to \
+                         reconnect. [{m}]"
+                    )
+                } else {
+                    format!("error: {e}")
+                };
+                (text, false)
+            }
         }
     }
 }
