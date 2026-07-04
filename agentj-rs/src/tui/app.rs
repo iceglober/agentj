@@ -124,51 +124,36 @@ pub enum AppEffect {
     Copy(String),
 }
 
-/// A position in the transcript in LOGICAL coordinates (line index + character offset within that
-/// line), so a selection survives scrolling and resizing — screen coordinates would not.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct TextPos {
-    pub line: usize,
-    pub col: usize,
-}
-
-impl PartialOrd for TextPos {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for TextPos {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.line, self.col).cmp(&(other.line, other.col))
-    }
-}
-
-/// An in-progress or completed drag selection: `anchor` is where the drag began, `cursor` follows the
-/// mouse. Ordered as a half-open `[min, max)` range for both highlighting and copy.
+/// A drag selection in absolute SCREEN cells (col, row). Screen-based rather than tied to the
+/// transcript data model, so it can cover ANY rendered content — the transcript, a modal, a panel.
+/// The text is read back from the rendered terminal buffer (`App::screen_rows`).
 #[derive(Clone, Copy)]
 pub struct Selection {
-    pub anchor: TextPos,
-    pub cursor: TextPos,
+    pub anchor: (u16, u16),
+    pub cursor: (u16, u16),
 }
 
 impl Selection {
-    pub fn range(&self) -> (TextPos, TextPos) {
-        (self.anchor.min(self.cursor), self.anchor.max(self.cursor))
+    /// (top-left, bottom-right) endpoints ordered by (row, col).
+    pub fn ordered(&self) -> ((u16, u16), (u16, u16)) {
+        let key = |p: (u16, u16)| (p.1, p.0);
+        if key(self.anchor) <= key(self.cursor) {
+            (self.anchor, self.cursor)
+        } else {
+            (self.cursor, self.anchor)
+        }
     }
-    pub fn is_empty(&self) -> bool {
+    pub fn is_click(&self) -> bool {
         self.anchor == self.cursor
     }
 }
 
-/// Geometry of the transcript's content area from the last frame, captured so mouse events (which
-/// arrive between frames) can map a screen cell back to a `TextPos`.
+/// The transcript's top screen row and height from the last frame, so a drag past its top/bottom
+/// edge can auto-scroll while selecting.
 #[derive(Clone, Copy)]
 pub struct TranscriptGeom {
-    pub x: u16,
     pub y: u16,
-    pub width: u16,
     pub viewport: u16,
-    pub scroll: u16,
 }
 
 /// Values collected by the setup wizard, handed to the event loop to persist + build a client.
@@ -249,10 +234,13 @@ pub struct App {
     // scroll
     pub scroll: u16,
     pub follow: bool,
-    // selection
+    // selection (screen-cell based; text read back from the rendered buffer)
     pub selection: Option<Selection>,
     pub selecting: bool,
     pub tgeom: Option<TranscriptGeom>,
+    /// The last rendered frame's text, one String per screen row, captured while a selection is
+    /// active so copy can read exactly what's on screen (any widget, not just the transcript).
+    pub screen_rows: Vec<String>,
     // loop control
     pub dirty: bool,
     pub quit: bool,
@@ -314,6 +302,7 @@ impl App {
             selection: None,
             selecting: false,
             tgeom: None,
+            screen_rows: Vec::new(),
             dirty: true,
             quit: false,
             setup: None,
@@ -521,54 +510,56 @@ impl App {
         }
     }
 
-    /// Map a mouse cell to a stable transcript position, using the geometry captured on the last
-    /// frame. Rows above/below the viewport clamp to the first/last visible row (so a drag past the
-    /// edge still tracks). `None` before the first draw or when the transcript is empty.
-    pub fn transcript_pos(&self, col: u16, row: u16) -> Option<TextPos> {
-        let g = self.tgeom?;
-        if self.transcript.line_count() == 0 || g.viewport == 0 {
-            return None;
+    /// When a drag reaches the transcript's top/bottom edge, scroll it one row so the selection can
+    /// extend beyond the viewport — and shift the anchor to track its text (until it scrolls off).
+    /// Only when no modal is up (modals are static and cover the transcript).
+    fn autoscroll_selection(&mut self, row: u16) {
+        if self.setup.is_some() || self.mcp_modal_open() {
+            return;
         }
-        let ry = row.clamp(g.y, g.y + g.viewport - 1);
-        let phys = g.scroll as usize + (ry - g.y) as usize;
-        let (line, seg) = self.transcript.locate_row(phys);
-        let l = self.transcript.line(line)?;
-        let rows = super::wrap::wrap_line(l, g.width.max(1) as usize);
-        let rseg = &rows[seg.min(rows.len().saturating_sub(1))];
-        let cx = col.saturating_sub(g.x) as usize;
-        Some(TextPos { line, col: rseg.char_start + cx.min(rseg.cells.len()) })
-    }
-
-    /// Nudge the scroll by one row when a drag reaches (or passes) the top/bottom edge of the
-    /// transcript, so selection can extend beyond what's on screen. Clamped in `draw`.
-    fn autoscroll_for(&mut self, row: u16) {
         let Some(g) = self.tgeom else { return };
-        if row <= g.y {
-            self.follow = false;
-            self.scroll = self.scroll.saturating_sub(1);
-        } else if row >= g.y + g.viewport.saturating_sub(1) {
-            self.follow = false;
-            self.scroll = self.scroll.saturating_add(1);
+        let bottom = g.y + g.viewport.saturating_sub(1);
+        let delta: i32 = if row <= g.y {
+            -1
+        } else if row >= bottom {
+            1
+        } else {
+            return;
+        };
+        self.follow = false;
+        self.scroll = if delta < 0 {
+            self.scroll.saturating_sub(1)
+        } else {
+            self.scroll.saturating_add(1)
+        };
+        // Content moved by `delta`; keep the anchor on the same text if it's within the transcript.
+        if let Some(sel) = self.selection.as_mut() {
+            let (ax, ay) = sel.anchor;
+            if ay >= g.y && ay <= bottom {
+                let ny = (ay as i32 - delta).clamp(g.y as i32, bottom as i32) as u16;
+                sel.anchor = (ax, ny);
+            }
         }
     }
 
-    /// The text covered by a selection, as `[min, max)` over logical characters, lines joined by
-    /// newlines. Consumed break-spaces live in the logical text, so copied prose reads naturally.
-    pub fn selected_text(&self, sel: Selection) -> String {
-        let (a, b) = sel.range();
-        let mut out = String::new();
-        for li in a.line..=b.line {
-            let Some(line) = self.transcript.line(li) else { continue };
-            let full: String = line.spans.iter().flat_map(|s| s.content.chars()).collect();
-            let len = full.chars().count();
-            let start = if li == a.line { a.col.min(len) } else { 0 };
-            let end = if li == b.line { b.col.min(len) } else { len };
-            if li > a.line {
-                out.push('\n');
-            }
-            out.extend(full.chars().skip(start).take(end.saturating_sub(start)));
+    /// The selected text, read from the last rendered frame's screen rows so it's exactly what's on
+    /// screen (any widget). Rows join with newlines; trailing padding is trimmed.
+    pub fn selected_screen_text(&self, sel: Selection) -> String {
+        let ((sx, sy), (ex, ey)) = sel.ordered();
+        let mut out: Vec<String> = Vec::new();
+        for y in sy..=ey {
+            let chars: Vec<char> = self
+                .screen_rows
+                .get(y as usize)
+                .map(|s| s.chars().collect())
+                .unwrap_or_default();
+            let x0 = if y == sy { sx as usize } else { 0 };
+            let x1 = if y == ey { ex as usize } else { chars.len() };
+            let x0 = x0.min(chars.len());
+            let x1 = x1.min(chars.len()).max(x0);
+            out.push(chars[x0..x1].iter().collect::<String>().trim_end().to_string());
         }
-        out
+        out.join("\n")
     }
 
     pub fn on_input(&mut self, ev: Event) -> AppEffect {
@@ -591,20 +582,17 @@ impl App {
                         self.dirty = true;
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
-                        // Start a selection anchored at the clicked character; a bare click (no drag)
-                        // clears any prior selection on release.
-                        self.selection = self
-                            .transcript_pos(m.column, m.row)
-                            .map(|p| Selection { anchor: p, cursor: p });
-                        self.selecting = self.selection.is_some();
+                        // Anchor a selection at the clicked screen cell. Works over ANY content —
+                        // transcript, modals, panels. A bare click (no drag) clears on release.
+                        let cell = (m.column, m.row);
+                        self.selection = Some(Selection { anchor: cell, cursor: cell });
+                        self.selecting = true;
                         self.dirty = true;
                     }
                     MouseEventKind::Drag(MouseButton::Left) if self.selecting => {
-                        self.autoscroll_for(m.row); // scroll when dragging past the transcript edge
-                        if let Some(p) = self.transcript_pos(m.column, m.row) {
-                            if let Some(sel) = self.selection.as_mut() {
-                                sel.cursor = p;
-                            }
+                        self.autoscroll_selection(m.row); // scroll if dragging past the transcript edge
+                        if let Some(sel) = self.selection.as_mut() {
+                            sel.cursor = (m.column, m.row);
                         }
                         self.dirty = true;
                     }
@@ -612,13 +600,13 @@ impl App {
                         self.selecting = false;
                         self.dirty = true;
                         match self.selection {
-                            Some(sel) if !sel.is_empty() => {
-                                let text = self.selected_text(sel);
+                            Some(sel) if !sel.is_click() => {
+                                let text = self.selected_screen_text(sel);
                                 if !text.is_empty() {
                                     return AppEffect::Copy(text);
                                 }
                             }
-                            // a click with no drag: clear the highlight
+                            // a click with no drag: clear the highlight (does NOT dismiss a modal)
                             _ => self.selection = None,
                         }
                     }
@@ -1129,30 +1117,39 @@ mod tests {
     }
 
     #[test]
-    fn selected_text_spans_columns_and_lines() {
+    fn selected_screen_text_reads_the_rendered_rows_across_lines() {
         let mut a = app();
-        a.transcript = TranscriptView::new(vec![Line::from("hello world"), Line::from("second line")]);
-        // (0,6)..(1,6) → "world" + newline + "second"; a reversed drag gives the same range.
-        let sel = Selection { anchor: TextPos { line: 0, col: 6 }, cursor: TextPos { line: 1, col: 6 } };
-        assert_eq!(a.selected_text(sel), "world\nsecond");
-        let rev = Selection { anchor: sel.cursor, cursor: sel.anchor };
-        assert_eq!(a.selected_text(rev), "world\nsecond");
-        // single line, half-open [0,5)
-        let one = Selection { anchor: TextPos { line: 0, col: 0 }, cursor: TextPos { line: 0, col: 5 } };
-        assert_eq!(a.selected_text(one), "hello");
+        // Simulate a rendered frame (what's on screen), including trailing padding to trim.
+        a.screen_rows = vec![
+            "  hello world      ".to_string(),
+            "  second line      ".to_string(),
+        ];
+        // Drag from (4,0) to (8,1): row 0 from col 4 to end, row 1 from col 0 to col 8 (linear
+        // selection, so the last row includes its leading indent).
+        let sel = Selection { anchor: (4, 0), cursor: (8, 1) };
+        assert_eq!(a.selected_screen_text(sel), "llo world\n  second");
+        // reversed drag → same range
+        let rev = Selection { anchor: (8, 1), cursor: (4, 0) };
+        assert_eq!(a.selected_screen_text(rev), "llo world\n  second");
+        // single row selection past the text trims trailing spaces
+        let one = Selection { anchor: (2, 0), cursor: (19, 0) };
+        assert_eq!(a.selected_screen_text(one), "hello world");
     }
 
     #[test]
-    fn transcript_pos_maps_a_cell_through_wrap_and_scroll() {
+    fn autoscroll_selection_scrolls_and_keeps_the_anchor_on_its_text() {
         let mut a = app();
-        // "abcdefghij" wraps to "abcde"(0..5) + "fghij"(5..10); "second" follows.
-        a.transcript = TranscriptView::new(vec![Line::from("abcdefghij"), Line::from("second")]);
-        a.transcript.ensure_width(5);
-        a.tgeom = Some(TranscriptGeom { x: 0, y: 0, width: 5, viewport: 4, scroll: 0 });
-        assert_eq!(a.transcript_pos(2, 0), Some(TextPos { line: 0, col: 2 })); // row 0 col 2 → 'c'
-        assert_eq!(a.transcript_pos(1, 1), Some(TextPos { line: 0, col: 6 })); // 2nd wrap seg → 'g'
-        assert_eq!(a.transcript_pos(3, 2), Some(TextPos { line: 1, col: 3 })); // row 2 → line 1
-        assert_eq!(a.transcript_pos(99, 0), Some(TextPos { line: 0, col: 5 })); // past end clamps
+        a.tgeom = Some(TranscriptGeom { y: 0, viewport: 10 }); // transcript rows 0..=9
+        a.scroll = 5;
+        a.selection = Some(Selection { anchor: (3, 4), cursor: (3, 9) });
+        // drag to the bottom edge (row 9) → scroll down one, anchor shifts up to track its text
+        a.autoscroll_selection(9);
+        assert_eq!(a.scroll, 6);
+        assert!(!a.follow);
+        assert_eq!(a.selection.unwrap().anchor, (3, 3));
+        // dragging in the middle does nothing
+        a.autoscroll_selection(5);
+        assert_eq!(a.scroll, 6);
     }
 
     #[test]

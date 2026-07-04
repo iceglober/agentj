@@ -2,7 +2,7 @@
 //! input / footer, plus the floating slash-command popover), with the transcript/input line builders
 //! and their cached row-count bookkeeping.
 
-use super::app::{App, Selection, SetupStep, TextPos, TranscriptGeom};
+use super::app::{App, Selection, SetupStep, TranscriptGeom};
 use super::editor::Editor;
 use super::markdown::render_markdown;
 use super::theme;
@@ -249,19 +249,14 @@ fn wrapped_rows_for_line(line: &Line<'_>, content_width: u16) -> usize {
 /// on the same characters the selection map computed.
 fn visible_transcript_rows(
     window: &[Line<'static>],
-    first: usize,
     content_width: u16,
     viewport: u16,
     intra: u16,
-    sel: Option<Selection>,
 ) -> Text<'static> {
-    let hl = theme::selection_style();
-    let range = sel.map(|s| s.range());
     let width = content_width.max(1) as usize;
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut skip = intra as usize;
-    'outer: for (k, line) in window.iter().enumerate() {
-        let logical = first + k;
+    'outer: for line in window {
         for row in wrap::wrap_line(line, width) {
             if skip > 0 {
                 skip -= 1;
@@ -270,16 +265,7 @@ fn visible_transcript_rows(
             if out.len() >= viewport as usize {
                 break 'outer;
             }
-            let mut cells = row.cells;
-            if let Some((a, b)) = range {
-                for (c, cell) in cells.iter_mut().enumerate() {
-                    let pos = TextPos { line: logical, col: row.char_start + c };
-                    if a <= pos && pos < b {
-                        cell.1 = cell.1.patch(hl);
-                    }
-                }
-            }
-            out.push(wrap::cells_to_line(&cells));
+            out.push(wrap::cells_to_line(&row.cells));
         }
     }
     Text::from(out)
@@ -353,25 +339,6 @@ impl TranscriptView {
             end += 1;
         }
         (first, &self.lines[first..end], intra)
-    }
-
-    /// The (logical line index, physical-segment offset within that line) a global physical row lands
-    /// in. Used to turn a mouse position into a stable text position.
-    pub fn locate_row(&self, phys_row: usize) -> (usize, usize) {
-        let line = self
-            .row_prefix
-            .partition_point(|&r| r <= phys_row)
-            .saturating_sub(1)
-            .min(self.lines.len().saturating_sub(1));
-        (line, phys_row.saturating_sub(self.row_prefix[line]))
-    }
-
-    pub fn line(&self, i: usize) -> Option<&Line<'static>> {
-        self.lines.get(i)
-    }
-
-    pub fn line_count(&self) -> usize {
-        self.lines.len()
     }
 
     pub fn push(&mut self, line: Line<'static>) {
@@ -839,19 +806,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.scroll = max;
     }
     app.scroll = app.scroll.min(max);
-    // Record the content geometry so between-frame mouse events can map a cell back to a text
-    // position (x/y are the top-left of the text area, inside the side padding).
+    // Record the transcript's top row + height so a drag past its edge can auto-scroll while selecting.
     app.tgeom = Some(TranscriptGeom {
-        x: rows[0].x + PAD_X,
         y: rows[0].y,
-        width: content_width,
         viewport,
-        scroll: app.scroll,
     });
     // Wrap only the on-screen window ourselves (not ratatui's Wrap widget) so the wrap, the scroll
     // math, and the selection map agree; tint any selected cells while we're at it.
-    let (first, window, intra) = app.transcript.window(app.scroll, viewport);
-    let visible = visible_transcript_rows(window, first, content_width, viewport, intra, app.selection);
+    let (_first, window, intra) = app.transcript.window(app.scroll, viewport);
+    let visible = visible_transcript_rows(window, content_width, viewport, intra);
     // Clear the whole region first: a default Block doesn't paint its padding cells, so without this
     // the side/bottom padding retains stale glyphs pinned to screen coordinates as content scrolls.
     f.render_widget(Clear, rows[0]);
@@ -947,6 +910,47 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else if app.mcp_modal_open() {
         render_mcp_modal(f, app, area);
     }
+
+    // Selection is applied to the finished frame (after every widget, including modals), so it can
+    // highlight anything on screen; the frame's text is snapshotted so copy reads exactly what shows.
+    if let Some(sel) = app.selection {
+        apply_screen_selection(f.buffer_mut(), sel);
+        app.screen_rows = snapshot_screen(f.buffer_mut());
+    }
+}
+
+/// Reverse-video the selected screen cells in the finished frame buffer.
+fn apply_screen_selection(buf: &mut ratatui::buffer::Buffer, sel: Selection) {
+    let ((sx, sy), (ex, ey)) = sel.ordered();
+    let hl = theme::selection_style();
+    let area = buf.area;
+    for y in sy..=ey {
+        if y < area.top() || y >= area.bottom() {
+            continue;
+        }
+        let x0 = if y == sy { sx } else { area.left() };
+        let x1 = if y == ey { ex } else { area.right() };
+        for x in x0..x1.min(area.right()) {
+            if x < area.left() {
+                continue;
+            }
+            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                cell.set_style(cell.style().patch(hl));
+            }
+        }
+    }
+}
+
+/// The finished frame's text, one String per screen row (for copy).
+fn snapshot_screen(buf: &ratatui::buffer::Buffer) -> Vec<String> {
+    let area = buf.area;
+    (area.top()..area.bottom())
+        .map(|y| {
+            (area.left()..area.right())
+                .map(|x| buf.cell(Position::new(x, y)).map(|c| c.symbol()).unwrap_or(" "))
+                .collect::<String>()
+        })
+        .collect()
 }
 
 /// A centered modal listing each MCP server's connect result (tools on success, the captured error on
@@ -1435,6 +1439,27 @@ mod tests {
         assert!(text.contains("gh pr checks 2805"), "command: {text}");
         assert!(text.contains("1m05"), "elapsed: {text}");
         assert!(text.contains('⏱'), "timeout: {text}");
+    }
+
+    #[test]
+    fn screen_selection_snapshots_and_copies_any_content_incl_a_modal() {
+        use super::super::app::Selection;
+        use crate::mcp::client::McpStatus;
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        // A failing server opens the MCP modal; selection must be able to copy its text.
+        let mcp = vec![McpStatus { name: "linear".into(), outcome: Err("boom".into()) }];
+        let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, mcp, false);
+        app.selection = Some(Selection { anchor: (0, 0), cursor: (89, 23) }); // whole screen
+        let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
+        app.refresh_input(90);
+        term.draw(|f| draw(f, &mut app)).unwrap();
+
+        assert!(!app.screen_rows.is_empty(), "frame text snapshotted for copy");
+        let copied = app.selected_screen_text(app.selection.unwrap());
+        assert!(copied.contains("MCP servers"), "copy reads the modal text: {copied}");
+        assert!(copied.contains("linear"));
     }
 
     #[test]
