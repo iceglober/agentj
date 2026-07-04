@@ -965,13 +965,19 @@ fn render_mcp_modal(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::default(),
     ];
     for s in &app.mcp_status {
+        use crate::mcp::client::McpOutcome;
         lines.push(match &s.outcome {
-            Ok(n) => Line::from(vec![
+            McpOutcome::Ok(n) => Line::from(vec![
                 Span::styled("✓ ", theme::ok()),
                 Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
                 Span::styled(format!("{n} tool{}", if *n == 1 { "" } else { "s" }), theme::dim()),
             ]),
-            Err(e) => Line::from(vec![
+            McpOutcome::NeedsAuth => Line::from(vec![
+                Span::styled("✎ ", theme::accent()),
+                Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
+                Span::styled(format!("needs authorization — /mcp login {}", s.name), theme::dim()),
+            ]),
+            McpOutcome::Err(e) => Line::from(vec![
                 Span::styled("✗ ", theme::err()),
                 Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
                 Span::styled(trunc(e, err_width), theme::dim()),
@@ -980,7 +986,7 @@ fn render_mcp_modal(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
     lines.push(Line::default());
     lines.push(Line::from(Span::styled(
-        "Any key: dismiss   ·   fix a failing server in your MCP config (.aj/aj.json)",
+        "Any key: dismiss   ·   ✎ servers authorize once with /mcp login <name>",
         theme::dim(),
     )));
 
@@ -1449,7 +1455,7 @@ mod tests {
         use ratatui::Terminal;
 
         // A failing server opens the MCP modal; selection must be able to copy its text.
-        let mcp = vec![McpStatus { name: "linear".into(), outcome: Err("boom".into()) }];
+        let mcp = vec![McpStatus { name: "linear".into(), outcome: crate::mcp::client::McpOutcome::Err("boom".into()) }];
         let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, mcp, false);
         app.selection = Some(Selection { anchor: (0, 0), cursor: (89, 23) }); // whole screen
         let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
@@ -1469,8 +1475,8 @@ mod tests {
         use ratatui::Terminal;
 
         let mcp = vec![
-            McpStatus { name: "linear".into(), outcome: Ok(12) },
-            McpStatus { name: "atlassian".into(), outcome: Err("address already in use 127.0.0.1:3736".into()) },
+            McpStatus { name: "linear".into(), outcome: crate::mcp::client::McpOutcome::Ok(12) },
+            McpStatus { name: "atlassian".into(), outcome: crate::mcp::client::McpOutcome::Err("address already in use 127.0.0.1:3736".into()) },
         ];
         let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, mcp, false);
         assert!(app.mcp_modal_open(), "a failure opens the modal");

@@ -38,6 +38,11 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
         summary: "configure a provider (endpoint, key, model) in a guided form",
     },
     SlashCommand {
+        name: "/mcp",
+        takes_arg: true,
+        summary: "MCP servers: status · login <name> (authorize once) · logout <name>",
+    },
+    SlashCommand {
         name: "/exit",
         takes_arg: false,
         summary: "quit agentj",

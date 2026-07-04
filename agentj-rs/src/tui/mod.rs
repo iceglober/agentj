@@ -269,6 +269,40 @@ pub async fn run(
                             let _ = execute!(terminal.backend_mut(), Print(osc52_copy(&text)));
                             app.notice(format!("copied {} chars", text.chars().count()));
                         }
+                        AppEffect::McpLogin(name) => {
+                            let configs = crate::mcp::config::load_mcp_servers(&app.root);
+                            match configs.iter().find(|c| c.name == name).and_then(|c| c.url.clone()) {
+                                None => app.notice(format!(
+                                    "no http/sse MCP server named `{name}` — /mcp for the list"
+                                )),
+                                Some(url) => {
+                                    app.notice(format!("authorizing {name}…"));
+                                    let tx = ui_tx.clone();
+                                    let n = name.clone();
+                                    tokio::spawn(async move {
+                                        let progress = tx.clone();
+                                        let result = crate::mcp::oauth::login(&url, move |m| {
+                                            let _ = progress.send(UiMsg::Agent(
+                                                crate::events::AgentEvent::Note(m),
+                                            ));
+                                        })
+                                        .await
+                                        .map_err(|e| e.to_string());
+                                        let _ = tx.send(UiMsg::McpAuthDone { name: n, result });
+                                    });
+                                }
+                            }
+                        }
+                        AppEffect::McpLogout(name) => {
+                            let configs = crate::mcp::config::load_mcp_servers(&app.root);
+                            match configs.iter().find(|c| c.name == name).and_then(|c| c.url.clone()) {
+                                Some(url) => {
+                                    crate::mcp::oauth::forget(&url);
+                                    app.notice(format!("{name}: cached credentials removed"));
+                                }
+                                None => app.notice(format!("no http/sse MCP server named `{name}`")),
+                            }
+                        }
                         AppEffect::ConfigureProvider(setup) => {
                             // Persist to the global config, reload it, then reuse the normal
                             // build-and-swap path so the new provider is live with no restart.
@@ -337,6 +371,43 @@ pub async fn run(
                         if let AppEffect::SpawnTurn = app.apply_rekey_result(rk, desc) {
                             app.turn = Some(spawn_turn(&app.messages, sess.clone(), ui_tx.clone()));
                         }
+                        continue;
+                    }
+                    // A server was just authorized: reconnect MCP off-loop so the UI stays live, then
+                    // swap the fresh clients into the session below.
+                    if let UiMsg::McpAuthDone { name, result } = msg {
+                        match result {
+                            Err(e) => app.notice(format!("{name}: authorization failed — {e}")),
+                            Ok(()) => {
+                                app.notice(format!("{name} authorized — reconnecting MCP servers…"));
+                                if let Some(old) = &sess.tools.mcp {
+                                    old.shutdown();
+                                }
+                                let root = app.root.clone();
+                                let tx = ui_tx.clone();
+                                tokio::spawn(async move {
+                                    let configs = crate::mcp::config::load_mcp_servers(&root);
+                                    let (clients, statuses) =
+                                        crate::mcp::client::connect_all(&configs).await;
+                                    let _ = tx.send(UiMsg::McpReconnected { clients, statuses });
+                                });
+                            }
+                        }
+                        continue;
+                    }
+                    if let UiMsg::McpReconnected { clients, statuses } = msg {
+                        let tool_count = clients.tool_count();
+                        app.mcp_status = statuses;
+                        sess = Session {
+                            llm: sess.llm.clone(),
+                            tools: std::sync::Arc::new(crate::tools::Tools::new(
+                                std::path::PathBuf::from(&app.root),
+                                sess.tools.jobs.clone(),
+                                Some(std::sync::Arc::new(clients)),
+                            )),
+                            cfg: sess.cfg.clone(),
+                        };
+                        app.notice(format!("MCP reconnected — {tool_count} tools available"));
                         continue;
                     }
                     if matches!(app.on_ui(msg), AppEffect::Snapshot) {

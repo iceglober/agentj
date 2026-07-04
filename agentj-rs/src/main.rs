@@ -131,15 +131,47 @@ async fn run_mcp(sub: &[String]) {
             println!("Connected: {} tool(s) available.", clients.tool_count());
             for s in statuses {
                 match s.outcome {
-                    Ok(n) => println!("  ✓ {:20} {n} tool(s)", s.name),
-                    Err(e) => println!("  ✗ {:20} {e}", s.name),
+                    mcp::client::McpOutcome::Ok(n) => println!("  ✓ {:20} {n} tool(s)", s.name),
+                    mcp::client::McpOutcome::NeedsAuth => {
+                        println!("  ✎ {:20} needs authorization — `agentj mcp login {}`", s.name, s.name)
+                    }
+                    mcp::client::McpOutcome::Err(e) => println!("  ✗ {:20} {e}", s.name),
                 }
             }
+            clients.shutdown();
         }
-        Some("login") | Some("logout") => {
-            println!("MCP OAuth login/logout is staged. Today: stdio servers and no-auth streamable-http work; static-`Authorization`-header and OAuth servers are the next step.");
+        Some("login") => {
+            let Some(name) = sub.get(1) else {
+                println!("usage: agentj mcp login <server-name>");
+                return;
+            };
+            let Some(cfg) = configs.iter().find(|c| &c.name == name) else {
+                println!("no MCP server named `{name}` in .mcp.json");
+                return;
+            };
+            let Some(url) = cfg.url.clone() else {
+                println!("`{name}` is a stdio server — OAuth login applies to http/sse servers");
+                return;
+            };
+            match mcp::oauth::login(&url, |m| println!("  {m}")).await {
+                Ok(()) => println!("✓ {name} authorized — it will connect automatically from now on"),
+                Err(e) => println!("✗ authorization failed: {e}"),
+            }
         }
-        _ => println!("usage: agentj mcp <list | login | logout>"),
+        Some("logout") => {
+            let Some(name) = sub.get(1) else {
+                println!("usage: agentj mcp logout <server-name>");
+                return;
+            };
+            match configs.iter().find(|c| &c.name == name).and_then(|c| c.url.clone()) {
+                Some(url) => {
+                    mcp::oauth::forget(&url);
+                    println!("✓ {name}: cached credentials removed");
+                }
+                None => println!("no http/sse MCP server named `{name}` in .mcp.json"),
+            }
+        }
+        _ => println!("usage: agentj mcp <list | login <name> | logout <name>>"),
     }
 }
 
@@ -223,8 +255,13 @@ async fn main() {
     if let Some(task) = args.once {
         // Headless one-shot: run a turn, print events to stdout, exit on the result.
         for s in &mcp_status {
-            if let Err(e) = &s.outcome {
-                eprintln!("! MCP \"{}\": {e}", s.name);
+            match &s.outcome {
+                mcp::client::McpOutcome::Err(e) => eprintln!("! MCP \"{}\": {e}", s.name),
+                mcp::client::McpOutcome::NeedsAuth => eprintln!(
+                    "! MCP \"{}\": needs authorization — run `agentj mcp login {}` once",
+                    s.name, s.name
+                ),
+                mcp::client::McpOutcome::Ok(_) => {}
             }
         }
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();

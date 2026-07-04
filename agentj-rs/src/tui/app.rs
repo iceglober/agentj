@@ -70,6 +70,13 @@ pub enum UiMsg {
     TurnDone,
     /// A `/task` re-key finished off-thread; carries its result and the task directive to start.
     RekeyDone { rk: RekeyResult, desc: String },
+    /// An `/mcp login` flow finished; on success the loop reconnects MCP and rebuilds the session.
+    McpAuthDone { name: String, result: Result<(), String> },
+    /// A background MCP reconnect finished — the loop swaps these into a fresh `Session`.
+    McpReconnected {
+        clients: crate::mcp::client::McpClients,
+        statuses: Vec<McpStatus>,
+    },
 }
 
 /// A running turn: its abort handle plus the job-id watermark captured at spawn, so an interrupt can
@@ -122,6 +129,10 @@ pub enum AppEffect {
     ConfigureProvider(ProviderSetup),
     /// Copy this text to the system clipboard (emitted via OSC 52 by the event loop).
     Copy(String),
+    /// `/mcp login <name>`: run the one-time OAuth flow for that server, then reconnect.
+    McpLogin(String),
+    /// `/mcp logout <name>`: drop the server's cached grant.
+    McpLogout(String),
 }
 
 /// A drag selection in absolute SCREEN cells (col, row). Screen-based rather than tied to the
@@ -264,7 +275,9 @@ impl App {
     ) -> Self {
         let transcript = TranscriptView::new(vec![dim_line(CHEAT_SHEET)]);
         // Surface MCP failures as a dismissible modal (below), not as transcript noise.
-        let show_mcp_modal = mcp_status.iter().any(|s| s.outcome.is_err());
+        let show_mcp_modal = mcp_status
+            .iter()
+            .any(|s| !matches!(s.outcome, crate::mcp::client::McpOutcome::Ok(_)));
         let mut app = Self {
             system: system.clone(),
             root,
@@ -829,6 +842,8 @@ impl App {
         } else if text == "/setup" {
             self.start_setup();
             AppEffect::None
+        } else if text == "/mcp" || text.starts_with("/mcp ") {
+            self.submit_mcp(&text)
         } else if text == "/init" {
             self.push_user_line(&text);
             AppEffect::Init
@@ -878,6 +893,25 @@ impl App {
             selector: SelectorOverride {
                 model: (!model.is_empty()).then_some(model),
             },
+        }
+    }
+
+    fn submit_mcp(&mut self, text: &str) -> AppEffect {
+        self.push_user_line(text);
+        let mut parts = text["/mcp".len()..].split_whitespace();
+        match (parts.next(), parts.next()) {
+            (Some("login"), Some(name)) => AppEffect::McpLogin(name.to_string()),
+            (Some("logout"), Some(name)) => AppEffect::McpLogout(name.to_string()),
+            _ => {
+                // Bare `/mcp` (or bad args): reopen the status modal + usage.
+                self.show_mcp_modal = !self.mcp_status.is_empty();
+                if self.mcp_status.is_empty() {
+                    self.transcript.push(dim_line("no MCP servers configured (.mcp.json)"));
+                }
+                self.transcript
+                    .push(dim_line("usage: /mcp login <name> · /mcp logout <name>"));
+                AppEffect::None
+            }
         }
     }
 
@@ -995,6 +1029,9 @@ impl App {
             }
             // Applied directly in the event loop (it may start a turn); never reaches here.
             UiMsg::RekeyDone { .. } => AppEffect::None,
+            // Applied directly in the event loop (it rebuilds the session); never reaches here.
+            UiMsg::McpAuthDone { .. } => AppEffect::None,
+            UiMsg::McpReconnected { .. } => AppEffect::None,
         }
     }
 

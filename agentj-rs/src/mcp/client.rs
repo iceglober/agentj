@@ -7,6 +7,7 @@ use crate::mcp::config::{McpServerConfig, Transport};
 use crate::provider::ToolSpec;
 use rmcp::model::CallToolRequestParams;
 use rmcp::service::RunningService;
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::transport::{StreamableHttpClientTransport, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
 use serde_json::{json, Value};
@@ -17,9 +18,21 @@ use std::sync::{Arc, Mutex};
 /// The outcome of connecting to one MCP server at startup, for a clean status display in the TUI.
 pub struct McpStatus {
     pub name: String,
-    /// `Ok(tool_count)` on success; `Err(reason)` on failure/timeout.
-    pub outcome: Result<usize, String>,
+    pub outcome: McpOutcome,
 }
+
+pub enum McpOutcome {
+    /// Connected; carries the tool count.
+    Ok(usize),
+    /// An OAuth server with no cached grant on this machine. Deliberate, never ambient: startup
+    /// doesn't block or open a browser — the user authorizes once via `/mcp login <name>`.
+    NeedsAuth,
+    Err(String),
+}
+
+/// Sentinel error text from `connect_one` meaning "this server wants OAuth and has no usable grant";
+/// `connect_all` turns it into `McpOutcome::NeedsAuth`.
+const NEEDS_AUTH_MARKER: &str = "__needs_auth__";
 
 /// Drain a child's stderr into a capped rolling buffer instead of letting it inherit (and spew all
 /// over) agentj's terminal. The buffer is read back to surface the real error when a server fails.
@@ -158,11 +171,44 @@ async fn connect_one(cfg: &McpServerConfig, spawned: &Mutex<Option<u32>>) -> any
             (service, pid)
         }
         Transport::Http | Transport::Sse => {
-            // Stage 1: plain streamable-http. Static `Authorization` headers + OAuth are staged (a
-            // server needing either just surfaces as a connect notice for now).
             let url = cfg.url.clone().unwrap_or_default();
-            let transport = StreamableHttpClientTransport::from_uri(url);
-            (().serve(transport).await?, None)
+            let mut tcfg = StreamableHttpClientTransportConfig::with_uri(url.clone());
+            // Static headers from the config are sent on every request; `Authorization` rides the
+            // dedicated auth_header slot.
+            for (k, v) in &cfg.headers {
+                if k.eq_ignore_ascii_case("authorization") {
+                    tcfg.auth_header = Some(v.clone());
+                } else if let (Ok(name), Ok(value)) = (
+                    reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                    reqwest::header::HeaderValue::from_str(v),
+                ) {
+                    tcfg.custom_headers.insert(name, value);
+                }
+            }
+            let has_static = crate::mcp::config::has_static_auth(cfg);
+            if !has_static && crate::mcp::oauth::has_cached_credentials(&url) {
+                // This machine holds a grant for the server: connect through the OAuth client, which
+                // attaches (and refreshes) the token itself.
+                match crate::mcp::oauth::cached_auth_client(&url).await {
+                    Some(auth) => {
+                        let transport = StreamableHttpClientTransport::with_client(auth, tcfg);
+                        (().serve(transport).await?, None)
+                    }
+                    // A grant exists but can't be used (revoked / metadata gone) → re-authorize.
+                    None => anyhow::bail!(NEEDS_AUTH_MARKER),
+                }
+            } else {
+                let transport =
+                    StreamableHttpClientTransport::with_client(reqwest::Client::default(), tcfg);
+                match ().serve(transport).await {
+                    Ok(s) => (s, None),
+                    // A bare http server that refuses the handshake and carries no static auth is in
+                    // all likelihood an OAuth server without a grant — surface "authorize me", never
+                    // auto-open a browser.
+                    Err(_) if !has_static => anyhow::bail!(NEEDS_AUTH_MARKER),
+                    Err(e) => return Err(e.into()),
+                }
+            }
         }
     };
 
@@ -201,25 +247,22 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
                 }
                 let n = server.tools.len();
                 servers.push(server);
-                Ok(n)
+                McpOutcome::Ok(n)
             }
             // Failed or timed out: the child (if any) is useless now — kill its whole tree so it
             // can't linger holding ports. Successful servers are killed later by `shutdown()`.
+            Ok(Err(e)) if e.to_string() == NEEDS_AUTH_MARKER => McpOutcome::NeedsAuth,
             Ok(Err(e)) => {
                 if let Some(pid) = *spawned.lock().unwrap() {
                     kill_group(pid);
                 }
-                Err(format!("{e}"))
+                McpOutcome::Err(format!("{e}"))
             }
             Err(_) => {
                 if let Some(pid) = *spawned.lock().unwrap() {
                     kill_group(pid);
                 }
-                Err(format!(
-                    "timed out connecting (>{}s) — for an OAuth server (mcp-remote), pre-authorize \
-                     once: `npx -y mcp-remote <url>` in a terminal, approve in the browser, Ctrl-C",
-                    timeout.as_secs()
-                ))
+                McpOutcome::Err(format!("timed out connecting (>{}s)", timeout.as_secs()))
             }
         };
         statuses.push(McpStatus { name: cfg.name.clone(), outcome });
