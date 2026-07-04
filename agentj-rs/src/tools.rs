@@ -6,6 +6,7 @@ use crate::jobs::JobManager;
 use crate::mcp::client::McpClients;
 use crate::provider::ToolSpec;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,6 +41,36 @@ pub struct Tools {
     pub root: PathBuf,
     pub jobs: Arc<JobManager>,
     pub mcp: Option<Arc<McpClients>>,
+    /// Content hash of each file at its last read/write through these tools. Edit tools compare
+    /// against it so an edit lands on what the model actually saw — a file changed on disk since the
+    /// last read fails with "re-read" instead of silently editing drifted content.
+    read_stamps: std::sync::Mutex<HashMap<PathBuf, u64>>,
+}
+
+/// Numbered lines around the first line containing `needle` — the post-edit echo that makes a
+/// verification re-read unnecessary. `None` when the needle isn't found (e.g. a pure deletion).
+fn context_snippet(text: &str, needle: &str, around: usize) -> Option<String> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = text.split('\n').collect();
+    let hit = lines.iter().position(|l| l.contains(needle))?;
+    let lo = hit.saturating_sub(around);
+    let hi = (hit + around + 1).min(lines.len());
+    Some(
+        (lo..hi)
+            .map(|i| format!("{}\t{}", i + 1, lines[i]))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn content_stamp(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -94,7 +125,32 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 impl Tools {
     pub fn new(root: PathBuf, jobs: Arc<JobManager>, mcp: Option<Arc<McpClients>>) -> Self {
-        Self { root, jobs, mcp }
+        Self {
+            root,
+            jobs,
+            mcp,
+            read_stamps: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn stamp(&self, abs: &Path, text: &str) {
+        self.read_stamps
+            .lock()
+            .unwrap()
+            .insert(abs.to_path_buf(), content_stamp(text));
+    }
+
+    /// `Some(error)` when the file on disk no longer matches what the model last read through these
+    /// tools (an external change). No stamp yet → not stale (the model may edit blind; the match
+    /// checks below still guard correctness).
+    fn stale_error(&self, abs: &Path, current: &str, path: &str) -> Option<String> {
+        let stamps = self.read_stamps.lock().unwrap();
+        match stamps.get(abs) {
+            Some(&s) if s != content_stamp(current) => Some(format!(
+                "error: {path} changed on disk since you last read it — re-read it before editing"
+            )),
+            _ => None,
+        }
     }
 
     /// Tool specs contributed by connected MCP servers (each `<server>__<tool>`).
@@ -111,6 +167,7 @@ impl Tools {
             "read_file" => self.read_file(args),
             "write_file" => self.write_file(args),
             "edit_file" => self.edit_file(args),
+            "edit_lines" => self.edit_lines(args),
             "list_dir" => self.list_dir(args),
             "glob" => self.glob(args).await,
             "grep" => self.grep(args).await,
@@ -180,6 +237,7 @@ impl Tools {
             return ToolOutcome::ok(format!("[binary file, {} bytes, not shown]", bytes.len()));
         }
         let text = String::from_utf8_lossy(&bytes);
+        self.stamp(&abs, &text); // edits verify against what was actually read
         let lines: Vec<&str> = text.split('\n').collect();
         let total = lines.len();
         let offset = args
@@ -225,19 +283,22 @@ impl Tools {
             let _ = fs::create_dir_all(parent);
         }
         match fs::write(&abs, content) {
-            Ok(_) => ToolOutcome::ok(format!("wrote {} bytes to {path}", content.len())),
+            Ok(_) => {
+                self.stamp(&abs, content);
+                ToolOutcome::ok(format!("wrote {} bytes to {path}", content.len()))
+            }
             Err(e) => ToolOutcome::err(format!("error: {e}")),
         }
     }
 
+    /// One or MANY string replacements in a single call. Batching related fixes into one `edits`
+    /// array is the cheap path: every extra tool round-trip re-sends the whole conversation. Edits
+    /// apply in order against the evolving text and are atomic — if any fails, nothing is written and
+    /// the error names which one. The result echoes the changed regions so a verification re-read is
+    /// unnecessary.
     fn edit_file(&self, args: &Value) -> ToolOutcome {
-        let (path, old, new) = match (
-            arg_str(args, "path"),
-            arg_str(args, "old_string"),
-            arg_str(args, "new_string"),
-        ) {
-            (Some(p), Some(o), Some(n)) => (p, o, n),
-            _ => return ToolOutcome::err("error: edit_file needs path, old_string, new_string"),
+        let Some(path) = arg_str(args, "path") else {
+            return ToolOutcome::err("error: edit_file needs a path");
         };
         let abs = match safe_resolve(&self.root, path) {
             Ok(a) => a,
@@ -247,37 +308,166 @@ impl Tools {
             Ok(t) => t,
             Err(_) => return ToolOutcome::err(format!("file not found: {path}")),
         };
-        let count = text.matches(old).count();
-        if count == 0 {
-            return ToolOutcome::err(format!(
-                "old_string not found in {path} — re-read the file; it may have changed since you last saw it"
+        if let Some(stale) = self.stale_error(&abs, &text, path) {
+            return ToolOutcome::err(stale);
+        }
+
+        // Ops: an `edits` array, or the single old_string/new_string form.
+        let mut ops: Vec<(String, String, bool)> = Vec::new();
+        if let Some(arr) = args.get("edits").and_then(|v| v.as_array()) {
+            for (i, e) in arr.iter().enumerate() {
+                match (
+                    e.get("old_string").and_then(|v| v.as_str()),
+                    e.get("new_string").and_then(|v| v.as_str()),
+                ) {
+                    (Some(o), Some(n)) => ops.push((
+                        o.to_string(),
+                        n.to_string(),
+                        e.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false),
+                    )),
+                    _ => {
+                        return ToolOutcome::err(format!(
+                            "error: edits[{i}] needs old_string and new_string"
+                        ))
+                    }
+                }
+            }
+        } else if let (Some(o), Some(n)) = (arg_str(args, "old_string"), arg_str(args, "new_string")) {
+            ops.push((
+                o.to_string(),
+                n.to_string(),
+                args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false),
             ));
         }
-        let replace_all = args
-            .get("replace_all")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if count > 1 && !replace_all {
-            return ToolOutcome::err(format!(
-                "old_string is not unique in {path} ({count} matches) — add more context, or pass replace_all to replace every occurrence"
-            ));
+        if ops.is_empty() {
+            return ToolOutcome::err(
+                "error: edit_file needs old_string+new_string, or an `edits` array of them",
+            );
         }
-        let updated = if replace_all {
-            text.replace(old, new)
-        } else {
-            text.replacen(old, new, 1)
-        };
-        match fs::write(&abs, updated) {
-            Ok(_) => ToolOutcome::ok(if replace_all {
-                format!(
-                    "edited {path} ({count} replacement{})",
-                    if count == 1 { "" } else { "s" }
-                )
+
+        let n_ops = ops.len();
+        let mut updated = text;
+        let mut replaced_total = 0usize;
+        for (i, (old, new, replace_all)) in ops.iter().enumerate() {
+            let at = |msg: String| {
+                if n_ops > 1 {
+                    format!("edit {}/{n_ops}: {msg} — NOTHING was written (edits are atomic); fix and resend the batch", i + 1)
+                } else {
+                    msg
+                }
+            };
+            let count = updated.matches(old.as_str()).count();
+            if count == 0 {
+                return ToolOutcome::err(at(format!(
+                    "old_string not found in {path} — re-read the file; it may have changed since you last saw it"
+                )));
+            }
+            if count > 1 && !replace_all {
+                return ToolOutcome::err(at(format!(
+                    "old_string is not unique in {path} ({count} matches) — add more context, or pass replace_all"
+                )));
+            }
+            updated = if *replace_all {
+                replaced_total += count;
+                updated.replace(old.as_str(), new)
             } else {
-                format!("edited {path}")
-            }),
-            Err(e) => ToolOutcome::err(format!("error: {e}")),
+                replaced_total += 1;
+                updated.replacen(old.as_str(), new, 1)
+            };
         }
+        if let Err(e) = fs::write(&abs, &updated) {
+            return ToolOutcome::err(format!("error: {e}"));
+        }
+        self.stamp(&abs, &updated);
+
+        // Echo the changed regions (result-side verification — no re-read round-trip needed).
+        let mut echo = String::new();
+        for (old, new, _) in ops.iter().take(5) {
+            let anchor = new.lines().next().filter(|l| !l.trim().is_empty());
+            let target = anchor.or_else(|| old.lines().next());
+            if let Some(t) = target {
+                if let Some(snip) = context_snippet(&updated, t, 2) {
+                    echo.push('\n');
+                    echo.push_str(&snip);
+                }
+            }
+        }
+        ToolOutcome::ok(format!(
+            "edited {path} ({replaced_total} replacement{}){echo}",
+            if replaced_total == 1 { "" } else { "s" }
+        ))
+    }
+
+    /// Replace an inclusive 1-based line range, anchored by the numbers `read_file` prints plus an
+    /// `expect` prefix of the first line — so a drifted file fails with the current region instead of
+    /// silently editing the wrong lines. Line-precise and whitespace-light where exact string
+    /// reproduction is awkward.
+    fn edit_lines(&self, args: &Value) -> ToolOutcome {
+        let (Some(path), Some(start), Some(end), Some(expect), Some(content)) = (
+            arg_str(args, "path"),
+            args.get("start_line").and_then(|v| v.as_u64()),
+            args.get("end_line").and_then(|v| v.as_u64()),
+            arg_str(args, "expect"),
+            arg_str(args, "content"),
+        ) else {
+            return ToolOutcome::err(
+                "error: edit_lines needs path, start_line, end_line, expect (prefix of the first line being replaced), content (empty deletes the range)",
+            );
+        };
+        let abs = match safe_resolve(&self.root, path) {
+            Ok(a) => a,
+            Err(e) => return ToolOutcome::err(format!("error: {e}")),
+        };
+        let text = match fs::read_to_string(&abs) {
+            Ok(t) => t,
+            Err(_) => return ToolOutcome::err(format!("file not found: {path}")),
+        };
+        if let Some(stale) = self.stale_error(&abs, &text, path) {
+            return ToolOutcome::err(stale);
+        }
+        let lines: Vec<&str> = text.split('\n').collect();
+        let total = lines.len();
+        let (start, end) = (start as usize, end as usize);
+        if start < 1 || end < start || end > total {
+            return ToolOutcome::err(format!(
+                "error: invalid range {start}–{end} ({path} has {total} lines)"
+            ));
+        }
+        // Anchor check: the first line being replaced must still start with `expect` (whitespace
+        // relaxed). A mismatch returns the current region so re-anchoring needs no full re-read.
+        let anchor = lines[start - 1].trim_start();
+        if expect.trim().is_empty() || !anchor.starts_with(expect.trim_start().trim_end()) {
+            let lo = start.saturating_sub(3).max(1);
+            let hi = (end + 2).min(total);
+            let region: String = (lo..=hi)
+                .map(|n| format!("{n}\t{}", lines[n - 1]))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return ToolOutcome::err(format!(
+                "line {start} of {path} doesn't start with your `expect` — the region currently reads:\n{region}\nre-anchor (adjust start_line/expect) and retry"
+            ));
+        }
+        let mut out: Vec<&str> = Vec::with_capacity(total);
+        out.extend(&lines[..start - 1]);
+        if !content.is_empty() {
+            out.extend(content.split('\n'));
+        }
+        out.extend(&lines[end..]);
+        let updated = out.join("\n");
+        if let Err(e) = fs::write(&abs, &updated) {
+            return ToolOutcome::err(format!("error: {e}"));
+        }
+        self.stamp(&abs, &updated);
+        let ulines: Vec<&str> = updated.split('\n').collect();
+        let lo = start.saturating_sub(2).max(1);
+        let hi = (start + content.split('\n').count() + 1).min(ulines.len());
+        let echo: String = (lo..=hi)
+            .map(|n| format!("{n}\t{}", ulines[n - 1]))
+            .collect::<Vec<_>>()
+            .join("\n");
+        ToolOutcome::ok(format!(
+            "edited {path} lines {start}–{end}; now:\n{echo}"
+        ))
     }
 
     fn list_dir(&self, args: &Value) -> ToolOutcome {
@@ -507,8 +697,25 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "edit_file".into(),
-            description: "Replace an exact, unique string in a file. old_string must occur exactly once, unless replace_all is set — then every occurrence is replaced and the count reported.".into(),
-            parameters: json!({ "type": "object", "properties": { "path": { "type": "string" }, "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean", "description": "replace every occurrence of old_string instead of requiring it be unique" } }, "required": ["path", "old_string", "new_string"] }),
+            description: "Replace exact strings in a file. BATCH related fixes: pass `edits` (an array of {old_string,new_string}) to apply several replacements in ONE call — far cheaper than one call per fix. Edits apply in order and are atomic (any failure writes nothing). Each old_string must occur exactly once unless its replace_all is set. The result echoes the changed regions, so you do NOT need to re-read the file to verify.".into(),
+            parameters: json!({ "type": "object", "properties": {
+                "path": { "type": "string" },
+                "edits": { "type": "array", "description": "batch form: replacements applied in order", "items": { "type": "object", "properties": { "old_string": { "type": "string" }, "new_string": { "type": "string" }, "replace_all": { "type": "boolean" } }, "required": ["old_string", "new_string"] } },
+                "old_string": { "type": "string", "description": "single-edit form" },
+                "new_string": { "type": "string" },
+                "replace_all": { "type": "boolean", "description": "replace every occurrence instead of requiring uniqueness" }
+            }, "required": ["path"] }),
+        },
+        ToolSpec {
+            name: "edit_lines".into(),
+            description: "Replace an inclusive line range (1-based, the numbers read_file shows). `expect` = the first few words of the current start_line, as a drift guard: on mismatch you get the current region back to re-anchor from. Empty content deletes the range. Use when exact-string matching is awkward (heavy whitespace, duplicated text); result echoes the new region.".into(),
+            parameters: json!({ "type": "object", "properties": {
+                "path": { "type": "string" },
+                "start_line": { "type": "integer" },
+                "end_line": { "type": "integer" },
+                "expect": { "type": "string", "description": "prefix of the CURRENT first line being replaced (leading whitespace ignored)" },
+                "content": { "type": "string", "description": "replacement lines; empty string deletes the range" }
+            }, "required": ["path", "start_line", "end_line", "expect", "content"] }),
         },
         ToolSpec {
             name: "list_dir".into(),
@@ -720,5 +927,86 @@ mod tests {
             "expected a re-read hint, got: {}",
             o.text
         );
+    }
+
+    #[tokio::test]
+    async fn batched_edits_apply_in_order_atomically_and_echo_regions() {
+        let (t, dir) = temp_tools();
+        fs::write(dir.join("f.rs"), "fn a() {}\nfn b() {}\nfn c() {}\n").unwrap();
+        let o = t
+            .call(
+                "edit_file",
+                &json!({ "path": "f.rs", "edits": [
+                    { "old_string": "fn a() {}", "new_string": "fn a() { one(); }" },
+                    { "old_string": "fn c() {}", "new_string": "fn c() { three(); }" }
+                ]}),
+            )
+            .await;
+        assert!(o.ok, "{}", o.text);
+        assert!(o.text.contains("2 replacements"), "{}", o.text);
+        assert!(o.text.contains("one();"), "echoes changed region: {}", o.text);
+        assert!(o.text.contains("three();"), "echoes second region: {}", o.text);
+        let now = fs::read_to_string(dir.join("f.rs")).unwrap();
+        assert!(now.contains("one();") && now.contains("three();"));
+
+        // Atomic: a bad op in the middle writes nothing.
+        let o = t
+            .call(
+                "edit_file",
+                &json!({ "path": "f.rs", "edits": [
+                    { "old_string": "fn b() {}", "new_string": "fn b() { two(); }" },
+                    { "old_string": "DOES NOT EXIST", "new_string": "x" }
+                ]}),
+            )
+            .await;
+        assert!(!o.ok);
+        assert!(o.text.contains("edit 2/2"), "names the failing op: {}", o.text);
+        let now = fs::read_to_string(dir.join("f.rs")).unwrap();
+        assert!(!now.contains("two();"), "nothing written on batch failure");
+    }
+
+    #[tokio::test]
+    async fn edit_lines_replaces_a_range_and_rejects_a_drifted_anchor() {
+        let (t, dir) = temp_tools();
+        fs::write(dir.join("s.ts"), "const a = 1;\nconst b = 2;\nconst c = 3;\n").unwrap();
+        let o = t
+            .call(
+                "edit_lines",
+                &json!({ "path": "s.ts", "start_line": 2, "end_line": 2, "expect": "const b", "content": "const b = 22;\nconst b2 = 23;" }),
+            )
+            .await;
+        assert!(o.ok, "{}", o.text);
+        assert!(o.text.contains("const b = 22;"), "echoes the new region: {}", o.text);
+        let now = fs::read_to_string(dir.join("s.ts")).unwrap();
+        assert_eq!(now, "const a = 1;\nconst b = 22;\nconst b2 = 23;\nconst c = 3;\n");
+
+        // Drifted anchor: expect doesn't match → error carries the current region to re-anchor from.
+        let o = t
+            .call(
+                "edit_lines",
+                &json!({ "path": "s.ts", "start_line": 2, "end_line": 2, "expect": "const zzz", "content": "x" }),
+            )
+            .await;
+        assert!(!o.ok);
+        assert!(o.text.contains("const b = 22;"), "shows current region: {}", o.text);
+    }
+
+    #[tokio::test]
+    async fn edits_fail_stale_when_the_file_changed_since_the_last_read() {
+        let (t, dir) = temp_tools();
+        fs::write(dir.join("w.txt"), "alpha\n").unwrap();
+        let _ = t.call("read_file", &json!({ "path": "w.txt" })).await; // stamps
+        fs::write(dir.join("w.txt"), "alpha\nbeta (external change)\n").unwrap();
+        let o = t
+            .call("edit_file", &json!({ "path": "w.txt", "old_string": "alpha", "new_string": "gamma" }))
+            .await;
+        assert!(!o.ok);
+        assert!(o.text.contains("changed on disk"), "{}", o.text);
+        // Re-reading refreshes the stamp; the edit then succeeds.
+        let _ = t.call("read_file", &json!({ "path": "w.txt" })).await;
+        let o = t
+            .call("edit_file", &json!({ "path": "w.txt", "old_string": "alpha", "new_string": "gamma" }))
+            .await;
+        assert!(o.ok, "{}", o.text);
     }
 }

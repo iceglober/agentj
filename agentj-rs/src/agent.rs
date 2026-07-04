@@ -555,7 +555,7 @@ pub async fn run_turn(
             // git commit arms the RESOLVE completeness gate.
             if !is_delegate {
                 match tc.function.name.as_str() {
-                    "write_file" | "edit_file" if ok => {
+                    "write_file" | "edit_file" | "edit_lines" if ok => {
                         edited_since_check = true;
                         mutated_this_turn = true;
                     }
