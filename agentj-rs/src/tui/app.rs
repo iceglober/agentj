@@ -1047,6 +1047,9 @@ impl App {
                 if name != "delegate" {
                     self.status = self.current_tool.clone();
                 }
+                // The status timer tracks the CURRENT step, not the whole turn — otherwise a long
+                // turn reads "thinking · 271s" and looks wedged when it's healthy.
+                self.since = Instant::now();
                 self.set_effect(format!("tool: {name}"));
             }
             AgentEvent::ToolEnd {
@@ -1065,6 +1068,7 @@ impl App {
                 self.transcript
                     .push(tool_end_line(&self.current_tool, ok, elapsed_ms, shown));
                 self.status = "thinking".to_string();
+                self.since = Instant::now(); // per-step timer: time in THIS thinking stretch
                 self.set_effect(format!("done in {}", fmt_ms(elapsed_ms)));
             }
             AgentEvent::SubagentStart { id, desc } => {
