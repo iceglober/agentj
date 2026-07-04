@@ -457,7 +457,10 @@ pub async fn run_turn(
                 let msg = format!(
                     "[supervisor: ASSESS check — you edited files this turn but no project check has \
                      passed since the last edit. Run the project's checks{hint} and show the result \
-                     before finishing; if a check genuinely doesn't apply, say why in your final report.]"
+                     before finishing. If you changed live service/API behavior, tests alone aren't \
+                     proof — boot the system (AGENTS.md/dev scripts, `job_start`) and exercise the \
+                     changed path for real, or state explicitly why that's impossible here. If a check \
+                     genuinely doesn't apply, say why in your final report.]"
                 );
                 let _ = tx.send(AgentEvent::Note(first_line(&msg, 120)));
                 let m = ChatMessage::user(msg);
