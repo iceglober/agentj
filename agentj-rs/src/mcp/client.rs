@@ -137,8 +137,18 @@ async fn connect_one(cfg: &McpServerConfig, spawned: &Mutex<Option<u32>>) -> any
                 Ok(s) => s,
                 Err(e) => {
                     // The transport error ("channel closed") is usually opaque; the real reason is in
-                    // the captured stderr (e.g. "RPA_FILES_S3_BUCKET not configured").
-                    let captured = errbuf.lock().unwrap().clone();
+                    // the captured stderr (e.g. "RPA_FILES_S3_BUCKET not configured"). The drain task
+                    // races a fast crash, so give it a moment to consume the child's dying words
+                    // before reading — otherwise we show the opaque error even though the real one
+                    // arrived milliseconds later.
+                    let mut captured = String::new();
+                    for _ in 0..10 {
+                        captured = errbuf.lock().unwrap().clone();
+                        if !captured.trim().is_empty() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
                     match error_hint(&captured) {
                         Some(hint) => anyhow::bail!("{hint}"),
                         None => return Err(e.into()),

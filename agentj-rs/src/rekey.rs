@@ -53,10 +53,16 @@ pub async fn rekey(root: &str, reference: &str) -> RekeyResult {
         }
     };
 
-    // 1. Discard everything from the previous task.
+    // 1. Discard everything from the previous task — but keep personal, machine-local config a
+    // re-key has no business wiping (untracked overrides like `.mcp.local.json` / `.aj/`).
     let (l, _) = git(vec!["git", "reset", "--hard"], vec![], None).await;
     steps.push(l);
-    let (l, _) = git(vec!["git", "clean", "-fd"], vec![], None).await;
+    let (l, _) = git(
+        vec!["git", "clean", "-fd", "-e", ".mcp.local.json", "-e", ".aj"],
+        vec![],
+        None,
+    )
+    .await;
     steps.push(l);
 
     // 2. Sync origin.
