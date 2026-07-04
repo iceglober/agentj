@@ -102,7 +102,18 @@ fn render_result(res: rmcp::model::CallToolResult) -> String {
     }
 }
 
-async fn connect_one(cfg: &McpServerConfig) -> anyhow::Result<Server> {
+/// SIGKILL a child's whole process group (children spawn with `process_group(0)`).
+fn kill_group(pid: u32) {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
+    let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL);
+}
+
+/// `spawned` is set to the child pid as soon as it exists, so the caller can kill the process GROUP
+/// even when this future fails or is cancelled by a timeout — a cancelled connect otherwise reaps
+/// only the direct child (rmcp's drop) and orphans `npm → node` descendants, which keep holding
+/// ports (the mcp-remote EADDRINUSE zombie).
+async fn connect_one(cfg: &McpServerConfig, spawned: &Mutex<Option<u32>>) -> anyhow::Result<Server> {
     let (service, pid) = match cfg.transport {
         Transport::Stdio => {
             let mut command = tokio::process::Command::new(cfg.command.clone().unwrap_or_default());
@@ -120,6 +131,7 @@ async fn connect_one(cfg: &McpServerConfig) -> anyhow::Result<Server> {
                 .stderr(Stdio::piped())
                 .spawn()?;
             let pid = transport.id();
+            *spawned.lock().unwrap() = pid;
             let errbuf = drain_stderr(stderr);
             let service = match ().serve(transport).await {
                 Ok(s) => s,
@@ -170,7 +182,8 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
             .timeout_ms
             .map(Duration::from_millis)
             .unwrap_or(Duration::from_secs(30));
-        let outcome = match tokio::time::timeout(timeout, connect_one(cfg)).await {
+        let spawned = Mutex::new(None);
+        let outcome = match tokio::time::timeout(timeout, connect_one(cfg, &spawned)).await {
             Ok(Ok(server)) => {
                 let idx = servers.len();
                 for t in &server.tools {
@@ -180,8 +193,24 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
                 servers.push(server);
                 Ok(n)
             }
-            Ok(Err(e)) => Err(format!("{e}")),
-            Err(_) => Err(format!("timed out connecting (>{}s)", timeout.as_secs())),
+            // Failed or timed out: the child (if any) is useless now — kill its whole tree so it
+            // can't linger holding ports. Successful servers are killed later by `shutdown()`.
+            Ok(Err(e)) => {
+                if let Some(pid) = *spawned.lock().unwrap() {
+                    kill_group(pid);
+                }
+                Err(format!("{e}"))
+            }
+            Err(_) => {
+                if let Some(pid) = *spawned.lock().unwrap() {
+                    kill_group(pid);
+                }
+                Err(format!(
+                    "timed out connecting (>{}s) — for an OAuth server (mcp-remote), pre-authorize \
+                     once: `npx -y mcp-remote <url>` in a terminal, approve in the browser, Ctrl-C",
+                    timeout.as_secs()
+                ))
+            }
         };
         statuses.push(McpStatus { name: cfg.name.clone(), outcome });
     }
@@ -193,11 +222,9 @@ impl McpClients {
     /// node` trees never orphan — a leaked mcp-remote keeps holding its OAuth callback port, and the
     /// next launch dies with EADDRINUSE. (rmcp's drop only reaps the direct child, not descendants.)
     pub fn shutdown(&self) {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
         for s in &self.servers {
             if let Some(pid) = s.pid {
-                let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL);
+                kill_group(pid);
             }
         }
     }

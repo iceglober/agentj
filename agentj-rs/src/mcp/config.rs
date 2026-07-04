@@ -81,6 +81,11 @@ fn parse_server(
     if !raw.is_object() {
         return None;
     }
+    // `"disabled": true` skips a server entirely — put it in .mcp.local.json to turn off a shared
+    // server (e.g. one whose OAuth you don't want to grant) without editing the committed file.
+    if raw.get("disabled").and_then(|v| v.as_bool()) == Some(true) {
+        return None;
+    }
     let timeout_ms = raw.get("timeout").and_then(|v| v.as_u64());
     // stdio: identified by `command`.
     if let Some(cmd) = raw.get("command").and_then(|v| v.as_str()) {
@@ -220,6 +225,18 @@ mod tests {
         let sse = out.iter().find(|s| s.name == "sse").unwrap();
         assert_eq!(sse.transport, Transport::Sse);
         assert!(has_static_auth(sse));
+    }
+
+    #[test]
+    fn disabled_in_local_turns_a_shared_server_off() {
+        let repo = json!({ "mcpServers": {
+            "atlassian": { "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.atlassian.com/v1/mcp"] },
+            "linear": { "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.linear.app/sse"] }
+        }});
+        let local = json!({ "mcpServers": { "atlassian": { "disabled": true } } });
+        let out = resolve_mcp_servers(&json!({}), &repo, &local, &get(&[]));
+        assert!(out.iter().all(|s| s.name != "atlassian"), "disabled server is skipped");
+        assert!(out.iter().any(|s| s.name == "linear"), "others untouched");
     }
 
     #[test]
