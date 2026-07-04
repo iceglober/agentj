@@ -149,10 +149,21 @@ pub fn resolve_mcp_servers(
             }
         }
     }
+    // Top-level `"disabledServers": ["name", …]` from ANY layer wins over the merge — unlike a
+    // per-entry `"disabled"` (which a higher layer replaces), this lets the machine-global file turn
+    // off a repo-defined server (e.g. one whose OAuth you never want to grant) across every repo and
+    // every fresh worktree.
+    let disabled: std::collections::HashSet<String> = [global, repo, local]
+        .iter()
+        .filter_map(|d| d.get("disabledServers").and_then(|v| v.as_array()))
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
     let mut names: Vec<&String> = merged.keys().collect();
     names.sort();
     names
         .into_iter()
+        .filter(|n| !disabled.contains(n.as_str()))
         .filter_map(|n| parse_server(n, &merged[n], get))
         .collect()
 }
@@ -225,6 +236,20 @@ mod tests {
         let sse = out.iter().find(|s| s.name == "sse").unwrap();
         assert_eq!(sse.transport, Transport::Sse);
         assert!(has_static_auth(sse));
+    }
+
+    #[test]
+    fn global_disabled_servers_beat_a_repo_entry() {
+        // The machine-global file can turn a repo-defined server off for every repo/worktree — the
+        // per-entry form can't (the repo entry replaces a global one wholesale).
+        let global = json!({ "disabledServers": ["atlassian"] });
+        let repo = json!({ "mcpServers": {
+            "atlassian": { "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.atlassian.com/v1/mcp"] },
+            "linear": { "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.linear.app/mcp"] }
+        }});
+        let out = resolve_mcp_servers(&global, &repo, &json!({}), &get(&[]));
+        assert!(out.iter().all(|s| s.name != "atlassian"), "globally disabled server never runs");
+        assert!(out.iter().any(|s| s.name == "linear"));
     }
 
     #[test]
