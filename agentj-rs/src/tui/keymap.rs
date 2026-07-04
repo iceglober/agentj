@@ -35,6 +35,8 @@ pub enum Action {
     Home,
     End,
     Complete,
+    /// Ctrl-P — toggle the command menu (works while running too).
+    CommandMenu,
     AbortTurn,
     /// Ctrl-C — quit on a double-tap; the loop tracks the timing.
     CtrlC,
@@ -56,6 +58,7 @@ pub fn key_to_action(k: KeyEvent, running: bool, input: &str) -> Action {
         // These work during a turn too (interrupt / quit / scroll).
         KeyCode::Esc if running => Action::AbortTurn, // Esc interrupts the running turn
         KeyCode::Char('c') if ctrl => Action::CtrlC,  // twice = quit (loop tracks the double-tap)
+        KeyCode::Char('p') if ctrl => Action::CommandMenu,
         KeyCode::Char('d') if ctrl => Action::Quit,
         KeyCode::PageUp => Action::PageUp,
         KeyCode::PageDown => Action::PageDown,
@@ -147,6 +150,7 @@ mod tests {
             | Action::None
             | Action::Quit
             | Action::Complete
+            | Action::CommandMenu
             | Action::AbortTurn
             | Action::CtrlC
             | Action::ScrollUp
@@ -168,6 +172,7 @@ mod tests {
         None,
         AbortTurn,
         CtrlC,
+        CommandMenu,
         Quit,
         PageUp,
         PageDown,
@@ -200,6 +205,7 @@ mod tests {
                 Action::None => Self::None,
                 Action::AbortTurn => Self::AbortTurn,
                 Action::CtrlC => Self::CtrlC,
+                Action::CommandMenu => Self::CommandMenu,
                 Action::Quit => Self::Quit,
                 Action::PageUp => Self::PageUp,
                 Action::PageDown => Self::PageDown,
@@ -239,6 +245,8 @@ mod tests {
     const KEYMAP_CASES: &[KeymapCase] = &[
         KeymapCase { code: KeyCode::Esc, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::AbortTurn },
         KeymapCase { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::CtrlC },
+        KeymapCase { code: KeyCode::Char('p'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::CommandMenu },
+        KeymapCase { code: KeyCode::Char('p'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::CommandMenu },
         KeymapCase { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::Quit },
         KeymapCase { code: KeyCode::PageUp, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::PageUp },
         KeymapCase { code: KeyCode::PageDown, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::PageDown },

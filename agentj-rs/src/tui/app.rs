@@ -25,7 +25,7 @@ const EFFECT_TTL: Duration = Duration::from_millis(700);
 /// A second Ctrl-C within this window quits.
 const DOUBLE_TAP: Duration = Duration::from_secs(2);
 
-const CHEAT_SHEET: &str = "Enter send · Ctrl-J newline · Esc interrupt · / commands · ↑↓/wheel or PageUp/Dn scroll · Ctrl-C×2 quit";
+const CHEAT_SHEET: &str = "Enter send · Ctrl-J newline · Esc interrupt · / commands · Ctrl-P menu · ↑↓/wheel or PageUp/Dn scroll · Ctrl-C×2 quit";
 
 /// Orients the model after an interrupt: side effects (edits, commits) may already have applied.
 /// Deferred to the head of the next turn so any history deltas the aborted turn already queued land
@@ -260,6 +260,12 @@ pub struct App {
     /// Per-server MCP connect results, shown in a dismissible startup modal.
     pub mcp_status: Vec<McpStatus>,
     pub show_mcp_modal: bool,
+    /// Show supervisor nudges in the transcript (they always reach the model). Ctrl-P menu toggles.
+    pub show_steering: bool,
+    /// The Ctrl-P command menu: `Some(selected_index)` while open.
+    pub menu: Option<usize>,
+    /// The last turn ended at the step gate; an empty Enter continues it.
+    pub step_limit_hit: bool,
 }
 
 impl App {
@@ -321,6 +327,9 @@ impl App {
             setup: None,
             mcp_status,
             show_mcp_modal,
+            show_steering: true,
+            menu: None,
+            step_limit_hit: false,
         };
         if needs_setup {
             app.start_setup();
@@ -356,6 +365,43 @@ impl App {
         self.editor.clear();
         self.notice("setup canceled — run /setup to configure a provider");
         AppEffect::None
+    }
+
+    /// Ctrl-P command menu items: (label-builder handled in view) — order matters for menu_accept.
+    pub const MENU_ITEMS: usize = 3;
+
+    fn menu_move(&mut self, delta: i32) -> AppEffect {
+        if let Some(sel) = self.menu.as_mut() {
+            let n = Self::MENU_ITEMS as i32;
+            *sel = ((*sel as i32 + delta).rem_euclid(n)) as usize;
+            self.dirty = true;
+        }
+        AppEffect::None
+    }
+
+    fn menu_accept(&mut self) -> AppEffect {
+        let Some(sel) = self.menu else { return AppEffect::None };
+        self.dirty = true;
+        match sel {
+            0 => {
+                // Toggle steering visibility; stay open so the state change is visible.
+                self.show_steering = !self.show_steering;
+                AppEffect::None
+            }
+            1 => {
+                self.menu = None;
+                self.show_mcp_modal = !self.mcp_status.is_empty();
+                if self.mcp_status.is_empty() {
+                    self.notice("no MCP servers configured (.mcp.json)");
+                }
+                AppEffect::None
+            }
+            _ => {
+                self.menu = None;
+                self.start_setup();
+                AppEffect::None
+            }
+        }
     }
 
     /// Feed one submitted field into the wizard, advancing a step or (on the last) emitting the effect
@@ -476,6 +522,7 @@ impl App {
     /// Common turn-start bookkeeping: mark the turn running, reset the elapsed clock and status line,
     /// and flash the given effect label.
     pub fn begin_running(&mut self, effect_label: impl Into<String>) {
+        self.step_limit_hit = false;
         self.running = true;
         self.since = Instant::now();
         self.status.clear();
@@ -637,6 +684,21 @@ impl App {
     }
 
     fn on_key(&mut self, k: KeyEvent) -> AppEffect {
+        // The Ctrl-P command menu captures navigation while open (setup keeps priority over it).
+        if self.menu.is_some() && self.setup.is_none() {
+            use crossterm::event::KeyCode;
+            match k.code {
+                KeyCode::Up => return self.menu_move(-1),
+                KeyCode::Down => return self.menu_move(1),
+                KeyCode::Enter => return self.menu_accept(),
+                KeyCode::Esc | KeyCode::Char('p') if k.code == KeyCode::Esc || k.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                    self.menu = None;
+                    self.dirty = true;
+                    return AppEffect::None;
+                }
+                _ => return AppEffect::None, // modal: swallow other keys
+            }
+        }
         // The MCP status modal is informational — any key dismisses it and is consumed.
         if self.mcp_modal_open() {
             self.show_mcp_modal = false;
@@ -694,6 +756,11 @@ impl App {
             Action::Complete => {
                 // Tab with no popover open: try to open it for the token under the cursor.
                 self.update_popover();
+                self.dirty = true;
+                AppEffect::None
+            }
+            Action::CommandMenu => {
+                self.menu = if self.menu.is_some() { None } else { Some(0) };
                 self.dirty = true;
                 AppEffect::None
             }
@@ -836,6 +903,17 @@ impl App {
             return self.advance_setup(&text);
         }
         if text.is_empty() {
+            // At the step gate, an empty Enter continues the turn (history is intact).
+            if self.step_limit_hit && !self.running {
+                self.step_limit_hit = false;
+                self.push_user_line("continue");
+                self.flush_interrupt_note();
+                self.messages.push(ChatMessage::user(
+                    "continue — pick up exactly where you left off; the step budget has reset",
+                ));
+                self.begin_running("continuing");
+                return AppEffect::SpawnTurn;
+            }
             AppEffect::None
         } else if text == "/exit" || text == "/quit" {
             AppEffect::Quit
@@ -1121,7 +1199,19 @@ impl App {
                 self.dirty = true;
             }
             AgentEvent::Note(t) => {
-                self.transcript.push(dim_line(format!("» {t}")));
+                // "Show steering" off hides supervisor nudges from the transcript (the model still
+                // receives them — this is display only). Job/lifecycle notes stay visible.
+                if self.show_steering || !t.starts_with("[supervisor") {
+                    self.transcript.push(dim_line(format!("» {t}")));
+                }
+                self.dirty = true;
+            }
+            AgentEvent::StepLimit(n) => {
+                self.step_limit_hit = true;
+                self.transcript.push(dim_line(format!(
+                    "» step gate: hit the {n}-step budget — press Enter (empty prompt) to continue, or type new directions"
+                )));
+                self.set_effect("step gate — Enter continues");
                 self.dirty = true;
             }
             AgentEvent::Error(e) => {
@@ -1191,6 +1281,59 @@ mod tests {
         // dragging in the middle does nothing
         a.autoscroll_selection(5);
         assert_eq!(a.scroll, 6);
+    }
+
+    #[test]
+    fn steering_toggle_hides_supervisor_notes_only() {
+        let mut a = app();
+        a.show_steering = false;
+        a.on_agent(AgentEvent::Note("[supervisor: SPEAR checkpoint — converge]".into()));
+        assert!(!a.transcript.plain().contains("SPEAR checkpoint"), "steering hidden");
+        a.on_agent(AgentEvent::Note("[job 2 `pnpm test` finished, exit 0]".into()));
+        assert!(a.transcript.plain().contains("finished, exit 0"), "job notes stay visible");
+        a.show_steering = true;
+        a.on_agent(AgentEvent::Note("[supervisor: ASSESS check]".into()));
+        assert!(a.transcript.plain().contains("ASSESS check"), "steering shown when on");
+    }
+
+    #[test]
+    fn step_gate_offers_empty_enter_continue() {
+        let mut a = app();
+        a.on_agent(AgentEvent::StepLimit(40));
+        assert!(a.step_limit_hit);
+        assert!(a.transcript.plain().contains("step gate"), "{}", a.transcript.plain());
+        // Empty Enter continues the turn with an explicit continue message.
+        let effect = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(effect, AppEffect::SpawnTurn));
+        assert!(!a.step_limit_hit);
+        assert!(a.running);
+        assert!(a
+            .messages
+            .iter()
+            .any(|m| m.content.as_deref().is_some_and(|c| c.contains("pick up exactly where you left off"))));
+        // With no gate pending, an empty Enter is still a no-op.
+        a.running = false;
+        let effect = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(effect, AppEffect::None));
+    }
+
+    #[test]
+    fn ctrl_p_toggles_the_menu_and_enter_toggles_steering() {
+        let mut a = app();
+        let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
+        a.on_key(ctrl_p);
+        assert_eq!(a.menu, Some(0));
+        // Enter on item 0 flips steering and keeps the menu open.
+        assert!(a.show_steering);
+        a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!a.show_steering);
+        assert_eq!(a.menu, Some(0), "menu stays open after a toggle");
+        // Esc closes; Ctrl-P reopens even while running.
+        a.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(a.menu.is_none());
+        a.running = true;
+        a.on_key(ctrl_p);
+        assert!(a.menu.is_some(), "menu opens while a turn runs");
     }
 
     #[test]

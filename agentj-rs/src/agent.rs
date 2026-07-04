@@ -339,7 +339,24 @@ pub async fn run_turn(
     // messages appended past this point are "unseen" and must not be compacted until sent.
     let mut seen_before = messages.len();
 
-    for _ in 0..sess.cfg.max_steps {
+    for step in 0..sess.cfg.max_steps {
+        // Step-budget awareness: with ~8 steps left, tell the model to converge instead of letting
+        // it burn its last calls mid-flail (observed: a run spent its final 20 steps on one-line
+        // edits and hit the wall with no report). Skipped for tiny budgets where it would fire
+        // immediately.
+        if sess.cfg.max_steps > 16 && step + 8 == sess.cfg.max_steps {
+            let msg = format!(
+                "[supervisor: step budget — 8 of {} steps remain in this turn. Converge now: batch \
+                 any remaining edits into one call, run the single most decisive check, and write \
+                 your report. If work will remain, end with exactly what's left and how to continue.]",
+                sess.cfg.max_steps
+            );
+            let _ = tx.send(AgentEvent::Note(first_line(&msg, 120)));
+            let m = ChatMessage::user(msg);
+            commit_delta(vec![m.clone()]);
+            messages.push(m);
+        }
+
         // Background jobs are the primary loop's concern only (subagents don't consume nudges).
         if allow_delegate {
             for n in sess.tools.jobs.drain_nudges() {
@@ -590,10 +607,7 @@ pub async fn run_turn(
         commit_delta(delta);
     }
 
-    let _ = tx.send(AgentEvent::Note(format!(
-        "hit the {}-step limit — send another message to continue.",
-        sess.cfg.max_steps
-    )));
+    let _ = tx.send(AgentEvent::StepLimit(sess.cfg.max_steps));
     let _ = tx.send(AgentEvent::Done);
     final_text
 }
@@ -1030,6 +1044,26 @@ mod tests {
 
     fn note_seen(events: &[AgentEvent], needle: &str) -> bool {
         events.iter().any(|e| matches!(e, AgentEvent::Note(t) if t.contains(needle)))
+    }
+
+    #[tokio::test]
+    async fn step_budget_nudges_convergence_and_the_gate_fires_at_the_cap() {
+        // max_steps 20 (>16, so the converge nudge engages) with a script that never finishes:
+        // the nudge lands with 8 steps left, and the turn ends with a StepLimit gate event.
+        let mut cfg = test_cfg();
+        cfg.max_steps = 20;
+        let steps: Vec<ScriptStep> = (0..20)
+            .map(|_| ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": "true" }))))
+            .collect();
+        let events = run_and_collect(&session_cfg(steps, cfg)).await;
+        assert!(
+            note_seen(&events, "8 of 20 steps remain"),
+            "converge nudge missing: {events:?}"
+        );
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::StepLimit(20))),
+            "step gate event missing: {events:?}"
+        );
     }
 
     #[tokio::test]

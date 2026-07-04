@@ -296,6 +296,9 @@ async fn main() {
                     u.prompt_tokens, u.completion_tokens, u.total_tokens
                 ),
                 AgentEvent::Note(t) => println!("» {t}"),
+                AgentEvent::StepLimit(n) => {
+                    println!("» hit the {n}-step limit — work may be unfinished")
+                }
                 AgentEvent::Error(e) => {
                     eprintln!("[error] {e}");
                     failed = true;

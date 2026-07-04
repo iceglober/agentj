@@ -29,6 +29,9 @@ pub enum AgentEvent {
     Usage(TokenUsage),
     /// A supervisor/lifecycle note (auto-continue, hit the cap, …).
     Note(String),
+    /// The turn exhausted its step budget with work possibly unfinished — a gate, not a wall: the
+    /// UI offers a one-key continue (history is intact, so a fresh turn resumes cleanly).
+    StepLimit(usize),
     /// A hard error ended the turn.
     Error(String),
     /// The turn finished (natural completion or clean stop).

@@ -904,9 +904,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(popover), rect);
     }
 
-    // First-run provider setup, as a centered modal form over everything.
+    // Modals, one at a time: setup > command menu > MCP status.
     if app.setup.is_some() {
         render_setup_modal(f, app, area);
+    } else if app.menu.is_some() {
+        render_menu_modal(f, app, area);
     } else if app.mcp_modal_open() {
         render_mcp_modal(f, app, area);
     }
@@ -951,6 +953,55 @@ fn snapshot_screen(buf: &ratatui::buffer::Buffer) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+/// The Ctrl-P command menu: a small centered modal of session actions/settings.
+fn render_menu_modal(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use ratatui::layout::Rect;
+    let Some(selected) = app.menu else { return };
+    let items = [
+        format!(
+            "Show steering: {}   (supervisor nudges in the transcript)",
+            if app.show_steering { "ON " } else { "OFF" }
+        ),
+        "MCP servers — connection status".to_string(),
+        "Provider setup — endpoint / key / model".to_string(),
+    ];
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(Span::styled("Menu", theme::accent_bold())),
+        Line::default(),
+    ];
+    for (i, item) in items.iter().enumerate() {
+        let (marker, style) = if i == selected {
+            ("› ", theme::accent())
+        } else {
+            ("  ", theme::muted())
+        };
+        lines.push(Line::from(vec![
+            Span::styled(marker, theme::accent()),
+            Span::styled(item.clone(), style),
+        ]));
+    }
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled(
+        "↑↓ move · Enter select · Esc/Ctrl-P close",
+        theme::dim(),
+    )));
+
+    let mw = 64.min(area.width.saturating_sub(4)).max(24);
+    let mh = (lines.len() as u16 + 3).min(area.height);
+    let rect = Rect {
+        x: area.x + area.width.saturating_sub(mw) / 2,
+        y: area.y + area.height.saturating_sub(mh) / 2,
+        width: mw,
+        height: mh,
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::accent())
+        .padding(Padding::new(2, 2, 1, 0));
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 /// A centered modal listing each MCP server's connect result (tools on success, the captured error on
