@@ -126,6 +126,12 @@ impl Tools {
                 Some(id) => ToolOutcome::ok(self.jobs.stop(id).await),
                 None => ToolOutcome::err("error: job_stop needs an id"),
             },
+            "mcp_find_tools" => match &self.mcp {
+                Some(mcp) => ToolOutcome::ok(
+                    mcp.find_tools(args.get("query").and_then(|v| v.as_str()).unwrap_or_default()),
+                ),
+                None => ToolOutcome::err("error: no MCP servers connected"),
+            },
             other => match &self.mcp {
                 Some(mcp) if mcp.has_tool(other) => {
                     let (text, ok) = mcp.call(other, args).await;

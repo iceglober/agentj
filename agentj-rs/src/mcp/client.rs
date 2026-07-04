@@ -76,6 +76,207 @@ struct McpTool {
     input_schema: Value,
 }
 
+/// Metadata for every connected MCP tool, independent of the live connections — this is what decides
+/// WHAT the model sees. Small sets are advertised eagerly; big sets advertise one `mcp_find_tools`
+/// meta-tool, and only tools the model has looked up (activated) ship their full schemas. That keeps
+/// dozens of verbose schemas (e.g. Linear's 50) out of every prompt.
+pub struct McpCatalog {
+    entries: Vec<CatalogEntry>,
+    activated: Mutex<std::collections::HashSet<String>>,
+    /// Small toolsets skip the meta-tool indirection entirely.
+    eager: bool,
+}
+
+#[derive(Clone)]
+struct CatalogEntry {
+    full_name: String,
+    server: String,
+    description: String,
+    input_schema: Value,
+}
+
+/// Advertised toolset budget (~tokens, chars/4). Above it, the catalog goes lazy.
+const EAGER_BUDGET_TOKENS: usize = 4_000;
+/// Most matches a single find call will activate.
+const FIND_ACTIVATE_CAP: usize = 12;
+
+impl McpCatalog {
+    pub fn new(entries: Vec<(String, String, String, Value)>) -> Self {
+        let entries: Vec<CatalogEntry> = entries
+            .into_iter()
+            .map(|(full_name, server, description, input_schema)| CatalogEntry {
+                full_name,
+                server,
+                description,
+                input_schema,
+            })
+            .collect();
+        let est_tokens: usize = entries
+            .iter()
+            .map(|e| {
+                (e.full_name.len()
+                    + e.description.len().min(250)
+                    + serde_json::to_string(&e.input_schema).map(|s| s.len()).unwrap_or(0))
+                    / 4
+            })
+            .sum();
+        Self {
+            entries,
+            activated: Mutex::new(std::collections::HashSet::new()),
+            eager: est_tokens <= EAGER_BUDGET_TOKENS,
+        }
+    }
+
+    /// The tool specs to advertise right now: everything (slimmed) when eager; when lazy, the
+    /// meta-tool plus only the activated tools' full (slimmed) schemas.
+    pub fn specs(&self) -> Vec<ToolSpec> {
+        let mut out = Vec::new();
+        if self.eager {
+            out.extend(self.entries.iter().map(slim_spec));
+            return out;
+        }
+        out.push(self.finder_spec());
+        let activated = self.activated.lock().unwrap();
+        out.extend(
+            self.entries
+                .iter()
+                .filter(|e| activated.contains(&e.full_name))
+                .map(slim_spec),
+        );
+        out
+    }
+
+    fn finder_spec(&self) -> ToolSpec {
+        // Per-server counts so the model knows what's discoverable.
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for e in &self.entries {
+            match counts.iter_mut().find(|(s, _)| s == &e.server) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((e.server.clone(), 1)),
+            }
+        }
+        let summary = counts
+            .iter()
+            .map(|(s, n)| format!("{s} ({n})"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ToolSpec {
+            name: "mcp_find_tools".to_string(),
+            description: format!(
+                "Find MCP tools by capability. {} tools are connected but not listed here: {summary}. \
+                 Search by keywords (e.g. \"create issue\", \"list comments\", server name); matching \
+                 tools BECOME CALLABLE with their full schemas from your next step. Call this before \
+                 assuming a capability is missing.",
+                self.entries.len()
+            ),
+            parameters: json!({
+                "type": "object",
+                "properties": { "query": { "type": "string", "description": "keywords or a server name; empty lists the servers" } },
+                "required": ["query"]
+            }),
+        }
+    }
+
+    /// Search the catalog; matches are ACTIVATED (their schemas advertise from the next model call)
+    /// and rendered as a list. An empty query returns the per-server summary.
+    pub fn find_tools(&self, query: &str) -> String {
+        let terms: Vec<String> = query
+            .split_whitespace()
+            .map(|t| t.to_lowercase())
+            .filter(|t| t.len() > 1)
+            .collect();
+        if terms.is_empty() {
+            let mut lines = vec!["connected MCP servers:".to_string()];
+            let mut seen = Vec::new();
+            for e in &self.entries {
+                if !seen.contains(&e.server) {
+                    let n = self.entries.iter().filter(|x| x.server == e.server).count();
+                    lines.push(format!("  {} — {n} tools", e.server));
+                    seen.push(e.server.clone());
+                }
+            }
+            lines.push("search with keywords to activate specific tools".to_string());
+            return lines.join("\n");
+        }
+        let mut scored: Vec<(usize, &CatalogEntry)> = self
+            .entries
+            .iter()
+            .filter_map(|e| {
+                let hay = format!("{} {}", e.full_name, e.description).to_lowercase();
+                let hits = terms.iter().filter(|t| hay.contains(t.as_str())).count();
+                (hits > 0).then_some((hits, e))
+            })
+            .collect();
+        if scored.is_empty() {
+            return format!("no MCP tools match {query:?} — try broader keywords or a server name");
+        }
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.full_name.cmp(&b.1.full_name)));
+        let take = scored.len().min(FIND_ACTIVATE_CAP);
+        let mut activated = self.activated.lock().unwrap();
+        let mut lines = vec![format!(
+            "{} match(es){} — now callable:",
+            scored.len(),
+            if scored.len() > take { format!(" (top {take} activated)") } else { String::new() }
+        )];
+        for (_, e) in scored.iter().take(take) {
+            activated.insert(e.full_name.clone());
+            lines.push(format!("  {} — {}", e.full_name, clip_chars(&e.description, 140)));
+        }
+        lines.join("\n")
+    }
+
+    #[cfg(test)]
+    fn is_activated(&self, name: &str) -> bool {
+        self.activated.lock().unwrap().contains(name)
+    }
+}
+
+/// A slimmed, prompt-ready spec: description capped, schema stripped of prose bloat. Types, enums,
+/// and required fields survive — the model keeps what it needs to call correctly.
+fn slim_spec(e: &CatalogEntry) -> ToolSpec {
+    let mut schema = e.input_schema.clone();
+    slim_schema(&mut schema);
+    ToolSpec {
+        name: e.full_name.clone(),
+        description: clip_chars(&e.description, 250),
+        parameters: schema,
+    }
+}
+
+/// Walk a JSON schema: truncate property descriptions, drop examples/titles/$comment.
+fn slim_schema(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            map.remove("examples");
+            map.remove("title");
+            map.remove("$comment");
+            if let Some(Value::String(d)) = map.get_mut("description") {
+                if d.chars().count() > 120 {
+                    *d = clip_chars(d, 120);
+                }
+            }
+            for (_, child) in map.iter_mut() {
+                slim_schema(child);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                slim_schema(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn clip_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{cut}…")
+    }
+}
+
 struct Server {
     service: RunningService<RoleClient, ()>,
     tools: Vec<McpTool>,
@@ -88,6 +289,7 @@ struct Server {
 pub struct McpClients {
     servers: Vec<Server>,
     by_tool: HashMap<String, usize>,
+    catalog: McpCatalog,
 }
 
 fn render_result(res: rmcp::model::CallToolResult) -> String {
@@ -267,7 +469,18 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
         };
         statuses.push(McpStatus { name: cfg.name.clone(), outcome });
     }
-    (McpClients { servers, by_tool }, statuses)
+    let catalog = McpCatalog::new(
+        servers
+            .iter()
+            .flat_map(|srv| &srv.tools)
+            .map(|t| {
+                // full_name is `{server}__{tool}` — recover the server for the catalog summary.
+                let server = t.full_name.split("__").next().unwrap_or_default().to_string();
+                (t.full_name.clone(), server, t.description.clone(), t.input_schema.clone())
+            })
+            .collect(),
+    );
+    (McpClients { servers, by_tool, catalog }, statuses)
 }
 
 impl McpClients {
@@ -282,18 +495,15 @@ impl McpClients {
         }
     }
 
-    /// Tool specs advertised to the model (each `<server>__<tool>`).
+    /// Tool specs advertised to the model right now: eager (all, slimmed) for small toolsets; lazy
+    /// (`mcp_find_tools` + activated schemas) for big ones. See `McpCatalog`.
     pub fn specs(&self) -> Vec<ToolSpec> {
-        self.servers
-            .iter()
-            .flat_map(|s| {
-                s.tools.iter().map(|t| ToolSpec {
-                    name: t.full_name.clone(),
-                    description: t.description.clone(),
-                    parameters: t.input_schema.clone(),
-                })
-            })
-            .collect()
+        self.catalog.specs()
+    }
+
+    /// Search the catalog and activate matches (the `mcp_find_tools` meta-tool).
+    pub fn find_tools(&self, query: &str) -> String {
+        self.catalog.find_tools(query)
     }
 
     pub fn has_tool(&self, name: &str) -> bool {
@@ -350,7 +560,7 @@ impl McpClients {
 
 #[cfg(test)]
 mod tests {
-    use super::error_hint;
+    use super::*;
 
     #[test]
     fn error_hint_picks_the_error_line_over_the_node_footer() {
@@ -359,5 +569,82 @@ mod tests {
         // no "error" line → last non-footer line
         assert_eq!(error_hint("just a warning\nNode.js v24\n").as_deref(), Some("just a warning"));
         assert_eq!(error_hint("   \n  \n"), None);
+    }
+
+    fn entry(server: &str, tool: &str, desc: &str) -> (String, String, String, Value) {
+        (
+            format!("{server}__{tool}"),
+            server.to_string(),
+            desc.to_string(),
+            json!({ "type": "object", "properties": { "id": { "type": "string", "description": "the id" } } }),
+        )
+    }
+
+    #[test]
+    fn small_catalogs_stay_eager_big_ones_go_lazy() {
+        let small = McpCatalog::new(vec![entry("db", "query", "run sql")]);
+        assert!(small.eager);
+        let specs = small.specs();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name, "db__query");
+
+        // 60 tools with fat descriptions blow the eager budget.
+        let big = McpCatalog::new(
+            (0..60)
+                .map(|i| entry("linear", &format!("tool_{i}"), &"x".repeat(1200)))
+                .collect(),
+        );
+        assert!(!big.eager);
+        let specs = big.specs();
+        assert_eq!(specs.len(), 1, "only the meta-tool advertises");
+        assert_eq!(specs[0].name, "mcp_find_tools");
+        assert!(specs[0].description.contains("linear (60)"), "{}", specs[0].description);
+    }
+
+    #[test]
+    fn find_activates_matches_and_their_schemas_advertise() {
+        let mut entries: Vec<_> = (0..60)
+            .map(|i| entry("linear", &format!("tool_{i}"), &"x".repeat(1200)))
+            .collect();
+        entries.push(entry("linear", "create_issue", "Create a new Linear issue in a team"));
+        let cat = McpCatalog::new(entries);
+        assert!(!cat.eager);
+
+        let out = cat.find_tools("create issue");
+        assert!(out.contains("linear__create_issue"), "{out}");
+        assert!(cat.is_activated("linear__create_issue"));
+
+        let specs = cat.specs();
+        assert!(specs.iter().any(|s| s.name == "linear__create_issue"), "activated schema advertises");
+        assert!(specs.iter().any(|s| s.name == "mcp_find_tools"), "meta-tool stays");
+
+        // No match → helpful message, nothing activated.
+        let miss = cat.find_tools("zzzznope");
+        assert!(miss.contains("no MCP tools match"));
+        // Empty query → server summary.
+        assert!(cat.find_tools("").contains("linear — 61 tools"));
+    }
+
+    #[test]
+    fn slimming_caps_descriptions_and_strips_schema_bloat() {
+        let e = CatalogEntry {
+            full_name: "s__t".into(),
+            server: "s".into(),
+            description: "d".repeat(400),
+            input_schema: json!({
+                "type": "object",
+                "title": "Fancy",
+                "examples": [{"id": "x"}],
+                "properties": { "id": { "type": "string", "description": "p".repeat(300) } }
+            }),
+        };
+        let spec = slim_spec(&e);
+        assert!(spec.description.chars().count() <= 250);
+        assert!(spec.parameters.get("title").is_none());
+        assert!(spec.parameters.get("examples").is_none());
+        let pdesc = spec.parameters["properties"]["id"]["description"].as_str().unwrap();
+        assert!(pdesc.chars().count() <= 120);
+        // structure the model needs survives
+        assert_eq!(spec.parameters["properties"]["id"]["type"], "string");
     }
 }

@@ -319,8 +319,6 @@ pub async fn run_turn(
     allow_delegate: bool,
     commit: Option<&UnboundedSender<Vec<ChatMessage>>>,
 ) -> String {
-    let mut specs = tool_specs(allow_delegate);
-    specs.extend(sess.tools.mcp_specs()); // MCP tools sit alongside the built-ins (subagents inherit them)
     let mut idle_nudges = 0usize;
     let mut final_text = String::new();
     let commit_delta = |delta: Vec<ChatMessage>| {
@@ -404,6 +402,10 @@ pub async fn run_turn(
             messages.push(m);
         }
 
+        // Specs are recomputed each call: `mcp_find_tools` activates tools mid-turn, and their full
+        // schemas must advertise on the very next call (subagents share the catalog via Tools).
+        let mut specs = tool_specs(allow_delegate);
+        specs.extend(sess.tools.mcp_specs());
         // About to send the whole history — after this call, everything in it counts as seen.
         seen_before = messages.len();
         let turn = match sess.llm.chat(messages, &specs).await {
