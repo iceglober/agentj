@@ -130,10 +130,14 @@ fn parse_server(
 pub fn resolve_mcp_servers(
     global: &Value,
     repo: &Value,
+    local: &Value,
     get: &impl Fn(&str) -> Option<String>,
 ) -> Vec<McpServerConfig> {
     let mut merged: HashMap<String, Value> = HashMap::new();
-    for doc in [global, repo] {
+    // Priority low → high: global < repo (shared) < local (personal, gitignored). A per-server entry
+    // in `.mcp.local.json` fully replaces the same-named shared entry, so you can override a shared
+    // server (e.g. wrap an OAuth server through mcp-remote) without editing the committed file.
+    for doc in [global, repo, local] {
         if let Some(Value::Object(servers)) = doc.get("mcpServers") {
             for (name, raw) in servers {
                 merged.insert(name.clone(), raw.clone());
@@ -163,12 +167,16 @@ fn read_json(path: &Path) -> Value {
         .unwrap_or(Value::Null)
 }
 
-/// Load + merge MCP servers for `root`: repo `.mcp.json` over global `~/.agentj/.mcp.json`.
+/// Load + merge MCP servers for `root`, priority low→high: global `~/.agentj/.mcp.json` < shared repo
+/// `.mcp.json` < personal `.mcp.local.json` (gitignored). A per-server entry in a higher layer fully
+/// replaces the same-named lower one.
 pub fn load_mcp_servers(root: &str) -> Vec<McpServerConfig> {
     let home = std::env::var("HOME").unwrap_or_default();
     let global = read_json(&Path::new(&home).join(".agentj").join(".mcp.json"));
     let repo = read_json(&Path::new(root).join(".mcp.json"));
-    resolve_mcp_servers(&global, &repo, &|k| std::env::var(k).ok())
+    // Personal, gitignored override of the shared repo file.
+    let local = read_json(&Path::new(root).join(".mcp.local.json"));
+    resolve_mcp_servers(&global, &repo, &local, &|k| std::env::var(k).ok())
 }
 
 #[cfg(test)]
@@ -201,10 +209,10 @@ mod tests {
             "sse": { "type": "sse", "url": "https://x", "headers": { "Authorization": "Bearer ${TOK}" } }
         }});
         let g = get(&[("ARG", "one"), ("V", "two"), ("TOK", "sek")]);
-        let out = resolve_mcp_servers(&global, &repo, &g);
+        let out = resolve_mcp_servers(&global, &repo, &json!({}), &g);
         let a = out.iter().find(|s| s.name == "a").unwrap();
         assert_eq!(a.transport, Transport::Http);
-        assert_eq!(a.url.as_deref(), Some("https://repo")); // repo wins
+        assert_eq!(a.url.as_deref(), Some("https://repo")); // repo wins over global
         let local = out.iter().find(|s| s.name == "local").unwrap();
         assert_eq!(local.transport, Transport::Stdio);
         assert_eq!(local.args, vec!["s.js", "one"]);
@@ -215,12 +223,27 @@ mod tests {
     }
 
     #[test]
+    fn local_overrides_the_shared_repo_entry() {
+        // The shared repo has an OAuth server over plain http; the personal local file swaps it for an
+        // mcp-remote proxy without touching the committed file.
+        let repo = json!({ "mcpServers": { "linear": { "type": "http", "url": "https://mcp.linear.app/mcp" } } });
+        let local = json!({ "mcpServers": {
+            "linear": { "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.linear.app/sse"] }
+        }});
+        let out = resolve_mcp_servers(&json!({}), &repo, &local, &get(&[]));
+        let linear = out.iter().find(|s| s.name == "linear").unwrap();
+        assert_eq!(linear.transport, Transport::Stdio, "local override wins over the shared repo entry");
+        assert_eq!(linear.command.as_deref(), Some("npx"));
+        assert_eq!(linear.url, None);
+    }
+
+    #[test]
     fn no_static_auth_when_empty_or_stdio() {
         let repo = json!({ "mcpServers": {
             "s": { "url": "https://x", "headers": { "Authorization": "${UNSET}" } },
             "l": { "command": "node" }
         }});
-        let out = resolve_mcp_servers(&json!({}), &repo, &get(&[]));
+        let out = resolve_mcp_servers(&json!({}), &repo, &json!({}), &get(&[]));
         assert!(!has_static_auth(
             out.iter().find(|s| s.name == "s").unwrap()
         ));
