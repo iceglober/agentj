@@ -6,8 +6,13 @@ use crate::provider::TokenUsage;
 pub enum AgentEvent {
     /// A chunk of assistant text (one per model step).
     Message(String),
-    /// A tool call started.
-    ToolStart { name: String, args: String },
+    /// A tool call started. `step` is the model round-trip it belongs to — several calls sharing a
+    /// step were returned in ONE response, and the UI marks them as a batch.
+    ToolStart {
+        name: String,
+        args: String,
+        step: usize,
+    },
     /// A tool call finished. `ok` is false when the tool reported failure.
     ToolEnd {
         ok: bool,
@@ -27,6 +32,9 @@ pub enum AgentEvent {
     },
     /// Token accounting for the model call just completed.
     Usage(TokenUsage),
+    /// Token accounting for one model call inside a subagent. Kept distinct from `Usage` so the
+    /// primary loop's context-fill meter never counts subagent spend, while session totals still do.
+    SubagentUsage { id: usize, usage: TokenUsage },
     /// A supervisor/lifecycle note (auto-continue, hit the cap, …).
     Note(String),
     /// The turn exhausted its step budget with work possibly unfinished — a gate, not a wall: the

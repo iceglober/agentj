@@ -22,7 +22,7 @@ highlight + a fuzzy completion popover, Ctrl-C) in a proper full-screen layout r
 model. The loop is non-streaming on purpose (Vertex mangles Gemini thought-signatures on streamed
 tool replay), so the transcript updates once per model step, not per token.
 
-The UI code lives under `src/tui/` — `app.rs` (state + transitions), `view.rs` (rendering),
+The UI code lives under `src/tui/` — `app/` (state + transitions), `view/` (rendering),
 `markdown.rs`, `editor.rs`, `keymap.rs`, `theme.rs` — with the event loop in `tui/mod.rs`.
 
 ## Parity status
@@ -30,12 +30,12 @@ The UI code lives under `src/tui/` — `app.rs` (state + transitions), `view.rs`
 | Area | TS (`packages/agentj`) | Rust (`agentj-rs`) |
 |---|---|---|
 | Full-screen TUI + per-step transcript | inline raw-ANSI | ✅ ratatui, markdown-rendered replies |
-| Live subagent panel + context/token meter | — | ✅ Rust-first (`tui/view.rs`) |
+| Live subagent panel + context/token meter | — | ✅ Rust-first (`tui/view/`) |
 | Slash-command highlight + fuzzy completion popover | ✅ | ✅ (`commands.rs` + `tui`, tested) |
 | `/task` LRW re-key (wipe → fetch → checkout) | ✅ | ✅ (`rekey.rs`, tested) |
-| Built-in tools (read/write/edit/ls/glob/grep/bash) | ✅ | ✅ (`tools.rs`) |
+| Built-in tools (read/write/edit/ls/glob/grep/bash) | ✅ | ✅ (`tools/`) |
 | Process-group command runner (kill the tree) | ✅ | ✅ (`exec.rs`, `process_group` + killpg) |
-| Tool-call loop, non-streaming | ✅ | ✅ (`agent.rs`) |
+| Tool-call loop, non-streaming | ✅ | ✅ (`agent/`) |
 | System prompt (identity/context/instructions) | ✅ | ✅ (`prompt.rs`) |
 | **OpenAI-compatible provider (Azure / custom)** | ✅ | ✅ (`provider/openai.rs`) |
 | Vertex (Gemini) provider | ✅ | ⏳ stage 2 |
@@ -43,7 +43,7 @@ The UI code lives under `src/tui/` — `app.rs` (state + transitions), `view.rs`
 | MCP tools (stdio + no-auth http) | ✅ | ✅ (`mcp/*` via `rmcp`; config tested) |
 | MCP static-header / OAuth | ✅ | ⏳ staged |
 | Supervised auto-continue | ✅ | ⏳ stage 2 (`finish_reason` already plumbed) |
-| **Subagents** — parallel `delegate` (DAG execution) | — | ✅ Rust-first (`subagent.rs` + `agent.rs`) |
+| **Subagents** — parallel `delegate` (DAG execution) | — | ✅ Rust-first (`agent/delegate.rs`) |
 | **Background jobs** — non-blocking + nudges | — | ✅ Rust-first (`jobs.rs`, tested) |
 | **SPEAR instructions** (Scope/Plan/Execute/Assess/Resolve) | — | ✅ Rust-first (`prompt.rs`) |
 

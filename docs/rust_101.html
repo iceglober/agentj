@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust, side by side</title>
+<link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🦀</text></svg>'>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #222222;
+    --muted: #666666;
+    --faint: #999999;
+    --line: #dddddd;
+    --code-bg: #f6f6f6;
+    --code-edge: #e2e2e2;
+    --link: #0a58ca;
+    --ok: #157347;
+    --err: #b02a37;
+    --t-kw: #0a58ca;
+    --t-str: #157347;
+    --t-com: #6a737d;
+    --t-type: #6f42c1;
+    --t-mac: #953800;
+    --t-num: #0550ae;
+    --t-life: #b02a37;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 16px; line-height: 1.6; }
+  ::selection { background: #cfe3ff; }
+
+  #frame { display: flex; min-height: 100vh; }
+  #rail { width: 240px; flex: none; border-right: 1px solid var(--line); padding: 20px 0 40px; position: sticky; top: 0; align-self: flex-start; max-height: 100vh; overflow-y: auto; }
+  #rail .brand { padding: 0 18px 14px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+  #rail .brand .t { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  #rail .brand .s { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
+  #rail a.less { display: flex; gap: 8px; padding: 5px 18px; color: var(--text); text-decoration: none; font-size: 13.5px; border-left: 2px solid transparent; }
+  #rail a.less:hover { background: #f2f2f2; }
+  #rail a.less.active { border-left-color: var(--link); font-weight: 600; }
+  #rail a.less .n { font-family: var(--mono); font-size: 11px; color: var(--faint); min-width: 18px; }
+  #rail a.less .dot { margin-left: auto; color: var(--ok); visibility: hidden; font-size: 11px; }
+  #rail a.less.done .dot { visibility: visible; }
+  #rail .railsec { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); padding: 14px 18px 4px; }
+
+  #main { flex: 1; min-width: 0; padding: 36px 40px 100px; }
+  .lesson { display: none; max-width: 900px; margin: 0 auto; }
+  .lesson.open { display: block; }
+
+  .eyebrow { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; }
+  h1 { font-size: 27px; line-height: 1.2; font-weight: 700; margin: 0 0 6px; }
+  .dek { font-size: 16.5px; color: var(--muted); margin: 0 0 22px; max-width: 78ch; }
+  h2 { font-size: 18px; font-weight: 700; margin: 30px 0 8px; }
+  p, ul, ol { max-width: 82ch; }
+  p { margin: 0 0 14px; }
+  li { margin-bottom: 5px; }
+  a { color: var(--link); }
+  strong { font-weight: 700; }
+  em { font-style: italic; }
+  code { font-family: var(--mono); font-size: 0.85em; background: var(--code-bg); border: 1px solid var(--code-edge); padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+
+  /* side-by-side: rust left, right cycles ts/py/cs */
+  .compare { border: 1px solid var(--code-edge); border-radius: 4px; margin: 16px 0 22px; overflow: hidden; }
+  .cmp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--code-edge); }
+  .cmp-pane { background: #fbfbfb; min-width: 0; display: flex; flex-direction: column; }
+  .cmp-lang { font-family: var(--mono); font-size: 11px; color: var(--muted); padding: 6px 12px; border-bottom: 1px solid var(--code-edge); background: #ffffff; min-height: 30px; display: flex; align-items: center; }
+  .cmp-pane.rust .cmp-lang { font-weight: 600; color: var(--text); }
+  .cmp-switch { display: inline-flex; gap: 12px; }
+  .cmp-switch button { font-family: var(--mono); font-size: 11.5px; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0; }
+  .cmp-switch button:hover { color: var(--text); }
+  .cmp-switch button.on { color: var(--link); font-weight: 600; text-decoration: underline; }
+  .cmp-switch button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  pre.cmp-code { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre; flex: 1; }
+  pre.cmp-code[hidden] { display: none; }
+  .cmp-note { font-size: 13px; color: var(--muted); padding: 8px 12px; border-top: 1px solid var(--code-edge); max-width: none; margin: 0; background: #ffffff; }
+
+  /* plain rust block (quiz snippets) */
+  pre.code-rs { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; background: #fbfbfb; border: 1px solid var(--code-edge); border-radius: 4px; padding: 10px 12px; overflow-x: auto; white-space: pre; margin: 10px 0 12px; }
+
+  /* quiz */
+  .quiz { border: 1px solid var(--code-edge); border-radius: 4px; margin: 20px 0 24px; padding: 14px 16px; background: #fafafa; }
+  .quiz .q-tag { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px; }
+  .quiz .q-prompt { font-size: 15px; margin-bottom: 10px; max-width: 82ch; }
+  .quiz .q-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .quiz .q-opts button { font-family: var(--mono); font-size: 12px; background: #ffffff; color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: 6px 12px; cursor: pointer; }
+  .quiz .q-opts button:hover { border-color: var(--link); }
+  .quiz .q-opts button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  .quiz.answered .q-opts button { cursor: default; opacity: 0.6; }
+  .quiz.answered .q-opts button.right { opacity: 1; border-color: var(--ok); color: var(--ok); font-weight: 600; }
+  .quiz.answered .q-opts button.wrong { opacity: 1; border-color: var(--err); color: var(--err); }
+  .quiz .q-explain { display: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14.5px; }
+  .quiz .q-explain p { margin-bottom: 8px; }
+  .quiz.answered .q-explain { display: block; }
+  .quiz .verdict { font-family: var(--mono); font-size: 12px; margin-right: 4px; }
+
+  .rustc { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: #ffffff; border: 1px solid var(--code-edge); border-radius: 3px; padding: 8px 12px; margin: 8px 0; overflow-x: auto; white-space: pre; color: var(--muted); }
+  .rustc .e { color: var(--err); font-weight: 600; }
+  .rustc .h { color: var(--ok); }
+
+  /* footer nav */
+  .lfoot { display: flex; align-items: center; gap: 12px; margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .lfoot button, .lfoot a.nav { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); background: #ffffff; color: var(--text); padding: 7px 13px; border-radius: 3px; cursor: pointer; text-decoration: none; }
+  .lfoot button:hover, .lfoot a.nav:hover { border-color: var(--link); }
+  .lfoot .done-btn.is-done { border-color: var(--ok); color: var(--ok); }
+  .lfoot .spacer { flex: 1; }
+  .kbd-hint { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+  /* flow diagram (lesson 0) */
+  .flow { margin: 20px 0 8px; }
+  .flow .row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .flow .stage { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-radius: 3px; background: #ffffff; color: var(--text); padding: 8px 10px; cursor: pointer; text-align: left; flex: 1; min-width: 120px; }
+  .flow .stage small { display: block; color: var(--faint); font-size: 10.5px; margin-top: 2px; }
+  .flow .stage:hover { border-color: var(--link); }
+  .flow .stage:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  .flow .stage.sel { border-color: var(--link); background: #eef4ff; }
+  .flow .arrow { align-self: center; color: var(--faint); font-family: var(--mono); }
+  .flow .detail { border: 1px dashed var(--line); border-radius: 3px; margin-top: 8px; padding: 10px 12px; font-size: 14px; }
+  .flow .detail .file { font-family: var(--mono); font-size: 11.5px; color: var(--text); font-weight: 600; display: block; margin-bottom: 3px; }
+
+  table.map { border-collapse: collapse; font-size: 14px; margin: 14px 0; width: 100%; max-width: 820px; }
+  table.map th, table.map td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.map th { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; color: var(--faint); font-weight: 400; }
+  table.map td:first-child { font-family: var(--mono); font-size: 12px; color: var(--text); white-space: nowrap; }
+  table.map td { color: var(--muted); }
+  .tablewrap { overflow-x: auto; }
+
+  .tk-kw { color: var(--t-kw); }
+  .tk-str { color: var(--t-str); }
+  .tk-com { color: var(--t-com); }
+  .tk-type { color: var(--t-type); }
+  .tk-mac { color: var(--t-mac); }
+  .tk-num { color: var(--t-num); }
+  .tk-life { color: var(--t-life); }
+
+  @media (max-width: 760px) { .cmp-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) {
+    #frame { display: block; }
+    #rail { position: static; width: auto; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+    #main { padding: 24px 18px 80px; }
+  }
+</style>
+</head>
+<body>
+<div id="frame">
+<nav id="rail" aria-label="Lessons">
+  <div class="brand">
+    <div class="t">Rust, side by side</div>
+    <div class="s">Fifteen short lessons. Rust on the left, a language you know on the right.</div>
+  </div>
+  <div class="railsec">Orientation</div>
+  <a class="less" href="#0"><span class="n">00</span><span>The machine you're studying</span><span class="dot">✓</span></a>
+  <div class="railsec">The basics</div>
+  <a class="less" href="#1"><span class="n">01</span><span>Variables &amp; values</span><span class="dot">✓</span></a>
+  <a class="less" href="#2"><span class="n">02</span><span>Functions</span><span class="dot">✓</span></a>
+  <a class="less" href="#3"><span class="n">03</span><span>Control flow &amp; expressions</span><span class="dot">✓</span></a>
+  <div class="railsec">Shaping data</div>
+  <a class="less" href="#4"><span class="n">04</span><span>Structs</span><span class="dot">✓</span></a>
+  <a class="less" href="#5"><span class="n">05</span><span>Enums &amp; match</span><span class="dot">✓</span></a>
+  <a class="less" href="#6"><span class="n">06</span><span>Option &amp; Result</span><span class="dot">✓</span></a>
+  <div class="railsec">The memory model</div>
+  <a class="less" href="#7"><span class="n">07</span><span>Ownership</span><span class="dot">✓</span></a>
+  <a class="less" href="#8"><span class="n">08</span><span>Borrowing</span><span class="dot">✓</span></a>
+  <a class="less" href="#9"><span class="n">09</span><span>Lifetimes</span><span class="dot">✓</span></a>
+  <a class="less" href="#10"><span class="n">10</span><span>Pointers &amp; boxes</span><span class="dot">✓</span></a>
+  <div class="railsec">Abstraction</div>
+  <a class="less" href="#11"><span class="n">11</span><span>Traits</span><span class="dot">✓</span></a>
+  <a class="less" href="#12"><span class="n">12</span><span>Generics, closures, iterators</span><span class="dot">✓</span></a>
+  <div class="railsec">Concurrency</div>
+  <a class="less" href="#13"><span class="n">13</span><span>Arc, Mutex, atomics</span><span class="dot">✓</span></a>
+  <a class="less" href="#14"><span class="n">14</span><span>Async</span><span class="dot">✓</span></a>
+  <div class="railsec">Craft</div>
+  <a class="less" href="#15"><span class="n">15</span><span>Tests &amp; modules</span><span class="dot">✓</span></a>
+</nav>
+<main id="main">
+
+<!-- L0 -->
+<section class="lesson" id="l0">
+  <div class="eyebrow">Lesson 00 · Orientation</div>
+  <h1>The machine you're studying</h1>
+  <p class="dek">The Rust snippets come from <code>agentj-rs</code>, a real terminal coding agent. Every concept below is shown side by side: Rust on the left, your choice of TypeScript / Python / C# on the right. Pick the right-hand language once (the switch in any block) and it sticks everywhere.</p>
+
+  <p>agentj is one loop: send the conversation to a model, run the tools it asks for, feed results back, repeat. Click a stage to see where it lives.</p>
+
+  <div class="flow" id="flow0">
+    <div class="row">
+      <button class="stage" data-file="src/tui/mod.rs" data-d="The event loop. Owns the terminal, polls key + agent events. The only place that .awaits.">event loop<small>await lives here</small></button>
+      <span class="arrow">→</span>
+      <button class="stage" data-file="src/tui/app/input.rs" data-d="Your keystroke mutates App and returns an AppEffect describing async work to do. No async here, so it's testable without a terminal.">App::on_input<small>state</small></button>
+      <span class="arrow">→</span>
+      <button class="stage" data-file="src/agent/mod.rs" data-d="run_turn: call the model, run its tool calls, append results, repeat.">run_turn<small>agent loop</small></button>
+    </div>
+    <div class="row">
+      <button class="stage" data-file="src/provider/openai.rs" data-d="The HTTP client: serialize the history, retry transient failures, parse the reply.">Llm::chat<small>HTTP</small></button>
+      <span class="arrow">→</span>
+      <button class="stage" data-file="src/tools/mod.rs" data-d="Tools::call dispatches by name to file/search/shell tools, confined to the repo by paths::safe_resolve.">Tools::call<small>dispatch</small></button>
+      <span class="arrow">→</span>
+      <button class="stage" data-file="src/events.rs" data-d="Everything the UI can be told is a variant of the AgentEvent enum, sent back through a channel.">AgentEvent<small>events</small></button>
+    </div>
+    <div class="detail" id="flowdetail"><span class="file">click a stage</span><code>run_turn</code> drives the model and tools; what it learns flows back to the screen as events.</div>
+  </div>
+
+  <div class="tablewrap">
+  <table class="map">
+    <tr><th>Where</th><th>What lives there</th></tr>
+    <tr><td>src/agent/</td><td>The loop, subagent fan-out (<code>delegate.rs</code>), supervisor gates, compaction.</td></tr>
+    <tr><td>src/tools/</td><td>File / search / shell tools, path confinement, edit staleness.</td></tr>
+    <tr><td>src/tui/</td><td><code>app/</code> state, <code>view/</code> rendering, <code>mod.rs</code> the async loop.</td></tr>
+    <tr><td>src/provider/</td><td>Wire types + the OpenAI-compatible client.</td></tr>
+  </table>
+  </div>
+
+  <p>Lessons build in order; each uses only what came before. Progress saves locally; ←/→ keys navigate.</p>
+  <!-- LFOOT -->
+</section>
+
+<!-- L1 -->
+<section class="lesson" id="l1">
+  <div class="eyebrow">Lesson 01 · The basics</div>
+  <h1>Variables &amp; values</h1>
+  <p class="dek">Bindings are immutable by default — you opt into mutation with <code>mut</code>. <code>let</code> is a runtime binding; <code>const</code> is a compile-time value.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+let n = 0;          // frozen
+let mut m = 0;      // opt in to reassignment
+m += 1;
+const CAP: usize = 6000;
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+const n = 0;        // frozen
+let m = 0;          // reassignable
+m += 1;
+// no deep compile-time const
+</pre><pre class="cmp-code" data-lang="py" hidden>
+n = 0               # nothing is frozen
+m = 0
+m += 1
+CAP = 6000          # "const" by convention only
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+var n = 0;          // reassignable by default
+int m = 0;
+m += 1;
+const int CAP = 6000;
+</pre></div>
+    </div>
+    <p class="cmp-note">Rust freezes by default and you add <code>mut</code>. TS makes you remember <code>const</code>; Python and C# freeze nothing unless you ask.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Forget the <code>mut</code>, then bump the counter:</div>
+    <pre class="code-rs">
+let idle_nudges = 0usize;
+idle_nudges += 1;
+</pre>
+    <div class="q-opts">
+      <button>Compiles — it's a local</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> Plain <code>let</code> is frozen.</p>
+      <div class="rustc"><span class="e">error[E0384]</span>: cannot assign twice to immutable variable `idle_nudges`
+   <span class="h">help</span>: consider making this binding mutable: `mut idle_nudges`</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L2 -->
+<section class="lesson" id="l2">
+  <div class="eyebrow">Lesson 02 · The basics</div>
+  <h1>Functions</h1>
+  <p class="dek">Typed parameters, one return type. The body's last expression is the return value — <code>return</code> is only for leaving early.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+fn stamp(text: &amp;str) -&gt; u64 {
+    let h = hash(text);
+    h                   // last expression = return
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+function stamp(text: string): number {
+  const h = hash(text);
+  return h;             // explicit return required
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+def stamp(text: str) -&gt; int:
+    h = hash(text)
+    return h            # explicit; type hint optional
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+ulong Stamp(string text) {
+    var h = Hash(text);
+    return h;           // explicit return
+}
+</pre></div>
+    </div>
+    <p class="cmp-note">Only Rust makes the last expression the return value. The others always spell out <code>return</code>.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">One stray semicolon after the last line:</div>
+    <pre class="code-rs">
+fn stamp(text: &amp;str) -&gt; u64 {
+    let h = hash(text);
+    h;
+}
+</pre>
+    <div class="q-opts">
+      <button>Compiles — the semicolon is optional</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> The semicolon discards the value, so the function returns <code>()</code>, not <code>u64</code>.</p>
+      <div class="rustc"><span class="e">error[E0308]</span>: mismatched types — expected `u64`, found `()`
+   <span class="h">help</span>: remove this semicolon to return this value</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L3 -->
+<section class="lesson" id="l3">
+  <div class="eyebrow">Lesson 03 · The basics</div>
+  <h1>Control flow &amp; expressions</h1>
+  <p class="dek"><code>if</code> and <code>match</code> produce values, so there's no separate ternary — the same <code>if</code> works in statement and value position.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+let note = if n &gt; 1 {
+    format!("{n} lines")
+} else {
+    String::new()
+};
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+const note = n &gt; 1
+  ? `${n} lines`
+  : "";               // ternary: a separate construct
+</pre><pre class="cmp-code" data-lang="py" hidden>
+note = f"{n} lines" if n &gt; 1 else ""
+# conditional expression
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+var note = n &gt; 1
+    ? $"{n} lines"
+    : "";             // ternary
+</pre></div>
+    </div>
+    <p class="cmp-note">The others bolt on a ternary because their <code>if</code> is a statement. Rust's <code>if</code> already returns a value.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Delete the <code>else</code>:</div>
+    <pre class="code-rs">
+let note = if n &gt; 1 {
+    format!("{n} lines")
+};
+</pre>
+    <div class="q-opts">
+      <button>Compiles — note becomes optional</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> With no <code>else</code>, the false case is <code>()</code>, which isn't a <code>String</code>.</p>
+      <div class="rustc"><span class="e">error[E0317]</span>: `if` may be missing an `else` clause — expected `String`, found `()`</div>
+      <p>Want an optional? Say so: <code>(n &gt; 1).then(|| format!("{n} lines"))</code>.</p>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L4 -->
+<section class="lesson" id="l4">
+  <div class="eyebrow">Lesson 04 · Shaping data</div>
+  <h1>Structs</h1>
+  <p class="dek">A fixed layout: these fields, nothing else. No optional-by-accident keys, no <code>undefined</code>. In agentj, every tool returns a <code>ToolOutcome</code>.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+pub struct ToolOutcome {
+    pub text: String,
+    pub ok: bool,
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+interface ToolOutcome {
+  text: string;
+  ok: boolean;
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+@dataclass
+class ToolOutcome:
+    text: str
+    ok: bool
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+record ToolOutcome(string Text, bool Ok);
+</pre></div>
+    </div>
+    <p class="cmp-note">Same shape; the difference is enforcement. A Rust struct can't be built with a missing or extra field.</p>
+  </div>
+
+  <p>Methods sit in an <code>impl</code> block. The receiver says how they touch the value: <code>&amp;self</code> reads, <code>&amp;mut self</code> mutates (Lessons 07–08).</p>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Add a method that flips a failed outcome:</div>
+    <pre class="code-rs">
+impl ToolOutcome {
+    fn force_ok(&amp;self) {
+        self.ok = true;
+    }
+}
+</pre>
+    <div class="q-opts">
+      <button>Compiles — it's our own field</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> <code>&amp;self</code> is a shared, read-only borrow. Use <code>&amp;mut self</code> to mutate.</p>
+      <div class="rustc"><span class="e">error[E0594]</span>: cannot assign to `self.ok`, which is behind a `&` reference</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L5 -->
+<section class="lesson" id="l5">
+  <div class="eyebrow">Lesson 05 · Shaping data</div>
+  <h1>Enums &amp; match</h1>
+  <p class="dek">A struct is AND (all fields). An enum is OR (one shape at a time). agentj's <code>AgentEvent</code> is the whole agent-to-UI protocol; <code>match</code> forces you to handle every variant.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+enum Event { Message(String), Done }
+
+match ev {
+    Event::Message(t) =&gt; show(t),
+    Event::Done =&gt; finish(),
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+type Event =
+  | { kind: "message"; text: string }
+  | { kind: "done" };
+
+switch (ev.kind) {
+  case "message": show(ev.text); break;
+  case "done": finish(); break;
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+match ev:
+    case Message(text):
+        show(text)
+    case Done():
+        finish()
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+var r = ev switch {
+    Message m =&gt; Show(m.Text),
+    Done      =&gt; Finish(),
+};
+</pre></div>
+    </div>
+    <p class="cmp-note">Rust and C# force exhaustiveness — miss a case and it won't compile. TS needs a <code>never</code>-check; Python's <code>match</code> has none.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Your match handles <code>Message</code> and four others, but you add a new <code>Error</code> variant to the enum and forget to handle it. Result?</div>
+    <div class="q-opts">
+      <button>Compiles — unhandled variants are ignored</button>
+      <button data-ok>The compiler refuses, naming the gap</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span></p>
+      <div class="rustc"><span class="e">error[E0004]</span>: non-exhaustive patterns: `Event::Error(_)` not covered</div>
+      <p>Adding a variant hands you a to-do list of every match that must now decide.</p>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L6 -->
+<section class="lesson" id="l6">
+  <div class="eyebrow">Lesson 06 · Shaping data</div>
+  <h1>Option &amp; Result</h1>
+  <p class="dek">No <code>null</code>, no exceptions. Absence is <code>Option</code>, failure is <code>Result</code> — both ordinary enums, so the type tracks them. agentj's <code>safe_resolve</code> confines a path and can fail.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+fn resolve(p: &amp;str) -&gt; Result&lt;PathBuf, String&gt; {
+    if bad(p) { return Err("escape".into()); }
+    Ok(canonical(p))
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+function resolve(p: string): string {
+  if (bad(p)) throw new Error("escape");
+  return canonical(p);   // failure = exception
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+def resolve(p: str) -&gt; str:
+    if bad(p):
+        raise ValueError("escape")
+    return canonical(p)    # failure = exception
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+string Resolve(string p) {
+    if (Bad(p)) throw new Exception("escape");
+    return Canonical(p);   // failure = exception
+}
+</pre></div>
+    </div>
+    <p class="cmp-note">The others hide failure in an exception channel you can forget to catch. Rust puts it in the return type — you must handle <code>Err</code> to reach the value.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">The <code>?</code> operator propagates errors. Use it in a function that returns a plain struct, not a Result:</div>
+    <pre class="code-rs">
+fn read_file(&amp;self, args: &amp;Value) -&gt; ToolOutcome {
+    let abs = safe_resolve(&amp;self.root, path)?;
+}
+</pre>
+    <div class="q-opts">
+      <button>Compiles — ? converts it</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> <code>?</code> returns the failure from this function, so the return type must be able to hold one.</p>
+      <div class="rustc"><span class="e">error[E0277]</span>: the `?` operator can only be used in a function that returns `Result` or `Option`</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L7 -->
+<section class="lesson" id="l7">
+  <div class="eyebrow">Lesson 07 · The memory model</div>
+  <h1>Ownership</h1>
+  <p class="dek">The concept people mean when they call Rust hard — and it's three rules. Every value has one owner; when the owner leaves scope the value is freed; assignment <em>moves</em> ownership. No garbage collector. This one has no equivalent elsewhere.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+let a = String::from("hi");
+let b = a;            // MOVE — a is now dead
+println!("{a}");      // compile error E0382
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+let a = "hi";
+let b = a;            // both alias the same value
+console.log(a);       // fine — GC frees it later
+</pre><pre class="cmp-code" data-lang="py" hidden>
+a = "hi"
+b = a                 # both names → same object
+print(a)              # fine — refcount/GC frees it
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+var a = "hi";
+var b = a;            // both reference the string
+Console.WriteLine(a); // fine — GC frees it later
+</pre></div>
+    </div>
+    <p class="cmp-note">GC languages let any number of names alias a value and free it whenever. Rust picks a single owner so it can free deterministically, with no collector.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Move a String, then use the old name:</div>
+    <pre class="code-rs">
+let summary = first_line(&amp;result, 80);   // borrow — fine
+let owned = result;                      // move
+let both = format!("{result} / {summary}");
+</pre>
+    <div class="q-opts">
+      <button>Compiles — both names work</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> Line 2 moved <code>result</code>; line 3 reads a dead value. Fix: borrow (<code>&amp;result</code>) or <code>result.clone()</code>.</p>
+      <div class="rustc"><span class="e">error[E0382]</span>: borrow of moved value: `result`</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L8 -->
+<section class="lesson" id="l8">
+  <div class="eyebrow">Lesson 08 · The memory model</div>
+  <h1>Borrowing</h1>
+  <p class="dek">References let you look without owning. The rule: any number of shared reads <code>&amp;T</code>, XOR one exclusive writer <code>&amp;mut T</code> — never both. It kills the mutate-while-iterating bug at compile time.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+for m in items.iter() {
+    items.push(x);    // compile error E0502
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+for (const m of items) {
+  items.push(x);      // compiles; loops oddly / forever
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+for m in items:
+    items.append(x)   # runs; can loop forever
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+foreach (var m in items)
+    items.Add(x);     // throws at runtime:
+                      // InvalidOperationException
+</pre></div>
+    </div>
+    <p class="cmp-note">Rust rejects it at compile time, C# throws at runtime, Python and JS silently misbehave. The iterator is a reader; <code>push</code> needs the writer.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Why does Rust reject the code above?</div>
+    <div class="q-opts">
+      <button>It would loop forever</button>
+      <button data-ok>Reader and writer at once is banned</button>
+      <button>Runtime bounds check</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> <code>push</code> can reallocate the buffer and dangle the iterator's pointer — a use-after-free, prevented at compile time.</p>
+      <div class="rustc"><span class="e">error[E0502]</span>: cannot borrow `*items` as mutable because it is also borrowed as immutable</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L9 -->
+<section class="lesson" id="l9">
+  <div class="eyebrow">Lesson 09 · The memory model</div>
+  <h1>Lifetimes</h1>
+  <p class="dek">A reference must never outlive its data. In GC languages a reference keeps its target alive; Rust has no GC, so it proves the reference is safe. Returning a reference to a local shows the split.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+fn f() -&gt; &amp;str {
+    let s = make();
+    &amp;s                // error E0515: s dies here
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+function f(): string {
+  const s = make();
+  return s;           // fine — GC keeps s alive
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+def f() -&gt; str:
+    s = make()
+    return s          # fine — object outlives the call
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+string F() {
+    var s = Make();
+    return s;         // fine — GC keeps s alive
+}
+</pre></div>
+    </div>
+    <p class="cmp-note">You can't free memory and keep a pointer to it. In C that ships; in Rust it's E0515. A lifetime like <code>&amp;'a str</code> is just the compiler naming how long a borrow may live.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">The signature promises a borrow of <code>s</code>, but the body returns a borrow of a local. Result?</div>
+    <div class="q-opts">
+      <button>Compiles — elision handles it</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> Fix: return an owned <code>String</code>, or borrow something that outlives the call.</p>
+      <div class="rustc"><span class="e">error[E0515]</span>: cannot return reference to local variable `s`</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L10 -->
+<section class="lesson" id="l10">
+  <div class="eyebrow">Lesson 10 · The memory model</div>
+  <h1>Pointers &amp; boxes</h1>
+  <p class="dek">In GC languages every object is a hidden heap pointer you never choose. Rust stores values inline by default and makes you name the pointer: <code>&amp;T</code> to borrow, <code>Box&lt;T&gt;</code> to own on the heap, <code>Rc</code>/<code>Arc</code> to share.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+enum Tree {
+    Leaf(i32),
+    Node(Box&lt;Tree&gt;, Box&lt;Tree&gt;),  // Box = heap pointer
+}                                 // (without it: infinite size)
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+type Tree =
+  | { leaf: number }
+  | { node: [Tree, Tree] };  // refs implicit; always heap
+</pre><pre class="cmp-code" data-lang="py" hidden>
+class Node:
+    def __init__(self, left, right):
+        self.left = left       # every attribute is a reference
+        self.right = right
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+abstract record Tree;
+record Node(Tree Left, Tree Right) : Tree;
+// class/record fields are references (heap)
+</pre></div>
+    </div>
+    <p class="cmp-note">GC languages make every object a hidden heap pointer, so recursion just works. Rust stores values inline, so a recursive type needs an explicit <code>Box</code> — a single-owner heap pointer — to have a finite size.</p>
+  </div>
+
+  <p>The pointer family, plainest to most capable:</p>
+  <ul>
+    <li><code>&amp;T</code> / <code>&amp;mut T</code> — a borrow; owns nothing (Lesson 08).</li>
+    <li><code>Box&lt;T&gt;</code> — a single-owner heap pointer, freed when it drops. For recursive types, trait objects (<code>Box&lt;dyn Trait&gt;</code>), and moving big values cheaply.</li>
+    <li><code>Rc&lt;T&gt;</code> / <code>Arc&lt;T&gt;</code> — shared ownership by reference count (Lesson 13).</li>
+    <li><code>*const T</code> / <code>*mut T</code> — raw pointers: no guarantees, only usable in <code>unsafe</code>.</li>
+  </ul>
+  <p>agentj's <code>run_turn</code> is recursive — it re-enters itself through subagents. A recursive <code>async fn</code> would be an infinitely-sized state machine, so it carries <code>#[async_recursion]</code>, which boxes the inner future: the same fix the quiz needs.</p>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Write the recursive type without the <code>Box</code>:</div>
+    <pre class="code-rs">
+enum Tree {
+    Leaf(i32),
+    Node(Tree, Tree),
+}
+</pre>
+    <div class="q-opts">
+      <button>Compiles — enums can nest</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> A <code>Node</code> holds two <code>Tree</code>s, each holding two <code>Tree</code>s… with no fixed size. A <code>Box</code> is a fixed-size pointer to the heap, which breaks the recursion.</p>
+      <div class="rustc"><span class="e">error[E0072]</span>: recursive type `Tree` has infinite size
+   <span class="h">help</span>: insert some indirection (e.g., a `Box`, `Rc`, or `&`)</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L11 -->
+<section class="lesson" id="l11">
+  <div class="eyebrow">Lesson 11 · Abstraction</div>
+  <h1>Traits</h1>
+  <p class="dek">A trait is a named capability you implement for a type — nominal, not structural, and it can be added from outside the type's file. agentj converts a wire struct into <code>TokenUsage</code> via the standard <code>From</code> trait.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+impl From&lt;Wire&gt; for Usage {
+    fn from(w: Wire) -&gt; Self { /* … */ }
+}
+let u: Usage = w.into();
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+// structural: any object of the right shape fits
+function toUsage(w: Wire): Usage {
+  return { tokens: w.tokens };
+}
+</pre><pre class="cmp-code" data-lang="py" hidden>
+# duck typing: has the method? good enough
+class Usage:
+    @classmethod
+    def from_wire(cls, w): ...
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+class Wire : IInto&lt;Usage&gt; {   // must declare it
+    public Usage Into() =&gt; /* … */;
+}
+</pre></div>
+    </div>
+    <p class="cmp-note">TS and Python match by shape (structural / duck typing). Rust and C# are nominal — but Rust can add the impl from outside the type's own file.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">Check your model</div>
+    <div class="q-prompt">You wrote <code>impl From&lt;Wire&gt; for Usage</code>. Does <code>w.into()</code> also work?</div>
+    <div class="q-opts">
+      <button>No — we implemented From, not Into</button>
+      <button data-ok>Yes — From grants Into for free</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--ok)">yes.</span> A blanket impl in the standard library gives every <code>From</code> the mirror <code>Into</code>. One catch: <code>.into()</code> needs the target type known from context; <code>Usage::from(w)</code> never does.</p>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L12 -->
+<section class="lesson" id="l12">
+  <div class="eyebrow">Lesson 12 · Abstraction</div>
+  <h1>Generics, closures, iterators</h1>
+  <p class="dek">Generics compile a specialized copy per type (zero runtime cost). Closures capture by the ownership rules. Iterators are lazy — nothing runs until a consumer pulls, so a long chain is still one pass.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+let out: Vec&lt;_&gt; = items.iter()
+    .filter(|x| x.ok)
+    .map(|x| x.id)
+    .collect();       // one pass, runs at collect()
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+const out = items
+  .filter(x =&gt; x.ok)  // builds an array
+  .map(x =&gt; x.id);    // builds another array
+</pre><pre class="cmp-code" data-lang="py" hidden>
+out = [x.id for x in items if x.ok]
+# comprehension: eager, one new list
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+var out = items
+    .Where(x =&gt; x.Ok)   // LINQ: lazy
+    .Select(x =&gt; x.Id); // runs when enumerated
+</pre></div>
+    </div>
+    <p class="cmp-note">Rust iterators and C# LINQ are lazy — no intermediate arrays. JS array methods and Python comprehensions build a new collection at each step.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Warm a cache with a mapped side effect, never consumed:</div>
+    <pre class="code-rs">
+items.iter().map(|x| warm_cache(x));
+</pre>
+    <div class="q-opts">
+      <button>Runs for every item</button>
+      <button data-ok>Warns — and does nothing</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">nothing happens.</span> No consumer, no work.</p>
+      <div class="rustc"><span class="e">warning</span>: unused `Map` that must be used
+   <span class="h">note</span>: iterators are lazy and do nothing unless consumed</div>
+      <p>Use a <code>for</code> loop for side effects.</p>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L13 -->
+<section class="lesson" id="l13">
+  <div class="eyebrow">Lesson 13 · Concurrency</div>
+  <h1>Arc, Mutex, atomics</h1>
+  <p class="dek">One owner per value — but agentj's toolset is used by the UI, the turn, and subagents at once. <code>Arc</code> is shared ownership; <code>Mutex</code> lets many owners mutate safely.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+let s = Arc::new(Mutex::new(map));
+let s2 = s.clone();          // share across threads
+s2.lock().unwrap().insert(k, v);
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+const s = new Map();
+s.set(k, v);     // single-threaded: no locks,
+                 // but no real parallelism either
+</pre><pre class="cmp-code" data-lang="py" hidden>
+lock = threading.Lock()
+with lock:                   # GIL + explicit lock
+    s[k] = v
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+lock (gate) {                // monitor on an object
+    s[k] = v;
+}
+</pre></div>
+    </div>
+    <p class="cmp-note">JS sidesteps this by being single-threaded; Python leans on the GIL. Rust shares across real threads and makes forgetting the lock a compile error — a data race is a type error.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">What does the compiler say?</div>
+    <div class="q-prompt">Drop the Mutex and mutate through the shared <code>Arc&lt;Tools&gt;</code> directly (<code>&amp;mut self</code>). Result?</div>
+    <div class="q-opts">
+      <button>Compiles if one task does it</button>
+      <button data-ok>The compiler refuses</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">refused.</span> <code>&amp;mut</code> means exclusive; an Arc exists because access isn't. The Mutex is the minimal fix for "shared handle, occasional writes."</p>
+      <div class="rustc"><span class="e">error[E0596]</span>: cannot borrow data in an `Arc` as mutable</div>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L14 -->
+<section class="lesson" id="l14">
+  <div class="eyebrow">Lesson 14 · Concurrency</div>
+  <h1>Async</h1>
+  <p class="dek">agentj mostly waits — on the model, on child processes, on timers. An <code>async fn</code> is a state machine that parks at each <code>.await</code>. Futures are lazy: nothing runs until awaited or spawned.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+let fut = fetch();   // nothing runs yet
+let out = fut.await; // now it runs
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+const p = fetch();   // ALREADY running
+const out = await p; // just waits for it
+</pre><pre class="cmp-code" data-lang="py" hidden>
+coro = fetch()       # not running yet
+out = await coro     # runs under the event loop
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+var t = FetchAsync(); // already running (hot task)
+var out = await t;    // waits for it
+</pre></div>
+    </div>
+    <p class="cmp-note">Futures in Rust (and coroutines in Python) are lazy. JS promises and C# tasks are hot — they start the moment you create them. Rust also has no ambient event loop: you pick a runtime (tokio) and spawn explicitly.</p>
+  </div>
+
+  <div class="quiz" data-quiz>
+    <div class="q-tag">Not everything is a compile error</div>
+    <div class="q-prompt">agentj drains a child process's stdout in a spawned task while waiting. Skip that — just <code>wait()</code> then read. Result?</div>
+    <div class="q-opts">
+      <button>Won't compile</button>
+      <button data-ok>Compiles — and can hang forever</button>
+    </div>
+    <div class="q-explain">
+      <p><span class="verdict" style="color:var(--err)">compiles, hangs.</span> A chatty child fills the pipe buffer and blocks; the parent blocks in <code>wait()</code>; deadlock. Rust guarantees memory and race safety — deadlocks and logic bugs are still yours.</p>
+    </div>
+  </div>
+  <!-- LFOOT -->
+</section>
+
+<!-- L15 -->
+<section class="lesson" id="l15">
+  <div class="eyebrow">Lesson 15 · Craft</div>
+  <h1>Tests &amp; modules</h1>
+  <p class="dek">Rust's test runner is built in. Tests live beside the code under <code>#[cfg(test)]</code> — compiled only for <code>cargo test</code>, absent from the shipped binary.</p>
+
+  <div class="compare">
+    <div class="cmp-grid">
+      <div class="cmp-pane rust"><div class="cmp-lang">Rust</div><pre class="cmp-code" data-lang="rust">
+#[cfg(test)]        // same file; excluded from release
+mod tests {
+    #[test]
+    fn it_works() { assert_eq!(2 + 2, 4); }
+}
+</pre></div>
+      <div class="cmp-pane cmp-alt"><div class="cmp-lang"><span class="cmp-switch"><button type="button" data-lang="ts">TS</button><button type="button" data-lang="py">Python</button><button type="button" data-lang="cs">C#</button></span></div><pre class="cmp-code" data-lang="ts">
+// sum.test.ts — a separate file
+import { sum } from "./sum";
+test("adds", () =&gt; { expect(sum(2, 2)).toBe(4); });
+</pre><pre class="cmp-code" data-lang="py" hidden>
+# test_sum.py — a separate file
+def test_adds():
+    assert sum(2, 2) == 4
+</pre><pre class="cmp-code" data-lang="cs" hidden>
+// SumTests.cs — usually a separate project
+[Fact]
+public void Adds() =&gt; Assert.Equal(4, Sum(2, 2));
+</pre></div>
+    </div>
+    <p class="cmp-note">The others bolt on an external framework and a separate file. Rust ships the runner and keeps tests next to the code.</p>
+  </div>
+
+  <p>Modules mirror the file tree: a parent declares each child with <code>mod files;</code>, and <code>pub(super)</code> / <code>pub(crate)</code> / <code>pub</code> control who can reach in. That's how <code>safe_resolve</code> stays callable only inside <code>src/tools/</code>.</p>
+
+  <hr>
+  <h2>Where next</h2>
+  <ul>
+    <li>Read agentj top-down: <code>src/main.rs</code> → <code>run_turn</code>.</li>
+    <li><code>cargo clippy</code> teaches idiom; <code>cargo doc --open</code> renders the <code>///</code> comments.</li>
+    <li>The Book (doc.rust-lang.org/book) for trait objects, <code>Rc</code>/<code>RefCell</code>, error design, unsafe.</li>
+    <li>Add a variant to an enum and let the compiler walk you through every consequence.</li>
+  </ul>
+  <!-- LFOOT -->
+</section>
+
+</main>
+</div>
+<script>
+(function () {
+  "use strict";
+  var N = 16;
+  var TITLES = [
+    "The machine you're studying", "Variables & values", "Functions", "Control flow & expressions",
+    "Structs", "Enums & match", "Option & Result", "Ownership", "Borrowing", "Lifetimes",
+    "Pointers & boxes", "Traits", "Generics & iterators", "Arc & Mutex", "Async", "Tests & modules"
+  ];
+  var store = {
+    get: function (k, fb) { try { var v = localStorage.getItem(k); return v === null ? fb : JSON.parse(v); } catch (e) { return fb; } },
+    set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  };
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  /* Rust highlighter */
+  var RX = new RegExp([
+    "(\\/\\/.*$)", "(\"(?:[^\"\\\\]|\\\\.)*\")", "('(?:\\\\.|[^'\\\\])')", "('[A-Za-z_][A-Za-z0-9_]*)",
+    "\\b([a-z_][a-z0-9_]*)!",
+    "\\b(fn|let|mut|pub|use|mod|impl|struct|enum|trait|match|if|else|for|while|loop|return|in|const|static|async|await|move|ref|where|crate|super|self|Self|dyn|as|unsafe|type|break|continue)\\b",
+    "\\b([A-Z][A-Za-z0-9_]*)\\b", "\\b(\\d[\\d_]*)\\b"
+  ].join("|"), "g");
+  function hl(line) {
+    var out = "", last = 0, m; RX.lastIndex = 0;
+    while ((m = RX.exec(line))) {
+      out += esc(line.slice(last, m.index));
+      var cls = m[1] ? "tk-com" : m[2] ? "tk-str" : m[3] ? "tk-str" : m[4] ? "tk-life"
+              : m[5] ? "tk-mac" : m[6] ? "tk-kw" : m[7] ? "tk-type" : "tk-num";
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    return out + esc(line.slice(last));
+  }
+
+  /* generic highlighter for ts/py/cs */
+  var KWSTR = {
+    ts: "const|let|var|function|return|if|else|for|while|do|class|interface|type|enum|new|import|export|from|async|await|switch|case|default|of|in|null|undefined|void|readonly|public|private|extends|implements|throw|try|catch|finally",
+    py: "def|return|if|elif|else|for|while|class|import|from|as|with|lambda|async|await|match|case|None|True|False|and|or|not|in|is|yield|raise|try|except|finally|pass",
+    cs: "var|const|readonly|return|if|else|for|foreach|while|do|class|record|struct|interface|enum|new|using|namespace|async|await|switch|case|default|public|private|protected|void|null|true|false|is|in|out|ref|lock|sealed|override|static|throw|try|catch|finally|string|int|bool|ulong|double"
+  };
+  function hlGen(line, lang) {
+    var body = KWSTR[lang] || KWSTR.ts;
+    var comment = lang === "py" ? "(#.*$)" : "(\\/\\/.*$)";
+    var rx = new RegExp(comment
+      + "|(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`)"
+      + "|\\b(" + body + ")\\b" + "|\\b([A-Z][A-Za-z0-9_]*)\\b" + "|\\b(\\d[\\d_.]*)\\b", "g");
+    var out = "", last = 0, m;
+    while ((m = rx.exec(line))) {
+      out += esc(line.slice(last, m.index));
+      var cls = m[1] ? "tk-com" : m[2] ? "tk-str" : m[3] ? "tk-kw" : m[4] ? "tk-type" : "tk-num";
+      out += '<span class="' + cls + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    return out + esc(line.slice(last));
+  }
+  function render(pre, fn) {
+    var raw = pre.textContent.replace(/^\n+/, "").replace(/\s+$/, "");
+    pre.innerHTML = raw.split("\n").map(function (ln) { return fn(ln) || "&nbsp;"; }).join("\n");
+  }
+  document.querySelectorAll("pre.cmp-code").forEach(function (pre) {
+    var lang = pre.getAttribute("data-lang");
+    render(pre, lang === "rust" ? hl : function (ln) { return hlGen(ln, lang); });
+  });
+  document.querySelectorAll("pre.code-rs").forEach(function (pre) { render(pre, hl); });
+
+  /* side-by-side switch: rust fixed, right cycles ts/py/cs */
+  var cmpLang = store.get("r101.cmplang", "ts");
+  if (["ts", "py", "cs"].indexOf(cmpLang) === -1) cmpLang = "ts";
+  function applyCmp() {
+    document.querySelectorAll(".compare").forEach(function (c) {
+      c.querySelectorAll(".cmp-switch button").forEach(function (b) {
+        var on = b.getAttribute("data-lang") === cmpLang;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      var alt = c.querySelector(".cmp-alt");
+      if (alt) alt.querySelectorAll("pre.cmp-code").forEach(function (p) {
+        p.hidden = p.getAttribute("data-lang") !== cmpLang;
+      });
+    });
+  }
+  document.querySelectorAll(".cmp-switch button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      cmpLang = b.getAttribute("data-lang");
+      store.set("r101.cmplang", cmpLang);
+      applyCmp();
+    });
+  });
+  applyCmp();
+
+  /* quizzes */
+  document.querySelectorAll(".quiz[data-quiz]").forEach(function (q) {
+    var opts = q.querySelectorAll(".q-opts button");
+    opts.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        if (q.classList.contains("answered")) return;
+        q.classList.add("answered");
+        opts.forEach(function (b) { b.disabled = true; if (b.hasAttribute("data-ok")) b.classList.add("right"); });
+        if (!btn.hasAttribute("data-ok")) btn.classList.add("wrong");
+      });
+    });
+  });
+
+  /* flow diagram */
+  var detail = document.getElementById("flowdetail");
+  if (detail) {
+    document.querySelectorAll("#flow0 .stage").forEach(function (st) {
+      st.addEventListener("click", function () {
+        document.querySelectorAll("#flow0 .stage.sel").forEach(function (s) { s.classList.remove("sel"); });
+        st.classList.add("sel");
+        detail.innerHTML = '<span class="file">' + esc(st.getAttribute("data-file")) + "</span>" + esc(st.getAttribute("data-d"));
+      });
+    });
+  }
+
+  /* footers, router, progress */
+  var sections = [];
+  for (var i = 0; i < N; i++) sections.push(document.getElementById("l" + i));
+  var railLinks = Array.prototype.slice.call(document.querySelectorAll("#rail a.less"));
+  var done = store.get("r101.done", []);
+  function two(n) { return (n < 10 ? "0" : "") + n; }
+  sections.forEach(function (sec, i) {
+    var foot = document.createElement("div");
+    foot.className = "lfoot";
+    var h = "";
+    if (i > 0) h += '<a class="nav" href="#' + (i - 1) + '">← ' + two(i - 1) + " " + esc(TITLES[i - 1]) + "</a>";
+    h += '<button class="done-btn" type="button"></button>';
+    h += '<span class="spacer"></span><span class="kbd-hint">←/→ lessons</span>';
+    if (i < N - 1) h += '<a class="nav" href="#' + (i + 1) + '">' + two(i + 1) + " " + esc(TITLES[i + 1]) + " →</a>";
+    foot.innerHTML = h;
+    sec.appendChild(foot);
+    var btn = foot.querySelector(".done-btn");
+    function paint() {
+      var isDone = done.indexOf(i) !== -1;
+      btn.textContent = isDone ? "✓ done" : "mark done";
+      btn.classList.toggle("is-done", isDone);
+      railLinks[i].classList.toggle("done", isDone);
+    }
+    btn.addEventListener("click", function () {
+      var at = done.indexOf(i);
+      if (at === -1) done.push(i); else done.splice(at, 1);
+      store.set("r101.done", done); paint();
+    });
+    paint();
+  });
+  var current = 0;
+  function show(i) {
+    if (i < 0 || i >= N || !sections[i]) i = 0;
+    current = i;
+    sections.forEach(function (sec, j) { sec.classList.toggle("open", j === i); });
+    railLinks.forEach(function (a, j) { a.classList.toggle("active", j === i); });
+    store.set("r101.last", i); window.scrollTo(0, 0);
+  }
+  function fromHash() {
+    var h = location.hash.slice(1);
+    if (/^\d+$/.test(h)) show(parseInt(h, 10)); else show(store.get("r101.last", 0));
+  }
+  window.addEventListener("hashchange", fromHash);
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "ArrowRight" && current < N - 1) location.hash = "#" + (current + 1);
+    if (e.key === "ArrowLeft" && current > 0) location.hash = "#" + (current - 1);
+  });
+  fromHash();
+})();
+</script>
+</body>
+</html>

@@ -380,9 +380,7 @@ pub async fn run(
                             Err(e) => app.notice(format!("{name}: authorization failed — {e}")),
                             Ok(()) => {
                                 app.notice(format!("{name} authorized — reconnecting MCP servers…"));
-                                if let Some(old) = &sess.tools.mcp {
-                                    old.shutdown();
-                                }
+                                sess.tools.shutdown_mcp();
                                 let root = app.root.clone();
                                 let tx = ui_tx.clone();
                                 tokio::spawn(async move {

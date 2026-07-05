@@ -12,11 +12,9 @@ mod model;
 mod prompt;
 mod provider;
 mod rekey;
-mod subagent;
 mod tools;
 mod tui;
 mod util;
-mod webcheck;
 
 use events::AgentEvent;
 use model::{preflight, resolve_model, resolve_provider, Provider, Selector};
@@ -271,10 +269,16 @@ async fn main() {
             let _ = agent::run_turn(&turn_sess, &mut messages, &tx, true, None).await;
         });
         let mut failed = false;
+        let mut last_step: Option<usize> = None;
         while let Some(ev) = rx.recv().await {
             match ev {
                 AgentEvent::Message(t) => println!("{t}"),
-                AgentEvent::ToolStart { name, args, .. } => println!("· {name}({args})"),
+                AgentEvent::ToolStart { name, args, step } => {
+                    // `+` marks a call batched into the same model response as the previous one.
+                    let mark = if last_step == Some(step) { '+' } else { '·' };
+                    last_step = Some(step);
+                    println!("{mark} {name}({args})");
+                }
                 AgentEvent::ToolEnd {
                     summary,
                     elapsed_ms,
@@ -294,6 +298,12 @@ async fn main() {
                 AgentEvent::Usage(u) => println!(
                     "» tokens: {} in / {} out ({} total)",
                     u.prompt_tokens, u.completion_tokens, u.total_tokens
+                ),
+                // "tok:" (not "tokens:") on purpose — the eval harness sums `tokens:` lines as the
+                // primary loop's spend, and its budget graders are calibrated to that meaning.
+                AgentEvent::SubagentUsage { id, usage } => println!(
+                    "↳[{id}] tok: {} in / {} out",
+                    usage.prompt_tokens, usage.completion_tokens
                 ),
                 AgentEvent::Note(t) => println!("» {t}"),
                 AgentEvent::StepLimit(n) => {

@@ -4,8 +4,8 @@
 //! are actually present. Self-contained: a bundled Bun + Playwright driver `bun -e`'d against the URL
 //! (no files written), using the system Chrome (`channel: "chrome"`) so no browser download is needed.
 
+use super::ToolOutcome;
 use crate::exec::run;
-use crate::tools::ToolOutcome;
 use serde_json::Value;
 use std::path::Path;
 use std::time::Duration;
@@ -41,7 +41,7 @@ console.log(JSON.stringify(out));
 
 /// Run a browser check against `args.url`. Never errors out of the call (per the tools convention);
 /// an unreachable page or a missing toolchain comes back as readable text with `ok = false`.
-pub async fn web_check(root: &Path, args: &Value) -> ToolOutcome {
+pub(super) async fn web_check(root: &Path, args: &Value) -> ToolOutcome {
     let url = match args.get("url").and_then(|v| v.as_str()) {
         Some(u) if !u.is_empty() => u,
         _ => return ToolOutcome::err("error: web_check needs a `url` (e.g. http://localhost:5173)"),

@@ -11,6 +11,29 @@ pub fn first_line(s: &str, max: usize) -> String {
     }
 }
 
+/// `s` unchanged when it fits, else its first `max` characters with a trailing ellipsis.
+pub fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
+}
+
+/// Keep the head and tail of an over-long text, with an omission marker between (char boundaries,
+/// not bytes). Long tool output keeps its start (where answers usually sit) and its end (where
+/// errors usually sit).
+pub fn head_tail(text: &str, head: usize, tail: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= head + tail {
+        return text.to_string();
+    }
+    let omitted = chars.len() - head - tail;
+    let h: String = chars[..head].iter().collect();
+    let t: String = chars[chars.len() - tail..].iter().collect();
+    format!("{h}\n… [{omitted} chars omitted] …\n{t}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8,12 +8,19 @@
   - default full-screen TUI
   - `--once <task>` headless execution
   - `mcp list|login|logout`
-- `src/agent.rs` — non-streaming model/tool loop; replays tool calls, handles `delegate`, emits events, and integrates background-job nudges.
-- `src/tools.rs` — built-in tools: `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `bash`, `job_start`, `job_check`, `job_stop`; MCP tool passthrough lives here too.
+- `src/agent/` — non-streaming model/tool loop:
+  - `mod.rs` — `Session` + `run_turn`, the loop skeleton (tool replay, events, job nudges).
+  - `delegate.rs` — the `delegate` subagent fan-out (parallel sub-tasks, result capping).
+  - `supervisor.rs` — `Supervisor`: SPEAR/ASSESS/RESOLVE gates, step-budget/frontier nudges.
+  - `compact.rs` — context compaction (see conventions below).
+- `src/tools/` — built-in tools + MCP passthrough:
+  - `mod.rs` — `ToolOutcome` + the `Tools` registry/dispatch.
+  - `files.rs` (`read_file`/`write_file`/`edit_file`/`edit_lines`/`list_dir`), `search.rs` (`glob`/`grep`), `shell.rs` (`bash`/`job_start`), `webcheck.rs` (`web_check`).
+  - `paths.rs` (`safe_resolve` repo confinement), `stamps.rs` (`ReadStamps` edit-staleness guard), `spec.rs` (the schemas advertised to the model).
 - `src/tui/`
-  - `app.rs` — UI state transitions; returns `AppEffect` for anything async.
+  - `app/` — UI state transitions; returns `AppEffect` for anything async. `mod.rs` holds `App`; submodules: `input`, `update`, `msg`, `selection`, `setup`, `tokens`, `tray`.
   - `mod.rs` — outer event loop / async orchestration.
-  - `view.rs` — rendering.
+  - `view/` — rendering. `mod.rs` is the frame composer; submodules: `transcript`, `input`, `status`, `tray`, `modal`.
   - `editor.rs`, `keymap.rs`, `markdown.rs`, `theme.rs` — input/render helpers.
   - `knowledge.rs` — `/init` and `/knowledge` snapshot/diff workflow.
 - `src/provider/`, `src/model.rs` — provider abstraction and OpenAI-compatible client; Azure/custom are wired, Vertex/Anthropic staged.
@@ -26,12 +33,12 @@
 ## Local conventions
 - Non-streaming loop is intentional; do not switch behavior casually.
 - Keep TUI boundaries intact:
-  - state/update logic in `tui/app.rs`
+  - state/update logic in `tui/app/`
   - await/orchestration in `tui/mod.rs`
-  - drawing in `tui/view.rs`
+  - drawing in `tui/view/`
 - `delegate` is a first-class feature here:
-  - parent interception is in `src/agent.rs`
-  - subagent prompt is in `src/subagent.rs`
+  - parent interception and fan-out are in `src/agent/delegate.rs`
+  - the subagent prompt is assembled in `src/prompt.rs` (`subagent_identity`)
   - depth is capped; subagents do not re-delegate.
 - Tool calls return user/model-readable text plus structured success (`ToolOutcome { text, ok }`); do not reintroduce ad hoc error sniffing.
 - File tools must stay confined to repo-relative safe paths; preserve `safe_resolve` semantics.

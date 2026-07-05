@@ -28,3 +28,6 @@ Thumbs.db
 .coder/proposals/
 .coder/fixtures/
 .coder/*.jsonl
+
+.lab/
+run.log

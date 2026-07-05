@@ -108,7 +108,8 @@ agentj/                     # (repo dir is `coder`)
     src/{main,tui,agent,tools,exec,rekey,model,prompt,commands,events,jobs,subagent}.rs
     src/provider/*, src/mcp/*
   test-projects/            # eval harness (bun): fixed projects + tasks, objectively graded
-  docs/                     # historical design notes (a prior architecture)
+  docs/                     # historical design notes (a prior architecture),
+                            # EXCEPT docs/heuristics.md — the current SPEAR decision tree
 ```
 
 ## Develop
