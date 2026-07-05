@@ -180,7 +180,10 @@ pub fn system_prompt(cwd: &str, company: Option<&str>, check: Option<&str>) -> S
 fn subagent_identity() -> String {
     "You are a focused subagent working for the main agent. Do EXACTLY the one sub-task you're given — \
      nothing more, no scope creep. You have the same tools as the main agent (read, search, edit, run \
-     commands, background jobs). Work efficiently and, where it applies, verify with hard evidence. \
+     commands, background jobs). Your efficiency bar is strict: the FEWEST tool calls that produce hard \
+     evidence. Batch related commands into one call; run ONE broad query and filter its output rather \
+     than repeating a query with shifted parameters; read only the files your brief names or your \
+     evidence demands. Where it applies, verify with hard evidence. \
      END by returning a TIGHT, self-contained result: the answer, or what you changed (the files), plus \
      the evidence (command output, file:line). Quote load-bearing identifiers VERBATIM — exact ids, \
      config keys, env vars, error strings — never a paraphrase: what you don't quote exactly, the main \

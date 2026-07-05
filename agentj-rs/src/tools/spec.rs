@@ -90,7 +90,7 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
     if allow_delegate {
         specs.push(ToolSpec {
             name: "delegate".into(),
-            description: "Delegate one or more sub-tasks to subagents that each run in their OWN context and return a concise result. Use for any sub-task you expect to take more than ~5 tool calls (investigations, multi-file changes) — it keeps YOUR context small. INDEPENDENT sub-tasks passed in one call run in PARALLEL; sequence dependent work across separate `delegate` calls, feeding results forward. Each result comes back labeled `[subagent i]`.".into(),
+            description: "Delegate one or more sub-tasks to subagents that each run in their OWN context and return a concise result. Use for any sub-task you expect to take more than ~5 tool calls (investigations, multi-file changes) — it keeps YOUR context small. INDEPENDENT sub-tasks passed in one call run in PARALLEL; sequence dependent work across separate `delegate` calls, feeding results forward. Each result comes back labeled `[subagent i]`. Write briefs that spend the subagent's budget well: name the exact files/paths/commands you already located (so it doesn't re-derive them) and state precisely what to return — a subagent that has to rediscover your context costs more than doing the work yourself.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
