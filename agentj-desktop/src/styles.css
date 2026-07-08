@@ -89,6 +89,111 @@ body {
   color: var(--t-ink);
   font-weight: 600;
 }
+.topbar .brand {
+  color: var(--t-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+/* repo control */
+.repoctl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.repobtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #0b0e13;
+  border: 1px solid var(--line2);
+  color: var(--t-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  max-width: 360px;
+}
+.repobtn:hover:not(:disabled) {
+  border-color: #33415a;
+  background: #0e131b;
+}
+.repobtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.repobtn .folder {
+  filter: grayscale(0.2);
+}
+.repobtn .reponame {
+  color: var(--t-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repobtn .branch {
+  color: var(--aj);
+  font-size: 11px;
+}
+.repobtn .chev {
+  color: var(--t-faint);
+  font-size: 10px;
+}
+.repolock {
+  font-size: 11px;
+  opacity: 0.8;
+}
+.repomenu {
+  position: absolute;
+  top: 30px;
+  left: 0;
+  min-width: 240px;
+  background: #0f141d;
+  border: 1px solid var(--line2);
+  border-radius: 9px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  padding: 5px;
+  z-index: 50;
+}
+.repomenu-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--t-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.repomenu-item:hover {
+  background: #172033;
+}
+.repomenu-item.pick {
+  color: var(--accent);
+  font-weight: 600;
+}
+.repomenu-item .fullpath {
+  color: var(--t-faint);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repomenu-sep {
+  color: var(--t-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 9px 2px;
+}
 
 /* phase rail */
 .phases {

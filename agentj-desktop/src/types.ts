@@ -62,6 +62,12 @@ export interface Blueprint {
   html: string;
 }
 
+// The working directory the agent is operating in (from current_repo / open_repo / repo-changed).
+export interface RepoInfo {
+  root: string;
+  branch: string | null;
+}
+
 // A locally-injected event for user prompts, kept in the same stream so
 // ordering against agent events is preserved.
 export type UserEvent = { kind: "user"; data: string };

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AgentEvent, Blueprint, StreamEvent } from "./types";
+import type { AgentEvent, Blueprint, RepoInfo, StreamEvent } from "./types";
 
 export function readArtifact(name: string): Promise<string | null> {
   return invoke<string | null>("read_artifact", { name });
@@ -15,9 +15,11 @@ export interface Session {
   running: boolean;
   blueprint: Blueprint | null;
   bpOpen: boolean;
+  repo: RepoInfo | null;
   send: (prompt: string) => Promise<void>;
   interrupt: () => Promise<void>;
   openBlueprint: (open: boolean) => void;
+  openRepo: (path: string) => Promise<void>;
 }
 
 export function useSession(): Session {
@@ -25,6 +27,7 @@ export function useSession(): Session {
   const [running, setRunning] = useState(false);
   const [blueprint, setBlueprint] = useState<Blueprint | null>(null);
   const [bpOpen, setBpOpen] = useState(false);
+  const [repo, setRepo] = useState<RepoInfo | null>(null);
   const push = useCallback((ev: StreamEvent) => setEvents((p) => [...p, ev]), []);
 
   // Keep a live ref so the send/interrupt callbacks stay stable.
@@ -49,6 +52,18 @@ export function useSession(): Session {
       setBlueprint(e.payload);
       setBpOpen(true);
     }).then(track);
+
+    // A repo switch resets everything: new working dir, fresh conversation.
+    listen<RepoInfo>("repo-changed", (e) => {
+      setRepo(e.payload);
+      setEvents([]);
+      setBlueprint(null);
+      setBpOpen(false);
+      setRunning(false);
+    }).then(track);
+
+    // Seed the header with the repo the app launched in.
+    invoke<RepoInfo>("current_repo").then(setRepo).catch(() => {});
 
     return () => {
       disposed = true;
@@ -83,5 +98,21 @@ export function useSession(): Session {
 
   const openBlueprint = useCallback((open: boolean) => setBpOpen(open), []);
 
-  return { events, running, blueprint, bpOpen, send, interrupt, openBlueprint };
+  const openRepo = useCallback(
+    async (path: string) => {
+      if (runningRef.current) {
+        push({ kind: "error", data: "interrupt the running turn before switching repos" });
+        return;
+      }
+      try {
+        // The backend emits "repo-changed", which resets events/blueprint/running above.
+        await invoke<RepoInfo>("open_repo", { path });
+      } catch (err) {
+        push({ kind: "error", data: String(err) });
+      }
+    },
+    [push],
+  );
+
+  return { events, running, blueprint, bpOpen, repo, send, interrupt, openBlueprint, openRepo };
 }
