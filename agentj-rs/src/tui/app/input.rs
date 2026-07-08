@@ -15,6 +15,58 @@ use std::time::{Duration, Instant};
 /// A second Ctrl-C within this window quits.
 const DOUBLE_TAP: Duration = Duration::from_secs(2);
 
+/// Split a `/task` argument into `(reference, task directive)`. A numeric or branch-shaped first
+/// token (a digit, `-`, `/`, `_`, `.`) is a place to re-key ONTO — `1234`, `feature/login`,
+/// `GEN-2827`. But a bare word followed by prose ("complete the project") is the TASK itself, not a
+/// branch: we slug a fresh branch from it and keep the whole sentence as the directive, instead of
+/// eating "complete" as a branch name. A single bare token stays a reference (it's a branch name).
+pub(super) fn parse_task_args(rest: &str) -> (String, String) {
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    let first = words.first().copied().unwrap_or("");
+    let is_prose = words.len() > 1 && first.chars().all(|c| c.is_ascii_alphabetic());
+    if is_prose {
+        return (task_slug(rest), rest.to_string());
+    }
+    let reference = first.to_string();
+    // A bare `/task <ref>` (no inline description) should still start the work after re-keying, not
+    // switch branches and idle — synthesize a directive that fetches the task and implements it.
+    let desc = rest[first.len()..].trim();
+    let desc = if desc.is_empty() {
+        format!(
+            "Work on `{reference}` end to end. First find out what it requires — `{reference}` \
+             looks like a tracker issue, so fetch its details from a connected issue tracker \
+             (e.g. Linear via MCP) or infer the goal from the branch and its recent commits. \
+             Then scope, plan, implement, and verify your work."
+        )
+    } else {
+        desc.to_string()
+    };
+    (reference, desc)
+}
+
+/// A short, git-safe branch slug from a freeform task ("Complete the IV UX v2 project" →
+/// "complete-the-iv-ux-v2"). Capped so branch names stay readable.
+fn task_slug(task: &str) -> String {
+    let mut slug = String::new();
+    let mut dash = false;
+    for c in task.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+            dash = false;
+        } else if !slug.is_empty() && !dash {
+            slug.push('-');
+            dash = true;
+        }
+        if slug.len() >= 32 {
+            break;
+        }
+    }
+    match slug.trim_end_matches('-') {
+        "" => "task".to_string(),
+        s => s.to_string(),
+    }
+}
+
 /// The slash token containing the cursor, when the completion popover should consider it: a maximal
 /// non-whitespace run ending at the cursor that starts with `/` at the start of the text or right
 /// after whitespace (so `a/b` or a mid-word `/` never triggers). Returns (start byte, token so far).
@@ -44,7 +96,7 @@ pub struct Popover {
 
 impl App {
     /// Ctrl-P command menu items: (label-builder handled in view) — order matters for menu_accept.
-    pub const MENU_ITEMS: usize = 4;
+    pub const MENU_ITEMS: usize = 6;
 
     fn menu_move(&mut self, delta: i32) -> AppEffect {
         if let Some(sel) = self.menu.as_mut() {
@@ -60,10 +112,9 @@ impl App {
         self.dirty = true;
         match sel {
             0 => {
-                // Toggle steering visibility; stay open so the state change is visible. The
-                // transcript collapses/restores already-pushed steering rows immediately.
-                self.show_steering = !self.show_steering;
-                self.transcript.set_hide_steering(!self.show_steering);
+                // Show/hide the model's `thinking` blocks. Display-only, retroactive.
+                self.show_thinking = !self.show_thinking;
+                self.transcript.set_hide_thinking(!self.show_thinking);
                 AppEffect::None
             }
             1 => {
@@ -72,6 +123,22 @@ impl App {
                 AppEffect::None
             }
             2 => {
+                // Focus: hide the machinery (tool calls + thinking), leaving just the conversation
+                // cards. Display-only, retroactive. Stay open so the change is visible.
+                self.focus = !self.focus;
+                self.transcript.set_focus(self.focus);
+                AppEffect::None
+            }
+            3 => {
+                // Export the transcript to a markdown file in the working dir.
+                self.menu = None;
+                match self.export_transcript() {
+                    Ok(path) => self.notice(format!("exported transcript → {path}")),
+                    Err(e) => self.notice(format!("transcript export failed: {e}")),
+                }
+                AppEffect::None
+            }
+            4 => {
                 self.menu = None;
                 self.show_mcp_modal = !self.mcp_status.is_empty();
                 if self.mcp_status.is_empty() {
@@ -219,7 +286,7 @@ impl App {
             Action::PageUp => self.scroll_by(-10, true),
             Action::PageDown => self.scroll_by(10, false),
             Action::Complete => {
-                // Tab with no popover open: try to open it for the token under the cursor.
+                // Tab: open the slash-command completion popover for the token under the cursor.
                 self.update_popover();
                 self.dirty = true;
                 AppEffect::None
@@ -459,36 +526,22 @@ impl App {
     }
 
     pub(super) fn submit_task(&mut self, text: &str) -> AppEffect {
-        let rest = text["/task".len()..].trim().to_string();
-        let reference = rest.split_whitespace().next().unwrap_or("").to_string();
-        if reference.is_empty() {
+        let rest = text["/task".len()..].trim();
+        if rest.is_empty() {
             self.transcript.push(dim_line(
-                "usage: /task <pr-number | branch-name> [task description]",
+                "usage: /task <pr-number | branch | a task to do on a fresh branch>",
             ));
-            AppEffect::None
-        } else if !is_linked_worktree(&self.root)
+            return AppEffect::None;
+        }
+        if !is_linked_worktree(&self.root)
             && std::env::var("AGENTJ_ALLOW_PRIMARY").as_deref() != Ok("1")
         {
             self.transcript.push(dim_line("» /task does a destructive reset to origin and is meant for a dedicated worktree — this looks like the primary checkout. Run agentj in your worktree, or set AGENTJ_ALLOW_PRIMARY=1."));
-            AppEffect::None
-        } else {
-            self.transcript
-                .push(dim_line(format!("» re-keying worktree → {reference}")));
-            // A bare `/task <ref>` (no inline description) should still start the work after re-keying,
-            // not just switch branches and idle. Synthesize a directive from the reference so the agent
-            // fetches the task and implements it.
-            let desc = rest[reference.len()..].trim().to_string();
-            let desc = if desc.is_empty() {
-                format!(
-                    "Work on `{reference}` end to end. First find out what it requires — `{reference}` \
-                     looks like a tracker issue, so fetch its details from a connected issue tracker \
-                     (e.g. Linear via MCP) or infer the goal from the branch and its recent commits. \
-                     Then scope, plan, implement, and verify your work."
-                )
-            } else {
-                desc
-            };
-            AppEffect::Rekey { reference, desc }
+            return AppEffect::None;
         }
+        let (reference, desc) = parse_task_args(rest);
+        self.transcript
+            .push(dim_line(format!("» re-keying worktree → {reference}")));
+        AppEffect::Rekey { reference, desc }
     }
 }

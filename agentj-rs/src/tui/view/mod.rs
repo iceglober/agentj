@@ -29,12 +29,12 @@ mod tests;
 pub use input::InputLayoutCache;
 #[cfg(test)]
 pub use perf::{note_batch, PerfMetrics};
-pub use transcript::{assistant_block, tool_end_line, TranscriptView};
+pub use transcript::{assistant_block, tool_end_line, LineKind, TranscriptView};
 pub use tray::rail_connector;
 
 use modal::{render_mcp_modal, render_menu_modal, render_setup_modal};
 use status::{popover_lines, status_line};
-use transcript::visible_transcript_rows;
+use transcript::{visible_transcript_rows, GUTTER, LABEL_W};
 use tray::{jobs_panel, jobs_panel_rows, subagent_panel, subagent_panel_rows};
 
 use super::app::{App, Selection, TranscriptGeom};
@@ -88,14 +88,25 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Constraint::Length(1),
     ])
     .split(area);
+    let (r_main, r_tray, r_status, r_input, r_footer) =
+        (rows[0], rows[1], rows[2], rows[3], rows[4]);
 
-    // Transcript (with a bottom divider). A little side padding, a moderate bottom gap above the
-    // divider; the top stays flush. Auto-follow the tail unless the user scrolled up.
+    // Main pane (with a bottom divider). A little side padding, a moderate bottom gap above the
+    // divider; the top stays flush. Holds the transcript.
     const PAD_X: u16 = 1;
     const PAD_BOTTOM: u16 = 2;
-    let viewport = rows[0].height.saturating_sub(1 + PAD_BOTTOM); // border + bottom padding
-    let content_width = rows[0].width.saturating_sub(2 * PAD_X);
-    app.transcript.ensure_width(content_width);
+    let viewport = r_main.height.saturating_sub(1 + PAD_BOTTOM); // border + bottom padding
+    let content_width = r_main.width.saturating_sub(2 * PAD_X);
+    // The transcript reserves a left type-label column + the card gutter; text wraps in what's left.
+    let text_width = content_width.saturating_sub((GUTTER + LABEL_W) as u16);
+    let main_block = || {
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(theme::divider_color()))
+            .padding(Padding::new(PAD_X, PAD_X, 0, PAD_BOTTOM))
+    };
+    // Auto-follow the tail unless the user scrolled up.
+    app.transcript.ensure_width(text_width);
     let max = app.transcript.max_scroll(viewport);
     if app.follow {
         app.scroll = max;
@@ -108,35 +119,27 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     // Record the transcript's top row + height so a drag past its edge can auto-scroll while selecting.
     app.tgeom = Some(TranscriptGeom {
-        y: rows[0].y,
+        y: r_main.y,
         viewport,
     });
     // Wrap only the on-screen window ourselves (not ratatui's Wrap widget) so the wrap, the scroll
     // math, and the selection map agree; tint any selected cells while we're at it.
-    let (_first, window, intra) = app.transcript.window(app.scroll, viewport);
-    let visible = visible_transcript_rows(window, content_width, viewport, intra);
+    let (_first, window, kinds, intra, block_start) = app.transcript.window(app.scroll, viewport);
+    let visible = visible_transcript_rows(window, kinds, block_start, text_width, viewport, intra);
     // Clear the whole region first: a default Block doesn't paint its padding cells, so without this
     // the side/bottom padding retains stale glyphs pinned to screen coordinates as content scrolls.
-    f.render_widget(Clear, rows[0]);
-    f.render_widget(
-        Paragraph::new(visible).block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(theme::divider_color()))
-                .padding(Padding::new(PAD_X, PAD_X, 0, PAD_BOTTOM)),
-        ),
-        rows[0],
-    );
+    f.render_widget(Clear, r_main);
+    f.render_widget(Paragraph::new(visible).block(main_block()), r_main);
 
     // Scrolled-up badge: the tail keeps growing below while the user reads history — say so, and
     // say how to get back. (Paging to the bottom restores follow; see the clamp above.)
-    if !app.follow && rows[0].height > 2 {
+    if !app.follow && r_main.height > 2 {
         let hint = " ↓ scroll down for latest ";
         let w = hint.chars().count() as u16;
-        if rows[0].width > w + 2 {
+        if r_main.width > w + 2 {
             let rect = ratatui::layout::Rect {
-                x: rows[0].x + rows[0].width - w - 1,
-                y: rows[0].y + rows[0].height.saturating_sub(2), // the blank padding row above the divider
+                x: r_main.x + r_main.width - w - 1,
+                y: r_main.y + r_main.height.saturating_sub(2), // the blank padding row above the divider
                 width: w,
                 height: 1,
             };
@@ -151,12 +154,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // Clear the tray region before drawing its text/effect. The coalesce effect overdraws this
         // rect and the tray's height can change frame-to-frame; without an explicit clear, stale
         // cells can remain pinned to screen coordinates after the tray collapses or reflows.
-        f.render_widget(Clear, rows[1]);
-        let mut panel = subagent_panel(app, Instant::now(), rows[1].width);
+        f.render_widget(Clear, r_tray);
+        let mut panel = subagent_panel(app, Instant::now(), r_tray.width);
         panel.extend(jobs_panel(app, Instant::now()));
-        f.render_widget(Paragraph::new(panel), rows[1]);
+        f.render_widget(Paragraph::new(panel), r_tray);
         if let Some(fx_) = app.tray_fx.as_mut() {
-            f.render_effect(fx_, rows[1], frame_dt.into());
+            f.render_effect(fx_, r_tray, frame_dt.into());
             if fx_.done() {
                 app.tray_fx = None;
             }
@@ -167,8 +170,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Status line (left status + right-aligned session segment).
     f.render_widget(
-        Paragraph::new(status_line(app, Instant::now(), rows[2].width)),
-        rows[2],
+        Paragraph::new(status_line(app, Instant::now(), r_status.width)),
+        r_status,
     );
 
     // Input rows are pre-wrapped char-exact (no Wrap widget), so the cursor math is authoritative
@@ -177,17 +180,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.setup.is_some() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled("  ⏎ next · Esc cancel", theme::dim()))),
-            rows[3],
+            r_input,
         );
     } else {
         f.render_widget(
             Paragraph::new(app.input_cache.rendered.clone()).scroll((app.input_cache.scroll, 0)),
-            rows[3],
+            r_input,
         );
         let (crow, ccol) = app.input_cache.cursor;
         f.set_cursor_position(Position::new(
-            (rows[3].x + 2 + ccol).min(rows[3].x + rows[3].width.saturating_sub(1)),
-            (rows[3].y + crow).min(rows[3].y + rows[3].height.saturating_sub(1)),
+            (r_input.x + 2 + ccol).min(r_input.x + r_input.width.saturating_sub(1)),
+            (r_input.y + crow).min(r_input.y + r_input.height.saturating_sub(1)),
         ));
     }
 
@@ -197,7 +200,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             format!("agentj · {}/{} · {}", app.provider, app.model_id, app.root),
             theme::dim(),
         ))),
-        rows[4],
+        r_footer,
     );
 
     // Slash-command popover, floated above the status row.
@@ -210,9 +213,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .max()
             .unwrap_or(0)
             .min(area.width as usize) as u16;
-        let y = rows[2].y.saturating_sub(h);
+        let y = r_status.y.saturating_sub(h);
         let rect = ratatui::layout::Rect {
-            x: rows[3].x,
+            x: r_input.x,
             y,
             width: w.max(1),
             height: h.min(area.height),

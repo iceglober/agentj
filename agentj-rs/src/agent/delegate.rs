@@ -1,9 +1,9 @@
-//! Delegation: a `delegate` tool call fans sub-tasks out to subagents that each run through a
+//! Delegation: a `run_subagents` tool call fans sub-tasks out to subagents that each run through a
 //! fresh `run_turn` in their own context (depth cap 1 — subagents can't re-delegate). Independent
 //! sub-tasks run in parallel, bounded by a semaphore; only their final results re-enter the parent
 //! context, forwarded live to the UI as structured `Subagent*` events along the way.
 
-use super::{run_turn, Session};
+use super::{run_turn, AgentType, Session};
 use crate::events::AgentEvent;
 use crate::provider::ChatMessage;
 use crate::util::first_line;
@@ -67,7 +67,7 @@ pub(super) async fn run_delegate(
     args: &Value,
     tx: &UnboundedSender<AgentEvent>,
 ) -> (String, bool) {
-    let tasks: Vec<(String, Option<String>, String)> = args
+    let tasks: Vec<(String, Option<String>, String, AgentType)> = args
         .get("tasks")
         .and_then(|v| v.as_array())
         .map(|a| {
@@ -79,14 +79,15 @@ pub(super) async fn run_delegate(
                         .and_then(|x| x.as_str())
                         .map(|s| s.to_string());
                     let label = task_label(&task, t.get("title").and_then(|x| x.as_str()));
-                    Some((task, context, label))
+                    let kind = AgentType::parse(t.get("type").and_then(|x| x.as_str()));
+                    Some((task, context, label, kind))
                 })
                 .collect()
         })
         .unwrap_or_default();
     if tasks.is_empty() {
         return (
-            "error: delegate needs a non-empty `tasks` array of { task, context? }".to_string(),
+            "error: run_subagents needs a non-empty `tasks` array of { task, context? }".to_string(),
             false,
         );
     }
@@ -95,21 +96,22 @@ pub(super) async fn run_delegate(
         "delegating {} sub-task(s) in parallel",
         tasks.len()
     )));
-    // Every subagent shares one seeded system prompt: identity + cwd + the repo's AGENTS.md, so it
-    // starts oriented instead of re-deriving the project from scratch.
-    let sub_system = crate::prompt::subagent_system_prompt(
-        &sess.tools.root.to_string_lossy(),
-        sess.cfg.check.as_deref(),
-    );
+    let cwd = sess.tools.root.to_string_lossy().into_owned();
     let sem = Arc::new(Semaphore::new(sess.cfg.max_parallel_subagents));
     let mut set: JoinSet<SubResult> = JoinSet::new();
     let mut task_index: HashMap<tokio::task::Id, usize> = HashMap::new();
 
-    for (i, (task, context, label)) in tasks.into_iter().enumerate() {
-        let sess = sess.clone();
+    for (i, (task, context, label, kind)) in tasks.into_iter().enumerate() {
+        // Each subagent runs in a Session scoped to its TYPE: a tool set the type allows, and the
+        // type's role prompt (both keep its context lean and its behavior on-rails).
+        let sub_sess = Session {
+            llm: sess.llm.clone(),
+            tools: Arc::new(sess.tools.scoped_to(kind)),
+            cfg: sess.cfg.clone(),
+        };
+        let sub_system = crate::prompt::subagent_system_prompt(kind, &cwd);
         let parent = tx.clone();
         let sem = sem.clone();
-        let sub_system = sub_system.clone();
         let handle = set.spawn(async move {
             let _permit = sem.acquire_owned().await;
             let _ = parent.send(AgentEvent::SubagentStart { id: i, desc: label });
@@ -154,7 +156,7 @@ pub(super) async fn run_delegate(
             };
             let run = async {
                 // Subagents don't commit deltas — only their final result re-enters the parent.
-                let r = run_turn(&sess, &mut sub_msgs, &atx, false, None).await;
+                let r = run_turn(&sub_sess, &mut sub_msgs, &atx, false, None).await;
                 drop(atx); // close the channel so the forwarder finishes
                 r
             };

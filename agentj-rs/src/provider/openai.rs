@@ -104,6 +104,7 @@ fn parse_turn(text: &str) -> anyhow::Result<AssistantTurn> {
         .ok_or_else(|| anyhow::anyhow!("no choices in response"))?;
     Ok(AssistantTurn {
         content: choice.message.content,
+        reasoning: choice.message.reasoning_content.or(choice.message.reasoning),
         tool_calls: choice.message.tool_calls,
         finish_reason: choice.finish_reason.unwrap_or_default(),
         usage,
@@ -128,6 +129,12 @@ struct Choice {
 struct RespMessage {
     #[serde(default)]
     content: Option<String>,
+    /// Reasoning-model output. Gateways differ on the key — accept both `reasoning_content`
+    /// (DeepSeek/vLLM/Bifrost style) and `reasoning` (some OpenAI-compat shims).
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
     #[serde(default)]
     tool_calls: Vec<ToolCall>,
 }
@@ -249,6 +256,18 @@ mod tests {
         assert_eq!(u.completion_tokens, 30);
         assert_eq!(u.total_tokens, 150);
         assert_eq!(u.cached_tokens, Some(64));
+    }
+
+    #[test]
+    fn reasoning_content_is_parsed_from_either_key_and_absent_when_missing() {
+        let a = parse(r#"{"choices":[{"message":{"content":"hi","reasoning_content":"let me think"}}]}"#);
+        assert_eq!(a.reasoning.as_deref(), Some("let me think"));
+        // The alternate `reasoning` key also works.
+        let b = parse(r#"{"choices":[{"message":{"content":"hi","reasoning":"pondering"}}]}"#);
+        assert_eq!(b.reasoning.as_deref(), Some("pondering"));
+        // Absent → None (most providers don't return reasoning).
+        let c = parse(r#"{"choices":[{"message":{"content":"hi"}}]}"#);
+        assert_eq!(c.reasoning, None);
     }
 
     #[test]

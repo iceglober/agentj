@@ -159,6 +159,11 @@ pub struct Config {
     pub compact_threshold: u64,
     /// The project's check command (`AGENTJ_CHECK` > aj.json `check` > None → heuristics).
     pub check: Option<String>,
+    /// When the model goes idle with work still framed but unfinished, consult a fresh-context
+    /// judge inference for a keep-going/stop verdict instead of ending the turn (`AGENTJ_CONTINUATION_JUDGE`,
+    /// default ON; set `0`/`false` to disable). Bounds premature "shall I proceed?" stops on
+    /// long-horizon autonomous work.
+    pub continuation_judge: bool,
 }
 
 impl Config {
@@ -184,6 +189,8 @@ impl Config {
     ) -> Self {
         let env_num = |k: &str| get(k).and_then(|s| s.parse::<u64>().ok());
         let num = |k: &str, file_value: Option<u64>| env_num(k).or(file_value);
+        let env_flag_default_on =
+            |k: &str| get(k).is_none_or(|s| !(s == "0" || s.eq_ignore_ascii_case("false")));
         let context_window = env_num("AGENTJ_CONTEXT_WINDOW").or_else(|| crate::model::context_window(model_id));
         Config {
             max_steps: num("AGENTJ_MAX_STEPS", file.max_steps)
@@ -202,6 +209,7 @@ impl Config {
                 .or_else(|| context_window.map(|w| w * 7 / 10))
                 .unwrap_or(96_000),
             check: get("AGENTJ_CHECK").filter(|s| !s.is_empty()).or(file.check),
+            continuation_judge: env_flag_default_on("AGENTJ_CONTINUATION_JUDGE"),
         }
     }
 }
@@ -361,6 +369,15 @@ mod tests {
             from_all(&[("AGENTJ_CHECK", "bun test")], "unknown-model", e_file()).check.as_deref(),
             Some("bun test")
         );
+    }
+
+    #[test]
+    fn continuation_judge_defaults_on_and_only_an_explicit_off_disables_it() {
+        assert!(from(&[]).continuation_judge, "on by default");
+        assert!(from(&[("AGENTJ_CONTINUATION_JUDGE", "1")]).continuation_judge);
+        assert!(from(&[("AGENTJ_CONTINUATION_JUDGE", "anything")]).continuation_judge, "unknown value stays on");
+        assert!(!from(&[("AGENTJ_CONTINUATION_JUDGE", "0")]).continuation_judge);
+        assert!(!from(&[("AGENTJ_CONTINUATION_JUDGE", "false")]).continuation_judge);
     }
 
     #[test]

@@ -107,16 +107,17 @@ pub(super) fn status_line(app: &App, now: Instant, width: u16) -> Line<'static> 
     let ctx_text = ctx.as_ref().map(|(t, _)| t.as_str());
     let avail = (width as usize).saturating_sub(left_w + 1);
     let right = right_status_text(ctx_text, &elapsed, avail);
+
     if !right.is_empty() {
         let right_w = right.chars().count();
         let pad = (width as usize).saturating_sub(left_w + right_w);
+        spans.push(Span::raw(" ".repeat(pad)));
         let warn = ctx.map(|(_, w)| w).unwrap_or(false) && right.contains("ctx");
         let style = if warn {
             Style::default().fg(theme::WARN)
         } else {
             theme::muted()
         };
-        spans.push(Span::raw(" ".repeat(pad)));
         spans.push(Span::styled(right, style));
     }
     Line::from(spans)

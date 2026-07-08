@@ -3,17 +3,18 @@
 //!  - **Background jobs (primary loop only):** inject finished/timed-out job nudges each iteration; when
 //!    the model goes idle with jobs still running, wait for the next nudge — but only when it has
 //!    nothing else to do.
-//!  - **Subagents:** a `delegate` tool call is intercepted here (not run through `tools.call`); each
+//!  - **Subagents:** a `run_subagents` tool call is intercepted here (not run through `tools.call`); each
 //!    sub-task runs through a fresh `run_turn` with `allow_delegate=false` (depth cap 1). Independent
 //!    sub-tasks run in parallel; only their final results re-enter the parent context.
 //!
-//! The concepts each have a submodule: `delegate` (the subagent fan-out), `compact` (context
-//! compaction), and `supervisor` (the gates and nudges that push a turn toward verified, shipped
-//! work). This file is the loop skeleton that wires them together.
+//! The concepts each have a submodule: `delegate` (the subagent fan-out) and `compact` (context
+//! compaction). This file is the loop skeleton that wires them together.
 
+mod agent_type;
 mod compact;
 mod delegate;
-mod supervisor;
+
+pub use agent_type::AgentType;
 
 #[cfg(test)]
 mod tests;
@@ -29,8 +30,50 @@ use delegate::run_delegate;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
-use supervisor::Supervisor;
 use tokio::sync::mpsc::UnboundedSender;
+
+/// The file-mutating tools. Once one has landed, compaction may start aging out older reads (before
+/// that the turn is still read-only exploration and every read is live design context).
+fn is_mutating_tool(name: &str) -> bool {
+    matches!(name, "write_file" | "edit_file" | "edit_lines")
+}
+
+/// Resume — a `--resume`/`--continue` convenience, NOT a steering nudge. On the first turn of a
+/// session that has surviving work, embed it so the model picks up where it left off instead of
+/// re-deriving scope. It leads with `todos` (what's left) and follows with `plan` (the approach the
+/// run committed to). Interactive sessions read the two artifacts from the global store; a headless
+/// run reads its in-tree `.aj/task/plan.md`. A FRESH session has neither → nothing injected.
+fn frontier_resume(sess: &Session) -> Option<String> {
+    let cap = |s: String| -> String { s.trim().chars().take(4000).collect() };
+    let mut parts: Vec<String> = Vec::new();
+    match &sess.tools.session {
+        Some(session) => {
+            if let Some(t) = session.read_artifact("todos").map(cap).filter(|s| !s.is_empty()) {
+                parts.push(format!("Your `todos` (what's left):\n{t}"));
+            }
+            if let Some(p) = session.read_artifact("plan").map(cap).filter(|s| !s.is_empty()) {
+                parts.push(format!("Your `plan` (the approach):\n{p}"));
+            }
+        }
+        None => {
+            if let Some(p) = std::fs::read_to_string(sess.tools.root.join(".aj/task/plan.md"))
+                .ok()
+                .map(cap)
+                .filter(|s| !s.is_empty())
+            {
+                parts.push(format!(".aj/task/plan.md:\n{p}"));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Work from this session survives — resume from it instead of re-deriving scope, and keep \
+         your `todos` current as you go:\n\n{}",
+        parts.join("\n\n")
+    ))
+}
 
 /// Everything a turn needs to talk to the model and run tools, bundled so signatures stay small.
 #[derive(Clone)]
@@ -60,7 +103,7 @@ pub async fn run_turn(
             let _ = c.send(delta);
         }
     };
-    // Inject a supervisor/job message into the turn: surfaced to the UI as a Note, committed to the
+    // Inject a job/resume message into the turn: surfaced to the UI as a Note, committed to the
     // durable history, and appended for the model's next call.
     let inject = |messages: &mut Vec<ChatMessage>, msg: String, note_cap: usize| {
         let _ = tx.send(AgentEvent::Note(first_line(&msg, note_cap)));
@@ -68,26 +111,33 @@ pub async fn run_turn(
         commit_delta(vec![m.clone()]);
         messages.push(m);
     };
-    let mut sup = Supervisor::new(allow_delegate);
+    // Once any file-mutating tool has landed, compaction may age out older reads; before that the
+    // turn is read-only exploration and every read is live design context.
+    let mut mutated = false;
     let mut last_prompt_tokens: u64 = 0;
     // Everything present when the turn begins was already shown to the model in prior turns; only
     // messages appended past this point are "unseen" and must not be compacted until sent.
     let mut seen_before = messages.len();
 
-    // Frontier resume: on the FIRST turn of a fresh session (history is exactly [system, prompt])
-    // a surviving task frontier is embedded, so the model resumes from the plan instead of
-    // re-deriving scope. Primary loop only; later turns already carry the frontier work.
+    // Frontier resume: on the FIRST turn of a session (history is exactly [system, prompt]) a
+    // surviving task plan is embedded so the model resumes from it. Primary loop only; later turns
+    // already carry that work in their history.
     if allow_delegate && messages.len() == 2 {
-        if let Some(msg) = supervisor::frontier_nudge(sess) {
+        if let Some(msg) = frontier_resume(sess) {
             inject(messages, msg, 120);
-            seen_before = messages.len();
         }
+        seen_before = messages.len();
     }
 
-    for step in 0..sess.cfg.max_steps {
-        if let Some(msg) = Supervisor::step_budget_nudge(step, sess.cfg.max_steps) {
-            inject(messages, msg, 120);
+    let mut step = 0usize;
+    let step_budget = sess.cfg.max_steps;
+    loop {
+        if step >= step_budget {
+            let _ = tx.send(AgentEvent::StepLimit(sess.cfg.max_steps));
+            let _ = tx.send(AgentEvent::Done);
+            return final_text;
         }
+        step += 1;
 
         // Background jobs are the primary loop's concern only (subagents don't consume nudges).
         if allow_delegate {
@@ -107,7 +157,7 @@ pub async fn run_turn(
         // fires regardless so a pathological pure-exploration turn can't overrun the context.
         let size = last_prompt_tokens.max(estimate_prompt_tokens(messages));
         let near_window = sess.cfg.context_window.is_some_and(|w| size > w * 7 / 10);
-        if size > sess.cfg.compact_threshold && (sup.mutated() || near_window) {
+        if size > sess.cfg.compact_threshold && (mutated || near_window) {
             let n = compact_history(messages, COMPACT_KEEP_RECENT, seen_before);
             if n > 0 {
                 let _ = tx.send(AgentEvent::Note(format!(
@@ -116,13 +166,13 @@ pub async fn run_turn(
             }
         }
 
-        if let Some(msg) = sup.spear_nudge() {
-            inject(messages, msg, 120);
-        }
-
         // Specs are recomputed each call: `mcp_find_tools` activates tools mid-turn, and their full
         // schemas must advertise on the very next call (subagents share the catalog via Tools).
-        let mut specs = tool_specs(allow_delegate);
+        let mut specs = tool_specs(
+            allow_delegate,
+            sess.tools.has_session(),
+            sess.tools.agent_type,
+        );
         specs.extend(sess.tools.mcp_specs());
         // About to send the whole history — after this call, everything in it counts as seen.
         seen_before = messages.len();
@@ -144,6 +194,14 @@ pub async fn run_turn(
             ));
         }
 
+        // Surface the model's reasoning (when the provider returns it) before its reply — a
+        // `thinking` block. Display-only; it is not added to `messages`/history.
+        if let Some(reasoning) = turn.reasoning.as_deref() {
+            if !reasoning.trim().is_empty() {
+                let _ = tx.send(AgentEvent::Thinking(reasoning.to_string()));
+            }
+        }
+
         if let Some(text) = turn.content.clone() {
             if !text.trim().is_empty() {
                 let _ = tx.send(AgentEvent::Message(text.clone()));
@@ -161,13 +219,6 @@ pub async fn run_turn(
         if turn.tool_calls.is_empty() {
             // A bare assistant reply commits on its own.
             commit_delta(vec![assistant]);
-
-            // The model wants to end the turn — the supervisor's finishing gates (ASSESS,
-            // RESOLVE ship, RESOLVE completeness) each get one shot at sending it back to work.
-            if let Some(msg) = sup.finishing_nudge(sess).await {
-                inject(messages, msg, 120);
-                continue;
-            }
 
             // The model went idle. If background jobs are still running and it has nothing else to do,
             // wait for the next nudge and continue — it blocks only when there's nothing else to do.
@@ -187,6 +238,7 @@ pub async fn run_turn(
                     }
                 }
             }
+
             let _ = tx.send(AgentEvent::Done);
             return final_text;
         }
@@ -198,8 +250,8 @@ pub async fn run_turn(
             let args: Value = serde_json::from_str(&tc.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
 
-            // `delegate` is intercepted here (not run through tools.call) so it can spawn nested loops.
-            let is_delegate = allow_delegate && tc.function.name == "delegate";
+            // `run_subagents` is intercepted here (not run through tools.call) so it can spawn nested loops.
+            let is_delegate = allow_delegate && tc.function.name == "run_subagents";
             let _ = tx.send(AgentEvent::ToolStart {
                 name: tc.function.name.clone(),
                 args: first_line(&tc.function.arguments, 100),
@@ -217,14 +269,9 @@ pub async fn run_turn(
                 elapsed_ms: start.elapsed().as_millis(),
                 summary: first_line(&text, 60),
             });
-            sup.observe_call(
-                &tc.function.name,
-                is_delegate,
-                &args,
-                &text,
-                ok,
-                sess.cfg.check.as_deref(),
-            );
+            if ok && is_mutating_tool(&tc.function.name) {
+                mutated = true;
+            }
             let tool_msg = ChatMessage {
                 role: "tool".into(),
                 content: Some(text),
@@ -236,8 +283,4 @@ pub async fn run_turn(
         }
         commit_delta(delta);
     }
-
-    let _ = tx.send(AgentEvent::StepLimit(sess.cfg.max_steps));
-    let _ = tx.send(AgentEvent::Done);
-    final_text
 }

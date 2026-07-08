@@ -24,6 +24,34 @@ fn temp_tools() -> (Tools, PathBuf) {
 }
 
 #[tokio::test]
+async fn a_scout_scoped_tool_set_refuses_writes_at_dispatch() {
+    use crate::agent::AgentType;
+    let (base, dir) = temp_tools();
+    let scout = base.scoped_to(AgentType::Scout);
+    // A scout can read…
+    fs::write(dir.join("a.txt"), "x").unwrap();
+    assert!(scout.call("read_file", &json!({ "path": "a.txt" })).await.ok);
+    // …but writing/editing is refused, naming the type.
+    let o = scout.call("write_file", &json!({ "path": "b.txt", "content": "y" })).await;
+    assert!(!o.ok && o.text.contains("scout"), "{}", o.text);
+    assert!(!scout.call("edit_file", &json!({ "path": "a.txt", "old_string": "x", "new_string": "z" })).await.ok);
+    // The executor (default subagent) may write.
+    let exec = base.scoped_to(AgentType::Executor);
+    assert!(exec.call("write_file", &json!({ "path": "c.txt", "content": "z" })).await.ok);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn artifact_tools_error_without_a_session_store() {
+    // Headless runs have no session; the artifact tools refuse rather than write anywhere.
+    let t = tools(); // built with session=None
+    let o = t.call("save_artifact", &json!({ "name": "plan", "content": "x" })).await;
+    assert!(!o.ok && o.text.contains("no session"), "{}", o.text);
+    let o = t.call("read_artifact", &json!({ "name": "plan" })).await;
+    assert!(!o.ok && o.text.contains("no session"), "{}", o.text);
+}
+
+#[tokio::test]
 async fn unknown_tool_reports_not_ok() {
     let o = tools().call("no_such_tool", &json!({})).await;
     assert!(!o.ok);
@@ -49,6 +77,35 @@ async fn reading_an_existing_file_is_ok() {
     // the crate manifest is always present when tests run from the crate root
     let o = tools().call("read_file", &json!({ "path": "Cargo.toml" })).await;
     assert!(o.ok, "expected ok, got: {}", o.text);
+}
+
+#[tokio::test]
+async fn list_dir_lists_entries_and_a_missing_path_errors() {
+    let (t, dir) = temp_tools();
+    fs::write(dir.join("a.txt"), "x").unwrap();
+    fs::create_dir_all(dir.join("sub")).unwrap();
+    let o = t.call("list_dir", &json!({ "path": "." })).await;
+    assert!(o.ok, "expected ok, got: {}", o.text);
+    assert!(o.text.contains("a.txt") && o.text.contains("sub"), "entries listed: {}", o.text);
+
+    let o = t.call("list_dir", &json!({ "path": "no-such-dir" })).await;
+    assert!(!o.ok);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn glob_matches_patterns_and_reports_no_hits() {
+    let (t, dir) = temp_tools();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("src/lib.rs"), "x").unwrap();
+    fs::write(dir.join("src/notes.md"), "x").unwrap();
+    let o = t.call("glob", &json!({ "pattern": "**/*.rs" })).await;
+    assert!(o.ok, "expected ok, got: {}", o.text);
+    assert!(o.text.contains("lib.rs") && !o.text.contains("notes.md"), "rs only: {}", o.text);
+
+    let o = t.call("glob", &json!({ "pattern": "**/*.zig" })).await;
+    assert!(o.text.to_ascii_lowercase().contains("no"), "no-match message: {}", o.text);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]

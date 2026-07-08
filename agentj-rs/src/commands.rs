@@ -15,7 +15,7 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/task",
         takes_arg: true,
-        summary: "wipe + re-key the worktree onto a PR or branch, then start a fresh task",
+        summary: "wipe + re-key the worktree onto a PR/branch (or a fresh branch), then start the task",
     },
     SlashCommand {
         name: "/init",

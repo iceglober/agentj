@@ -332,7 +332,6 @@ mod tests {
     fn running_turn_suppresses_unsupported_keys() {
         for (code, modifiers) in [
             (KeyCode::Enter, KeyModifiers::NONE),
-            (KeyCode::Tab, KeyModifiers::NONE),
             (KeyCode::Left, KeyModifiers::NONE),
             (KeyCode::Char('x'), KeyModifiers::NONE),
             (KeyCode::Backspace, KeyModifiers::NONE),

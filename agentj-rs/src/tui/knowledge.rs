@@ -154,13 +154,13 @@ fn list_bucket(label: &str, paths: &[String]) -> String {
     format!("\n{label} ({}):\n  {}{more}", paths.len(), shown.join("\n  "))
 }
 
-/// The `/init` directive: an orchestrated mapping run, worked as a normal SPEAR task.
+/// The `/init` directive: an orchestrated mapping run, worked as a normal task.
 pub fn init_directive() -> String {
     "[/init — map this repository and write its agent documentation]\n\n\
      1. SURVEY the shape yourself first, cheaply: list_dir the root, read the manifest files \
      (Cargo.toml / package.json / etc.), and glob for any existing AGENTS.md or README files. \
      Identify the major components — packages, crates, services, apps.\n\
-     2. DELEGATE one subagent per major component, in ONE parallel `delegate` call. Each subagent \
+     2. DELEGATE one subagent per major component, in ONE parallel `run_subagents` call. Each subagent \
      maps its component — entry points, key modules and their responsibilities, internal \
      conventions, how it's built and tested — and returns a tight, factual summary with file paths.\n\
      3. WRITE the documentation from that synthesis:\n\

@@ -24,6 +24,7 @@ async-recursion = "1"
 pulldown-cmark = { version = "0.13", default-features = false }
 rmcp = { version = "2.0.0", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest", "reqwest", "auth"] }
 tachyonfx = "0.21.0"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 portable-pty = "0.9"

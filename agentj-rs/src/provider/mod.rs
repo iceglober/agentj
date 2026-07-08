@@ -80,6 +80,9 @@ pub struct TokenUsage {
 #[derive(Debug)]
 pub struct AssistantTurn {
     pub content: Option<String>,
+    /// The model's reasoning, when the provider returns it (`reasoning_content`/`reasoning`).
+    /// Display-only — shown as a `thinking` block; not committed to the durable history.
+    pub reasoning: Option<String>,
     pub tool_calls: Vec<ToolCall>,
     pub finish_reason: String,
     pub usage: Option<TokenUsage>,

@@ -44,7 +44,7 @@ impl App {
     /// transcript (still-running rows just vanish — their turn was aborted). Called when a delegate
     /// batch completes, and on turn end/abort as a safety net.
     /// Freeze the finished wave into the transcript as the same fork/join rail the live panel
-    /// drew, closed by a join line with the wave's aggregates — scrollback keeps the DAG's shape.
+    /// drew, closed by a join line with the wave's aggregates — scrollback keeps the fork/join shape.
     pub(super) fn flush_subagent_summaries(&mut self) {
         self.tray_fx = None;
         let rows = std::mem::take(&mut self.subagents);

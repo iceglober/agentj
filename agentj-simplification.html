@@ -1,0 +1,363 @@
+<meta charset="utf-8">
+<title>agentj — the hard reset</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c2230; --border: #2a3140;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --accent2: #7ee787;
+    --warn: #f0883e; --danger: #ff7b72; --code: #d2a8ff;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans);
+         line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 80px; }
+  header h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  header .sub { color: var(--muted); font-size: 15px; margin-bottom: 4px; }
+  header .meta { color: var(--muted); font-size: 12.5px; font-family: var(--mono); }
+  .tag { display:inline-block; background: var(--panel2); border:1px solid var(--border);
+         color: var(--accent2); border-radius: 20px; padding: 2px 11px; font-size: 12px;
+         font-family: var(--mono); margin-right: 6px; }
+  nav { position: sticky; top: 0; background: rgba(14,17,22,0.9); backdrop-filter: blur(8px);
+        z-index: 10; display: flex; gap: 4px; border-bottom: 1px solid var(--border);
+        margin: 24px 0 0; padding: 8px 0; }
+  nav button { background: none; border: none; color: var(--muted); font-family: var(--sans);
+        font-size: 14px; font-weight: 600; padding: 9px 16px; border-radius: 8px; cursor: pointer;
+        transition: all .12s; }
+  nav button:hover { color: var(--fg); background: var(--panel); }
+  nav button.active { color: var(--accent); background: var(--panel2); }
+  section { display: none; animation: fade .2s ease; }
+  section.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px);} to {opacity:1; transform:none;} }
+  h2 { font-size: 21px; margin: 28px 0 12px; letter-spacing: -0.3px; }
+  h2 .em { color: var(--accent); }
+  p.lead { color: var(--muted); font-size: 14.5px; max-width: 74ch; }
+  code { font-family: var(--mono); font-size: 12.5px; background: var(--panel2);
+         padding: 1px 5px; border-radius: 4px; color: var(--code); }
+  .toggle { display: inline-flex; background: var(--panel); border: 1px solid var(--border);
+            border-radius: 10px; padding: 3px; margin: 14px 0 20px; }
+  .toggle button { background: none; border: none; color: var(--muted); font-family: var(--sans);
+            font-size: 13.5px; font-weight: 600; padding: 7px 18px; border-radius: 7px; cursor: pointer; }
+  .toggle button.on-before { background: var(--danger); color: #1a0e0e; }
+  .toggle button.on-after  { background: var(--accent2); color: #0c1a0c; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+          padding: 18px 20px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 4px; font-size: 16px; }
+  .card h3 .pill { font-size: 11px; font-family: var(--mono); font-weight: 600;
+          padding: 2px 8px; border-radius: 12px; margin-left: 8px; vertical-align: middle; }
+  .pill.ro { background: #12233a; color: var(--accent); border:1px solid #1d3a5c; }
+  .pill.rw { background: #23301a; color: var(--accent2); border:1px solid #33481f; }
+  .pill.def { background: #2a2118; color: var(--warn); border:1px solid #47351f; }
+  .card .role { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .prompt { font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap;
+            background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+            border-radius: 6px; padding: 12px 14px; color: #c9d1d9; max-height: 190px; overflow: auto; }
+  .prompt.tail { border-left-color: var(--muted); color: var(--muted); }
+  details.prompt-wrap { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--accent); font-size: 12.5px; font-weight: 600;
+            font-family: var(--mono); list-style: none; padding: 4px 0; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "▸ "; }
+  details[open] summary::before { content: "▾ "; }
+  .tools-line { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+  .tools-line .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase;
+            letter-spacing: .5px; margin-right: 4px; }
+  .chip { font-family: var(--mono); font-size: 11.5px; padding: 2px 8px; border-radius: 5px;
+          background: var(--panel2); border: 1px solid var(--border); color: #adbac7; }
+  .chip.w { color: var(--accent2); border-color: #33481f; }
+  .chip.d { color: var(--code); border-color: #3a2d52; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 24px; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11.5px;
+       text-transform: uppercase; letter-spacing: .5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px; border-bottom: 1px solid var(--panel2); vertical-align: top; }
+  td.name code { color: var(--accent2); background: none; padding: 0; font-size: 13px; font-weight: 600; }
+  td.sig code { color: #adbac7; background: none; padding: 0; font-size: 12px; }
+  .gate { font-family: var(--mono); font-size: 11px; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .gate.core { background: #1a2233; color: var(--accent); }
+  .gate.prim { background: #2a2118; color: var(--warn); }
+  .gate.sess { background: #221a2e; color: var(--code); }
+  .gate.mcp  { background: #12261c; color: var(--accent2); }
+  .del { color: var(--danger); }
+  .kept { color: var(--accent2); }
+  ul.changes { list-style: none; padding: 0; margin: 6px 0; }
+  ul.changes li { padding: 7px 0 7px 26px; position: relative; font-size: 13.5px; border-bottom: 1px solid var(--panel2); }
+  ul.changes li::before { position: absolute; left: 0; top: 7px; font-family: var(--mono); font-weight: 700; }
+  ul.changes li.rm::before { content: "✕"; color: var(--danger); }
+  ul.changes li.keep::before { content: "✓"; color: var(--accent2); }
+  ul.changes li.new::before { content: "＋"; color: var(--accent); }
+  ul.changes li code { font-size: 12px; }
+  .loop { font-family: var(--mono); font-size: 13px; background: var(--bg); border: 1px solid var(--border);
+          border-radius: 8px; padding: 16px 18px; margin: 14px 0; color: #adbac7; overflow-x: auto; }
+  .loop .k { color: var(--accent); } .loop .c { color: var(--muted); }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 40px; border-top: 1px solid var(--border);
+          padding-top: 16px; font-family: var(--mono); }
+  .note { background: #14202e; border: 1px solid #1d3a5c; border-radius: 8px; padding: 10px 14px;
+          font-size: 13px; color: #a9c7e8; margin: 12px 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>agentj — the hard reset</h1>
+    <div class="sub">From an accreted SPEAR/supervisor machine to a three-sentence prime prompt + parallel subagents + self-verification.</div>
+    <div class="meta">verified: 199 unit + 5 PTY tests pass · clippy clean · branch research/long-horizon</div>
+    <div style="margin-top:12px">
+      <span class="tag">✕ SPEAR</span>
+      <span class="tag">✕ supervisor/steering</span>
+      <span class="tag">✕ continuation judge</span>
+      <span class="tag">✕ epic/engineer/DAG</span>
+      <span class="tag">✕ web_check</span>
+      <span class="tag">✓ implemented</span>
+    </div>
+  </header>
+
+  <nav>
+    <button class="active" data-t="overview">Overview</button>
+    <button data-t="agents">Agents &amp; Prompts</button>
+    <button data-t="tools">Tool Catalogue</button>
+  </nav>
+
+  <!-- ================= OVERVIEW ================= -->
+  <section id="overview" class="active">
+    <h2>Current state <span class="em">vs.</span> the simplified state (now implemented)</h2>
+    <p class="lead">The request: reset the prompts, strip every mention of SPEAR and strict protocols, remove all steering/supervisor usage, and make the prime prompt very simple. That is done. Toggle to compare what the system <em>was</em> against what it now <em>is</em>.</p>
+
+    <div class="toggle" id="ba-toggle">
+      <button class="on-before" data-ba="before">◀ Before (complex)</button>
+      <button data-ba="after">After (simple) ▶</button>
+    </div>
+
+    <div id="ba-before">
+      <div class="card">
+        <h3>The prime prompt was a wall of doctrine</h3>
+        <div class="role">A multi-page <code>instructions()</code> built the whole SPEAR loop (Scope · Plan · Execute · Assess · Resolve) as a literal spine, plus a separate <code>epic_doctrine()</code> block, the design-contest doctrine, the meta-plan/frontier ceremony, and a dozen "judicious re-adds." It read as an accreted pile — and it still default-dove a greenfield build instead of exploring.</div>
+      </div>
+      <div class="card">
+        <h3>A supervisor steered every turn <span class="pill def">≈600 lines</span></h3>
+        <ul class="changes">
+          <li class="rm"><code>spear_nudge</code> — re-anchor after 12 direct calls</li>
+          <li class="rm"><code>step_budget_nudge</code> — "8 steps remain, converge now"</li>
+          <li class="rm"><code>greenfield_edit_gate</code> — block the first scaffold write into an empty repo</li>
+          <li class="rm">ASSESS / RESOLVE-ship / RESOLVE-completeness / epic-merge finishing gates</li>
+          <li class="rm"><code>phase()</code> inference → a live <code>SPEAR-spine</code> panel in the TUI</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>A continuation judge second-guessed every stop</h3>
+        <div class="role">On idle or step-budget exhaustion, a fresh model context was asked CONTINUE/STOP and could re-arm the budget — <code>src/agent/continuation.rs</code>, up to 6 extensions per turn.</div>
+      </div>
+      <div class="card">
+        <h3>Steering was a first-class transcript citizen</h3>
+        <div class="role"><code>LineKind::Steering</code>, a "Show steering" Ctrl-P toggle, tagged <code>[supervisor: …]</code> notes. The Ctrl-P menu carried 9 items.</div>
+      </div>
+    </div>
+
+    <div id="ba-after" style="display:none">
+      <div class="card">
+        <h3>The prime prompt is four tagged sections</h3>
+        <div class="role">This is the entire <code>instructions()</code> body now — four ideas, each its own opening/closing tag, nothing else about how to work:</div>
+        <div class="prompt">&lt;explore&gt;
+Always explore and always plan before you take any action. Build a HIGH-CONFIDENCE understanding of the context from HARD EVIDENCE — read the code, run commands, look at the real files — before you act; never work from assumption.
+&lt;/explore&gt;
+
+&lt;subagents&gt;
+Use subagents as much as possible, and launch them in PARALLEL as much as possible — one `run_subagents` call with several independent tasks. This applies to EVERY kind of task, not just building things: answering a question about the code, tracking down a bug, reviewing a change, refactoring, or auditing all fan out the same way. Delegate the reading and exploring to them; you synthesize and decide.
+&lt;/subagents&gt;
+
+&lt;align&gt;
+For anything beyond a trivial change, ALIGN with the user before you build. When a picture would land faster than prose — an interface, a data model, a page layout, a multi-step flow — save a `blueprint` (`save_artifact` with format:"html"): a self-contained interactive page using mockups, hierarchy, and diagrams that shows what you understand and what you propose. It opens in their browser. Track the work itself in a `todos` artifact (pending / in-progress / done, with evidence) and keep it current; hold the settled approach in `plan`.
+&lt;/align&gt;
+
+&lt;verify&gt;
+Always verify the user's request has been fulfilled beyond a shadow of a doubt. Check your work no matter what the task was. If you answered a question about the codebase, double-check your reasoning and make sure your conclusion rests on hard evidence. If you made a code change, run the tests, run the code, and manually exercise it — cURL an endpoint, run a script, or drive the UI with a browser.
+&lt;/verify&gt;</div>
+      </div>
+      <div class="card">
+        <h3>The loop is just: call → run tools → repeat</h3>
+        <div class="loop"><span class="c">// src/agent/mod.rs — run_turn, stripped to the skeleton</span>
+<span class="k">loop</span> {
+    <span class="k">if</span> step >= step_budget { emit StepLimit; <span class="k">return</span>; }   <span class="c">// hard stop, no judge</span>
+    drain background-job nudges;                        <span class="c">// primary loop only</span>
+    <span class="k">if</span> prompt too large &amp;&amp; already mutated { compact old tool results; }
+    turn = llm.chat(messages, tool_specs);
+    emit Thinking / Message;
+    <span class="k">if</span> no tool_calls { wait on running jobs, else Done; }
+    <span class="k">for</span> call <span class="k">in</span> tool_calls { run it (run_subagents is intercepted); }
+}</div>
+      </div>
+      <div class="card">
+        <h3 class="kept">What survived — and why it isn't steering</h3>
+        <ul class="changes">
+          <li class="keep"><b>Typed subagents</b> — <code>scout/planner/reviewer/executor</code> (oracle folded away), each a scoped toolset. Identities are plain role descriptions (no SPEAR); the reviewer carries a MECE rubric.</li>
+          <li class="keep"><b>Frontier resume</b> — moved out of the supervisor to a plain <code>frontier_resume()</code> in <code>agent/mod.rs</code>; a <code>--resume</code>/<code>--continue</code> convenience that re-injects your <code>plan</code> artifact, not a nudge.</li>
+          <li class="keep"><b>Context compaction</b> — still elides old tool bodies once the turn has mutated a file; now gated on a local <code>mutated</code> flag instead of the supervisor.</li>
+          <li class="keep"><b>Background jobs, MCP, sessions</b> — untouched. (The epic / engineer / DAG / advanced-delegation feature is <span class="del">gone entirely</span> — see the note below.)</li>
+          <li class="new">Ctrl-P menu is now 8 items; <code>LineKind</code> is <code>Plain/User/Assistant/Tool/Note/Thinking</code>.</li>
+        </ul>
+      </div>
+      <div class="note">Deleted outright: <code>supervisor.rs</code>, <code>continuation.rs</code>, <code>view/spear.rs</code>, the <code>SpearPhase</code> type, the <code>AgentEvent::Phase</code> variant, <code>LineKind::Steering</code> + its toggle, <code>epic_doctrine()</code> — and, in the KISS pass: the <code>web_check</code> tool, the <code>engineer_start</code> tool and the <b>entire epic / engineer / DAG / advanced-delegation feature</b> (<code>engineers.rs</code>, <code>tui/epic.rs</code>, <code>view/dag.rs</code>, <code>view/epic.rs</code>, the <code>manage</code>/<code>epic_automerge</code> config, the two Ctrl-P toggles, the <code>/epic</code> command). The <code>oracle</code> subagent type was folded away and <code>delegate</code> was renamed <code>run_subagents</code>.</div>
+    </div>
+  </section>
+
+  <!-- ================= AGENTS ================= -->
+  <section id="agents">
+    <h2>Agents &amp; their prompts</h2>
+    <p class="lead">There is one primary agent (PRIME) and four subagent types dispatched by the <code>run_subagents</code> tool. Each agent's system prompt is built from opening/closing tagged sections: PRIME gets <code>&lt;identity&gt; &lt;context&gt; &lt;explore&gt; &lt;subagents&gt; &lt;align&gt; &lt;verify&gt;</code> (+ <code>&lt;project_docs&gt; &lt;skills&gt;</code> when present); a subagent gets <code>&lt;role&gt; &lt;contract&gt;</code> (+ <code>&lt;rubric&gt;</code> for the reviewer) then the same context/docs/skills. Every prompt string below is verbatim from the source.</p>
+
+    <div class="card">
+      <h3>PRIME — the primary loop <span class="pill def">full toolset + run_subagents</span></h3>
+      <div class="role">The interactive agent you talk to. Runs the simple prime prompt; orchestrates subagents.</div>
+      <div class="prompt">&lt;identity&gt; You are Agent J, a staff software engineer and architect[, at &lt;company&gt;]. You get real engineering work done in the user's repository — carefully, and without hand-holding. &lt;/identity&gt;
+
+&lt;context&gt; Your current working directory is &lt;cwd&gt;. You have full access to it through your tools — read files, search, edit, and run commands. Act; don't ask for permission to use a tool, and get things done. &lt;/context&gt;
+
+&lt;explore&gt; Always explore and always plan before you take any action. Build a HIGH-CONFIDENCE understanding of the context from HARD EVIDENCE — read the code, run commands, look at the real files — before you act; never work from assumption. &lt;/explore&gt;
+
+&lt;subagents&gt; Use subagents as much as possible, and launch them in PARALLEL as much as possible — one `run_subagents` call with several independent tasks. This applies to EVERY kind of task, not just building things: answering a question about the code, tracking down a bug, reviewing a change, refactoring, or auditing all fan out the same way. Delegate the reading and exploring to them; you synthesize and decide. &lt;/subagents&gt;
+
+&lt;align&gt; For anything beyond a trivial change, ALIGN with the user before you build. When a picture would land faster than prose — an interface, a data model, a page layout, a multi-step flow — save a `blueprint` (`save_artifact` with format:"html"): a self-contained interactive page using mockups, hierarchy, and diagrams that shows what you understand and what you propose. It opens in their browser. Track the work itself in a `todos` artifact (pending / in-progress / done, with evidence) and keep it current; hold the settled approach in `plan`. &lt;/align&gt;
+
+&lt;verify&gt; Always verify the user's request has been fulfilled beyond a shadow of a doubt. Check your work no matter what the task was. If you answered a question about the codebase, double-check your reasoning and make sure your conclusion rests on hard evidence. If you made a code change, run the tests, run the code, and manually exercise it — cURL an endpoint, run a script, or drive the UI with a browser. &lt;/verify&gt;
+
+(&lt;project_docs&gt; = the repo's AGENTS.md, and &lt;skills&gt; = the .claude/skills index, are appended when present.)</div>
+      <div class="tools-line"><span class="lbl">tools</span>
+        <span class="chip">read_file</span><span class="chip w">write_file</span><span class="chip w">edit_file</span><span class="chip w">edit_lines</span><span class="chip">list_dir</span><span class="chip">glob</span><span class="chip">grep</span><span class="chip w">bash</span><span class="chip w">job_start</span><span class="chip">job_check</span><span class="chip w">job_stop</span><span class="chip d">run_subagents</span>
+      </div>
+      <div class="tools-line"><span class="lbl">+ when enabled</span>
+        <span class="chip">save_artifact <small>(session)</small></span><span class="chip">read_artifact <small>(session)</small></span><span class="chip">mcp_find_tools <small>(MCP connected)</small></span>
+      </div>
+    </div>
+
+    <div class="grid2" id="subagents"></div>
+
+    <details class="prompt-wrap card" style="margin-top:4px">
+      <summary>Shared subagent contract (prepended-to by every type identity)</summary>
+      <div class="prompt tail">Do EXACTLY the one sub-task you're given — nothing more, no scope creep. Your efficiency bar is strict: the FEWEST tool calls that produce hard evidence. Batch related commands into one call; run ONE broad query and filter its output rather than repeating a query with shifted parameters; read only the files your brief names or your evidence demands. (Exception: reproducing nondeterministic behavior — flaky tests, races — is done by rerunning the SAME command; that repetition is the method, not waste.) If you discovered independent follow-up work outside your sub-task, do NOT do it — end with a `frontier:` line listing it so the main agent can schedule it. Your entire final reply becomes the result handed back to the main agent — tight and self-contained, no filler, no meta-commentary.</div>
+    </details>
+  </section>
+
+  <!-- ================= TOOLS ================= -->
+  <section id="tools">
+    <h2>Tool catalogue</h2>
+    <p class="lead">All 14 built-in tools plus the MCP meta-tool, with signatures and gating. <span class="gate core">core</span> = always available to the primary loop; subagents see only what their type allows. <span class="gate prim">primary</span> / <span class="gate sess">session</span> / <span class="gate mcp">mcp</span> mark the conditionally-advertised tools.</p>
+    <table id="tool-table">
+      <thead><tr><th>Tool</th><th>Signature</th><th>Gate</th><th>What it does</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <h2>Per-type tool scoping</h2>
+    <p class="lead">Enforced twice: <code>tool_specs(…, agent_type)</code> filters what's advertised, and <code>Tools::call</code> refuses a disallowed call at dispatch. The type allowlist constant <code>READ_ONLY</code> = <code>read_file, list_dir, glob, grep, mcp_find_tools, job_check, read_artifact</code> — but subagents run without a session store (<code>scoped_to</code> sets <code>session: None</code>), so the artifact tools are never actually advertised to them; the rows below show what a subagent truly sees.</p>
+    <table id="scope-table">
+      <thead><tr><th>Type</th><th>Access</th><th>Allowed built-ins</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Typed artifacts</h2>
+    <p class="lead">Artifacts persist in the session store (outside the repo, keyed to the session). <code>save_artifact</code> takes a <code>format</code> — <code>markdown</code> (default) or <code>html</code>. An <code>html</code> save is written as <code>&lt;name&gt;.html</code> and <b>opened in the user's browser</b>, which is the alignment moment. Three are conventional:</p>
+    <table>
+      <thead><tr><th>Artifact</th><th>Format</th><th>Role · lifecycle</th></tr></thead>
+      <tbody>
+        <tr><td class="name"><code>plan</code></td><td><span class="gate core">markdown</span></td><td>The settled <b>approach</b> + rationale. Written once the design is decided, revised only on new info. Re-injected on resume.</td></tr>
+        <tr><td class="name"><code>todos</code></td><td><span class="gate core">markdown</span></td><td>The execution <b>checklist</b> — pending / in-progress / done, with evidence. Churns every step. Re-injected on resume, and led with (it's what tells a resumed run what's left).</td></tr>
+        <tr><td class="name"><code>blueprint</code></td><td><span class="gate mcp">html</span></td><td>An interactive <b>visual alignment</b> page — mockups, hierarchy, diagrams. Opens in the user's browser on save. For the user, not the model context; not re-injected.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <div class="foot">agentj-simplification.html · generated as a working deliverable — itself an example of a `blueprint` · all prompt/tool text quoted verbatim from src/prompt.rs, src/agent/agent_type.rs, src/tools/spec.rs</div>
+</div>
+
+<script>
+// ---- data ----
+const SUBAGENTS = [
+  { name:"scout", cls:"ro", access:"read-only", role:"Find out / gather context / answer a question.",
+    tools:[["read_file",""],["list_dir",""],["glob",""],["grep",""],["mcp_find_tools",""],["job_check",""],["bash","w"]],
+    identity:`You are a SCOUT subagent. Your job is to FIND OUT, not to change anything: explore the code read-only and answer the exact question you were given with hard evidence. You do NOT edit files. Quote every load-bearing identifier — file:line, exact keys, error strings — VERBATIM; a paraphrase the main agent can't grep is worthless.` },
+  { name:"planner", cls:"ro", access:"read-only", role:"Design / decompose / weigh alternatives — never code.",
+    tools:[["read_file",""],["list_dir",""],["glob",""],["grep",""],["mcp_find_tools",""],["job_check",""],["bash","w"]],
+    identity:`You are a PLANNER subagent. You produce a DESIGN or a decomposition, never code: read to ground yourself, work out the shape (data model, interfaces, precedence, edge cases, back-compat), and weigh the alternatives. Return the plan and the tradeoffs you chose between; you do not write files.` },
+  { name:"reviewer", cls:"ro", access:"read-only + checks", role:"Adversarial verification against a MECE rubric.",
+    tools:[["read_file",""],["list_dir",""],["glob",""],["grep",""],["mcp_find_tools",""],["job_check",""],["bash","w"],["job_start","w"],["job_stop","w"]],
+    identity:`You are a REVIEWER subagent — adversarial. Your job is to find what is WRONG: read the diff/plan/answer and run the project's checks; you do NOT edit. Every finding must be REAL — reproduce it or cite it at file:line, no invented nits. Score the work against the rubric below and report exactly in its shape.`,
+    rubric:`Judge the work against these FOUR dimensions. They are mutually exclusive (a fault belongs to exactly one) and collectively exhaustive (together they cover every way the work can be wrong) — so assign each fault to one dimension and check that none is left unexamined:
+1. CORRECTNESS — does the logic do what it intends? wrong results, bad edge cases, off-by-one, unhandled errors, broken invariants.
+2. REQUIREMENTS — does it fulfill what was actually asked, in full? nothing missing, nothing built beyond the request.
+3. SAFETY — security holes, data loss, race conditions, resource leaks, unsafe defaults.
+4. MAINTAINABILITY — readability, naming, dead or duplicated code, and whether the change is covered by tests.
+For EACH dimension return PASS or FAIL with concrete evidence (file:line or a reproduction). Then give ONE overall verdict: SHIP or BLOCK. List the failing findings worst-first.` },
+  { name:"executor", cls:"def", access:"read + write (default)", role:"Make a targeted change on the files you were assigned.",
+    tools:[["read_file",""],["write_file","w"],["edit_file","w"],["edit_lines","w"],["list_dir",""],["glob",""],["grep",""],["bash","w"],["job_start","w"],["job_check",""],["job_stop","w"],["mcp_find_tools",""]],
+    identity:`You are an EXECUTOR subagent. You deliver a targeted CHANGE on the files you were assigned: make the edits, then verify with the project's own check on what you touched. Stay INSIDE your assigned files — no scope creep. Return the files you changed plus the check output; quote identifiers verbatim.` },
+];
+const PILL = { ro:"read-only", rw:"read + write", def:"default · read + write" };
+const PILLCLS = { ro:"ro", rw:"rw", def:"def" };
+
+const TOOLS = [
+  ["read_file","read_file(path, offset?, limit?)","core","Read a UTF-8 text file (repo-relative) with line numbers; offset/limit for a span."],
+  ["write_file","write_file(path, content)","core","Create or overwrite a file with the given content."],
+  ["edit_file","edit_file(path, edits[]? | old_string?, new_string?, replace_all?)","core","Exact-string replacement; batch several {old,new} edits in one atomic call. Echoes changed regions."],
+  ["edit_lines","edit_lines(path, start_line, end_line, expect, content)","core","Replace an inclusive 1-based line range; `expect` is a drift guard. Empty content deletes."],
+  ["list_dir","list_dir(path?)","core","List a directory's entries (repo-relative); directories end with /."],
+  ["glob","glob(pattern)","core","Find files by glob (e.g. **/*.rs) from repo root; respects .gitignore."],
+  ["grep","grep(pattern, path?)","core","Regex-search file contents from repo root; returns matching lines with numbers."],
+  ["bash","bash(command, timeout_s?)","core","Run a shell command (bash -lc) from repo root; ≤120s default, ≤600s max."],
+  ["job_start","job_start(command, timeout_s?)","core","Start a long-running command in the background; returns a job id, nudges you on finish/timeout."],
+  ["job_check","job_check(id?)","core","Check background jobs — status + recent output. Omit id for all. Non-blocking."],
+  ["job_stop","job_stop(id)","core","Kill a background job by id."],
+  ["run_subagents","run_subagents(tasks[] of {task, type?, title?, context?})","prim","Fan out sub-tasks to typed subagents (scout/planner/reviewer/executor) in parallel; each returns a concise result. Primary loop only (depth cap 1)."],
+  ["save_artifact","save_artifact(name, content, format?)","sess","Persist a named session artifact outside the repo. Conventions: `plan` (approach), `todos` (checklist) — both re-injected on resume — and `blueprint` (format:\"html\", opened in the user's browser for visual alignment)."],
+  ["read_artifact","read_artifact(name)","sess","Read back an artifact saved earlier this session. Needs a session store."],
+  ["mcp_find_tools","mcp_find_tools(query)","mcp","Search connected MCP servers by capability; matches become callable with full schemas next step."],
+];
+const GATELBL = { core:"core", prim:"primary", sess:"session", mcp:"mcp" };
+
+// ---- render agents ----
+const subWrap = document.getElementById("subagents");
+subWrap.innerHTML = SUBAGENTS.map(a => `
+  <div class="card">
+    <h3>${a.name} <span class="pill ${PILLCLS[a.cls]}">${PILL[a.cls]}</span></h3>
+    <div class="role">${a.role}</div>
+    <div class="prompt">&lt;role&gt; ${a.identity} &lt;/role&gt;</div>
+    ${a.rubric ? `<details class="prompt-wrap"><summary>&lt;rubric&gt; MECE output the reviewer must return</summary><div class="prompt">${a.rubric}</div></details>` : ""}
+    <div class="tools-line"><span class="lbl">tools</span>
+      ${a.tools.map(([t,c]) => `<span class="chip ${c}">${t}</span>`).join("")}
+    </div>
+  </div>`).join("");
+
+// ---- render tool table ----
+document.querySelector("#tool-table tbody").innerHTML = TOOLS.map(([n,sig,g,d]) => `
+  <tr>
+    <td class="name"><code>${n}</code></td>
+    <td class="sig"><code>${sig.replace(/</g,"&lt;")}</code></td>
+    <td><span class="gate ${g}">${GATELBL[g]}</span></td>
+    <td>${d}</td>
+  </tr>`).join("");
+
+// ---- render scope table ----
+document.querySelector("#scope-table tbody").innerHTML = SUBAGENTS.map(a => `
+  <tr>
+    <td class="name"><code>${a.name}</code></td>
+    <td>${a.access}</td>
+    <td class="sig">${a.tools.map(([t]) => t).join(", ")}</td>
+  </tr>`).join("") + `
+  <tr><td class="name"><code>PRIME</code></td><td>full</td><td class="sig">every built-in incl. run_subagents (+ save_artifact / read_artifact when a session store is attached)</td></tr>`;
+
+// ---- nav ----
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+  document.querySelectorAll("section").forEach(s => s.classList.remove("active"));
+  b.classList.add("active");
+  document.getElementById(b.dataset.t).classList.add("active");
+  window.scrollTo({top:0, behavior:"instant"});
+});
+
+// ---- before/after toggle ----
+const baBtns = document.querySelectorAll("#ba-toggle button");
+baBtns.forEach(b => b.onclick = () => {
+  const before = b.dataset.ba === "before";
+  document.getElementById("ba-before").style.display = before ? "block" : "none";
+  document.getElementById("ba-after").style.display  = before ? "none" : "block";
+  baBtns[0].className = before ? "on-before" : "";
+  baBtns[1].className = before ? "" : "on-after";
+});
+</script>

@@ -12,9 +12,11 @@ mod model;
 mod prompt;
 mod provider;
 mod rekey;
+mod session;
 mod tools;
 mod tui;
 mod util;
+mod worktree;
 
 use events::AgentEvent;
 use model::{preflight, resolve_model, resolve_provider, Provider, Selector};
@@ -28,7 +30,9 @@ const HELP: &str = "\
 agentj — a simple terminal coding agent (ratatui edition)
 
 Usage:
-  agentj                     chat in the current repo (full-screen ratatui)
+  agentj                     chat in the current repo (a fresh session)
+  agentj --continue          resume the most-recent session for this worktree
+  agentj --resume <uuid>     resume a specific session by its id
   agentj --once \"<task>\"      run one task headlessly, then exit
   agentj mcp list            show configured MCP servers + tool count
 
@@ -36,6 +40,8 @@ Options:
   --provider <name>   vertex | anthropic | azure | custom (env AGENTJ_PROVIDER; default vertex)
   --model <id>        model id (env AGENTJ_MODEL; required for azure/custom)
   --base-url <url>    endpoint for --provider custom (env AGENTJ_BASE_URL)
+  -c, --continue      resume the most-recent session for this worktree
+  --resume <uuid>     resume a specific session (its id is printed at startup)
   -h, --help          show this help
   -v, --version       show version
 
@@ -52,6 +58,10 @@ struct Args {
     model: Option<String>,
     base_url: Option<String>,
     once: Option<String>,
+    /// `--resume <uuid>`: reopen a specific prior session.
+    resume: Option<String>,
+    /// `--continue`: reopen the most-recent session for this worktree.
+    continue_: bool,
     help: bool,
     version: bool,
 }
@@ -62,6 +72,8 @@ fn parse_args(argv: &[String]) -> Args {
         model: None,
         base_url: None,
         once: None,
+        resume: None,
+        continue_: false,
         help: false,
         version: false,
     };
@@ -88,6 +100,11 @@ fn parse_args(argv: &[String]) -> Args {
                 i += 1;
                 a.once = argv.get(i).cloned();
             }
+            "--resume" => {
+                i += 1;
+                a.resume = argv.get(i).cloned();
+            }
+            "--continue" | "-c" => a.continue_ = true,
             _ => {}
         }
         i += 1;
@@ -222,7 +239,7 @@ async fn main() {
     // Resolve the runtime config once, before the prompt, so the check command shown to the model and
     // the one the ASSESS gate enforces come from the same source and can't diverge.
     let run_cfg = config::Config::from_sources(&model_id, &app_cfg);
-    let system = prompt::system_prompt(&root, company.as_deref(), run_cfg.check.as_deref());
+    let system = prompt::system_prompt(&root, company.as_deref());
 
     // Connect MCP servers once at startup; results are surfaced in the TUI (a modal on failure), not
     // spewed to the terminal.
@@ -234,11 +251,57 @@ async fn main() {
         (Some(Arc::new(c)), n)
     };
 
+    // Resolve the persistent session for INTERACTIVE runs only: `--resume <uuid>` reopens a specific
+    // one, `--continue` the most-recent for this worktree, else a fresh session is minted. A fresh
+    // session owns no artifacts, so it never inherits a previous task's plan. Headless
+    // `--once` runs get no session (they use the in-tree frontier, which can't bleed).
+    let session = if interactive {
+        let resolved = if let Some(id) = &args.resume {
+            match session::Session::load(id) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("couldn't resume session {id}: {e}");
+                    std::process::exit(1);
+                }
+            }
+        } else if args.continue_ {
+            match session::Session::most_recent_for(&root) {
+                Some(s) => s,
+                None => {
+                    eprintln!("no previous session for this worktree — start a fresh one (drop --continue)");
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            let branch = exec::run(&["git", "rev-parse", "--abbrev-ref", "HEAD"], &root, None)
+                .await
+                .ok()
+                .filter(|o| o.exit_code == 0)
+                .map(|o| o.stdout.trim().to_string());
+            match session::Session::mint(&root, branch) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("couldn't create a session: {e}");
+                    std::process::exit(1);
+                }
+            }
+        };
+        println!("session {}", resolved.id);
+        Some(Arc::new(resolved))
+    } else {
+        None
+    };
+
     let jobs = jobs::JobManager::new(root.clone());
     // Kept so every exit path below can kill MCP child-process trees (else an orphaned mcp-remote
     // keeps holding its OAuth callback port and the next launch dies with EADDRINUSE).
     let mcp_for_shutdown = mcp_clients.clone();
-    let tools = Tools::new(PathBuf::from(&root), jobs.clone(), mcp_clients);
+    let tools = Tools::with_session(
+        PathBuf::from(&root),
+        jobs.clone(),
+        mcp_clients,
+        session.clone(),
+    );
     let sess = agent::Session {
         llm: Arc::new(llm),
         tools: Arc::new(tools),
@@ -305,9 +368,11 @@ async fn main() {
                     "↳[{id}] tok: {} in / {} out",
                     usage.prompt_tokens, usage.completion_tokens
                 ),
+                AgentEvent::Thinking(t) => println!("thinking: {t}"),
                 AgentEvent::Note(t) => println!("» {t}"),
                 AgentEvent::StepLimit(n) => {
-                    println!("» hit the {n}-step limit — work may be unfinished")
+                    // Not a failure — long work runs out of step budget. Committed work is safe.
+                    println!("» hit the {n}-step limit — stopping here; committed work is safe and resumable")
                 }
                 AgentEvent::Error(e) => {
                     eprintln!("[error] {e}");

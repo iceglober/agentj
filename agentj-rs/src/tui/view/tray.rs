@@ -25,8 +25,9 @@ pub(super) fn jobs_panel_rows(count: usize) -> u16 {
 /// Live rows for running background jobs: `⚙ [id] <command> · <elapsed> · ⏱<timeout>`.
 pub(super) fn jobs_panel(app: &App, now: Instant) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let show = app.jobs.len().min(JOBS_PANEL_MAX);
-    for job in app.jobs.iter().take(show) {
+    let jobs = &app.jobs;
+    let show = jobs.len().min(JOBS_PANEL_MAX);
+    for job in jobs.iter().take(show) {
         let cmd: String = job.command.lines().next().unwrap_or_default().chars().take(44).collect();
         let elapsed = fmt_mmss(now.saturating_duration_since(job.started).as_secs());
         let mut spans = vec![
@@ -40,9 +41,9 @@ pub(super) fn jobs_panel(app: &App, now: Instant) -> Vec<Line<'static>> {
         }
         lines.push(Line::from(spans));
     }
-    if app.jobs.len() > JOBS_PANEL_MAX {
+    if jobs.len() > JOBS_PANEL_MAX {
         lines.push(Line::from(Span::styled(
-            format!("   … and {} more", app.jobs.len() - JOBS_PANEL_MAX),
+            format!("   … and {} more", jobs.len() - JOBS_PANEL_MAX),
             theme::dim(),
         )));
     }

@@ -30,13 +30,18 @@ pub(super) fn render_menu_modal(f: &mut Frame, app: &App, area: ratatui::layout:
     let Some(selected) = app.menu else { return };
     let items = [
         format!(
-            "Show steering: {}   (supervisor nudges in the transcript)",
-            if app.show_steering { "ON " } else { "OFF" }
+            "Show thinking: {}   (the model's reasoning blocks)",
+            if app.show_thinking { "ON " } else { "OFF" }
         ),
         format!(
             "Auto-scroll: {}     (jump to latest on new activity)",
             if app.auto_follow { "ON " } else { "OFF" }
         ),
+        format!(
+            "Focus: {}           (hide tool calls + thinking)",
+            if app.focus { "ON " } else { "OFF" }
+        ),
+        "Export transcript — write this session to a markdown file".to_string(),
         "MCP servers — connection status".to_string(),
         "Provider setup — endpoint / key / model".to_string(),
     ];

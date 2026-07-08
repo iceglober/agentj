@@ -4,15 +4,15 @@
 - Product: `agentj-rs/` — Rust terminal coding agent with a ratatui TUI and headless `--once` mode.
 - Root layer: thin Bun/bash wrappers for build/test/eval convenience; not a separate app.
 - Eval harness: `test-projects/` — fixed fixture projects and task runner used to grade agent behavior.
-- Historical notes: `docs/` — prior-architecture/design documents, not current build inputs. Exception: `docs/heuristics.md` is CURRENT — the SPEAR decision tree that `src/prompt.rs` (doctrine) and `src/agent/supervisor.rs` (gates) encode; keep the three in sync.
+- Historical notes: `docs/` — prior-architecture/design documents (incl. `docs/heuristics.md`), not current build inputs. The prompt is now a short prime in `src/prompt.rs::instructions()`; the SPEAR doctrine and the supervisor gates those docs describe were removed.
 
 ## Component map
 - `agentj-rs/`
   - Rust crate and only shipped product binary (`agentj-rs/Cargo.toml`, `agentj-rs/src/main.rs`).
   - Key areas:
     - `src/main.rs` — CLI entry; routes to TUI, `--once`, or `mcp` subcommands.
-    - `src/agent/` — model/tool loop (`mod.rs`), delegate fan-out (`delegate.rs`), supervisor gates (`supervisor.rs`), context compaction (`compact.rs`).
-    - `src/tools/` — built-in tools (`files`/`search`/`shell`/`webcheck`), `job_*`, MCP tool routing (`mod.rs`), repo path confinement (`paths.rs`).
+    - `src/agent/` — model/tool loop (`mod.rs`), `run_subagents` fan-out (`delegate.rs`), typed subagents (`agent_type.rs`), context compaction (`compact.rs`).
+    - `src/tools/` — built-in tools (`files`/`search`/`shell`), `job_*`, MCP tool routing (`mod.rs`), repo path confinement (`paths.rs`).
     - `src/tui/` — full-screen UI (`app/` state, `view/` rendering, `editor.rs`, `keymap.rs`, `markdown.rs`, `knowledge.rs`, `theme.rs`, `mod.rs` event loop).
     - `src/provider/`, `src/model.rs` — provider abstraction and OpenAI-compatible client; Azure/custom wired.
     - `src/mcp/` — `.mcp.json` loading/merge and RMCP client.
@@ -74,5 +74,5 @@ bin/aj
 
 ## Verification evidence
 - `cargo build --release --manifest-path agentj-rs/Cargo.toml` — passed.
-- `cargo test --manifest-path agentj-rs/Cargo.toml` — passed: 94 unit tests + 5 PTY integration tests.
+- `cargo test --manifest-path agentj-rs/Cargo.toml` — passed: 197 unit tests + 5 PTY integration tests.
 - `bun test-projects/run.ts --selftest` — no agent, no paid calls: proves each grader fails unsolved and passes on the reference solution.

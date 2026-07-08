@@ -132,15 +132,19 @@ impl App {
         }
         match ev {
             AgentEvent::Message(t) => {
-                self.transcript.extend(assistant_block(&t));
+                // agentj's reply as a card: a blank band row above and below pads it.
+                use crate::tui::view::LineKind;
+                self.transcript.push_kind(Line::default(), LineKind::Assistant);
+                self.transcript.extend_kind(assistant_block(&t), LineKind::Assistant);
+                self.transcript.push_kind(Line::default(), LineKind::Assistant);
                 self.set_effect("new reply");
             }
             AgentEvent::ToolStart { name, args, step } => {
                 self.current_tool_batched = self.last_tool_step == Some(step);
                 self.last_tool_step = Some(step);
                 self.current_tool = format!("{name}({args})");
-                // The subagent panel is the live status for delegate; don't overwrite it.
-                if name != "delegate" {
+                // The subagent panel is the live status for run_subagents; don't overwrite it.
+                if name != "run_subagents" {
                     self.status = self.current_tool.clone();
                 }
                 // The status timer tracks the CURRENT step, not the whole turn — otherwise a long
@@ -154,15 +158,17 @@ impl App {
                 elapsed_ms,
                 ..
             } => {
-                // A finished delegate collapses the agent tray into permanent transcript summaries;
-                // its own summary is redundant with those per-agent ✓/✗ lines.
-                let is_delegate = self.current_tool.starts_with("delegate(");
+                // A finished run_subagents collapses the agent tray into permanent transcript
+                // summaries; its own summary is redundant with those per-agent ✓/✗ lines.
+                let is_delegate = self.current_tool.starts_with("run_subagents(");
                 if is_delegate {
                     self.flush_subagent_summaries();
                 }
                 let shown = if is_delegate { "" } else { summary.as_str() };
-                self.transcript
-                    .push(tool_end_line(&self.current_tool, ok, elapsed_ms, shown, self.current_tool_batched));
+                self.transcript.push_kind(
+                    tool_end_line(&self.current_tool, ok, elapsed_ms, shown, self.current_tool_batched),
+                    crate::tui::view::LineKind::Tool,
+                );
                 self.status = "thinking".to_string();
                 self.since = Instant::now(); // per-step timer: time in THIS thinking stretch
                 self.set_effect(format!("done in {}", fmt_ms(elapsed_ms)));
@@ -227,16 +233,19 @@ impl App {
                 }
                 self.dirty = true;
             }
-            AgentEvent::Note(t) => {
-                // Supervisor nudges are pushed TAGGED — the "Show steering" toggle collapses and
-                // restores them retroactively (the model always receives them; this is display
-                // only). Job/lifecycle notes stay visible regardless.
-                let line = dim_line(format!("» {t}"));
-                if t.starts_with("[supervisor") {
-                    self.transcript.push_steering(line);
-                } else {
-                    self.transcript.push(line);
+            AgentEvent::Thinking(t) => {
+                // The model's reasoning as its own dim `thinking` block — plain (no assistant
+                // glyph); the transcript wraps long lines and the type label marks the block.
+                use crate::tui::view::LineKind;
+                for line in t.lines() {
+                    self.transcript.push_kind(dim_line(line.to_string()), LineKind::Thinking);
                 }
+                self.set_effect("thinking");
+                self.dirty = true;
+            }
+            AgentEvent::Note(t) => {
+                let line = dim_line(format!("» {t}"));
+                self.transcript.push_kind(line, crate::tui::view::LineKind::Note);
                 self.dirty = true;
             }
             AgentEvent::StepLimit(n) => {

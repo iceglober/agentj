@@ -35,7 +35,10 @@ pub enum AgentEvent {
     /// Token accounting for one model call inside a subagent. Kept distinct from `Usage` so the
     /// primary loop's context-fill meter never counts subagent spend, while session totals still do.
     SubagentUsage { id: usize, usage: TokenUsage },
-    /// A supervisor/lifecycle note (auto-continue, hit the cap, …).
+    /// The model's reasoning for the step just taken, when the provider returns it. Display-only
+    /// (a `thinking` block) — never committed to the durable history.
+    Thinking(String),
+    /// A lifecycle note (job update, context compacted, hit the cap, …).
     Note(String),
     /// The turn exhausted its step budget with work possibly unfinished — a gate, not a wall: the
     /// UI offers a one-key continue (history is intact, so a fresh turn resumes cleanly).

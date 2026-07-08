@@ -533,10 +533,116 @@ fn window_slices_the_transcript_without_cloning_all_of_it() {
     view.ensure_width(5);
     assert_eq!(view.max_scroll(6), 34); // 40 - 6
 
-    let (first, window, intra) = view.window(10, 6);
+    let (first, window, kinds, intra, _bs) = view.window(10, 6);
     assert_eq!((first, intra), (5, 0));
     assert!(window.len() <= 5, "clones only the window, not all 20: {}", window.len());
+    assert_eq!(window.len(), kinds.len(), "kinds are index-aligned with the window lines");
 
-    let (first2, _w2, intra2) = view.window(11, 6);
+    let (first2, _w2, _k2, intra2, _bs2) = view.window(11, 6);
     assert_eq!((first2, intra2), (5, 1));
+}
+
+fn card_app() -> super::super::app::App {
+    use super::super::app::{App, UiMsg};
+    use crate::events::AgentEvent;
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
+    app.editor.insert_str("Finish GEN-3320");
+    app.on_input(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))); // pushes the user card
+    app.on_ui(UiMsg::Agent(AgentEvent::ToolStart { name:"bash".into(), args:"git status".into(), step:0 }));
+    app.on_ui(UiMsg::Agent(AgentEvent::ToolEnd { ok:true, elapsed_ms:39, summary:"clean".into() }));
+    app.on_ui(UiMsg::Agent(AgentEvent::Note("context compacted — elided 3 older tool results".into())));
+    app.on_ui(UiMsg::Agent(AgentEvent::Message("Design is locked; implementing now.".into())));
+    app
+}
+
+#[test]
+fn cards_tint_messages_leave_the_machinery_plain_and_focus_hides_it() {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    let mut app = card_app();
+    let mut term = Terminal::new(TestBackend::new(64, 18)).unwrap();
+    let render = |app: &mut super::super::app::App, term: &mut Terminal<TestBackend>| {
+        app.refresh_input(64);
+        term.draw(|f| draw(f, app)).unwrap();
+    };
+    render(&mut app, &mut term);
+    let buf = term.backend().buffer();
+    let row_str = |y: u16| -> String { (0..64).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect() };
+    let find = |needle: &str| (0..18).find(|&y| row_str(y).contains(needle));
+    // A representative cell inside the card body — past the label column (LABEL_W=8) + bar.
+    let bg = |y: u16| buf.cell((16, y)).unwrap().style().bg;
+
+    let uy = find("Finish GEN-3320").expect("user card row");
+    assert!(row_str(uy).contains('▌'), "user card carries a left bar: {}", row_str(uy));
+    assert_eq!(bg(uy), Some(theme::user_bg()), "user card row is tinted");
+
+    let ay = find("Design is locked").expect("assistant card row");
+    assert!(row_str(ay).contains('▌'), "assistant card carries a left bar");
+    assert_eq!(bg(ay), Some(theme::assistant_bg()), "assistant card row is tinted");
+
+    // Tool + note render plainly between the cards — no bar, no tint.
+    let ty = find("bash(git status)").expect("tool row");
+    assert!(!row_str(ty).contains('▌'), "tool line has no card bar");
+    assert_ne!(bg(ty), Some(theme::user_bg()), "tool line is not tinted");
+    assert_ne!(bg(ty), Some(theme::assistant_bg()));
+
+    // Focus hides the machinery, keeping just the conversation cards.
+    app.focus = true;
+    app.transcript.set_focus(true);
+    render(&mut app, &mut term);
+    let buf = term.backend().buffer();
+    let all: String = (0..18)
+        .flat_map(|y| (0..64).map(move |x| (x, y)))
+        .map(|(x, y)| buf.cell((x, y)).unwrap().symbol().to_string())
+        .collect();
+    assert!(!all.contains("bash(git status)"), "Focus hides tool calls");
+    assert!(all.contains("Finish GEN-3320") && all.contains("Design is locked"), "conversation stays");
+}
+
+#[test]
+fn model_reasoning_renders_as_a_labeled_thinking_block() {
+    use super::super::app::{App, UiMsg};
+    use crate::events::AgentEvent;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
+    app.on_ui(UiMsg::Agent(AgentEvent::Thinking("weighing the two approaches".into())));
+    let mut term = Terminal::new(TestBackend::new(72, 12)).unwrap();
+    app.refresh_input(72);
+    term.draw(|f| draw(f, &mut app)).unwrap();
+    let buf = term.backend().buffer();
+    let rows: Vec<String> = (0..12)
+        .map(|y| (0..72).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect())
+        .collect();
+    let all = rows.join("\n");
+    assert!(all.contains("weighing the two approaches"), "reasoning text shown: {all}");
+    assert!(
+        rows.iter().any(|r| r.get(1..9).map(|s| s.trim() == "thinking").unwrap_or(false)),
+        "a `thinking` label marks the block: {rows:?}"
+    );
+}
+
+#[test]
+fn each_transcript_block_is_labeled_once_by_type() {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    let mut app = card_app();
+    let mut term = Terminal::new(TestBackend::new(72, 18)).unwrap();
+    app.refresh_input(72);
+    term.draw(|f| draw(f, &mut app)).unwrap();
+    let buf = term.backend().buffer();
+    // The type label sits in the left column: PAD_X(1) then LABEL_W(8) → screen cols 1..9.
+    let labels: Vec<String> = (0..18)
+        .map(|y| {
+            (1..9).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect::<String>().trim().to_string()
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+    for kind in ["you", "agentj", "tool", "note"] {
+        assert!(labels.iter().any(|l| l == kind), "expected a `{kind}` label, got {labels:?}");
+    }
+    // A block is labeled exactly once — not on every wrapped/padded row of the card.
+    assert_eq!(labels.iter().filter(|l| *l == "you").count(), 1, "{labels:?}");
+    assert_eq!(labels.iter().filter(|l| *l == "agentj").count(), 1, "{labels:?}");
 }

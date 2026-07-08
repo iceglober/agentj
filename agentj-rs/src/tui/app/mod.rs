@@ -35,7 +35,7 @@ pub use tray::SubagentRow;
 
 use super::editor::Editor;
 use super::theme;
-use super::view::{dim_line, InputLayoutCache, TranscriptView};
+use super::view::{dim_line, InputLayoutCache, LineKind, TranscriptView};
 use crate::jobs::JobInfo;
 use crate::mcp::client::McpStatus;
 use crate::provider::{ChatMessage, TokenUsage};
@@ -129,11 +129,15 @@ pub struct App {
     /// Per-server MCP connect results, shown in a dismissible startup modal.
     pub mcp_status: Vec<McpStatus>,
     pub show_mcp_modal: bool,
-    /// Show supervisor nudges in the transcript (they always reach the model). Ctrl-P menu toggles.
-    pub show_steering: bool,
     /// Re-pin the transcript to the tail whenever new activity lands (Ctrl-P toggle). Off by
     /// default: scrolling up stays put until you page back down or a new turn starts.
     pub auto_follow: bool,
+    /// Focus mode (Ctrl-P toggle): hide tool calls, leaving just the conversation cards. Off by
+    /// default; mirrors `TranscriptView::set_focus`.
+    pub focus: bool,
+    /// Show the model's `thinking` blocks (Ctrl-P toggle). On by default; mirrors
+    /// `TranscriptView::set_hide_thinking`.
+    pub show_thinking: bool,
     /// The Ctrl-P command menu: `Some(selected_index)` while open.
     pub menu: Option<usize>,
     /// The last turn ended at the step gate; an empty Enter continues it.
@@ -203,8 +207,9 @@ impl App {
             setup: None,
             mcp_status,
             show_mcp_modal,
-            show_steering: true,
             auto_follow: false,
+            focus: false,
+            show_thinking: true,
             menu: None,
             step_limit_hit: false,
         };
@@ -227,9 +232,21 @@ impl App {
         self.effect_until.is_some_and(|until| until > Instant::now())
     }
 
+    /// Write the full transcript to a timestamped markdown file in the working dir; returns the
+    /// path written (for a notice). Uses only App state, so the Ctrl-P menu can call it directly.
+    pub fn export_transcript(&self) -> std::io::Result<String> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = std::path::Path::new(&self.root).join(format!("agentj-transcript-{ts}.md"));
+        std::fs::write(&path, self.transcript.export_markdown())?;
+        Ok(path.to_string_lossy().into_owned())
+    }
+
     /// A dim `»` note line in the transcript (lifecycle chatter, not conversation content).
     pub fn notice(&mut self, s: impl Into<String>) {
-        self.transcript.push(dim_line(format!("» {}", s.into())));
+        self.transcript.push_kind(dim_line(format!("» {}", s.into())), LineKind::Note);
         self.dirty = true;
     }
 
@@ -263,13 +280,19 @@ impl App {
         }
     }
 
-    /// Push a user prompt line, preceded by a blank line to separate turns visually.
+    /// Push a user prompt as a card: a blank separator, then the prompt on a tinted band (a blank
+    /// card row above and below gives the card its padding).
     fn push_user_line(&mut self, text: &str) {
         self.transcript.push(Line::default());
-        self.transcript.push(Line::from(vec![
-            Span::styled("› ", theme::accent()),
-            Span::styled(text.to_string(), Style::default().add_modifier(Modifier::BOLD)),
-        ]));
+        self.transcript.push_kind(Line::default(), LineKind::User);
+        self.transcript.push_kind(
+            Line::from(vec![
+                Span::styled("› ", theme::accent()),
+                Span::styled(text.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            LineKind::User,
+        );
+        self.transcript.push_kind(Line::default(), LineKind::User);
     }
 
     fn set_effect(&mut self, label: impl Into<String>) {

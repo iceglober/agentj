@@ -398,10 +398,11 @@ pub async fn run(
                         app.mcp_status = statuses;
                         sess = Session {
                             llm: sess.llm.clone(),
-                            tools: std::sync::Arc::new(crate::tools::Tools::new(
+                            tools: std::sync::Arc::new(crate::tools::Tools::with_session(
                                 std::path::PathBuf::from(&app.root),
                                 sess.tools.jobs.clone(),
                                 Some(std::sync::Arc::new(clients)),
+                                sess.tools.session.clone(), // keep the session across an MCP reconnect
                             )),
                             cfg: sess.cfg.clone(),
                         };

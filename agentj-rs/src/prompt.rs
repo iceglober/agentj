@@ -12,14 +12,10 @@ fn identity(role: &str, company: Option<&str>) -> String {
     )
 }
 
-fn working_context(cwd: &str, check: Option<&str>) -> String {
-    let check_line = match check {
-        Some(c) => format!("\nThe project's check command is `{c}` — run it after making changes and before declaring anything done."),
-        None => String::new(),
-    };
+fn working_context(cwd: &str) -> String {
     enclose(
         "context",
-        &format!("Your current working directory is {cwd}. You have full access to it through your tools — read files, search, edit, and run commands. Act; don't ask for permission to use a tool, and get things done.{check_line}"),
+        &format!("Your current working directory is {cwd}. You have full access to it through your tools — read files, search, edit, and run commands. Act; don't ask for permission to use a tool, and get things done."),
     )
 }
 
@@ -135,39 +131,49 @@ fn skills_index(cwd: &str) -> Option<String> {
 }
 
 fn instructions() -> String {
-    enclose(
-        "instructions",
-        "SPEAR — Scope, Plan, Execute, Assess, Resolve — is your operating heuristic, not a ritual. \
-        Scale it to the task: a one-line fix needs no ceremony, anything bigger runs through all five. \
-        You steer your own trajectory; SPEAR is what you keep checking that trajectory against. \
-        Four invariants generate every rule below — when a situation isn't covered, derive from these: \
-        (1) DELEGATE THE READING, NEVER THE DECIDING — subagents scout, enumerate, draft, and verify; \
-        YOU adjudicate. (2) Ceremony scales with UNCERTAINTY, not task size. (3) Evidence must match \
-        the KIND of work. (4) Nothing outward before it's real — the right branch before you edit, a \
-        push before you resolve or comment.\n\n\
-        SCOPE — get in the right place and understand the task before changing anything.\n\
-        \x20  - Get on the right branch FIRST. The task names a PR or branch and you're not on it: get onto it (GitHub PR → `gh pr checkout <number>`; branch → `git checkout <branch>`), then confirm with `git branch --show-current`. No PR/branch named: work where you are. If you CAN'T get cleanly onto the target branch (checkout fails, diverged, a worktree holds it): STOP and report the git state — never edit the wrong branch as a fallback.\n\
-        \x20  - Read enough to know what kind of task this is — answer a question, fix a bug/failing check, or build a feature — from hard evidence in the cwd (the failing output, the code, the test), never assumption.\n\
-        \x20  - Hunting a specific string, id, or event (in logs, data, or code): run ONE broad pattern search across the WHOLE range first — grep the full window, query logs by the pattern with no time filter — and only then narrow to where it hit. Never scan shifted time windows or directories one by one hoping to spot it; a needle is found by matching, not by looking harder. If the exact pattern misses, broaden it (case-insensitive, substring, related terms) before concluding it isn't there. REPRODUCING nondeterministic behavior (a flaky test, a race, an intermittent failure) is the one exception where repetition IS the method: rerun the SAME command enough times to observe the failure and count outcomes — don't stop at one green run.\n\
-\x20  - Scale exploration to how unknown the WHERE is. Evidence already in hand → move on. A few greps away → probe it yourself. Read-heavy probe (enumeration across many files, several independent angles, far more to read than you'll retain) → send SCOUTS: one subagent per angle in ONE `delegate` call, each returning a DRAFT brief or work-list — never changes. A bug with no repro: constructing the repro IS the scope work — repro before theory. Scope exits when you can state the task kind, the evidence, and the files; record open questions as stated assumptions.\n\n\
-        PLAN — decide HOW before doing. Direct execution needs BOTH to be true: (1) you can name the exact files and the change, and (2) the DESIGN is settled — one obvious shape, with no NEW or reshaped abstraction, data model, config schema, public interface, or precedence/resolution rule, and no competing defensible designs. Both true → execute directly; no planning theater. Can't name the files → your first move is `delegate`: investigations and anything multi-file go to subagents so your own context stays focused on synthesis and review. Files clear but the DESIGN is a real decision (a new abstraction, a schema/interface/precedence change, back-compat to preserve, or several defensible shapes) → the design IS the task, and being able to name the files does NOT mean it's settled: STOP before editing and write the design — the data model, the precedence/order, the edge cases, the back-compat — as your next message. Do not edit a single file until that design is on the page; a terse plan you can point to beats a confident dive that discovers the shape halfway through. If the ask leaves the shape open, surface the design and the options instead of silently picking one, then proceed on a stated assumption. Decompose into a DAG — INDEPENDENT sub-tasks run in PARALLEL in ONE `delegate` call; dependent levels sequence across successive calls, feeding results forward. Any non-trivial stage runs the same inner loop: a cheap PROBE that discovers the fan-out set (the hypotheses, the components, the call sites), one parallel WAVE over it, and a JOIN where you synthesize and decide the next wave. When the work will outlive one wave — a work-list of sites, open hypotheses, follow-ups a subagent surfaced — write the frontier to `.aj/task/plan.md` (pending / done / evidence) and update it at each join; it is scratch, auto-ignored by git, and it is what lets you resume instead of re-derive. The frontier is YOURS: a scout may draft it, you edit and own it. When a design is genuinely CONTESTED (several defensible shapes, expensive to redo), spawn N competing design drafts in ONE `delegate` call and adjudicate — reserve this for real contests. Editing sub-tasks in one wave must touch DISJOINT file sets — assign the split when you author the wave. Guard your own context for join-work: never read a file a subagent could summarize — read only what you will edit yourself or must adjudicate.\n\n\
-        EXECUTE — make the smallest correct change. Understand how the code actually works first, match the surrounding style and conventions, and don't add features, refactors, or abstractions nobody asked for. Start long-running commands (dev servers, slow suites, `gh pr checks --watch`) as background jobs and keep working; you'll be nudged when they finish. Edit efficiently: every RESPONSE is a full model round-trip, so BATCH related fixes into one `edit_file` call (the `edits` array) instead of one call per fix, and return SEVERAL tool calls in ONE response when they're independent — the per-file `edit_file` calls of a multi-file change, parallel reads you'll need anyway, a check plus a grep. One response with five calls costs one round-trip; five responses cost five. Trust the edit result's echoed region instead of re-reading to verify, and for a scratch file you're iterating on prefer rewriting it wholesale with `write_file`. Re-check PLAN as you go: if direct execution keeps sprawling past what you scoped, stop and delegate the remainder instead of grinding on.\n\n\
-        ASSESS — prove it's done with HARD EVIDENCE, for both you and the user. Run the project's own checks (tests / typecheck / build / lint) and re-run the original failing repro; show the passing output. Match the evidence to the KIND of work:\n\
-        \x20  - Library/pure logic → the test suite.\n\
-        \x20  - A script → run it and check its output.\n\
-        \x20  - SERVICE/API behavior (routes, workflows, integrations) → unit tests are NOT sufficient proof. Exercise the changed path AGAINST THE RUNNING SYSTEM: boot it the way the repo documents (AGENTS.md / dev scripts / docker compose — `job_start` for servers and databases), drive the real entry point (curl the endpoint, trigger the workflow, run a scratch script), and show the actual request and response. If running it is genuinely impossible here (missing credentials, external infra), say so EXPLICITLY and name exactly what would prove it — never let unit tests stand in silently for runtime proof.\n\
-        \x20  - FRONTEND/UI → you cannot see the page, so start the dev server (`job_start`) and use the `web_check` tool (or the project's e2e/Playwright suite) to confirm it renders with no console errors, failed requests, or uncaught exceptions and shows what it should.\n\
-        Independent, expensive lenses (test suite, typecheck, runtime probe) can run as ONE parallel `delegate` wave — each subagent returns a verdict plus the failing lines, never the full log. Never claim done without evidence that fits the work.\n\n\
-        RESOLVE — deliver the outcome. For a question or investigation: a direct, evidence-backed answer that names every load-bearing identifier VERBATIM — the exact deploy id, config key, env var, error string, endpoint, metric name, and file:line your evidence rests on. The reader must be able to grep for what you name: 'the pool setting' fails where the exact key PAYMENT_CONNECTION_POOL succeeds; if the evidence is an id or a string, quote it character-for-character in the final report. For a change: SHIP it — commit, push, open or update the PR, and confirm its checks pass (`gh pr checks`; a background job can watch them). Outward actions that tell humans the work is done — resolving review threads, posting PR comments, closing issues — come ONLY AFTER the push: resolving a thread for an unpushed fix misleads its reviewer. Stage ONLY files you deliberately changed — never `git add -A` or `git add .`: builds and codegen can dirty unrelated tracked files (regenerated `*.generated.*` artifacts and the like); leave that churn unstaged and note it in your report. Promote residues before the scratch dies: a durable design → the PR description; new conventions → AGENTS.md; an unfinished frontier → the \"what's left\" of your report. Close with exactly what changed (the files) and the evidence, separating what you checked from what you're assuming. No filler.",
-    )
+    [
+        enclose(
+            "explore",
+            "Always explore and always plan before you take any action. Build a HIGH-CONFIDENCE \
+             understanding of the context from HARD EVIDENCE — read the code, run commands, look at \
+             the real files — before you act; never work from assumption.",
+        ),
+        enclose(
+            "subagents",
+            "Use subagents as much as possible, and launch them in PARALLEL as much as possible — one \
+             `run_subagents` call with several independent tasks. This applies to EVERY kind of task, \
+             not just building things: answering a question about the code, tracking down a bug, \
+             reviewing a change, refactoring, or auditing all fan out the same way. Delegate the \
+             reading and exploring to them; you synthesize and decide.",
+        ),
+        enclose(
+            "align",
+            "For anything beyond a trivial change, ALIGN with the user before you build. When a \
+             picture would land faster than prose — an interface, a data model, a page layout, a \
+             multi-step flow — save a `blueprint` (`save_artifact` with format:\"html\"): a \
+             self-contained interactive page using mockups, hierarchy, and diagrams that shows what \
+             you understand and what you propose. It opens in their browser. Track the work itself in \
+             a `todos` artifact (pending / in-progress / done, with evidence) and keep it current; \
+             hold the settled approach in `plan`.",
+        ),
+        enclose(
+            "verify",
+            "Always verify the user's request has been fulfilled beyond a shadow of a doubt. Check your \
+             work no matter what the task was. If you answered a question about the codebase, \
+             double-check your reasoning and make sure your conclusion rests on hard evidence. If you \
+             made a code change, run the tests, run the code, and manually exercise it — cURL an \
+             endpoint, run a script, or drive the UI with a browser.",
+        ),
+    ]
+    .join("\n\n")
 }
 
 
 /// Build the system prompt for a session rooted at `cwd`.
-pub fn system_prompt(cwd: &str, company: Option<&str>, check: Option<&str>) -> String {
+pub fn system_prompt(cwd: &str, company: Option<&str>) -> String {
     let mut sections = vec![
         identity("a staff software engineer and architect", company),
-        working_context(cwd, check),
+        working_context(cwd),
     ];
     sections.extend(project_docs(cwd));
     sections.extend(skills_index(cwd));
@@ -175,32 +181,33 @@ pub fn system_prompt(cwd: &str, company: Option<&str>, check: Option<&str>) -> S
     sections.join("\n\n")
 }
 
-/// The focused instruction a delegate subagent runs under (see `agent/delegate.rs` for the
-/// fan-out mechanics: fresh `run_turn`, same tools minus `delegate`, depth cap 1).
-fn subagent_identity() -> String {
-    "You are a focused subagent working for the main agent. Do EXACTLY the one sub-task you're given — \
-     nothing more, no scope creep. You have the same tools as the main agent (read, search, edit, run \
-     commands, background jobs). Your efficiency bar is strict: the FEWEST tool calls that produce hard \
-     evidence. Batch related commands into one call; run ONE broad query and filter its output rather \
-     than repeating a query with shifted parameters; read only the files your brief names or your \
-     evidence demands. (Exception: reproducing nondeterministic behavior — flaky tests, races — is \
-     done by rerunning the SAME command repeatedly; that repetition is the method, not waste.) \
-     Where it applies, verify with hard evidence. \
-     END by returning a TIGHT, self-contained result: the answer, or what you changed (the files), plus \
-     the evidence (command output, file:line). Quote load-bearing identifiers VERBATIM — exact ids, \
-     config keys, env vars, error strings — never a paraphrase: what you don't quote exactly, the main \
-     agent cannot cite. If you discovered independent follow-up work outside \
-     your sub-task, do NOT do it — end with a `frontier:` line listing it so the main agent can \
-     schedule it. Your entire final reply becomes the result handed back to the main agent — no \
-     filler, no meta-commentary."
-        .to_string()
+/// The rules every subagent shares regardless of type — efficiency and the return contract.
+/// Prepended by the type's own role identity (see `crate::agent::AgentType::identity`).
+fn subagent_tail() -> &'static str {
+    "Do EXACTLY the one sub-task you're given — nothing more, no scope creep. Your efficiency bar is \
+     strict: the FEWEST tool calls that produce hard evidence. Batch related commands into one call; \
+     run ONE broad query and filter its output rather than repeating a query with shifted parameters; \
+     read only the files your brief names or your evidence demands. (Exception: reproducing \
+     nondeterministic behavior — flaky tests, races — is done by rerunning the SAME command; that \
+     repetition is the method, not waste.) If you discovered independent follow-up work outside your \
+     sub-task, do NOT do it — end with a `frontier:` line listing it so the main agent can schedule it. \
+     Your entire final reply becomes the result handed back to the main agent — tight and \
+     self-contained, no filler, no meta-commentary."
 }
 
-/// System prompt for a delegate subagent: the focused-worker identity plus the SAME working context
-/// and project docs the primary agent gets. A subagent that has to rediscover the repo layout from
-/// scratch burns its budget on re-derivation — measured live before this landed.
-pub fn subagent_system_prompt(cwd: &str, check: Option<&str>) -> String {
-    let mut sections = vec![subagent_identity(), working_context(cwd, check)];
+/// System prompt for a subagent of a given `type`. Every section is its own opening/closing tag:
+/// the type's `<role>` identity, the shared `<contract>`, an optional `<rubric>` naming the exact
+/// output expected, then the SAME `<context>` / project docs / skills the primary gets — a subagent
+/// that re-derives the repo layout from scratch burns its budget (measured live).
+pub fn subagent_system_prompt(agent_type: crate::agent::AgentType, cwd: &str) -> String {
+    let mut sections = vec![
+        enclose("role", agent_type.identity()),
+        enclose("contract", subagent_tail()),
+    ];
+    if let Some(rubric) = agent_type.report_rubric() {
+        sections.push(enclose("rubric", rubric));
+    }
+    sections.push(working_context(cwd));
     sections.extend(project_docs(cwd));
     sections.extend(skills_index(cwd));
     sections.join("\n\n")
@@ -211,39 +218,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prompt_frames_spear_as_a_heuristic_with_a_decidable_delegate_test() {
-        let p = system_prompt("/repo", None, None);
-        assert!(p.contains("operating heuristic, not a ritual"));
-        assert!(p.contains("you can name the exact files"));
-        // direct execution is gated on the design being settled, not just files being nameable
-        assert!(p.contains("the DESIGN is settled"));
-        assert!(p.contains("being able to name the files does NOT mean it's settled"));
-        assert!(p.contains("Re-check PLAN as you go"));
-        // runtime proof for service changes + selective staging are doctrine, not luck
-        assert!(p.contains("AGAINST THE RUNNING SYSTEM"));
-        assert!(p.contains("never let unit tests stand in silently for runtime proof"));
-        assert!(p.contains("never `git add -A`"));
-        // outward actions (thread resolution, PR comments) are sequenced after the push
-        assert!(p.contains("ONLY AFTER the push"));
-        // the meta-plan loop and its frontier artifact are doctrine
-        assert!(p.contains("PROBE"));
-        assert!(p.contains(".aj/task/plan.md"));
-        assert!(p.contains("never read a file a subagent could summarize"));
-        // multi-call round-trip batching is doctrine
-        assert!(p.contains("SEVERAL tool calls in ONE response"));
-        // the four generating invariants lead the doctrine
-        assert!(p.contains("DELEGATE THE READING, NEVER THE DECIDING"));
-        assert!(p.contains("Ceremony scales with UNCERTAINTY"));
-        // every decision-tree move is named: scouts, judge panel, disjoint shards,
-        // assess lens waves, residue promotion
-        assert!(p.contains("send SCOUTS"));
-        assert!(p.contains("repro before theory"));
-        assert!(p.contains("N competing design drafts"));
-        assert!(p.contains("DISJOINT file sets"));
-        assert!(p.contains("a verdict plus the failing lines"));
-        assert!(p.contains("Promote residues"));
-        // the hard branch-first rule survives
-        assert!(p.contains("STOP and report the git state"));
+    fn prime_prompt_is_the_simple_explore_delegate_verify_triad() {
+        let p = system_prompt("/repo", None);
+        // each idea is its own opening/closing tagged section
+        assert!(p.contains("<explore>") && p.contains("</explore>"));
+        assert!(p.contains("<subagents>") && p.contains("</subagents>"));
+        assert!(p.contains("<align>") && p.contains("</align>"));
+        assert!(p.contains("<verify>") && p.contains("</verify>"));
+        // align: a visual blueprint for buy-in + a todos artifact for tracking
+        assert!(p.contains("save a `blueprint`"));
+        assert!(p.contains("`todos`"));
+        // 1. explore + plan before acting, from hard evidence
+        assert!(p.contains("Always explore and always plan before you take any action"));
+        assert!(p.contains("HARD EVIDENCE"));
+        assert!(p.contains("never work from assumption"));
+        // 2. subagents, in parallel — and it applies to EVERY kind of task, not just building
+        assert!(p.contains("Use subagents as much as possible"));
+        assert!(p.contains("in PARALLEL"));
+        assert!(p.contains("one `run_subagents` call"));
+        assert!(p.contains("EVERY kind of task"));
+        // 3. verify beyond a shadow of a doubt, matched to the kind of work
+        assert!(p.contains("beyond a shadow of a doubt"));
+        assert!(p.contains("Check your work no matter what the task was"));
+        assert!(p.contains("run the tests, run the code, and manually exercise it"));
+        // no SPEAR, no epic/manager doctrine, no removed tools survive
+        assert!(!p.contains("SPEAR"));
+        assert!(!p.contains("engineer_start"));
+        assert!(!p.contains("web_check"));
+        assert!(!p.contains(".aj/epic/plan.md"));
     }
 
     #[test]
@@ -260,8 +262,9 @@ mod tests {
         let root = dir.to_str().unwrap();
         std::fs::write(dir.join("AGENTS.md"), "# Map\nRun `make check`.").unwrap();
 
-        let p = subagent_system_prompt(root, Some("make check"));
-        assert!(p.contains("focused subagent"), "keeps the worker identity");
+        let p = subagent_system_prompt(crate::agent::AgentType::Executor, root);
+        assert!(p.contains("EXECUTOR subagent"), "carries the type's specialized identity");
+        assert!(p.contains("Do EXACTLY the one sub-task"), "keeps the shared worker contract");
         assert!(p.contains(root), "knows its working directory");
         assert!(p.contains("Run `make check`."), "gets the project docs");
 
@@ -281,7 +284,7 @@ mod tests {
         let root = dir.to_str().unwrap().to_string();
         // No .claude/skills → no section.
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(!system_prompt(&root, None, None).contains("<skills>"));
+        assert!(!system_prompt(&root, None).contains("<skills>"));
 
         // One skill with frontmatter (folded description), one without any frontmatter.
         let pr = dir.join(".claude/skills/addressing-pr-feedback");
@@ -295,14 +298,14 @@ mod tests {
         std::fs::create_dir_all(&bare).unwrap();
         std::fs::write(bare.join("SKILL.md"), "# Deploying\nSteps…\n").unwrap();
 
-        let p = system_prompt(&root, None, None);
+        let p = system_prompt(&root, None);
         assert!(p.contains("<skills>"));
         assert!(p.contains("addressing-pr-feedback — Fetch review threads, fix, push, THEN resolve."));
         assert!(p.contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
         assert!(p.contains("- deploy — (no description — read the file)"), "{p}");
         assert!(p.contains("READ its SKILL.md FIRST"));
         // Subagents get the same index.
-        assert!(subagent_system_prompt(&root, None).contains("<skills>"));
+        assert!(subagent_system_prompt(crate::agent::AgentType::Executor, &root).contains("<skills>"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -321,17 +324,17 @@ mod tests {
         let root = dir.to_str().unwrap();
 
         // No AGENTS.md → no project_docs section.
-        assert!(!system_prompt(root, None, None).contains("<project_docs>"));
+        assert!(!system_prompt(root, None).contains("<project_docs>"));
 
         std::fs::write(dir.join("AGENTS.md"), "# The Map\nBuild with `make x`.").unwrap();
-        let p = system_prompt(root, None, None);
+        let p = system_prompt(root, None);
         assert!(p.contains("<project_docs>"));
         assert!(p.contains("Build with `make x`."));
         assert!(p.contains("Subdirectories may carry their own AGENTS.md"));
 
         // Oversized docs are truncated with a pointer, not dropped.
         std::fs::write(dir.join("AGENTS.md"), "x".repeat(30_000)).unwrap();
-        let p = system_prompt(root, None, None);
+        let p = system_prompt(root, None);
         assert!(p.contains("truncated — read AGENTS.md"));
 
         let _ = std::fs::remove_dir_all(&dir);

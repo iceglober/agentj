@@ -1,6 +1,5 @@
 use super::compact::{compact_history, estimate_prompt_tokens};
 use super::delegate::{cap_result, task_label};
-use super::supervisor::is_check_command;
 use super::{run_turn, Session};
 use crate::config::Config;
 use crate::events::AgentEvent;
@@ -16,13 +15,28 @@ use std::time::Duration;
 use tokio::sync::mpsc::unbounded_channel;
 
 #[test]
-fn delegate_spec_gated_by_allow_delegate() {
-    let with = tool_specs(true);
-    let without = tool_specs(false);
-    assert!(with.iter().any(|s| s.name == "delegate"));
-    assert!(!without.iter().any(|s| s.name == "delegate"));
+fn run_subagents_spec_is_gated_by_role() {
+    let primary = tool_specs(true, false, None);
+    let subagent = tool_specs(false, true, None);
+    // The primary loop may fan out to subagents.
+    assert!(primary.iter().any(|s| s.name == "run_subagents"));
+    // Subagents never get it (allow_delegate=false → depth cap 1).
+    assert!(!subagent.iter().any(|s| s.name == "run_subagents"));
     // job tools are present in both.
-    assert!(without.iter().any(|s| s.name == "job_start"));
+    assert!(primary.iter().any(|s| s.name == "job_start"));
+    assert!(subagent.iter().any(|s| s.name == "job_start"));
+}
+
+#[test]
+fn artifact_specs_require_a_session_and_the_primary_loop() {
+    // Only the interactive primary (allow_delegate && has_session) gets the artifact tools.
+    let with_session = tool_specs(true, true, None);
+    assert!(with_session.iter().any(|s| s.name == "save_artifact"));
+    assert!(with_session.iter().any(|s| s.name == "read_artifact"));
+    // No session (headless) → no artifact tools.
+    assert!(!tool_specs(true, false, None).iter().any(|s| s.name == "save_artifact"));
+    // Subagents never get them even with a session attached.
+    assert!(!tool_specs(false, true, None).iter().any(|s| s.name == "save_artifact"));
 }
 
 fn test_cfg() -> Config {
@@ -34,6 +48,7 @@ fn test_cfg() -> Config {
         context_window: None,
         compact_threshold: 12_000,
         check: None,
+        continuation_judge: false, // off by default in unit tests; opted in per-test
     }
 }
 
@@ -54,6 +69,7 @@ fn session_cfg(steps: Vec<ScriptStep>, cfg: Config) -> Session {
 fn turn_text(s: &str) -> AssistantTurn {
     AssistantTurn {
         content: Some(s.to_string()),
+        reasoning: None,
         tool_calls: vec![],
         finish_reason: "stop".into(),
         usage: None,
@@ -65,11 +81,12 @@ fn turn_delegate(tasks: &[&str]) -> AssistantTurn {
     let args = serde_json::json!({ "tasks": items }).to_string();
     AssistantTurn {
         content: None,
+        reasoning: None,
         tool_calls: vec![ToolCall {
             id: "call_1".into(),
             kind: "function".into(),
             function: FunctionCall {
-                name: "delegate".into(),
+                name: "run_subagents".into(),
                 arguments: args,
             },
         }],
@@ -81,6 +98,7 @@ fn turn_delegate(tasks: &[&str]) -> AssistantTurn {
 fn turn_tool(name: &str, args: serde_json::Value) -> AssistantTurn {
     AssistantTurn {
         content: None,
+        reasoning: None,
         tool_calls: vec![ToolCall {
             id: "call_x".into(),
             kind: "function".into(),
@@ -260,11 +278,12 @@ async fn delegate_title_becomes_the_tray_label() {
     let sess = session(vec![
         ScriptStep::Turn(AssistantTurn {
             content: None,
+        reasoning: None,
             tool_calls: vec![ToolCall {
                 id: "c1".into(),
                 kind: "function".into(),
                 function: FunctionCall {
-                    name: "delegate".into(),
+                    name: "run_subagents".into(),
                     arguments: args,
                 },
             }],
@@ -292,6 +311,22 @@ fn session_in(root: &str, steps: Vec<ScriptStep>, check: Option<&str>) -> Sessio
     }
 }
 
+/// An interactive session with an attached artifact store (rooted at an explicit dir, no HOME).
+/// If `plan` is set, it's pre-saved as the `plan` artifact so the frontier can resume from it.
+fn session_with_store(steps: Vec<ScriptStep>, store_dir: &std::path::Path, plan: Option<&str>) -> Session {
+    let store = crate::session::Session::at_dir(store_dir.to_path_buf());
+    if let Some(p) = plan {
+        store.save_artifact("plan", p, false).unwrap();
+    }
+    let jobs = JobManager::new(".".to_string());
+    let tools = Tools::with_session(PathBuf::from("."), jobs, None, Some(Arc::new(store)));
+    Session {
+        llm: Arc::new(Llm::Script(std::sync::Mutex::new(VecDeque::from(steps)))),
+        tools: Arc::new(tools),
+        cfg: Arc::new(test_cfg()),
+    }
+}
+
 fn temp_root(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "agentj-agent-test-{tag}-{}-{}",
@@ -313,98 +348,8 @@ fn notes_containing(events: &[AgentEvent], needle: &str) -> usize {
 }
 
 #[tokio::test]
-async fn assess_gate_nudges_unverified_edits_once_then_lets_go() {
-    let dir = temp_root("assess");
-    let sess = session_in(
-        dir.to_str().unwrap(),
-        vec![
-            ScriptStep::Turn(turn_tool("write_file", serde_json::json!({ "path": "a.txt", "content": "x" }))),
-            ScriptStep::Turn(turn_text("all done")), // tries to finish without checking → nudged
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": "echo CHECK OK" }))),
-            ScriptStep::Turn(turn_text("done, checks pass")),
-        ],
-        Some("echo CHECK"),
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "ASSESS check"), 1, "{events:?}");
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Done)));
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[tokio::test]
-async fn assess_gate_stays_quiet_when_the_agent_already_verified() {
-    let dir = temp_root("assess-ok");
-    let sess = session_in(
-        dir.to_str().unwrap(),
-        vec![
-            ScriptStep::Turn(turn_tool("write_file", serde_json::json!({ "path": "a.txt", "content": "x" }))),
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": "echo CHECK OK" }))),
-            ScriptStep::Turn(turn_text("done, verified")),
-        ],
-        Some("echo CHECK"),
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "ASSESS check"), 0, "{events:?}");
-    // read-only turns are never nudged either
-    let dir2 = temp_root("assess-ro");
-    std::fs::write(dir2.join("r.txt"), "hi").unwrap();
-    let sess = session_in(
-        dir2.to_str().unwrap(),
-        vec![
-            ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "r.txt" }))),
-            ScriptStep::Turn(turn_text("answer")),
-        ],
-        None,
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "ASSESS check"), 0);
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&dir2);
-}
-
-#[tokio::test]
-async fn resolve_gate_flags_a_partial_commit() {
-    let dir = temp_root("resolve");
-    let root = dir.to_str().unwrap().to_string();
-    crate::exec::run(&["git", "init", "-q"], &root, None).await.unwrap();
-    std::fs::write(dir.join("a.txt"), "committed half").unwrap();
-    std::fs::write(dir.join("b.txt"), "forgotten half").unwrap();
-    const GIT_C: &str = "git -c user.email=t@t -c user.name=t";
-    let sess = session_in(
-        &root,
-        vec![
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": format!("git add a.txt && {GIT_C} commit -qm half") }))),
-            ScriptStep::Turn(turn_text("shipped!")), // tree still dirty (b.txt) → nudged
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": format!("git add -A && {GIT_C} commit -qm rest") }))),
-            ScriptStep::Turn(turn_text("now fully shipped")),
-        ],
-        None,
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "RESOLVE check"), 1, "{events:?}");
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Done)));
-    // a clean full commit is not nudged
-    let dir2 = temp_root("resolve-ok");
-    let root2 = dir2.to_str().unwrap().to_string();
-    crate::exec::run(&["git", "init", "-q"], &root2, None).await.unwrap();
-    std::fs::write(dir2.join("a.txt"), "everything").unwrap();
-    let sess = session_in(
-        &root2,
-        vec![
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": format!("git add -A && {GIT_C} commit -qm all") }))),
-            ScriptStep::Turn(turn_text("shipped")),
-        ],
-        None,
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "RESOLVE check"), 0, "{events:?}");
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&dir2);
-}
-
-#[tokio::test]
 async fn a_surviving_frontier_is_injected_on_the_first_turn_only() {
-    // A frontier file from a prior session → the supervisor embeds it before the first model
+    // A frontier file from a prior session → `frontier_resume` embeds it before the first model
     // call, so the model resumes the plan instead of re-scoping.
     let dir = temp_root("frontier");
     std::fs::create_dir_all(dir.join(".aj/task")).unwrap();
@@ -415,56 +360,58 @@ async fn a_surviving_frontier_is_injected_on_the_first_turn_only() {
         None,
     );
     let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "task frontier"), 1, "{events:?}");
+    assert_eq!(notes_containing(&events, "re-deriving scope"), 1, "{events:?}");
 
     // No frontier on disk → no injection.
     let dir2 = temp_root("frontier-none");
     let sess = session_in(dir2.to_str().unwrap(), vec![ScriptStep::Turn(turn_text("hi"))], None);
     let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "task frontier"), 0, "{events:?}");
+    assert_eq!(notes_containing(&events, "re-deriving scope"), 0, "{events:?}");
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&dir2);
 }
 
-#[tokio::test]
-async fn ship_gate_flags_edits_that_were_never_committed() {
-    const GIT_C: &str = "git -c user.email=t@t -c user.name=t";
-    // Edits landed, checks passed, nothing committed → one ship nudge before the turn ends.
-    let dir = temp_root("ship");
-    let root = dir.to_str().unwrap().to_string();
-    crate::exec::run(&["git", "init", "-q"], &root, None).await.unwrap();
-    let sess = session_in(
-        &root,
-        vec![
-            ScriptStep::Turn(turn_tool("write_file", serde_json::json!({ "path": "a.txt", "content": "x" }))),
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": "echo CHECK OK" }))),
-            ScriptStep::Turn(turn_text("all done")), // ASSESS is clear; SHIP is not → nudged
-            ScriptStep::Turn(turn_text("left unshipped: user is iterating")),
-        ],
-        Some("echo CHECK"),
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "RESOLVE ship check"), 1, "{events:?}");
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Done)));
-
-    // A committed change is never ship-nudged.
-    let dir2 = temp_root("ship-ok");
-    let root2 = dir2.to_str().unwrap().to_string();
-    crate::exec::run(&["git", "init", "-q"], &root2, None).await.unwrap();
-    let sess = session_in(
-        &root2,
-        vec![
-            ScriptStep::Turn(turn_tool("write_file", serde_json::json!({ "path": "a.txt", "content": "x" }))),
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": "echo CHECK OK" }))),
-            ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": format!("git add a.txt && {GIT_C} commit -qm ship") }))),
-            ScriptStep::Turn(turn_text("shipped")),
-        ],
-        Some("echo CHECK"),
-    );
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "RESOLVE ship check"), 0, "{events:?}");
+#[test]
+fn resume_leads_with_todos_then_plan() {
+    let dir = temp_root("resume-order");
+    let store = crate::session::Session::at_dir(dir.clone());
+    store.save_artifact("plan", "APPROACH: rewrite the parser", false).unwrap();
+    store.save_artifact("todos", "- [ ] port lexer\n- [x] scaffold", false).unwrap();
+    let jobs = JobManager::new(".".to_string());
+    let tools = Tools::with_session(PathBuf::from("."), jobs, None, Some(Arc::new(store)));
+    let sess = Session {
+        llm: Arc::new(Llm::Script(std::sync::Mutex::new(VecDeque::new()))),
+        tools: Arc::new(tools),
+        cfg: Arc::new(test_cfg()),
+    };
+    let msg = super::frontier_resume(&sess).expect("a resume payload when work survives");
+    let todos_at = msg.find("port lexer").expect("todos content present");
+    let plan_at = msg.find("rewrite the parser").expect("plan content present");
+    assert!(todos_at < plan_at, "todos (what's left) leads the approach: {msg}");
+    assert!(msg.contains("`todos` (what's left)"));
     let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_dir_all(&dir2);
+}
+
+#[tokio::test]
+async fn interactive_frontier_comes_from_the_session_plan_artifact_not_the_repo() {
+    // Resume: an attached session with a saved `plan` artifact injects it on the first turn.
+    let store = temp_root("store-resume");
+    let sess = session_with_store(
+        vec![ScriptStep::Turn(turn_text("resuming"))],
+        &store,
+        Some("## pending\n- finish the migration"),
+    );
+    let events = run_and_collect(&sess).await;
+    assert_eq!(notes_containing(&events, "re-deriving scope"), 1, "resumed from the artifact: {events:?}");
+
+    // Fresh: an attached session with NO plan artifact injects nothing — a new session never
+    // inherits an old task, which is the whole point.
+    let store2 = temp_root("store-fresh");
+    let sess = session_with_store(vec![ScriptStep::Turn(turn_text("brand new task"))], &store2, None);
+    let events = run_and_collect(&sess).await;
+    assert_eq!(notes_containing(&events, "re-deriving scope"), 0, "a fresh session inherits nothing: {events:?}");
+    let _ = std::fs::remove_dir_all(&store);
+    let _ = std::fs::remove_dir_all(&store2);
 }
 
 fn tool_msg(body: &str, id: usize) -> ChatMessage {
@@ -516,26 +463,6 @@ fn exploration_steps() -> Vec<ScriptStep> {
 
 fn note_seen(events: &[AgentEvent], needle: &str) -> bool {
     events.iter().any(|e| matches!(e, AgentEvent::Note(t) if t.contains(needle)))
-}
-
-#[tokio::test]
-async fn step_budget_nudges_convergence_and_the_gate_fires_at_the_cap() {
-    // max_steps 20 (>16, so the converge nudge engages) with a script that never finishes:
-    // the nudge lands with 8 steps left, and the turn ends with a StepLimit gate event.
-    let mut cfg = test_cfg();
-    cfg.max_steps = 20;
-    let steps: Vec<ScriptStep> = (0..20)
-        .map(|_| ScriptStep::Turn(turn_tool("bash", serde_json::json!({ "command": "true" }))))
-        .collect();
-    let events = run_and_collect(&session_cfg(steps, cfg)).await;
-    assert!(
-        note_seen(&events, "8 of 20 steps remain"),
-        "converge nudge missing: {events:?}"
-    );
-    assert!(
-        events.iter().any(|e| matches!(e, AgentEvent::StepLimit(20))),
-        "step gate event missing: {events:?}"
-    );
 }
 
 #[tokio::test]
@@ -596,87 +523,6 @@ fn cap_result_keeps_head_and_tail_under_the_cap() {
     assert!(capped.starts_with('A'), "head kept");
     assert!(capped.ends_with('Z'), "tail kept");
     assert!(capped.contains("truncated"));
-}
-
-#[test]
-fn check_command_detection() {
-    assert!(is_check_command("cargo test --lib", None));
-    assert!(is_check_command("cd app && python -m pytest -q", None));
-    assert!(!is_check_command("echo hello", None));
-    assert!(is_check_command("echo hello", Some("echo hello")));
-    assert!(is_check_command("bash -lc 'make verify'", Some("make verify")));
-    // end-to-end / browser runners count as checks
-    assert!(is_check_command("bunx playwright test", None));
-    assert!(is_check_command("npm run test:e2e", None));
-    assert!(is_check_command("yarn cypress run", None));
-}
-
-#[tokio::test]
-async fn a_failed_web_check_does_not_clear_the_assess_gate() {
-    // web_check is treated as frontend verification, but only a PASSING one clears the gate.
-    let dir = temp_root("webcheck-gate");
-    let sess = session_in(
-        dir.to_str().unwrap(),
-        vec![
-            ScriptStep::Turn(turn_tool("write_file", serde_json::json!({ "path": "app.js", "content": "x" }))),
-            ScriptStep::Turn(turn_tool("web_check", serde_json::json!({ "url": "http://localhost:1" }))),
-            ScriptStep::Turn(turn_text("verified in the browser")),
-        ],
-        None,
-    );
-    // web_check will report ok=false here (nothing served), so it should NOT clear the gate —
-    // an unverified edit remains, and the nudge fires. This proves ok-gating, not just presence.
-    let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "ASSESS check"), 1, "{events:?}");
-}
-
-fn spear_notes(events: &[AgentEvent]) -> usize {
-    events
-        .iter()
-        .filter(|e| matches!(e, AgentEvent::Note(t) if t.contains("SPEAR checkpoint")))
-        .count()
-}
-
-#[tokio::test]
-async fn spear_nudge_fires_once_after_sustained_direct_execution() {
-    // 14 direct tool calls (past SPEAR_NUDGE_AFTER=12), no delegation → exactly one advisory
-    // nudge, entering committed history so the model sees it.
-    let mut steps: Vec<ScriptStep> = (0..14)
-        .map(|_| ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" }))))
-        .collect();
-    steps.push(ScriptStep::Turn(turn_text("done")));
-    let sess = session(steps);
-    let (events, deltas) = run_with_commit(&sess).await;
-
-    assert_eq!(spear_notes(&events), 1, "one nudge, not repeated: {events:?}");
-    assert!(deltas.iter().flatten().any(|m| m.role == "user"
-        && m.content.as_deref().is_some_and(|c| c.contains("SPEAR checkpoint"))));
-}
-
-#[tokio::test]
-async fn spear_nudge_skipped_when_the_turn_delegates_or_stays_short() {
-    // Delegating early suppresses the nudge entirely…
-    let mut steps = vec![
-        ScriptStep::Turn(turn_delegate(&["investigate"])),
-        ScriptStep::Turn(turn_text("subagent result")),
-    ];
-    steps.extend(
-        (0..10).map(|_| {
-            ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" })))
-        }),
-    );
-    steps.push(ScriptStep::Turn(turn_text("done")));
-    let sess = session(steps);
-    let events = run_and_collect(&sess).await;
-    assert_eq!(spear_notes(&events), 0, "delegation suppresses the nudge: {events:?}");
-
-    // …and short direct turns never see it.
-    let sess = session(vec![
-        ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" }))),
-        ScriptStep::Turn(turn_text("done")),
-    ]);
-    let events = run_and_collect(&sess).await;
-    assert_eq!(spear_notes(&events), 0);
 }
 
 #[tokio::test]

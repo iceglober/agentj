@@ -4,9 +4,15 @@
 use crate::provider::ToolSpec;
 use serde_json::json;
 
-/// Tool specs advertised to the model. `delegate` is included only for the primary loop
-/// (`allow_delegate`), so subagents can't fan out recursively.
-pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
+/// Tool specs advertised to the model. `run_subagents` is included only for the primary loop
+/// (`allow_delegate`), so subagents can't fan out recursively. `save_artifact`/`read_artifact`
+/// require an attached session store (`has_session`) — only the interactive primary persists
+/// artifacts.
+pub fn tool_specs(
+    allow_delegate: bool,
+    has_session: bool,
+    agent_type: Option<crate::agent::AgentType>,
+) -> Vec<ToolSpec> {
     let mut specs = vec![
         ToolSpec {
             name: "read_file".into(),
@@ -61,17 +67,6 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
             parameters: json!({ "type": "object", "properties": { "command": { "type": "string" }, "timeout_s": { "type": "number", "description": "kill the command after this many seconds (clamped to 1..=600; default 120)" } }, "required": ["command"] }),
         },
         ToolSpec {
-            name: "web_check".into(),
-            description: "Verify a running web page in a real headless browser (you cannot see it otherwise). Loads `url` and reports what's invisible from the source: uncaught exceptions, console.error output, failed network requests (>=400), and — if given — whether `expect_text` appears or `expect_selector` exists. Use this to check FRONTEND/UI work after starting the dev server (job_start), the way you'd run tests for backend work. ok=false on any error or failed assertion. Needs `bun` + Playwright + a Chrome/Chromium.".into(),
-            parameters: json!({ "type": "object", "properties": {
-                "url": { "type": "string", "description": "page to load, e.g. http://localhost:5173" },
-                "wait_for": { "type": "string", "description": "optional CSS selector to wait for before checking" },
-                "expect_text": { "type": "string", "description": "optional: assert this text is visible on the page" },
-                "expect_selector": { "type": "string", "description": "optional: assert an element matching this CSS selector exists" },
-                "timeout_s": { "type": "number", "description": "navigation timeout seconds (default 15)" }
-            }, "required": ["url"] }),
-        },
-        ToolSpec {
             name: "job_start".into(),
             description: "Start a long-running command in the BACKGROUND (dev server, slow test suite, `gh pr checks --watch`). Returns a job id immediately — keep working on other things. You'll be nudged when it finishes, or after `timeout_s` if it's still running. Prefer this over `bash` for anything slow.".into(),
             parameters: json!({ "type": "object", "properties": { "command": { "type": "string" }, "timeout_s": { "type": "number", "description": "fallback: nudge you if the job is still running after this many seconds" } }, "required": ["command"] }),
@@ -89,8 +84,8 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
     ];
     if allow_delegate {
         specs.push(ToolSpec {
-            name: "delegate".into(),
-            description: "Delegate one or more sub-tasks to subagents that each run in their OWN context and return a concise result. Use for any sub-task you expect to take more than ~5 tool calls (investigations, multi-file changes) — it keeps YOUR context small. INDEPENDENT sub-tasks passed in one call run in PARALLEL; sequence dependent work across separate `delegate` calls, feeding results forward. Each result comes back labeled `[subagent i]`. Write briefs that spend the subagent's budget well: name the exact files/paths/commands you already located (so it doesn't re-derive them) and state precisely what to return — a subagent that has to rediscover your context costs more than doing the work yourself.".into(),
+            name: "run_subagents".into(),
+            description: "Run one or more sub-tasks as TYPED subagents that each run in their OWN context and return a concise result. Use for a sub-task of more than ~5 tool calls, or that runs in parallel / needs isolated context — it keeps YOUR context small. INDEPENDENT sub-tasks in one call run in PARALLEL; sequence dependent work across separate calls. Each result comes back labeled `[subagent i]`. Pick the `type` that matches the work — each runs with a scoped toolset: `scout` (read-only investigation / answer a question), `planner` (read-only design / decompose / weigh options), `reviewer` (adversarial verify a diff or plan — read + run checks, no edits), `executor` (make a targeted change on files you name — the default). Write briefs that spend the budget well: name the exact files/paths/commands you already located and state precisely what to return.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -101,6 +96,7 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
                             "type": "object",
                             "properties": {
                                 "task": { "type": "string", "description": "The self-contained sub-task instruction." },
+                                "type": { "type": "string", "enum": ["scout", "planner", "reviewer", "executor"], "description": "The kind of subagent (default: executor). scout/planner/reviewer are read-only; executor makes changes." },
                                 "title": { "type": "string", "description": "A short 3–8 word label for this sub-task, shown in the UI while it runs (e.g. 'Map the Rust crate')." },
                                 "context": { "type": "string", "description": "Optional extra context (paths, findings) the subagent needs." }
                             },
@@ -111,6 +107,29 @@ pub fn tool_specs(allow_delegate: bool) -> Vec<ToolSpec> {
                 "required": ["tasks"]
             }),
         });
+    }
+    if allow_delegate && has_session {
+        specs.push(ToolSpec {
+            name: "save_artifact".into(),
+            description: "Persist a named artifact for THIS session, stored outside the repo and keyed to the session so it never pollutes the working tree and a fresh session never inherits it. Overwrites the artifact each call. Three artifacts are conventional: `plan` (markdown — the settled APPROACH and its rationale; write it once the design is decided, revise only on new info) and `todos` (markdown — the CHECKLIST of what's pending / in-progress / done, with evidence; rewrite it as you go). `plan` and `todos` are handed back to you on resume, so keep todos current — it's what tells a resumed run what's left. The third is `blueprint` (format:\"html\" — a self-contained interactive HTML page: mockups, hierarchy, diagrams). Saving an html artifact OPENS IT IN THE USER'S BROWSER, so build a `blueprint` when a picture would align you with the user faster than prose — during scoping/planning, show what you understand and what you propose, and get their buy-in before you build.".into(),
+            parameters: json!({ "type": "object", "properties": {
+                "name": { "type": "string", "description": "artifact name, e.g. \"plan\", \"todos\", \"blueprint\"" },
+                "content": { "type": "string", "description": "the full artifact content (replaces any prior version)" },
+                "format": { "type": "string", "enum": ["markdown", "html"], "description": "\"markdown\" (default) for plan/todos/notes; \"html\" for a blueprint — a self-contained page opened in the user's browser on save" }
+            }, "required": ["name", "content"] }),
+        });
+        specs.push(ToolSpec {
+            name: "read_artifact".into(),
+            description: "Read back a named artifact saved earlier in this session with `save_artifact` (e.g. your \"plan\" or \"todos\"). Useful after a long stretch when it may have scrolled out of context.".into(),
+            parameters: json!({ "type": "object", "properties": {
+                "name": { "type": "string", "description": "artifact name to read" }
+            }, "required": ["name"] }),
+        });
+    }
+    // A type-scoped subagent only sees the built-in tools its type allows (MCP specs, added by the
+    // caller, always pass through — they're the user's integrations, guided by the type prompt).
+    if let Some(t) = agent_type {
+        specs.retain(|s| t.allows(&s.name));
     }
     specs
 }

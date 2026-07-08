@@ -51,6 +51,25 @@ pub fn divider_color() -> Color {
     DIM
 }
 
+// Message-card treatment (the "Cards" transcript style). These are the ONE deliberate exception to
+// the no-background-fills rule at the top of this file: a subtle tinted band + colored left bar
+// groups your prompts and agentj's replies, with tool calls rendered plainly between.
+// The tints are truecolor and tuned for a DARK terminal — on a light background they read as dark
+// boxes (the reason the rest of the theme avoids fills). RGB so the warm-you / cool-agent contrast
+// survives regardless of the user's ANSI-16 palette.
+pub fn user_bar() -> Color {
+    Color::Rgb(224, 138, 76) // warm — your prompts
+}
+pub fn user_bg() -> Color {
+    Color::Rgb(34, 28, 23)
+}
+pub fn assistant_bar() -> Color {
+    Color::Rgb(108, 182, 255) // cool — agentj
+}
+pub fn assistant_bg() -> Color {
+    Color::Rgb(21, 27, 37)
+}
+
 pub fn sparkle() -> &'static str {
     "·"
 }

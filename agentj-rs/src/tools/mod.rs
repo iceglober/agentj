@@ -7,7 +7,6 @@
 //!  - `files` — read/write/edit/list, with post-edit echoes
 //!  - `search` — glob and grep
 //!  - `shell` — `bash` and background-job control
-//!  - `webcheck` — headless-browser verification
 //!  - `paths` — repo-root confinement (`safe_resolve`)
 //!  - `stamps` — the read-stamp staleness guard (`ReadStamps`)
 //!  - `spec` — the schemas advertised to the model ([`tool_specs`])
@@ -18,7 +17,6 @@ mod search;
 mod shell;
 mod spec;
 mod stamps;
-mod webcheck;
 
 #[cfg(test)]
 mod tests;
@@ -63,21 +61,79 @@ pub struct Tools {
     pub jobs: Arc<JobManager>,
     mcp: Option<Arc<McpClients>>,
     stamps: ReadStamps,
+    /// The interactive session's artifact store, when there is one (the primary TUI). `None` for
+    /// headless `--once` runs — they don't persist artifacts, so `save_artifact` /
+    /// `read_artifact` aren't advertised to them.
+    pub session: Option<Arc<crate::session::Session>>,
+    /// The subagent type this tool set is scoped to (`None` = the primary/PRIME loop, full tools).
+    /// Built-in tools the type disallows are neither advertised nor dispatchable.
+    pub agent_type: Option<crate::agent::AgentType>,
 }
+
+/// Every built-in tool name — used to tell a disallowed built-in (blocked for a scoped subagent)
+/// from an MCP tool (always passes through).
+const BUILTINS: &[&str] = &[
+    "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "glob", "grep", "bash",
+    "save_artifact", "read_artifact", "job_start", "job_check",
+    "job_stop", "mcp_find_tools", "run_subagents",
+];
 
 /// The value of `args[key]` when it's a string — the common shape of tool arguments.
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(|v| v.as_str())
 }
 
+/// Fire-and-forget open of a saved HTML artifact in the user's default browser (`open` on macOS,
+/// `xdg-open` elsewhere). Detached — we don't wait or surface its exit; returns whether the opener
+/// launched at all. Only ever called for an attached interactive session, so a GUI is expected.
+fn open_in_browser(path: &std::path::Path) -> bool {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(opener).arg(path).spawn().is_ok()
+}
+
 impl Tools {
-    pub fn new(root: PathBuf, jobs: Arc<JobManager>, mcp: Option<Arc<McpClients>>) -> Self {
+    #[cfg(test)]
+    pub fn new(
+        root: PathBuf,
+        jobs: Arc<JobManager>,
+        mcp: Option<Arc<McpClients>>,
+    ) -> Self {
+        Self::with_session(root, jobs, mcp, None)
+    }
+
+    pub fn with_session(
+        root: PathBuf,
+        jobs: Arc<JobManager>,
+        mcp: Option<Arc<McpClients>>,
+        session: Option<Arc<crate::session::Session>>,
+    ) -> Self {
         Self {
             root,
             jobs,
             mcp,
             stamps: ReadStamps::new(),
+            session,
+            agent_type: None,
         }
+    }
+
+    /// A copy of these tools scoped to a subagent `type`: shares the root/jobs/MCP handles, drops the
+    /// artifact store (subagents don't persist artifacts) and gets fresh read-stamps, and records the
+    /// type so its tool allowlist is enforced.
+    pub fn scoped_to(&self, agent_type: crate::agent::AgentType) -> Tools {
+        Tools {
+            root: self.root.clone(),
+            jobs: self.jobs.clone(),
+            mcp: self.mcp.clone(),
+            stamps: ReadStamps::new(),
+            session: None,
+            agent_type: Some(agent_type),
+        }
+    }
+
+    /// Whether an interactive artifact store is attached (gates the artifact tools' advertisement).
+    pub fn has_session(&self) -> bool {
+        self.session.is_some()
     }
 
     /// Tool specs contributed by connected MCP servers (each `<server>__<tool>`).
@@ -96,9 +152,65 @@ impl Tools {
         self.root.to_string_lossy().into_owned()
     }
 
+    /// `save_artifact` — persist a named session artifact (the model's `plan`/`todos`, a `blueprint`,
+    /// a decision log, …) to the global session store, OUTSIDE the repo. Only reachable when a
+    /// session is attached (its spec is gated the same way). An `html` artifact is opened in the
+    /// user's browser on save, so a visual `blueprint` lands in front of them for alignment.
+    fn save_artifact(&self, args: &Value) -> ToolOutcome {
+        let (Some(name), Some(content)) = (arg_str(args, "name"), arg_str(args, "content")) else {
+            return ToolOutcome::err("error: save_artifact needs a name and content");
+        };
+        let Some(session) = &self.session else {
+            return ToolOutcome::err("error: no session artifact store attached");
+        };
+        let html = arg_str(args, "format").is_some_and(|f| f.eq_ignore_ascii_case("html"));
+        match session.save_artifact(name, content, html) {
+            Ok(path) => {
+                let opened = if html { open_in_browser(&path) } else { false };
+                let tail = if opened {
+                    " — opened in your browser for review"
+                } else if html {
+                    " (HTML; open it in a browser to view)"
+                } else {
+                    ""
+                };
+                ToolOutcome::ok(format!(
+                    "saved artifact `{name}` ({} bytes) to this session — it persists across resume \
+                     and is not written into the repo{tail}",
+                    content.len()
+                ))
+            }
+            Err(e) => ToolOutcome::err(format!("error: could not save artifact `{name}`: {e}")),
+        }
+    }
+
+    /// `read_artifact` — read a named session artifact back.
+    fn read_artifact(&self, args: &Value) -> ToolOutcome {
+        let Some(name) = arg_str(args, "name") else {
+            return ToolOutcome::err("error: read_artifact needs a name");
+        };
+        let Some(session) = &self.session else {
+            return ToolOutcome::err("error: no session artifact store attached");
+        };
+        match session.read_artifact(name) {
+            Some(content) => ToolOutcome::ok(content),
+            None => ToolOutcome::err(format!("no artifact `{name}` in this session yet")),
+        }
+    }
+
     /// Dispatch one tool call by name. Built-ins first; anything else is tried against the
     /// connected MCP servers.
     pub async fn call(&self, name: &str, args: &Value) -> ToolOutcome {
+        // A type-scoped subagent may only call the built-ins its type allows (MCP tools pass
+        // through). The specs already hide these, but enforce at dispatch too — belt and braces.
+        if let Some(t) = self.agent_type {
+            if BUILTINS.contains(&name) && !t.allows(name) {
+                return ToolOutcome::err(format!(
+                    "error: `{name}` is not available to a {} subagent",
+                    t.as_str()
+                ));
+            }
+        }
         match name {
             "read_file" => self.read_file(args),
             "write_file" => self.write_file(args),
@@ -108,7 +220,8 @@ impl Tools {
             "glob" => self.glob(args).await,
             "grep" => self.grep(args).await,
             "bash" => self.bash(args).await,
-            "web_check" => webcheck::web_check(&self.root, args).await,
+            "save_artifact" => self.save_artifact(args),
+            "read_artifact" => self.read_artifact(args),
             "job_start" => self.job_start(args).await,
             "job_check" => ToolOutcome::ok(
                 self.jobs

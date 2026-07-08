@@ -90,29 +90,6 @@ fn session_tokens_accumulate_primary_and_subagent_spend_separately() {
 }
 
 #[test]
-fn steering_toggle_collapses_and_restores_supervisor_notes_retroactively() {
-    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
-    let mut a = app();
-    a.on_agent(AgentEvent::Note("[supervisor: SPEAR checkpoint — converge]".into()));
-    a.on_agent(AgentEvent::Note("[job 2 `pnpm test` finished, exit 0]".into()));
-    assert!(a.transcript.plain().contains("SPEAR checkpoint"), "visible by default");
-
-    // Menu item 0 toggles steering OFF: already-pushed rows collapse immediately.
-    a.menu = Some(0);
-    a.on_key(enter);
-    assert!(!a.show_steering);
-    assert!(!a.transcript.plain().contains("SPEAR checkpoint"), "collapsed retroactively");
-    assert!(a.transcript.plain().contains("finished, exit 0"), "job notes stay visible");
-    // New steering notes stay hidden while off…
-    a.on_agent(AgentEvent::Note("[supervisor: ASSESS check]".into()));
-    assert!(!a.transcript.plain().contains("ASSESS check"));
-    // …and everything reappears, in order, when toggled back on.
-    a.on_key(enter); // menu stayed open on item 0
-    let t = a.transcript.plain();
-    assert!(t.contains("SPEAR checkpoint") && t.contains("ASSESS check"), "{t}");
-}
-
-#[test]
 fn auto_scroll_toggle_repins_on_new_activity() {
     let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     let mut a = app();
@@ -126,6 +103,36 @@ fn auto_scroll_toggle_repins_on_new_activity() {
     a.follow = false;
     a.on_agent(AgentEvent::Message("world".into()));
     assert!(a.follow, "auto-scroll re-pins on new content");
+}
+
+#[test]
+fn menu_has_six_items() {
+    assert_eq!(App::MENU_ITEMS, 6);
+}
+
+#[test]
+fn slash_task_reads_a_branch_ref_or_a_freeform_task() {
+    use super::input::parse_task_args;
+
+    // A PR number or a branch-shaped token is a place to re-key onto; the rest is the directive.
+    assert_eq!(parse_task_args("1234 add tests"), ("1234".into(), "add tests".into()));
+    assert_eq!(
+        parse_task_args("feature/login wire it up"),
+        ("feature/login".into(), "wire it up".into())
+    );
+    assert_eq!(parse_task_args("GEN-2827").0, "GEN-2827");
+
+    // A single bare token is still a branch name (with a synthesized "go fetch the task" directive).
+    let (r, d) = parse_task_args("refactor");
+    assert_eq!(r, "refactor");
+    assert!(d.contains("Work on `refactor`"));
+
+    // The regression: a bare verb + prose is the TASK, not a branch. The verb is preserved and the
+    // branch is slugged from the whole sentence — never `git checkout -B complete`.
+    let (r, d) = parse_task_args("complete the \"IV UX v2\" project");
+    assert_eq!(d, "complete the \"IV UX v2\" project", "the verb is not eaten");
+    assert!(r.starts_with("complete-the-iv-ux-v2"), "branch slugged from the task, got: {r}");
+    assert!(!r.contains(' ') && !r.contains('"'), "git-safe branch: {r}");
 }
 
 #[test]
@@ -150,15 +157,15 @@ fn step_gate_offers_empty_enter_continue() {
 }
 
 #[test]
-fn ctrl_p_toggles_the_menu_and_enter_toggles_steering() {
+fn ctrl_p_toggles_the_menu_and_enter_toggles_an_item() {
     let mut a = app();
     let ctrl_p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
     a.on_key(ctrl_p);
     assert_eq!(a.menu, Some(0));
-    // Enter on item 0 flips steering and keeps the menu open.
-    assert!(a.show_steering);
+    // Enter on item 0 (Show thinking) flips it and keeps the menu open.
+    assert!(a.show_thinking);
     a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-    assert!(!a.show_steering);
+    assert!(!a.show_thinking);
     assert_eq!(a.menu, Some(0), "menu stays open after a toggle");
     // Esc closes; Ctrl-P reopens even while running.
     a.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -408,7 +415,7 @@ fn tray_collapses_into_transcript_summaries_when_the_delegate_batch_lands() {
     use crate::events::AgentEvent;
     let mut a = app();
     a.on_ui(UiMsg::Agent(AgentEvent::ToolStart {
-        name: "delegate".to_string(),
+        name: "run_subagents".to_string(),
         args: "{tasks:…}".to_string(),
         step: 0,
     }));
@@ -527,4 +534,262 @@ fn double_ctrl_c_quits_within_window() {
         a.on_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
         AppEffect::Quit
     ));
+}
+
+/// Submit `text` the way a user would: type it, hit Enter.
+fn submit(a: &mut App, text: &str) -> AppEffect {
+    a.editor.insert_str(text);
+    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+}
+
+#[test]
+fn startup_shows_the_cheat_sheet_and_first_run_opens_the_wizard() {
+    let a = app();
+    assert!(a.transcript.plain().contains("Ctrl-P menu"), "cheat sheet on first frame");
+    assert!(a.setup.is_none());
+
+    let b = App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, Vec::new(), true);
+    assert!(b.setup.is_some(), "needs_setup=true opens the provider wizard");
+}
+
+#[test]
+fn bracketed_paste_inserts_idle_and_is_ignored_while_a_turn_runs() {
+    let mut a = app();
+    a.on_input(Event::Paste("pasted text".into()));
+    assert_eq!(a.editor.text(), "pasted text");
+
+    a.running = true;
+    a.on_input(Event::Paste(" more".into()));
+    assert_eq!(a.editor.text(), "pasted text", "paste is read-only while running");
+}
+
+#[test]
+fn empty_enter_when_idle_does_nothing() {
+    let mut a = app();
+    let effect = a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(effect, AppEffect::None));
+    assert!(!a.running);
+    assert_eq!(a.messages.len(), 1, "only the system message — no turn was started");
+}
+
+#[test]
+fn unknown_slash_text_is_sent_to_the_model_as_a_plain_prompt() {
+    // Intentional: an unrecognized "/wat do it" is not an error — it goes to the model verbatim
+    // (the popover's Unknown highlight is the only warning).
+    let mut a = app();
+    let effect = submit(&mut a, "/wat do it");
+    assert!(matches!(effect, AppEffect::SpawnTurn));
+    assert!(a.running);
+    assert!(a.messages.last().unwrap().content.as_deref().unwrap_or("").contains("/wat do it"));
+}
+
+#[test]
+fn slash_model_shows_usage_switches_and_rejects_an_unknown_provider() {
+    let mut a = app();
+    // Bare /model: usage naming the current provider/model, no effect.
+    assert!(matches!(submit(&mut a, "/model"), AppEffect::None));
+    assert!(a.transcript.plain().contains("usage: /model"));
+    assert!(a.transcript.plain().contains("vertex / dummy"), "names the current pair");
+
+    // Unknown provider: a notice, no effect.
+    assert!(matches!(submit(&mut a, "/model banana"), AppEffect::None));
+    assert!(a.transcript.plain().contains("unknown provider `banana`"));
+
+    // Valid provider (+ optional model): the loop is asked to switch.
+    let effect = submit(&mut a, "/model azure gpt-5.2");
+    assert!(matches!(
+        effect,
+        AppEffect::SwitchModel { provider: Provider::Azure, ref selector }
+            if selector.model.as_deref() == Some("gpt-5.2")
+    ));
+}
+
+#[test]
+fn slash_mcp_dispatches_login_logout_and_reopens_the_status_modal() {
+    use crate::mcp::client::{McpOutcome, McpStatus};
+    let mut a = app();
+    // No servers configured: bare /mcp explains instead of opening an empty modal.
+    assert!(matches!(submit(&mut a, "/mcp"), AppEffect::None));
+    assert!(!a.show_mcp_modal);
+    assert!(a.transcript.plain().contains("no MCP servers configured"));
+    assert!(a.transcript.plain().contains("usage: /mcp login"));
+
+    // login/logout are deferred to the loop with the server name.
+    assert!(matches!(submit(&mut a, "/mcp login linear"), AppEffect::McpLogin(n) if n == "linear"));
+    assert!(matches!(submit(&mut a, "/mcp logout linear"), AppEffect::McpLogout(n) if n == "linear"));
+
+    // With statuses, bare /mcp reopens the modal.
+    a.mcp_status = vec![McpStatus { name: "linear".into(), outcome: McpOutcome::Ok(4) }];
+    assert!(matches!(submit(&mut a, "/mcp"), AppEffect::None));
+    assert!(a.show_mcp_modal);
+}
+
+#[test]
+fn mcp_modal_auto_opens_on_startup_failures_and_any_key_dismisses_it() {
+    use crate::mcp::client::{McpOutcome, McpStatus};
+    let ok_only = vec![McpStatus { name: "a".into(), outcome: McpOutcome::Ok(2) }];
+    let a = App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, ok_only, false);
+    assert!(!a.show_mcp_modal, "all-green startup stays quiet");
+
+    let broken = vec![McpStatus { name: "b".into(), outcome: McpOutcome::Err("boom".into()) }];
+    let mut a = App::new("vertex", "dummy", ".".to_string(), "sys".to_string(), None, broken, false);
+    assert!(a.show_mcp_modal, "a failed server surfaces the modal");
+    // Any key dismisses it — and is consumed, not typed into the input.
+    a.on_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+    assert!(!a.show_mcp_modal);
+    assert_eq!(a.editor.text(), "", "the dismissing key is swallowed");
+}
+
+#[test]
+fn slash_setup_opens_the_wizard_and_esc_cancels_back_to_chat() {
+    let mut a = app();
+    assert!(matches!(submit(&mut a, "/setup"), AppEffect::None));
+    assert!(a.setup.is_some());
+
+    a.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(a.setup.is_none(), "Esc cancels the wizard");
+    // Chat works again: typing lands in the editor, Enter submits a turn.
+    let effect = submit(&mut a, "hello");
+    assert!(matches!(effect, AppEffect::SpawnTurn));
+}
+
+#[test]
+fn rekey_result_failure_notices_and_success_resets_history_then_starts_the_task() {
+    use crate::rekey::RekeyResult;
+    let mut a = app();
+    a.begin_rekey("feature/x");
+    assert!(a.running, "busy state while the git work runs off-loop");
+    assert!(a.status.contains("re-keying"));
+
+    // Failure: steps + error surface, no turn starts.
+    let effect = a.apply_rekey_result(
+        RekeyResult {
+            ok: false,
+            branch: None,
+            steps: vec!["git fetch origin".into()],
+            error: Some("no such ref".into()),
+        },
+        "fix it".into(),
+    );
+    assert!(matches!(effect, AppEffect::None));
+    assert!(!a.running);
+    assert!(a.transcript.plain().contains("re-key failed: no such ref"));
+
+    // Success with a task: history resets to a fresh system+user pair and the turn spawns.
+    a.messages.push(ChatMessage::user("stale history"));
+    let effect = a.apply_rekey_result(
+        RekeyResult {
+            ok: true,
+            branch: Some("feature/x".into()),
+            steps: vec![],
+            error: None,
+        },
+        "fix the flaky test".into(),
+    );
+    assert!(matches!(effect, AppEffect::SpawnTurn));
+    assert_eq!(a.messages.len(), 2, "system + the new task only");
+    assert!(a.messages[1].content.as_deref().unwrap_or("").contains("fix the flaky test"));
+    assert!(a.running);
+
+    // Success with no task: just a switch — no turn.
+    a.running = false;
+    let effect = a.apply_rekey_result(
+        RekeyResult { ok: true, branch: Some("main".into()), steps: vec![], error: None },
+        String::new(),
+    );
+    assert!(matches!(effect, AppEffect::None));
+    assert!(!a.running);
+}
+
+#[test]
+fn idle_tab_opens_the_completion_popover() {
+    let mut a = app();
+    // A slash token under the cursor: typing opens the popover, so Tab accepts the completion.
+    for c in ['/', 't', 'a'] {
+        a.on_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    }
+    assert!(a.popover.is_some(), "typing a slash token opens the popover");
+    a.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(a.editor.text().starts_with("/task"), "completion won: {}", a.editor.text());
+}
+
+#[test]
+fn menu_mcp_and_setup_items_dispatch_their_screens() {
+    use crate::mcp::client::{McpOutcome, McpStatus};
+    let mut a = app();
+    // MCP item (4) with no servers: a notice, the modal stays closed.
+    a.menu = Some(4);
+    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(!a.show_mcp_modal);
+    assert!(a.transcript.plain().contains("no MCP servers configured"));
+
+    // With statuses: the modal opens and the menu closes.
+    a.mcp_status = vec![McpStatus { name: "linear".into(), outcome: McpOutcome::Ok(4) }];
+    a.menu = Some(4);
+    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(a.show_mcp_modal);
+    assert!(a.menu.is_none());
+    a.show_mcp_modal = false;
+
+    // Provider-setup item (5): the wizard opens and the menu closes.
+    a.menu = Some(5);
+    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(a.setup.is_some());
+    assert!(a.menu.is_none());
+}
+
+#[test]
+fn show_thinking_toggle_hides_and_restores_reasoning_blocks() {
+    use crate::events::AgentEvent;
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    let mut a = app();
+    a.on_agent(AgentEvent::Thinking("weighing options".into()));
+    assert!(a.transcript.plain().contains("weighing options"));
+
+    // Menu item 0 = Show thinking → hide.
+    a.menu = Some(0);
+    a.on_key(enter);
+    assert!(!a.show_thinking);
+    assert!(!a.transcript.plain().contains("weighing options"), "thinking hidden retroactively");
+
+    // Toggle back on → restored.
+    a.on_key(enter);
+    assert!(a.show_thinking);
+    assert!(a.transcript.plain().contains("weighing options"), "thinking restored");
+}
+
+#[test]
+fn export_transcript_writes_a_labeled_markdown_file() {
+    use crate::events::AgentEvent;
+    let dir = std::env::temp_dir().join(format!("agentj-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut a = App::new("vertex", "m", dir.to_string_lossy().into_owned(), "sys".to_string(), None, Vec::new(), false);
+    submit(&mut a, "do the thing");
+    a.on_agent(AgentEvent::Thinking("hmm".into()));
+
+    // Menu item 3 = Export transcript.
+    a.menu = Some(3);
+    a.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let notice = a.transcript.plain();
+    assert!(notice.contains("exported transcript → "), "path noticed: {notice}");
+
+    let written = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.file_name().to_string_lossy().starts_with("agentj-transcript-"))
+        .expect("a transcript file was written");
+    let body = std::fs::read_to_string(written.path()).unwrap();
+    assert!(body.contains("### you") && body.contains("do the thing"), "labeled markdown: {body}");
+    assert!(body.contains("### thinking") && body.contains("hmm"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_click_without_a_drag_clears_the_selection() {
+    let mut a = app();
+    a.on_input(mouse(MouseEventKind::Down(MouseButton::Left)));
+    assert!(a.selection.is_some(), "click anchors a selection");
+    a.on_input(mouse(MouseEventKind::Up(MouseButton::Left)));
+    assert!(a.selection.is_none(), "no drag → the highlight clears");
 }
