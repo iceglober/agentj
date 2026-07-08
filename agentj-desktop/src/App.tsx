@@ -12,6 +12,8 @@ import { Welcome } from "./components/Welcome";
 import { WorkspaceChooser } from "./components/WorkspaceChooser";
 import { Settings } from "./components/Settings";
 import { Shortcuts } from "./components/Shortcuts";
+import { ToolStatus } from "./components/ToolStatus";
+import { COMMANDS } from "./commands";
 import type { RepoScan } from "./types";
 
 // Recents store BASE repo paths (the main repo dir), not individual worktrees.
@@ -48,7 +50,7 @@ export function App() {
   }, [derived.blocks, settings.showThinking, settings.showTools]);
 
   // Only one modal open at a time.
-  const [modal, setModal] = useState<"settings" | "shortcuts" | null>(null);
+  const [modal, setModal] = useState<"settings" | "shortcuts" | "tools" | null>(null);
 
   // Open flow state, owned here so Welcome, the tier-1 "+", and recents drive it.
   const [scan, setScan] = useState<RepoScan | null>(null); // chooser open ⇔ non-null
@@ -134,6 +136,40 @@ export function App() {
       setProvisioning(false);
     }
   }, [session]);
+
+  // Slash-command dispatch. InputRow (and future callers) run commands by name;
+  // App owns the effects (modals, store actions, the open flow).
+  const runCommand = useCallback(
+    (name: string) => {
+      switch (name) {
+        case "/init":
+          void session.send(
+            "Map this repository and write its AGENTS.md — survey the structure, entry points, conventions, and how to build & test, then write or update AGENTS.md at the repo root.",
+          );
+          break;
+        case "/mcp":
+          setModal("tools");
+          break;
+        case "/new":
+          if (session.activeProject) void newSession();
+          else void pickRepo();
+          break;
+        case "/close":
+          if (session.activeId) void session.close(session.activeId);
+          break;
+        case "/settings":
+          setModal("settings");
+          break;
+        case "/shortcuts":
+          setModal("shortcuts");
+          break;
+        case "/clear":
+          if (session.activeId) session.clearEvents(session.activeId);
+          break;
+      }
+    },
+    [session, newSession, pickRepo],
+  );
 
   // Global ⌘-combo shortcuts. Esc-to-close lives in the modal components; here
   // we only handle the ⌘ combos so they don't type into the textarea.
@@ -232,6 +268,7 @@ export function App() {
         onNewSession={newSession}
         onOpenSettings={() => setModal("settings")}
         onOpenShortcuts={() => setModal("shortcuts")}
+        onOpenTools={() => setModal("tools")}
       />
 
       <div className="body">
@@ -247,6 +284,8 @@ export function App() {
             onSend={session.send}
             onInterrupt={session.interrupt}
             running={active?.running ?? false}
+            commands={COMMANDS}
+            onRunCommand={runCommand}
           />
 
           {hasBlueprint && !active?.bpOpen && (
@@ -275,6 +314,9 @@ export function App() {
         />
       )}
       {modal === "shortcuts" && <Shortcuts onClose={() => setModal(null)} />}
+      {modal === "tools" && (
+        <ToolStatus sessionId={session.activeId} onClose={() => setModal(null)} />
+      )}
     </div>
   );
 }

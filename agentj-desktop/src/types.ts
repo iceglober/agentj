@@ -62,6 +62,19 @@ export interface Blueprint {
   html: string;
 }
 
+// --- tool & MCP status (invoke("tool_status", { sessionId })) --------------
+export interface McpServerStatus {
+  name: string;
+  state: "ok" | "needs_auth" | "error";
+  tools: number;
+  detail: string | null;
+}
+export interface ToolStatus {
+  builtins: { name: string; description: string }[];
+  mcp: McpServerStatus[];
+  mcpToolCount: number;
+}
+
 // One open session, keyed by `id`. `root` is the checkout in use (a worktree or
 // the base checkout); `base` is the main repository directory the worktree hangs
 // off; `projectName` is the display name of that base repository.

@@ -14,11 +14,17 @@ import type {
   RepoScan,
   SessionMeta,
   StreamEvent,
+  ToolStatus,
 } from "./types";
 
 // Read an artifact by name from a specific session.
 export function readArtifact(sessionId: string, name: string): Promise<string | null> {
   return invoke<string | null>("read_artifact", { sessionId, name });
+}
+
+// Fetch the built-in + MCP tool status for a session.
+export function toolStatus(sessionId: string): Promise<ToolStatus> {
+  return invoke<ToolStatus>("tool_status", { sessionId });
 }
 
 // Per-session view state. `events` starts empty for restored sessions.
@@ -45,6 +51,8 @@ export interface SessionStore {
   send: (prompt: string) => Promise<void>;
   interrupt: () => Promise<void>;
   openBlueprint: (open: boolean) => void;
+  // Clear one session's transcript display; leaves backend/model history alone.
+  clearEvents: (id: string) => void;
 
   // Inspect a picked directory; throws if it isn't a directory. The caller
   // branches on git-ness / surfaces the error.
@@ -235,6 +243,13 @@ export function useSessions(): SessionStore {
     [patch],
   );
 
+  const clearEvents = useCallback(
+    (id: string) => {
+      patch(id, (s) => ({ ...s, events: [] }));
+    },
+    [patch],
+  );
+
   const inspectRepo = useCallback(
     (path: string) => invoke<RepoScan>("inspect_repo", { path }),
     [],
@@ -279,6 +294,7 @@ export function useSessions(): SessionStore {
     send,
     interrupt,
     openBlueprint,
+    clearEvents,
     inspectRepo,
     provisionWorktree,
     openWorktree,

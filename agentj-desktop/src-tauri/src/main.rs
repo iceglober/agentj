@@ -19,6 +19,7 @@ use agentj::config::{self, AppConfig};
 use agentj::events::AgentEvent;
 use agentj::model::{preflight, resolve_model, resolve_provider, Selector};
 use agentj::prompt;
+use agentj::mcp::client::{connect_all, McpClients, McpOutcome};
 use agentj::provider::{ChatMessage, Llm};
 use agentj::session::Session as Store;
 use agentj::{jobs, tools};
@@ -34,6 +35,42 @@ struct RepoCtx {
     branch: Option<String>,
     base: String,
     system: String,
+    /// Connection result for each MCP server configured in this worktree (for the tool-status view).
+    mcp_status: Vec<McpServerStatus>,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct McpServerStatus {
+    name: String,
+    /// "ok" | "needs_auth" | "error".
+    state: String,
+    tools: usize,
+    detail: Option<String>,
+}
+
+/// Connect this worktree's `.mcp.json` servers (if any). Runs on the app's long-lived runtime so the
+/// clients stay usable; returns the shared clients + a serializable status per server.
+fn connect_mcp(root: &str) -> (Option<Arc<McpClients>>, Vec<McpServerStatus>) {
+    let configs = agentj::mcp::config::load_mcp_servers(root);
+    if configs.is_empty() {
+        return (None, Vec::new());
+    }
+    let (clients, statuses) = tauri::async_runtime::block_on(connect_all(&configs));
+    let lite = statuses
+        .into_iter()
+        .map(|s| {
+            let (state, tools, detail) = match s.outcome {
+                McpOutcome::Ok(n) => ("ok", n, None),
+                McpOutcome::NeedsAuth => {
+                    ("needs_auth", 0, Some(format!("run `agentj mcp login {}`", s.name)))
+                }
+                McpOutcome::Err(e) => ("error", 0, Some(e)),
+            };
+            McpServerStatus { name: s.name, state: state.into(), tools, detail }
+        })
+        .collect();
+    (Some(Arc::new(clients)), lite)
 }
 
 /// One open session: a worktree's context, its conversation, and its turn state. Sessions run
@@ -116,14 +153,15 @@ fn build_ctx(root: &str) -> RepoCtx {
 
     let store = Arc::new(Store::mint(root, branch.clone()).expect("mint session store"));
     let jobs = jobs::JobManager::new(root.to_string());
-    let tools = tools::Tools::with_session(PathBuf::from(root), jobs, None, Some(store.clone()));
+    let (mcp, mcp_status) = connect_mcp(root);
+    let tools = tools::Tools::with_session(PathBuf::from(root), jobs, mcp, Some(store.clone()));
 
     let sess = Session {
         llm: Arc::new(llm),
         tools: Arc::new(tools),
         cfg: Arc::new(run_cfg),
     };
-    RepoCtx { sess, store, root: root.to_string(), branch, base, system }
+    RepoCtx { sess, store, root: root.to_string(), branch, base, system, mcp_status }
 }
 
 fn make_entry(root: &str) -> Arc<SessionEntry> {
@@ -280,6 +318,37 @@ fn read_artifact(session_id: String, name: String, state: State<'_, AppState>) -
     find(&state, &session_id).and_then(|e| e.ctx.store.read_artifact(&name))
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct BuiltinTool {
+    name: String,
+    description: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ToolStatus {
+    /// The built-in tools this session advertises to the model.
+    builtins: Vec<BuiltinTool>,
+    /// Configured MCP servers and how their connection went.
+    mcp: Vec<McpServerStatus>,
+    /// Total MCP tools available (sum over connected servers).
+    mcp_tool_count: usize,
+}
+
+/// The tools available to a session: built-ins plus each configured MCP server's connection status.
+#[tauri::command]
+fn tool_status(session_id: String, state: State<'_, AppState>) -> Result<ToolStatus, String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    let builtins = tools::tool_specs(true, true, None)
+        .into_iter()
+        .map(|s| BuiltinTool { name: s.name, description: s.description })
+        .collect();
+    let mcp = entry.ctx.mcp_status.clone();
+    let mcp_tool_count = mcp.iter().filter(|m| m.state == "ok").map(|m| m.tools).sum();
+    Ok(ToolStatus { builtins, mcp, mcp_tool_count })
+}
+
 fn build_state() -> AppState {
     std::env::set_var("AGENTJ_DESKTOP", "1"); // render blueprints in-app, not the system browser
     // Reopen the sessions from last launch whose worktrees still look like git checkouts.
@@ -303,7 +372,8 @@ fn main() {
             close_session,
             send_prompt,
             interrupt,
-            read_artifact
+            read_artifact,
+            tool_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running agentj-desktop");

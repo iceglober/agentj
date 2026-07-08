@@ -33,9 +33,11 @@ function GearIcon() {
 function GearMenu({
   onOpenSettings,
   onOpenShortcuts,
+  onOpenTools,
 }: {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenTools: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -80,6 +82,9 @@ function GearMenu({
           <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenShortcuts)}>
             Keyboard shortcuts
           </button>
+          <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenTools)}>
+            Tool status
+          </button>
         </div>
       )}
     </div>
@@ -99,6 +104,7 @@ export function TabBar({
   onNewSession,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenTools,
 }: {
   sessions: SessionMeta[];
   activeProject: string | null;
@@ -112,6 +118,7 @@ export function TabBar({
   onNewSession: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenTools: () => void;
 }) {
   // Distinct projects, in first-seen order.
   const projects: Project[] = [];
@@ -129,7 +136,11 @@ export function TabBar({
     <div className="tabbar">
       {/* tier 1 — projects */}
       <div className="tier tier1">
-        <GearMenu onOpenSettings={onOpenSettings} onOpenShortcuts={onOpenShortcuts} />
+        <GearMenu
+          onOpenSettings={onOpenSettings}
+          onOpenShortcuts={onOpenShortcuts}
+          onOpenTools={onOpenTools}
+        />
         <div className="tabs">
           {projects.map((p) => (
             <button

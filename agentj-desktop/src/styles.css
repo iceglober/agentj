@@ -1069,3 +1069,138 @@ body {
   font-size: 11.5px;
   color: var(--t-ink);
 }
+
+/* ---- slash-command palette (above the input) ---------------------------- */
+.input-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.cmd-palette {
+  position: absolute;
+  top: auto;
+  bottom: calc(100% + 4px);
+  left: 14px;
+  right: 14px;
+  min-width: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 250;
+}
+.cmd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.cmd-item.active {
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.cmd-name {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--accent);
+}
+.cmd-item.active .cmd-name {
+  color: var(--accent);
+}
+.cmd-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  color: var(--t-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- tool & MCP status modal -------------------------------------------- */
+.ts-builtins {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ts-builtin {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ts-builtin-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--t-ink);
+}
+.ts-builtin-desc {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--t-dim);
+}
+.ts-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ts-server {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.ts-server-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ts-server-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--t-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ts-server-count {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-dim);
+}
+.ts-server-detail {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-faint);
+  word-break: break-word;
+}
+.ts-pill {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border: 1px solid currentColor;
+}
+.ts-ok {
+  color: var(--ok);
+}
+.ts-needs_auth {
+  color: var(--warn);
+}
+.ts-error {
+  color: var(--err);
+}
