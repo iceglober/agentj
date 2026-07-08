@@ -9,6 +9,12 @@ function shortRoot(root: string): string {
   return parts.length <= 2 ? "/" + parts.join("/") : parts.slice(-2).join("/");
 }
 
+/** Just the final path segment — the repository's directory name. */
+function baseName(path: string): string {
+  const parts = path.replace(/\/+$/, "").split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
 export function Header({
   repo,
   recents,
@@ -37,8 +43,8 @@ export function Header({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
 
-  const label = repo ? shortRoot(repo.root) : "no repo";
-  const others = recents.filter((p) => p !== repo?.root);
+  const label = repo ? baseName(repo.base) : "no repo";
+  const others = recents.filter((p) => p !== repo?.base);
 
   return (
     <div className="topbar">
@@ -54,16 +60,21 @@ export function Header({
       <span className="repoctl" ref={wrapRef}>
         <button
           className="repobtn"
-          title={repo?.root ?? "choose a working directory"}
+          title={repo?.root ?? "choose a repository"}
           disabled={busy}
           onClick={() => setMenuOpen((v) => !v)}
         >
           <span className="folder">🗂</span>
-          <span className="reponame">{label}</span>
-          {repo?.branch && <span className="branch">⎇ {repo.branch}</span>}
+          {repo?.branch ? (
+            <span className="branch">⎇ {repo.branch}</span>
+          ) : (
+            <span className="reponame">{label}</span>
+          )}
+          {repo?.branch && <span className="reponame dim">{label}</span>}
+          {repo?.isWorktree && <span className="wtbadge">worktree</span>}
           <span className="chev">▾</span>
         </button>
-        {busy && <span className="repolock" title="interrupt the turn to switch repos">🔒</span>}
+        {busy && <span className="repolock" title="interrupt the turn to switch workspaces">🔒</span>}
 
         {menuOpen && (
           <div className="repomenu">
@@ -74,7 +85,7 @@ export function Header({
                 onPick();
               }}
             >
-              Open repo…
+              Open a repository…
             </button>
             {others.length > 0 && <div className="repomenu-sep">recent</div>}
             {others.map((p) => (

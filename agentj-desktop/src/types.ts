@@ -62,10 +62,32 @@ export interface Blueprint {
   html: string;
 }
 
-// The working directory the agent is operating in (from current_repo / open_repo / repo-changed).
+// The workspace the agent is operating in (from current_repo / provision_worktree /
+// open_worktree / repo-changed). `root` is the checkout in use (a worktree or the
+// base checkout); `base` is the main repository directory the worktree hangs off.
 export interface RepoInfo {
   root: string;
   branch: string | null;
+  base: string;
+  isWorktree: boolean;
+}
+
+// One selectable checkout under a repo: the base checkout or an agentj worktree.
+export interface WorktreeEntry {
+  path: string;
+  branch: string | null;
+  isMain: boolean;
+  isActive: boolean;
+}
+
+// Result of inspecting a picked directory. `base` is the main repo dir,
+// `baseName` its display name, `defaultBranch` the origin default to branch off.
+export interface RepoScan {
+  isGit: boolean;
+  base: string;
+  baseName: string;
+  defaultBranch: string;
+  worktrees: WorktreeEntry[];
 }
 
 // A locally-injected event for user prompts, kept in the same stream so

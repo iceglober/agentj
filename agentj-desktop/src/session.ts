@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AgentEvent, Blueprint, RepoInfo, StreamEvent } from "./types";
+import type { AgentEvent, Blueprint, RepoInfo, RepoScan, StreamEvent } from "./types";
 
 export function readArtifact(name: string): Promise<string | null> {
   return invoke<string | null>("read_artifact", { name });
@@ -19,7 +19,14 @@ export interface Session {
   send: (prompt: string) => Promise<void>;
   interrupt: () => Promise<void>;
   openBlueprint: (open: boolean) => void;
-  openRepo: (path: string) => Promise<void>;
+  // Inspect a picked directory. Throws if the path isn't a directory; the
+  // caller decides what to do with the scan (git → chooser, else → error).
+  inspectRepo: (path: string) => Promise<RepoScan>;
+  // Provision a fresh worktree off origin/<base> or resume an existing checkout.
+  // Both let the backend's "repo-changed" event drive the transcript reset,
+  // and surface failures as an injected error event.
+  provisionWorktree: (base: string) => Promise<void>;
+  openWorktree: (path: string) => Promise<void>;
 }
 
 export function useSession(): Session {
@@ -98,21 +105,58 @@ export function useSession(): Session {
 
   const openBlueprint = useCallback((open: boolean) => setBpOpen(open), []);
 
-  const openRepo = useCallback(
-    async (path: string) => {
+  // Inspect only reads; let it throw so the caller can branch on git-ness/error.
+  const inspectRepo = useCallback(
+    (path: string) => invoke<RepoScan>("inspect_repo", { path }),
+    [],
+  );
+
+  const provisionWorktree = useCallback(
+    async (base: string) => {
       if (runningRef.current) {
-        push({ kind: "error", data: "interrupt the running turn before switching repos" });
-        return;
+        const msg = "interrupt the running turn before switching workspaces";
+        push({ kind: "error", data: msg });
+        throw new Error(msg);
       }
       try {
         // The backend emits "repo-changed", which resets events/blueprint/running above.
-        await invoke<RepoInfo>("open_repo", { path });
+        await invoke<RepoInfo>("provision_worktree", { base });
       } catch (err) {
         push({ kind: "error", data: String(err) });
+        throw err;
       }
     },
     [push],
   );
 
-  return { events, running, blueprint, bpOpen, repo, send, interrupt, openBlueprint, openRepo };
+  const openWorktree = useCallback(
+    async (path: string) => {
+      if (runningRef.current) {
+        const msg = "interrupt the running turn before switching workspaces";
+        push({ kind: "error", data: msg });
+        throw new Error(msg);
+      }
+      try {
+        await invoke<RepoInfo>("open_worktree", { path });
+      } catch (err) {
+        push({ kind: "error", data: String(err) });
+        throw err;
+      }
+    },
+    [push],
+  );
+
+  return {
+    events,
+    running,
+    blueprint,
+    bpOpen,
+    repo,
+    send,
+    interrupt,
+    openBlueprint,
+    inspectRepo,
+    provisionWorktree,
+    openWorktree,
+  };
 }
