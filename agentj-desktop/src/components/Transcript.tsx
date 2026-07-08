@@ -139,14 +139,22 @@ function BlockRow({ block }: { block: Block }) {
   );
 }
 
-export function Transcript({ blocks }: { blocks: Block[] }) {
+export function Transcript({
+  blocks,
+  autoScroll,
+}: {
+  blocks: Block[];
+  autoScroll: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
-  // Stick to the bottom as new blocks land.
+  // Stick to the bottom as new blocks land — unless the user turned it off,
+  // in which case leave their scroll position alone.
   useEffect(() => {
+    if (!autoScroll) return;
     const el = ref.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [blocks]);
+  }, [blocks, autoScroll]);
 
   return (
     <div className="screen" ref={ref}>

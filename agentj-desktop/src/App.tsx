@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useSessions } from "./session";
+import { useSettings } from "./settings";
 import { derive } from "./derive";
 import { TabBar } from "./components/TabBar";
 import { Transcript } from "./components/Transcript";
@@ -9,10 +10,9 @@ import { InputRow } from "./components/InputRow";
 import { BlueprintPane } from "./components/BlueprintPane";
 import { Welcome } from "./components/Welcome";
 import { WorkspaceChooser } from "./components/WorkspaceChooser";
+import { Settings } from "./components/Settings";
+import { Shortcuts } from "./components/Shortcuts";
 import type { RepoScan } from "./types";
-
-const FOOTER =
-  "Enter send · Shift+Enter newline · Esc interrupt · / commands · ↑↓/wheel scroll · ⧉ blueprint opens beside chat";
 
 // Recents store BASE repo paths (the main repo dir), not individual worktrees.
 const RECENTS_KEY = "agentj.workspaces";
@@ -34,6 +34,21 @@ export function App() {
   );
 
   const [recents, setRecents] = useState<string[]>(loadRecents);
+
+  // Display preferences that shape the transcript.
+  const { settings, set: setSetting } = useSettings();
+
+  // Apply the display toggles before the transcript sees them.
+  const visibleBlocks = useMemo(() => {
+    return derived.blocks.filter((b) => {
+      if (!settings.showThinking && b.type === "thinking") return false;
+      if (!settings.showTools && (b.type === "tool" || b.type === "tray")) return false;
+      return true;
+    });
+  }, [derived.blocks, settings.showThinking, settings.showTools]);
+
+  // Only one modal open at a time.
+  const [modal, setModal] = useState<"settings" | "shortcuts" | null>(null);
 
   // Open flow state, owned here so Welcome, the tier-1 "+", and recents drive it.
   const [scan, setScan] = useState<RepoScan | null>(null); // chooser open ⇔ non-null
@@ -120,6 +135,50 @@ export function App() {
     }
   }, [session]);
 
+  // Global ⌘-combo shortcuts. Esc-to-close lives in the modal components; here
+  // we only handle the ⌘ combos so they don't type into the textarea.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey) return;
+      const modalOpen = modal !== null;
+      switch (e.key) {
+        case ",": // ⌘, — Settings
+          e.preventDefault();
+          setModal("settings");
+          break;
+        case "/": // ⌘/ — Keyboard shortcuts
+          e.preventDefault();
+          setModal("shortcuts");
+          break;
+        case "t":
+        case "T": // ⌘T — new worktree session in the active project
+          if (modalOpen) return;
+          e.preventDefault();
+          if (session.activeProject) {
+            void session.provisionWorktree(session.activeProject);
+          } else {
+            void pickRepo();
+          }
+          break;
+        case "w":
+        case "W": // ⌘W — close the active session
+          if (modalOpen) return;
+          if (!session.activeId) return;
+          e.preventDefault();
+          void session.close(session.activeId);
+          break;
+        case "o":
+        case "O": // ⌘⇧O — open a repository
+          if (!e.shiftKey) return;
+          e.preventDefault();
+          void pickRepo();
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modal, session, pickRepo]);
+
   const chooser = scan && (
     <WorkspaceChooser
       scan={scan}
@@ -142,6 +201,16 @@ export function App() {
           error={openError}
         />
         {chooser}
+        {modal === "settings" && (
+          <Settings
+            settings={settings}
+            onSet={setSetting}
+            onClose={() => setModal(null)}
+            meta={null}
+            totalTokens={0}
+          />
+        )}
+        {modal === "shortcuts" && <Shortcuts onClose={() => setModal(null)} />}
       </div>
     );
   }
@@ -161,11 +230,13 @@ export function App() {
         onCloseSession={session.close}
         onNewProject={pickRepo}
         onNewSession={newSession}
+        onOpenSettings={() => setModal("settings")}
+        onOpenShortcuts={() => setModal("shortcuts")}
       />
 
       <div className="body">
         <div className="chat">
-          <Transcript blocks={derived.blocks} />
+          <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
           <StatusRow
             running={active?.running ?? false}
             activity={derived.activity}
@@ -177,7 +248,6 @@ export function App() {
             onInterrupt={session.interrupt}
             running={active?.running ?? false}
           />
-          <div className="foot">{FOOTER}</div>
 
           {hasBlueprint && !active?.bpOpen && (
             <div className="bpchip" onClick={() => session.openBlueprint(true)}>
@@ -194,6 +264,17 @@ export function App() {
       </div>
 
       {chooser}
+
+      {modal === "settings" && (
+        <Settings
+          settings={settings}
+          onSet={setSetting}
+          onClose={() => setModal(null)}
+          meta={active?.meta ?? null}
+          totalTokens={derived.totalTokens}
+        />
+      )}
+      {modal === "shortcuts" && <Shortcuts onClose={() => setModal(null)} />}
     </div>
   );
 }

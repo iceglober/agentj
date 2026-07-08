@@ -3,6 +3,7 @@
 //   TIER 2 — sessions: only the active project's sessions (worktrees).
 // Tier 2 visually nests under the active project. All grotesk (--sans).
 
+import { useEffect, useRef, useState } from "react";
 import type { SessionMeta } from "../types";
 
 interface Project {
@@ -12,6 +13,77 @@ interface Project {
 
 function branchLabel(s: SessionMeta): string {
   return s.branch ?? "detached";
+}
+
+// Small inline gear — no icon library. Inherits color via currentColor.
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GearMenu({
+  onOpenSettings,
+  onOpenShortcuts,
+}: {
+  onOpenSettings: () => void;
+  onOpenShortcuts: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const pick = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <div className="gearwrap" ref={ref}>
+      <button
+        className={"gearbtn" + (open ? " open" : "")}
+        aria-label="Menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <GearIcon />
+      </button>
+      {open && (
+        <div className="repomenu" role="menu">
+          <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenSettings)}>
+            Settings
+          </button>
+          <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenShortcuts)}>
+            Keyboard shortcuts
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TabBar({
@@ -25,6 +97,8 @@ export function TabBar({
   onCloseSession,
   onNewProject,
   onNewSession,
+  onOpenSettings,
+  onOpenShortcuts,
 }: {
   sessions: SessionMeta[];
   activeProject: string | null;
@@ -36,6 +110,8 @@ export function TabBar({
   onCloseSession: (id: string) => void;
   onNewProject: () => void;
   onNewSession: () => void;
+  onOpenSettings: () => void;
+  onOpenShortcuts: () => void;
 }) {
   // Distinct projects, in first-seen order.
   const projects: Project[] = [];
@@ -53,7 +129,7 @@ export function TabBar({
     <div className="tabbar">
       {/* tier 1 — projects */}
       <div className="tier tier1">
-        <span className="wordmark">agentj</span>
+        <GearMenu onOpenSettings={onOpenSettings} onOpenShortcuts={onOpenShortcuts} />
         <div className="tabs">
           {projects.map((p) => (
             <button

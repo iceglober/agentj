@@ -105,25 +105,63 @@ body {
   background: var(--page);
   border-bottom: 1px solid var(--line);
 }
-.wordmark {
+/* gear menu — replaces the wordmark at the far left of tier 1 */
+.gearwrap {
+  position: relative;
   align-self: center;
-  font-family: var(--sans);
-  font-weight: 700;
-  font-size: 14px;
-  letter-spacing: -0.2px;
-  color: var(--ink);
-  padding-right: 4px;
   flex: 0 0 auto;
 }
-.wordmark::after {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  vertical-align: middle;
+.gearbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--dim, var(--muted));
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+.gearbtn:hover,
+.gearbtn.open {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--line2);
+}
+.repomenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 200;
+  min-width: 190px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.repomenu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: var(--t-ink);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.repomenu-item:hover {
+  background: var(--panel-2);
+  color: var(--ink);
 }
 .ptab {
   display: inline-flex;
@@ -431,17 +469,6 @@ body {
 }
 .input textarea::placeholder {
   color: var(--t-faint);
-}
-
-.foot {
-  padding: 7px 14px 10px;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--t-faint);
-  border-top: 1px solid var(--line);
-  white-space: nowrap;
-  overflow-x: auto;
-  flex: 0 0 auto;
 }
 
 /* ---- blueprint pane ----------------------------------------------------- */
@@ -849,4 +876,196 @@ body {
   border-radius: 7px;
   padding: 8px 10px;
   word-break: break-word;
+}
+
+/* ---- modal overlay (Settings / Shortcuts) ------------------------------- */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 7, 12, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 300;
+}
+.modal {
+  width: 100%;
+  max-width: 440px;
+  max-height: 84vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.6);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.modal-x {
+  background: none;
+  border: none;
+  color: var(--t-dim);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.modal-x:hover {
+  color: var(--ink);
+}
+.modal-body {
+  padding: 16px 18px 18px;
+}
+
+/* settings toggles */
+.set-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 4px;
+  cursor: pointer;
+}
+.set-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.set-label {
+  font-family: var(--sans);
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.set-hint {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--t-faint);
+}
+.switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid var(--line2);
+  background: var(--page);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.14s, border-color 0.14s;
+}
+.switch .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--t-dim);
+  transition: transform 0.14s, background 0.14s;
+}
+.switch.on {
+  background: var(--aj-bg);
+  border-color: var(--accent);
+}
+.switch.on .knob {
+  background: var(--accent);
+  transform: translateX(16px);
+}
+
+/* settings — session info */
+.set-section {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.set-section-head {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--t-faint);
+  margin-bottom: 10px;
+}
+.set-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 14px;
+  row-gap: 7px;
+  margin: 0;
+}
+.set-info dt {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-dim);
+}
+.set-info dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-ink);
+  word-break: break-all;
+}
+.set-info dd.mono-path {
+  color: var(--aj);
+}
+.set-empty {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-faint);
+}
+
+/* shortcuts table */
+.keys {
+  width: 100%;
+  border-collapse: collapse;
+}
+.keys td {
+  padding: 7px 0;
+  vertical-align: middle;
+}
+.keys-combo {
+  white-space: nowrap;
+  width: 1%;
+  padding-right: 18px;
+}
+.keys-action {
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--t-ink);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  padding: 0 6px;
+  background: var(--page);
+  border: 1px solid var(--line2);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-ink);
 }
