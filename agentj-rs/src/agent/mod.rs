@@ -272,6 +272,18 @@ pub async fn run_turn(
             if ok && is_mutating_tool(&tc.function.name) {
                 mutated = true;
             }
+            // Surface a saved artifact so a front-end can react (the desktop app docks a saved html
+            // `blueprint` beside the chat). Display-only; no effect on the loop.
+            if ok && tc.function.name == "save_artifact" {
+                if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
+                    let format = args
+                        .get("format")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("markdown")
+                        .to_string();
+                    let _ = tx.send(AgentEvent::Artifact { name: name.to_string(), format });
+                }
+            }
             let tool_msg = ChatMessage {
                 role: "tool".into(),
                 content: Some(text),

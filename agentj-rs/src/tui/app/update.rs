@@ -248,6 +248,9 @@ impl App {
                 self.transcript.push_kind(line, crate::tui::view::LineKind::Note);
                 self.dirty = true;
             }
+            // The save already shows as a tool line in the TUI; the Artifact signal is for the
+            // desktop app (which docks a saved html blueprint beside the chat).
+            AgentEvent::Artifact { .. } => {}
             AgentEvent::StepLimit(n) => {
                 self.step_limit_hit = true;
                 self.transcript.push(dim_line(format!(

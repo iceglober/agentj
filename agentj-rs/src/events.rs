@@ -2,7 +2,8 @@
 
 use crate::provider::TokenUsage;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum AgentEvent {
     /// A chunk of assistant text (one per model step).
     Message(String),
@@ -38,6 +39,9 @@ pub enum AgentEvent {
     /// The model's reasoning for the step just taken, when the provider returns it. Display-only
     /// (a `thinking` block) — never committed to the durable history.
     Thinking(String),
+    /// A named artifact was just saved (`save_artifact`). `format` is "markdown" or "html". Lets a
+    /// front-end react — e.g. the desktop app docks a saved html `blueprint` beside the chat.
+    Artifact { name: String, format: String },
     /// A lifecycle note (job update, context compacted, hit the cap, …).
     Note(String),
     /// The turn exhausted its step budget with work possibly unfinished — a gate, not a wall: the

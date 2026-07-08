@@ -85,8 +85,12 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 /// Fire-and-forget open of a saved HTML artifact in the user's default browser (`open` on macOS,
 /// `xdg-open` elsewhere). Detached — we don't wait or surface its exit; returns whether the opener
-/// launched at all. Only ever called for an attached interactive session, so a GUI is expected.
+/// launched at all. Suppressed when `AGENTJ_DESKTOP=1`: the desktop app renders the blueprint in a
+/// pane beside the chat (via `AgentEvent::Artifact`), so a second system-browser tab would be noise.
 fn open_in_browser(path: &std::path::Path) -> bool {
+    if std::env::var("AGENTJ_DESKTOP").is_ok_and(|v| v == "1") {
+        return false;
+    }
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     std::process::Command::new(opener).arg(path).spawn().is_ok()
 }

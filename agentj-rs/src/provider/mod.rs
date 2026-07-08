@@ -67,7 +67,7 @@ impl ChatMessage {
 }
 
 /// Token accounting for one model call, when the provider reports it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,

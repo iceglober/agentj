@@ -5,6 +5,10 @@ edition = "2021"
 description = "agentj — a simple terminal coding agent, ratatui edition. A Rust port of packages/agentj."
 license = "MIT"
 
+[lib]
+name = "agentj"
+path = "src/lib.rs"
+
 [[bin]]
 name = "agentj"
 path = "src/main.rs"
