@@ -78,7 +78,7 @@ fn default_branch(base: &str) -> String {
 }
 
 /// Parse `git worktree list --porcelain` into entries; the first block is the main worktree.
-fn list(base: &str, active: Option<&str>) -> Vec<WorktreeEntry> {
+fn list(base: &str, open: &[String]) -> Vec<WorktreeEntry> {
     let Ok(out) = git(base, &["worktree", "list", "--porcelain"]) else {
         return Vec::new();
     };
@@ -87,7 +87,7 @@ fn list(base: &str, active: Option<&str>) -> Vec<WorktreeEntry> {
     let mut branch: Option<String> = None;
     let flush = |path: &mut Option<String>, branch: &mut Option<String>, entries: &mut Vec<WorktreeEntry>| {
         if let Some(p) = path.take() {
-            let is_active = active == Some(p.as_str());
+            let is_active = open.iter().any(|o| o == &p);
             entries.push(WorktreeEntry {
                 is_main: entries.is_empty(),
                 is_active,
@@ -112,7 +112,7 @@ fn list(base: &str, active: Option<&str>) -> Vec<WorktreeEntry> {
 
 /// Inspect a picked directory. A non-git directory returns `is_git: false` (not an error) so the UI
 /// can say so; only a missing directory is an error.
-pub fn inspect(path: &str, active: Option<&str>) -> Result<RepoScan, String> {
+pub fn inspect(path: &str, open: &[String]) -> Result<RepoScan, String> {
     if !Path::new(path).is_dir() {
         return Err(format!("not a directory: {path}"));
     }
@@ -130,7 +130,7 @@ pub fn inspect(path: &str, active: Option<&str>) -> Result<RepoScan, String> {
         is_git: true,
         base_name: dir_name(&base),
         default_branch: default_branch(&base),
-        worktrees: list(&base, active),
+        worktrees: list(&base, open),
         base,
     })
 }
@@ -164,7 +164,9 @@ pub fn provision(base: &str) -> Result<String, String> {
 
 #[derive(Serialize, Deserialize, Default)]
 struct DesktopConfig {
-    last_workspace: Option<String>,
+    /// Worktrees open as sessions last launch, in tab order.
+    #[serde(default)]
+    sessions: Vec<String>,
 }
 
 fn store_home() -> PathBuf {
@@ -178,13 +180,16 @@ fn config_path() -> PathBuf {
     store_home().join("desktop.json")
 }
 
-pub fn last_workspace() -> Option<String> {
-    let text = std::fs::read_to_string(config_path()).ok()?;
-    serde_json::from_str::<DesktopConfig>(&text).ok()?.last_workspace
+pub fn remembered_sessions() -> Vec<String> {
+    std::fs::read_to_string(config_path())
+        .ok()
+        .and_then(|t| serde_json::from_str::<DesktopConfig>(&t).ok())
+        .map(|c| c.sessions)
+        .unwrap_or_default()
 }
 
-pub fn remember_workspace(path: &str) {
-    let cfg = DesktopConfig { last_workspace: Some(path.to_string()) };
+pub fn remember_sessions(roots: &[String]) {
+    let cfg = DesktopConfig { sessions: roots.to_vec() };
     if let Ok(text) = serde_json::to_string_pretty(&cfg) {
         let _ = std::fs::create_dir_all(store_home());
         let _ = std::fs::write(config_path(), text);
@@ -193,14 +198,14 @@ pub fn remember_workspace(path: &str) {
 
 // ---- helpers --------------------------------------------------------------
 
-fn dir_name(path: &str) -> String {
+pub fn dir_name(path: &str) -> String {
     Path::new(path)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "repo".into())
 }
 
-fn short_id() -> String {
+pub fn short_id() -> String {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())

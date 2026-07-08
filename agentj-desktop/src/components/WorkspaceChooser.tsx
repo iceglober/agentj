@@ -1,6 +1,8 @@
-// Overlay shown after inspecting a git repo: create a fresh worktree off
-// origin/<defaultBranch>, or resume an existing worktree / the base checkout.
+// Overlay shown after inspecting a git repo. Leads with a single primary
+// "Continue" (provision a managed worktree off origin/<defaultBranch>); the
+// existing worktrees hide behind a collapsed disclosure below it.
 
+import { useState } from "react";
 import type { RepoScan } from "../types";
 
 function shortRoot(root: string): string {
@@ -24,6 +26,8 @@ export function WorkspaceChooser({
   onClose: () => void;
 }) {
   const busy = provisioning;
+  const [showExisting, setShowExisting] = useState(false);
+  const hasWorktrees = scan.worktrees.length > 0;
 
   return (
     <div className="chooser-scrim" onClick={busy ? undefined : onClose}>
@@ -38,43 +42,64 @@ export function WorkspaceChooser({
           </button>
         </div>
 
-        <button
-          className="chooser-new"
-          disabled={busy}
-          onClick={() => onProvision(scan.base)}
-        >
-          <span className="chooser-new-title">
-            {provisioning ? "provisioning…" : "New worktree"}
-          </span>
-          <span className="chooser-new-sub">
-            off <code>origin/{scan.defaultBranch}</code>
-          </span>
-        </button>
-
-        {scan.worktrees.length > 0 && (
+        {scan.isGit ? (
           <>
-            <div className="chooser-sep">resume a worktree</div>
-            <div className="chooser-list">
-              {scan.worktrees.map((w) => (
-                <button
-                  key={w.path}
-                  className="chooser-wt"
-                  title={w.path}
-                  disabled={busy}
-                  onClick={() => onOpen(w.path)}
-                >
-                  <span className="chooser-wt-top">
-                    <span className="chooser-wt-branch">
-                      ⎇ {w.branch ?? "(detached)"}
-                    </span>
-                    {w.isMain && <span className="badge base">main</span>}
-                    {w.isActive && <span className="badge active">active</span>}
-                  </span>
-                  <span className="chooser-wt-path">{shortRoot(w.path)}</span>
-                </button>
-              ))}
+            <button
+              className="chooser-continue"
+              disabled={busy}
+              onClick={() => onProvision(scan.base)}
+            >
+              {provisioning ? "provisioning…" : "Continue"}
+            </button>
+            <div className="chooser-continue-sub">
+              Default: Managed Worktree
+              <span className="chooser-continue-branch">
+                origin/{scan.defaultBranch}
+              </span>
             </div>
+
+            {hasWorktrees && (
+              <div className="chooser-disclosure">
+                <button
+                  className="chooser-disc-head"
+                  aria-expanded={showExisting}
+                  disabled={busy}
+                  onClick={() => setShowExisting((v) => !v)}
+                >
+                  <span className={"chooser-disc-caret" + (showExisting ? " open" : "")}>
+                    ▸
+                  </span>
+                  Existing worktree
+                  <span className="chooser-disc-count">{scan.worktrees.length}</span>
+                </button>
+
+                {showExisting && (
+                  <div className="chooser-list">
+                    {scan.worktrees.map((w) => (
+                      <button
+                        key={w.path}
+                        className="chooser-wt"
+                        title={w.path}
+                        disabled={busy}
+                        onClick={() => onOpen(w.path)}
+                      >
+                        <span className="chooser-wt-top">
+                          <span className="chooser-wt-branch">
+                            ⎇ {w.branch ?? "(detached)"}
+                          </span>
+                          {w.isMain && <span className="badge base">main</span>}
+                          {w.isActive && <span className="badge active">active</span>}
+                        </span>
+                        <span className="chooser-wt-path">{shortRoot(w.path)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
+        ) : (
+          <div className="chooser-error">not a git repository: {scan.base}</div>
         )}
 
         {error && <div className="chooser-error">{error}</div>}

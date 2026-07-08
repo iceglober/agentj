@@ -1,19 +1,12 @@
-// Fold the raw event stream into transcript blocks + status/phase metadata.
+// Fold the raw event stream into transcript blocks + status metadata.
 // Pure function: called on every render from the current event list.
 
 import type { Block, StreamEvent, Subagent, ToolLine, Wave } from "./types";
-
-export type Phase = "EXPLORE" | "ALIGN" | "BUILD" | "VERIFY" | "DONE";
-export const PHASES: Phase[] = ["EXPLORE", "ALIGN", "BUILD", "VERIFY", "DONE"];
-
-const EDIT_TOOLS = new Set(["write_file", "edit_file", "edit_lines"]);
-const VERIFY_TOOLS = new Set(["bash", "test", "curl"]);
 
 export interface Derived {
   blocks: Block[];
   totalTokens: number;
   activity: string;
-  phase: Phase | null;
   sawDone: boolean;
 }
 
@@ -31,7 +24,6 @@ export function derive(events: StreamEvent[]): Derived {
   const blocks: Block[] = [];
   let totalTokens = 0;
   let activity = "working…";
-  let phaseRank = -1;
   let sawDone = false;
 
   // Contiguous tool calls collapse into one block; `+` marks a call that
@@ -44,9 +36,6 @@ export function derive(events: StreamEvent[]): Derived {
   let waveCount = 0;
   const subById = new Map<number, Subagent>();
 
-  const bump = (rank: number) => {
-    if (rank > phaseRank) phaseRank = rank;
-  };
   const breakTool = () => {
     currentTool = null;
     lastToolStep = null;
@@ -71,7 +60,6 @@ export function derive(events: StreamEvent[]): Derived {
         breakTool();
         blocks.push({ type: "thinking", text: ev.data, id });
         activity = "thinking";
-        bump(0); // EXPLORE
         break;
 
       case "note":
@@ -97,9 +85,8 @@ export function derive(events: StreamEvent[]): Derived {
         break;
 
       case "artifact":
-        if (ev.data.format === "html") {
-          bump(1); // ALIGN — the blueprint arrives via its own event
-        } else {
+        // The HTML blueprint arrives via its own event; only note other artifacts.
+        if (ev.data.format !== "html") {
           breakTool();
           blocks.push({
             type: "note",
@@ -128,8 +115,6 @@ export function derive(events: StreamEvent[]): Derived {
         }
         lastToolStep = ev.data.step;
         activity = `tool: ${ev.data.name}`;
-        if (EDIT_TOOLS.has(ev.data.name)) bump(2); // BUILD
-        else if (VERIFY_TOOLS.has(ev.data.name)) bump(3); // VERIFY
         break;
       }
 
@@ -164,7 +149,6 @@ export function derive(events: StreamEvent[]): Derived {
         currentWave.subagents.push(sub);
         subById.set(ev.data.id, sub);
         activity = "delegating";
-        bump(0); // EXPLORE
         break;
       }
 
@@ -198,12 +182,10 @@ export function derive(events: StreamEvent[]): Derived {
       case "done":
         breakTool();
         sawDone = true;
-        bump(4); // DONE
         activity = "all set";
         break;
     }
   });
 
-  const phase = phaseRank >= 0 ? PHASES[phaseRank] : null;
-  return { blocks, totalTokens, activity, phase, sawDone };
+  return { blocks, totalTokens, activity, sawDone };
 }

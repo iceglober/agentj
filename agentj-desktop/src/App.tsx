@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useSession } from "./session";
+import { useSessions } from "./session";
 import { derive } from "./derive";
-import { Header } from "./components/Header";
+import { TabBar } from "./components/TabBar";
 import { Transcript } from "./components/Transcript";
 import { StatusRow } from "./components/StatusRow";
 import { InputRow } from "./components/InputRow";
@@ -12,7 +12,7 @@ import { WorkspaceChooser } from "./components/WorkspaceChooser";
 import type { RepoScan } from "./types";
 
 const FOOTER =
-  "Enter send · Shift+Enter newline · Esc interrupt · / commands · Ctrl-P menu · ↑↓/wheel scroll · ⧉ blueprint opens beside chat";
+  "Enter send · Shift+Enter newline · Esc interrupt · / commands · ↑↓/wheel scroll · ⧉ blueprint opens beside chat";
 
 // Recents store BASE repo paths (the main repo dir), not individual worktrees.
 const RECENTS_KEY = "agentj.workspaces";
@@ -26,12 +26,16 @@ function loadRecents(): string[] {
 }
 
 export function App() {
-  const session = useSession();
-  const derived = useMemo(() => derive(session.events), [session.events]);
-  const hasBlueprint = session.blueprint != null;
+  const session = useSessions();
+  const active = session.active;
+  const derived = useMemo(
+    () => derive(active?.events ?? []),
+    [active?.events],
+  );
+
   const [recents, setRecents] = useState<string[]>(loadRecents);
 
-  // Open flow state, owned here so both Welcome and Header can drive it.
+  // Open flow state, owned here so Welcome, the tier-1 "+", and recents drive it.
   const [scan, setScan] = useState<RepoScan | null>(null); // chooser open ⇔ non-null
   const [openError, setOpenError] = useState<string | null>(null);
   const [chooserError, setChooserError] = useState<string | null>(null);
@@ -72,12 +76,12 @@ export function App() {
     if (typeof dir === "string") await beginOpen(dir);
   }, [beginOpen]);
 
+  // Chooser "Continue" → provision a managed worktree off the base.
   const provision = useCallback(
     async (base: string) => {
       setChooserError(null);
       setProvisioning(true);
       try {
-        // On success the backend emits "repo-changed"; close the chooser.
         await session.provisionWorktree(base);
         setScan(null);
       } catch (err) {
@@ -89,6 +93,7 @@ export function App() {
     [session],
   );
 
+  // Chooser disclosure → resume an existing worktree.
   const resume = useCallback(
     async (path: string) => {
       setChooserError(null);
@@ -102,6 +107,19 @@ export function App() {
     [session],
   );
 
+  // Tier-2 "+" → provision a fresh worktree under the active project, no chooser.
+  const newSession = useCallback(async () => {
+    if (!session.activeProject) return;
+    setProvisioning(true);
+    try {
+      await session.provisionWorktree(session.activeProject);
+    } catch (err) {
+      setOpenError(String(err));
+    } finally {
+      setProvisioning(false);
+    }
+  }, [session]);
+
   const chooser = scan && (
     <WorkspaceChooser
       scan={scan}
@@ -113,8 +131,8 @@ export function App() {
     />
   );
 
-  // No workspace → welcome screen (still allow the chooser to overlay it).
-  if (session.repo == null) {
+  // No sessions → welcome screen (still allow the chooser to overlay it).
+  if (session.sessions.length === 0) {
     return (
       <div className="app">
         <Welcome
@@ -128,22 +146,28 @@ export function App() {
     );
   }
 
+  const hasBlueprint = active?.blueprint != null;
+
   return (
     <div className="app">
-      <Header
-        repo={session.repo}
-        recents={recents}
-        onPick={pickRepo}
-        onOpenRecent={beginOpen}
-        busy={session.running}
-        phase={derived.phase}
+      <TabBar
+        sessions={session.sessions}
+        activeProject={session.activeProject}
+        activeId={session.activeId}
+        runningIds={session.runningIds}
+        provisioning={provisioning}
+        onSelectProject={session.selectProject}
+        onSelectSession={session.selectSession}
+        onCloseSession={session.close}
+        onNewProject={pickRepo}
+        onNewSession={newSession}
       />
 
       <div className="body">
         <div className="chat">
           <Transcript blocks={derived.blocks} />
           <StatusRow
-            running={session.running}
+            running={active?.running ?? false}
             activity={derived.activity}
             totalTokens={derived.totalTokens}
             sawDone={derived.sawDone}
@@ -151,11 +175,11 @@ export function App() {
           <InputRow
             onSend={session.send}
             onInterrupt={session.interrupt}
-            running={session.running}
+            running={active?.running ?? false}
           />
           <div className="foot">{FOOTER}</div>
 
-          {hasBlueprint && !session.bpOpen && (
+          {hasBlueprint && !active?.bpOpen && (
             <div className="bpchip" onClick={() => session.openBlueprint(true)}>
               ⧉ blueprint
             </div>
@@ -163,8 +187,8 @@ export function App() {
         </div>
 
         <BlueprintPane
-          blueprint={session.blueprint}
-          open={session.bpOpen}
+          blueprint={active?.blueprint ?? null}
+          open={active?.bpOpen ?? false}
           onClose={() => session.openBlueprint(false)}
         />
       </div>

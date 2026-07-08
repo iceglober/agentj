@@ -5,6 +5,8 @@
     "": {
       "name": "agentj-desktop",
       "dependencies": {
+        "@fontsource-variable/jetbrains-mono": "^5.2.8",
+        "@fontsource-variable/space-grotesk": "^5.2.10",
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2.7.1",
         "react": "^18.3.1",
@@ -104,6 +106,10 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.21.5", "", { "os": "win32", "cpu": "ia32" }, "sha512-SWXFF1CL2RVNMaVs+BBClwtfZSvDgtL//G/smwAc5oVK/UPu2Gu9tIaRgFmYFFKrmg3SyAjSrElf0TiJ1v8fYA=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.21.5", "", { "os": "win32", "cpu": "x64" }, "sha512-tQd/1efJuzPC6rCFwEvLtci/xNFcTZknmXs98FYDfGE4wP9ClFV98nyKrzJKVPMhdDnjzLhdUyMX4PsQAPjwIw=="],
+
+    "@fontsource-variable/jetbrains-mono": ["@fontsource-variable/jetbrains-mono@5.2.8", "", {}, "sha512-WBA9elru6Jdp5df2mES55wuOO0WIrn3kpXnI4+W2ek5u3ZgLS9XS4gmIlcQhiZOWEKl95meYdvK7xI+ETLCq/Q=="],
+
+    "@fontsource-variable/space-grotesk": ["@fontsource-variable/space-grotesk@5.2.10", "", {}, "sha512-yJQO/o35/hAP3CFnpdFTwQku2yzJOae2HIpBmqkOVoxhhXJaQP3g+b6Jrz7u+eI7A5ZdCIf88uMWpBJdFiGr5w=="],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 

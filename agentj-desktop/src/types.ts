@@ -62,14 +62,27 @@ export interface Blueprint {
   html: string;
 }
 
-// The workspace the agent is operating in (from current_repo / provision_worktree /
-// open_worktree / repo-changed). `root` is the checkout in use (a worktree or the
-// base checkout); `base` is the main repository directory the worktree hangs off.
-export interface RepoInfo {
+// One open session, keyed by `id`. `root` is the checkout in use (a worktree or
+// the base checkout); `base` is the main repository directory the worktree hangs
+// off; `projectName` is the display name of that base repository.
+export interface SessionMeta {
+  id: string;
   root: string;
   branch: string | null;
   base: string;
+  projectName: string;
   isWorktree: boolean;
+}
+
+// Backend event payloads are tagged with the session they belong to.
+export interface AgentEventEnvelope {
+  sessionId: string;
+  event: AgentEvent;
+}
+export interface BlueprintEvent {
+  sessionId: string;
+  name: string;
+  html: string;
 }
 
 // One selectable checkout under a repo: the base checkout or an agentj worktree.

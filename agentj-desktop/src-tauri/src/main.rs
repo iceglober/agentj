@@ -1,11 +1,11 @@
 //! agentj-desktop backend.
 //!
-//! agentj always works inside a git worktree. The app opens a *workspace* — either an existing
-//! worktree, or a freshly provisioned one branched off `origin/<default>` (a long-running worktree
-//! that starts from the current state of the remote). The active workspace's session is held behind
-//! a lock; commands run turns against it and stream `AgentEvent`s to the webview. A saved html
-//! `blueprint` is read and emitted so the UI docks it beside the chat (the CLI's browser-open is
-//! suppressed here via `AGENTJ_DESKTOP=1`).
+//! agentj always works inside a git worktree. The app holds MANY live sessions at once — each is a
+//! worktree (its own checkout, artifact store, and conversation) grouped under the project (base
+//! repo) it belongs to, which is what the two-tier tab bar renders. Every command is scoped to a
+//! session id. Agent events stream to the webview tagged with their session id so the UI routes them
+//! to the right tab. A saved html `blueprint` is read and emitted for the docked pane; the CLI's
+//! browser-open is suppressed here via `AGENTJ_DESKTOP=1`.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod worktree;
@@ -26,7 +26,7 @@ use agentj::{jobs, tools};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc::unbounded_channel;
 
-/// The session built for one workspace (a worktree). Swapped wholesale when the workspace changes.
+/// The agent session built for one worktree.
 struct RepoCtx {
     sess: Session,
     store: Arc<Store>,
@@ -36,44 +36,65 @@ struct RepoCtx {
     system: String,
 }
 
-struct AppState {
-    /// The active workspace's session — `None` until one is opened (the Welcome screen shows then).
-    ctx: Mutex<Option<RepoCtx>>,
+/// One open session: a worktree's context, its conversation, and its turn state. Sessions run
+/// independently — several can have live turns at once (each in its own worktree).
+struct SessionEntry {
+    id: String,
+    ctx: RepoCtx,
     messages: Arc<Mutex<Vec<ChatMessage>>>,
-    turn: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     running: Arc<AtomicBool>,
+    turn: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+}
+
+struct AppState {
+    /// Open sessions in tab order.
+    sessions: Mutex<Vec<Arc<SessionEntry>>>,
 }
 
 #[derive(serde::Serialize, Clone)]
-struct RepoInfo {
-    /// The active worktree's path (where the agent operates).
+#[serde(rename_all = "camelCase")]
+struct SessionMeta {
+    id: String,
+    /// The worktree the session operates in.
     root: String,
     branch: Option<String>,
-    /// The base repository this worktree belongs to.
+    /// The project this session belongs to (base repo path) — the top-tier grouping.
     base: String,
-    /// Whether `root` is a linked worktree (vs. the base checkout itself).
+    project_name: String,
     is_worktree: bool,
 }
 
-impl RepoInfo {
-    fn of(c: &RepoCtx) -> Self {
-        RepoInfo {
+impl SessionMeta {
+    fn of(e: &SessionEntry) -> Self {
+        let c = &e.ctx;
+        SessionMeta {
+            id: e.id.clone(),
             root: c.root.clone(),
             branch: c.branch.clone(),
             base: c.base.clone(),
+            project_name: worktree::dir_name(&c.base),
             is_worktree: c.root != c.base,
         }
     }
 }
 
+/// An agent event tagged with the session it belongs to, so the UI routes it to the right tab.
 #[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Tagged {
+    session_id: String,
+    event: AgentEvent,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 struct BlueprintPayload {
+    session_id: String,
     name: String,
     html: String,
 }
 
-/// Build a full session for a worktree `root`, mirroring the CLI's interactive setup. Provider/model
-/// resolve from this checkout's config. If nothing resolves it still builds with `Llm::Unconfigured`.
+/// Build a full session for a worktree `root`, mirroring the CLI's interactive setup.
 fn build_ctx(root: &str) -> RepoCtx {
     let app_cfg = AppConfig::load(root);
     let provider = resolve_provider(None, &app_cfg);
@@ -105,77 +126,109 @@ fn build_ctx(root: &str) -> RepoCtx {
     RepoCtx { sess, store, root: root.to_string(), branch, base, system }
 }
 
-/// Activate `ctx` as the workspace: reset history, remember it for next launch, announce the change.
-fn set_workspace(state: &AppState, app: &AppHandle, ctx: RepoCtx) -> RepoInfo {
-    let info = RepoInfo::of(&ctx);
-    *state.messages.lock().unwrap() = vec![ChatMessage::system(ctx.system.clone())];
-    *state.ctx.lock().unwrap() = Some(ctx);
-    worktree::remember_workspace(&info.root);
-    let _ = app.emit("repo-changed", info.clone());
-    info
+fn make_entry(root: &str) -> Arc<SessionEntry> {
+    let ctx = build_ctx(root);
+    let messages = vec![ChatMessage::system(ctx.system.clone())];
+    Arc::new(SessionEntry {
+        id: worktree::short_id(),
+        ctx,
+        messages: Arc::new(Mutex::new(messages)),
+        running: Arc::new(AtomicBool::new(false)),
+        turn: Mutex::new(None),
+    })
+}
+
+fn find(state: &AppState, id: &str) -> Option<Arc<SessionEntry>> {
+    state.sessions.lock().unwrap().iter().find(|e| e.id == id).cloned()
+}
+
+fn persist(state: &AppState) {
+    let roots: Vec<String> = state
+        .sessions
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|e| e.ctx.root.clone())
+        .collect();
+    worktree::remember_sessions(&roots);
 }
 
 // ---- commands -------------------------------------------------------------
 
-/// The active workspace, or `null` when none is open (→ Welcome screen).
+/// Every open session, in tab order (the UI groups them by `base` into the two tiers).
 #[tauri::command]
-fn current_repo(state: State<'_, AppState>) -> Option<RepoInfo> {
-    state.ctx.lock().unwrap().as_ref().map(RepoInfo::of)
+fn list_sessions(state: State<'_, AppState>) -> Vec<SessionMeta> {
+    state.sessions.lock().unwrap().iter().map(|e| SessionMeta::of(e)).collect()
 }
 
-/// Inspect a picked directory: is it git, what's its base repo + default branch, and which worktrees
-/// already exist (so the user can resume one instead of provisioning a fresh one).
+/// Inspect a picked directory: git-ness, base repo, default branch, and its worktrees (marking the
+/// ones already open as a session).
 #[tauri::command]
 fn inspect_repo(path: String, state: State<'_, AppState>) -> Result<worktree::RepoScan, String> {
-    let active = state.ctx.lock().unwrap().as_ref().map(|c| c.root.clone());
-    worktree::inspect(&path, active.as_deref())
+    let open: Vec<String> =
+        state.sessions.lock().unwrap().iter().map(|e| e.ctx.root.clone()).collect();
+    worktree::inspect(&path, &open)
 }
 
-/// Provision a fresh long-running worktree off `origin/<default>` (fetching first) and open it.
+/// Provision a fresh long-running worktree off `origin/<default>` and open it as a new session.
 #[tauri::command]
-fn provision_worktree(
-    base: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<RepoInfo, String> {
-    if state.running.load(Ordering::SeqCst) {
-        return Err("a turn is running — interrupt it before switching workspaces".into());
-    }
+fn provision_worktree(base: String, state: State<'_, AppState>) -> Result<SessionMeta, String> {
     let path = worktree::provision(&base)?;
-    Ok(set_workspace(&state, &app, build_ctx(&path)))
+    let entry = make_entry(&path);
+    let meta = SessionMeta::of(&entry);
+    state.sessions.lock().unwrap().push(entry);
+    persist(&state);
+    Ok(meta)
 }
 
-/// Open an existing worktree (or the base checkout) as the workspace.
+/// Open an existing worktree as a session — focusing it if it's already open.
 #[tauri::command]
-fn open_worktree(
-    path: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<RepoInfo, String> {
-    if state.running.load(Ordering::SeqCst) {
-        return Err("a turn is running — interrupt it before switching workspaces".into());
-    }
+fn open_worktree(path: String, state: State<'_, AppState>) -> Result<SessionMeta, String> {
     if !std::path::Path::new(&path).is_dir() {
         return Err(format!("not a directory: {path}"));
     }
-    Ok(set_workspace(&state, &app, build_ctx(&path)))
+    if let Some(e) = state.sessions.lock().unwrap().iter().find(|e| e.ctx.root == path) {
+        return Ok(SessionMeta::of(e)); // already open — the UI just selects its tab
+    }
+    let entry = make_entry(&path);
+    let meta = SessionMeta::of(&entry);
+    state.sessions.lock().unwrap().push(entry);
+    persist(&state);
+    Ok(meta)
 }
 
-/// Start (or continue) a turn against the active workspace.
+/// Close a session (aborts its turn; the worktree stays on disk).
 #[tauri::command]
-fn send_prompt(prompt: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let (sess, store) = {
-        let guard = state.ctx.lock().unwrap();
-        let Some(c) = guard.as_ref() else {
-            return Err("open a workspace first".into());
-        };
-        (c.sess.clone(), c.store.clone())
-    };
-    if state.running.swap(true, Ordering::SeqCst) {
-        return Err("a turn is already running".into());
+fn close_session(id: String, state: State<'_, AppState>) {
+    let mut sessions = state.sessions.lock().unwrap();
+    if let Some(pos) = sessions.iter().position(|e| e.id == id) {
+        let entry = sessions.remove(pos);
+        let handle = entry.turn.lock().unwrap().take();
+        if let Some(h) = handle {
+            h.abort();
+        }
     }
-    let messages = state.messages.clone();
-    let running = state.running.clone();
+    drop(sessions);
+    persist(&state);
+}
+
+/// Start (or continue) a turn for a session.
+#[tauri::command]
+fn send_prompt(
+    session_id: String,
+    prompt: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    if entry.running.swap(true, Ordering::SeqCst) {
+        return Err("a turn is already running in this session".into());
+    }
+    let sess = entry.ctx.sess.clone();
+    let store = entry.ctx.store.clone();
+    let messages = entry.messages.clone();
+    let running = entry.running.clone();
+    let sid = session_id.clone();
 
     let mut msgs = {
         let mut g = messages.lock().unwrap();
@@ -187,12 +240,14 @@ fn send_prompt(prompt: String, app: AppHandle, state: State<'_, AppState>) -> Re
     let app_fwd = app.clone();
     let fwd = tauri::async_runtime::spawn(async move {
         while let Some(ev) = rx.recv().await {
-            let _ = app_fwd.emit("agent-event", &ev);
+            let _ = app_fwd.emit("agent-event", Tagged { session_id: sid.clone(), event: ev.clone() });
             if let AgentEvent::Artifact { name, format } = &ev {
                 if format == "html" {
                     if let Some(html) = store.read_artifact(name) {
-                        let _ = app_fwd
-                            .emit("blueprint", BlueprintPayload { name: name.clone(), html });
+                        let _ = app_fwd.emit(
+                            "blueprint",
+                            BlueprintPayload { session_id: sid.clone(), name: name.clone(), html },
+                        );
                     }
                 }
             }
@@ -206,44 +261,34 @@ fn send_prompt(prompt: String, app: AppHandle, state: State<'_, AppState>) -> Re
         *messages.lock().unwrap() = msgs;
         running.store(false, Ordering::SeqCst);
     });
-    *state.turn.lock().unwrap() = Some(handle);
+    *entry.turn.lock().unwrap() = Some(handle);
     Ok(())
 }
 
 #[tauri::command]
-fn interrupt(state: State<'_, AppState>) {
-    if let Some(h) = state.turn.lock().unwrap().take() {
-        h.abort();
+fn interrupt(session_id: String, state: State<'_, AppState>) {
+    if let Some(entry) = find(&state, &session_id) {
+        if let Some(h) = entry.turn.lock().unwrap().take() {
+            h.abort();
+        }
+        entry.running.store(false, Ordering::SeqCst);
     }
-    state.running.store(false, Ordering::SeqCst);
 }
 
 #[tauri::command]
-fn read_artifact(name: String, state: State<'_, AppState>) -> Option<String> {
-    state
-        .ctx
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|c| c.store.read_artifact(&name))
+fn read_artifact(session_id: String, name: String, state: State<'_, AppState>) -> Option<String> {
+    find(&state, &session_id).and_then(|e| e.ctx.store.read_artifact(&name))
 }
 
 fn build_state() -> AppState {
     std::env::set_var("AGENTJ_DESKTOP", "1"); // render blueprints in-app, not the system browser
-    // Resume the last workspace if it still looks like a git checkout; otherwise start on Welcome.
-    let ctx = worktree::last_workspace()
+    // Reopen the sessions from last launch whose worktrees still look like git checkouts.
+    let sessions: Vec<Arc<SessionEntry>> = worktree::remembered_sessions()
+        .into_iter()
         .filter(|p| worktree::is_git(p))
-        .map(|p| build_ctx(&p));
-    let messages = match &ctx {
-        Some(c) => vec![ChatMessage::system(c.system.clone())],
-        None => Vec::new(),
-    };
-    AppState {
-        ctx: Mutex::new(ctx),
-        messages: Arc::new(Mutex::new(messages)),
-        turn: Mutex::new(None),
-        running: Arc::new(AtomicBool::new(false)),
-    }
+        .map(|p| make_entry(&p))
+        .collect();
+    AppState { sessions: Mutex::new(sessions) }
 }
 
 fn main() {
@@ -251,10 +296,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(build_state())
         .invoke_handler(tauri::generate_handler![
-            current_repo,
+            list_sessions,
             inspect_repo,
             provision_worktree,
             open_worktree,
+            close_session,
             send_prompt,
             interrupt,
             read_artifact
