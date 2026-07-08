@@ -90,7 +90,7 @@ export function InputRow({
   return (
     <div className="input-wrap">
       {showPalette && (
-        <div className="cmd-palette repomenu" role="listbox">
+        <div className="cmd-palette" role="listbox">
           {matches.map((c, i) => (
             <button
               key={c.id}
