@@ -21,34 +21,38 @@ export function Welcome({
   return (
     <div className="welcome">
       <div className="wcard">
-        <div className="wbrand">agentj</div>
-        <div className="wtitle">Open a repository to start a workspace</div>
-        <div className="wsub">
-          agentj works in a dedicated git worktree, so it never touches your checkout.
+        <div className="wtitlebar">
+          <span className="wbrand">agentj</span>
         </div>
-
-        <button className="wopen" onClick={onOpen}>
-          <span className="folder">🗂</span> Open a repository
-        </button>
-
-        {error && <div className="werror">{error}</div>}
-
-        {recents.length > 0 && (
-          <div className="wrecents">
-            <div className="wrecents-head">recent repositories</div>
-            {recents.map((p) => (
-              <button
-                key={p}
-                className="wrecent"
-                title={p}
-                onClick={() => onOpenRecent(p)}
-              >
-                <span className="wrecent-name">{shortRoot(p)}</span>
-                <span className="wrecent-path">{p}</span>
-              </button>
-            ))}
+        <div className="wbody">
+          <div className="wtitle">Open a repository to start a workspace</div>
+          <div className="wsub">
+            agentj works in a dedicated git worktree, so it never touches your checkout.
           </div>
-        )}
+
+          <button className="wopen" onClick={onOpen}>
+            <span className="folder">🗂</span> Open a repository
+          </button>
+
+          {error && <div className="werror">{error}</div>}
+
+          {recents.length > 0 && (
+            <div className="wrecents">
+              <div className="wrecents-head">recent repositories</div>
+              {recents.map((p) => (
+                <button
+                  key={p}
+                  className="wrecent"
+                  title={p}
+                  onClick={() => onOpenRecent(p)}
+                >
+                  <span className="wrecent-name">{shortRoot(p)}</span>
+                  <span className="wrecent-path">{p}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
