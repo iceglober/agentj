@@ -164,6 +164,10 @@ pub struct Config {
     /// default ON; set `0`/`false` to disable). Bounds premature "shall I proceed?" stops on
     /// long-horizon autonomous work.
     pub continuation_judge: bool,
+    /// When true, the turn does NOT block waiting on background jobs — it ends and goes idle, and the
+    /// HOST wakes a fresh turn when a job pings (finish / soft timeout). Set by the desktop app so a
+    /// running job never holds the turn open; the CLI/TUI leave it false and idle-wait in-turn.
+    pub host_manages_jobs: bool,
 }
 
 impl Config {
@@ -210,6 +214,7 @@ impl Config {
                 .unwrap_or(96_000),
             check: get("AGENTJ_CHECK").filter(|s| !s.is_empty()).or(file.check),
             continuation_judge: env_flag_default_on("AGENTJ_CONTINUATION_JUDGE"),
+            host_manages_jobs: false,
         }
     }
 }

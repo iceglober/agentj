@@ -110,11 +110,13 @@ export function useSessions(): SessionStore {
 
     listen<AgentEventEnvelope>("agent-event", (e) => {
       const { sessionId, event } = e.payload;
+      const ends = event.kind === "done" || event.kind === "error";
       patch(sessionId, (s) => ({
         ...s,
         events: [...s.events, event],
-        running:
-          event.kind === "done" || event.kind === "error" ? false : s.running,
+        // A waker-started turn (background job ping) has no user `send`, so mark the session
+        // running on any live event; clear it on done/error.
+        running: ends ? false : true,
       }));
     }).then(track);
 

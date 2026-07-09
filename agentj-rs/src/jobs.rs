@@ -237,6 +237,21 @@ impl JobManager {
         }
     }
 
+    /// Resolve once a nudge is queued, WITHOUT consuming it — so a host can wake a fresh turn that
+    /// then drains the nudge itself (`drain_nudges` at the turn's start). Same armed-before-check
+    /// pattern as `next_nudge` so a nudge queued in the gap isn't missed. Used by the desktop host
+    /// (via the lib); the CLI bin manages jobs in-turn, so it never calls this.
+    #[allow(dead_code)]
+    pub async fn wait_nudge(&self) {
+        loop {
+            let notified = self.notify.notified();
+            if self.has_nudges() {
+                return;
+            }
+            notified.await;
+        }
+    }
+
     /// Status + output tail for one job (or all).
     pub async fn check(&self, id: Option<u64>) -> String {
         let jobs = self.jobs.lock().await;

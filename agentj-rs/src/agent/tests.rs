@@ -49,6 +49,7 @@ fn test_cfg() -> Config {
         compact_threshold: 12_000,
         check: None,
         continuation_judge: false, // off by default in unit tests; opted in per-test
+        host_manages_jobs: false,
     }
 }
 

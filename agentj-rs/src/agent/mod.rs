@@ -222,7 +222,10 @@ pub async fn run_turn(
 
             // The model went idle. If background jobs are still running and it has nothing else to do,
             // wait for the next nudge and continue — it blocks only when there's nothing else to do.
-            if allow_delegate
+            // When the HOST manages jobs (desktop), skip this: the turn ends and goes idle so the user
+            // can send another message, and the host wakes a fresh turn when a job pings.
+            if !sess.cfg.host_manages_jobs
+                && allow_delegate
                 && sess.tools.jobs.has_running()
                 && idle_nudges < sess.cfg.max_idle_nudges
             {

@@ -24,7 +24,7 @@ use agentj::provider::{ChatMessage, Llm};
 use agentj::session::Session as Store;
 use agentj::{jobs, tools};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc::unbounded_channel;
 
 /// The agent session built for one worktree.
@@ -149,7 +149,11 @@ fn build_ctx(root: &str) -> RepoCtx {
     };
 
     let company = AppConfig::env_or_file("AGENTJ_COMPANY", app_cfg.company.as_deref());
-    let run_cfg = config::Config::from_sources(&model_id, &app_cfg);
+    let mut run_cfg = config::Config::from_sources(&model_id, &app_cfg);
+    // The desktop host manages background jobs: a turn ends and goes idle when the model has nothing
+    // left to do (so the user can send another message), and a per-session waker starts a fresh turn
+    // when a job pings (finish / soft timeout) — see `spawn_waker`.
+    run_cfg.host_manages_jobs = true;
     let system = prompt::system_prompt(root, company.as_deref());
     let branch = worktree::current_branch(root);
     let base = worktree::base_repo(root).unwrap_or_else(|| root.to_string());
@@ -213,11 +217,16 @@ fn inspect_repo(path: String, state: State<'_, AppState>) -> Result<worktree::Re
 
 /// Provision a fresh long-running worktree off `origin/<default>` and open it as a new session.
 #[tauri::command]
-fn provision_worktree(base: String, state: State<'_, AppState>) -> Result<SessionMeta, String> {
+fn provision_worktree(
+    base: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SessionMeta, String> {
     let worktree::Provisioned { path, notice } = worktree::provision(&base)?;
     let entry = make_entry(&path);
     let mut meta = SessionMeta::of(&entry);
     meta.notice = notice;
+    spawn_waker(entry.clone(), app);
     state.sessions.lock().unwrap().push(entry);
     persist(&state);
     Ok(meta)
@@ -225,7 +234,11 @@ fn provision_worktree(base: String, state: State<'_, AppState>) -> Result<Sessio
 
 /// Open an existing worktree as a session — focusing it if it's already open.
 #[tauri::command]
-fn open_worktree(path: String, state: State<'_, AppState>) -> Result<SessionMeta, String> {
+fn open_worktree(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SessionMeta, String> {
     if !std::path::Path::new(&path).is_dir() {
         return Err(format!("not a directory: {path}"));
     }
@@ -237,6 +250,7 @@ fn open_worktree(path: String, state: State<'_, AppState>) -> Result<SessionMeta
     }
     let entry = make_entry(&path);
     let meta = SessionMeta::of(&entry);
+    spawn_waker(entry.clone(), app);
     state.sessions.lock().unwrap().push(entry);
     persist(&state);
     Ok(meta)
@@ -266,18 +280,30 @@ fn send_prompt(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let entry = find(&state, &session_id).ok_or("unknown session")?;
-    if entry.running.swap(true, Ordering::SeqCst) {
+    if !start_turn(entry, app, Some(prompt)) {
         return Err("a turn is already running in this session".into());
+    }
+    Ok(())
+}
+
+/// Run a turn for `entry`. With `Some(prompt)` the user message seeds it; with `None` it just runs
+/// (the loop drains any pending job nudges at its start) — that's how the waker wakes the agent when
+/// a background job pings. Returns false if a turn is already running. Fire-and-forget.
+fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) -> bool {
+    if entry.running.swap(true, Ordering::SeqCst) {
+        return false;
     }
     let sess = entry.ctx.sess.clone();
     let store = entry.ctx.store.clone();
     let messages = entry.messages.clone();
     let running = entry.running.clone();
-    let sid = session_id.clone();
+    let sid = entry.id.clone();
 
     let mut msgs = {
         let mut g = messages.lock().unwrap();
-        g.push(ChatMessage::user(prompt));
+        if let Some(p) = prompt {
+            g.push(ChatMessage::user(p));
+        }
         g.clone()
     };
 
@@ -307,7 +333,31 @@ fn send_prompt(
         running.store(false, Ordering::SeqCst);
     });
     *entry.turn.lock().unwrap() = Some(handle);
-    Ok(())
+    true
+}
+
+/// Per-session background-job waker. When a job pings (finish / soft timeout) and the session is idle,
+/// start a fresh turn so the agent reacts — even though no user message arrived. A running turn drains
+/// nudges itself, so we only step in once the session goes idle.
+fn spawn_waker(entry: Arc<SessionEntry>, app: AppHandle) {
+    use std::time::Duration;
+    let jobs = entry.ctx.sess.tools.jobs.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            jobs.wait_nudge().await; // a nudge is queued (not consumed)
+            // Let any in-flight turn go idle first — it drains the nudge on its own.
+            while entry.running.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            if jobs.has_nudges() {
+                start_turn(entry.clone(), app.clone(), None);
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                while entry.running.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                }
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -371,6 +421,15 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(build_state())
+        .setup(|app| {
+            // Wake reopened sessions on their background-job pings, too.
+            let handle = app.handle().clone();
+            let state = app.state::<AppState>();
+            for entry in state.sessions.lock().unwrap().iter() {
+                spawn_waker(entry.clone(), handle.clone());
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_sessions,
             inspect_repo,
