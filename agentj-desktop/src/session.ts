@@ -64,7 +64,10 @@ export interface SessionStore {
 }
 
 function freshSlice(meta: SessionMeta): SessionState {
-  return { meta, events: [], running: false, blueprint: null, bpOpen: false };
+  const events: StreamEvent[] = meta.notice
+    ? [{ kind: "notice", data: meta.notice }]
+    : [];
+  return { meta, events, running: false, blueprint: null, bpOpen: false };
 }
 
 export function useSessions(): SessionStore {

@@ -135,14 +135,58 @@ pub fn inspect(path: &str, open: &[String]) -> Result<RepoScan, String> {
     })
 }
 
-/// Fetch origin, then create a fresh worktree `agentj/<id>` off `origin/<default>` in the global
-/// store. Returns the new worktree's path.
-pub fn provision(base: &str) -> Result<String, String> {
+/// A provisioned worktree plus an optional notice to show first in the session (e.g. when we had to
+/// fall back off a local base because the remote default branch wasn't available).
+pub struct Provisioned {
+    pub path: String,
+    pub notice: Option<String>,
+}
+
+fn ref_exists(base: &str, r: &str) -> bool {
+    git(base, &["rev-parse", "--verify", "--quiet", r]).is_ok()
+}
+
+/// The start point for a new worktree, best-first: the remote default branch (current state of the
+/// remote), else the local default branch, else the base repo's current branch, else its HEAD. The
+/// `Some(notice)` explains any fallback so the UI can surface it.
+fn start_point(base: &str) -> Result<(String, Option<String>), String> {
+    let _ = git(base, &["fetch", "origin"]); // best-effort; offline uses whatever refs we have
+    let def = default_branch(base);
+    if ref_exists(base, &format!("refs/remotes/origin/{def}")) {
+        return Ok((format!("origin/{def}"), None));
+    }
+    if ref_exists(base, &format!("refs/heads/{def}")) {
+        return Ok((
+            def.clone(),
+            Some(format!(
+                "No origin/{def} on the remote — started this worktree from the local `{def}` branch instead."
+            )),
+        ));
+    }
+    if let Some(cur) = current_branch(base) {
+        return Ok((
+            cur.clone(),
+            Some(format!(
+                "No remote default branch to start from — started this worktree from `{cur}` (the base repo's current branch)."
+            )),
+        ));
+    }
+    if ref_exists(base, "HEAD") {
+        return Ok((
+            "HEAD".to_string(),
+            Some("No remote and no named branch — started this worktree from the base repo's HEAD.".to_string()),
+        ));
+    }
+    Err("this repository has no commits yet — make an initial commit before creating a worktree".into())
+}
+
+/// Create a fresh worktree `agentj/<id>` in the global store, branched off the best available start
+/// point (see `start_point`). Returns its path and any fallback notice.
+pub fn provision(base: &str) -> Result<Provisioned, String> {
     if !is_git(base) {
         return Err(format!("not a git repository: {base}"));
     }
-    let _ = git(base, &["fetch", "origin"]); // best-effort: offline falls back to local origin refs
-    let def = default_branch(base);
+    let (start, notice) = start_point(base)?;
     let id = short_id();
     let branch = format!("agentj/{id}");
     let dir = worktrees_dir()
@@ -152,12 +196,9 @@ pub fn provision(base: &str) -> Result<String, String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let path = dir.to_string_lossy().to_string();
-    git(
-        base,
-        &["worktree", "add", "-b", &branch, &path, &format!("origin/{def}")],
-    )
-    .map_err(|e| format!("git worktree add failed (base {def}): {e}"))?;
-    Ok(path)
+    git(base, &["worktree", "add", "-b", &branch, &path, &start])
+        .map_err(|e| format!("git worktree add failed (from {start}): {e}"))?;
+    Ok(Provisioned { path, notice })
 }
 
 // ---- persistence ----------------------------------------------------------

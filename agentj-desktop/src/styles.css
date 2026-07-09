@@ -457,6 +457,16 @@ body {
 .blk.error .lbl {
   color: var(--err);
 }
+/* system notice — the classic infotip yellow, so it reads as "read this" */
+.blk.notice .cnt {
+  background: #ffffe1;
+  border: 1px solid #b0a060;
+  color: #3a3320;
+  padding: 4px 8px;
+}
+.blk.notice .lbl {
+  color: var(--warn);
+}
 .blk.thinking .cnt {
   color: var(--think);
   font-style: italic;

@@ -85,6 +85,8 @@ export interface SessionMeta {
   base: string;
   projectName: string;
   isWorktree: boolean;
+  /** A one-off message to show first in the transcript (e.g. a provisioning fallback). */
+  notice: string | null;
 }
 
 // Backend event payloads are tagged with the session they belong to.
@@ -119,7 +121,9 @@ export interface RepoScan {
 // A locally-injected event for user prompts, kept in the same stream so
 // ordering against agent events is preserved.
 export type UserEvent = { kind: "user"; data: string };
-export type StreamEvent = AgentEvent | UserEvent;
+// A locally-injected system notice (e.g. a provisioning fallback), shown first in the transcript.
+export type NoticeEvent = { kind: "notice"; data: string };
+export type StreamEvent = AgentEvent | UserEvent | NoticeEvent;
 
 // --- Derived transcript blocks --------------------------------------------
 
@@ -155,6 +159,7 @@ export type Block =
   | { type: "card"; role: "you" | "agentj"; text: string; id: string }
   | { type: "thinking"; text: string; id: string }
   | { type: "note"; text: string; id: string }
+  | { type: "notice"; text: string; id: string }
   | { type: "error"; text: string; id: string }
   | { type: "tool"; lines: ToolLine[]; id: string }
   | { type: "tray"; wave: Wave; id: string };

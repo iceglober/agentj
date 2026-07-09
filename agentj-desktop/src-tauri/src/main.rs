@@ -99,6 +99,8 @@ struct SessionMeta {
     base: String,
     project_name: String,
     is_worktree: bool,
+    /// A one-off message to show first in the session's transcript (e.g. a provisioning fallback).
+    notice: Option<String>,
 }
 
 impl SessionMeta {
@@ -111,6 +113,7 @@ impl SessionMeta {
             base: c.base.clone(),
             project_name: worktree::dir_name(&c.base),
             is_worktree: c.root != c.base,
+            notice: None,
         }
     }
 }
@@ -211,9 +214,10 @@ fn inspect_repo(path: String, state: State<'_, AppState>) -> Result<worktree::Re
 /// Provision a fresh long-running worktree off `origin/<default>` and open it as a new session.
 #[tauri::command]
 fn provision_worktree(base: String, state: State<'_, AppState>) -> Result<SessionMeta, String> {
-    let path = worktree::provision(&base)?;
+    let worktree::Provisioned { path, notice } = worktree::provision(&base)?;
     let entry = make_entry(&path);
-    let meta = SessionMeta::of(&entry);
+    let mut meta = SessionMeta::of(&entry);
+    meta.notice = notice;
     state.sessions.lock().unwrap().push(entry);
     persist(&state);
     Ok(meta)
@@ -224,6 +228,9 @@ fn provision_worktree(base: String, state: State<'_, AppState>) -> Result<Sessio
 fn open_worktree(path: String, state: State<'_, AppState>) -> Result<SessionMeta, String> {
     if !std::path::Path::new(&path).is_dir() {
         return Err(format!("not a directory: {path}"));
+    }
+    if !worktree::is_git(&path) {
+        return Err(format!("not a git repository: {path}"));
     }
     if let Some(e) = state.sessions.lock().unwrap().iter().find(|e| e.ctx.root == path) {
         return Ok(SessionMeta::of(e)); // already open — the UI just selects its tab

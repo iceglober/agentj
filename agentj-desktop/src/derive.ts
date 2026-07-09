@@ -68,6 +68,11 @@ export function derive(events: StreamEvent[]): Derived {
         activity = ev.data.replace(/^»\s*/, "").trim() || "note";
         break;
 
+      case "notice":
+        breakTool();
+        blocks.push({ type: "notice", text: ev.data, id });
+        break;
+
       case "step_limit":
         breakTool();
         blocks.push({ type: "note", text: `» step gate — ${ev.data} steps`, id });

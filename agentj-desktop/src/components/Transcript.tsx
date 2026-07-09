@@ -6,6 +6,7 @@ const LABEL: Record<string, string> = {
   agentj: "agentj",
   thinking: "thinking",
   note: "note",
+  notice: "notice",
   error: "error",
   tool: "tool",
   tray: "",
@@ -120,6 +121,7 @@ function BlockRow({ block }: { block: Block }) {
     case "card":
     case "thinking":
     case "note":
+    case "notice":
     case "error":
       content = <Ticks text={block.text} />;
       break;
