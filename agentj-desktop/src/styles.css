@@ -704,6 +704,40 @@ button,
     var(--bevel-shadow);
 }
 
+/* ---- window status bar (workspace metadata) --------------------------- */
+.statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 4px;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--dim);
+  background: var(--panel);
+  border-top: 1px solid var(--bevel-lightest);
+}
+.sb-seg {
+  padding: 1px 8px;
+  white-space: nowrap;
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+}
+.sb-flex {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sb-branch {
+  color: var(--aj);
+  font-weight: bold;
+}
+.sb-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+}
+
 /* ---- input row -------------------------------------------------------- */
 .input {
   display: flex;

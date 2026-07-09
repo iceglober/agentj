@@ -9,6 +9,7 @@ import { StatusRow } from "./components/StatusRow";
 import { InputRow } from "./components/InputRow";
 import { BlueprintPane } from "./components/BlueprintPane";
 import { LeftRail } from "./components/LeftRail";
+import { StatusBar } from "./components/StatusBar";
 import { Welcome } from "./components/Welcome";
 import { WorkspaceChooser } from "./components/WorkspaceChooser";
 import { Settings } from "./components/Settings";
@@ -306,6 +307,8 @@ export function App() {
           onClose={() => session.openBlueprint(false)}
         />
       </div>
+
+      <StatusBar meta={active?.meta ?? null} />
 
       {chooser}
 
