@@ -153,8 +153,9 @@ fn instructions() -> String {
              multi-step flow — save a `blueprint` (`save_artifact` with format:\"html\"): a \
              self-contained interactive page using mockups, hierarchy, and diagrams that shows what \
              you understand and what you propose. It opens in their browser. Track the work itself in \
-             a `todos` artifact (pending / in-progress / done, with evidence) and keep it current; \
-             hold the settled approach in `plan`.",
+             a `todos` artifact — a markdown checklist, one item per line (`- [ ]` pending, `- [x]` \
+             done) — and keep it current with `edit_artifact` (flip a checkbox) rather than rewriting \
+             it; hold the settled approach in `plan`.",
         ),
         enclose(
             "verify",

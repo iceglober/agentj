@@ -156,6 +156,42 @@ impl Session {
         Ok(path)
     }
 
+    /// The on-disk path of an existing artifact (bare markdown or `<name>.html`), if any.
+    fn artifact_path(&self, name: &str) -> Option<PathBuf> {
+        let base = self.dir.join("artifacts");
+        let n = safe_name(name);
+        let bare = base.join(&n);
+        if bare.exists() {
+            return Some(bare);
+        }
+        let html = base.join(format!("{n}.html"));
+        if html.exists() {
+            return Some(html);
+        }
+        None
+    }
+
+    /// Apply ordered exact-string replacements (first occurrence each) to an existing artifact,
+    /// keeping its format. Returns the new content. Far cheaper than resending the whole artifact —
+    /// e.g. flipping one `todos` checkbox instead of rewriting the list.
+    pub fn edit_artifact(&self, name: &str, edits: &[(String, String)]) -> Result<String, String> {
+        let path = self
+            .artifact_path(name)
+            .ok_or_else(|| format!("no artifact `{name}` in this session — save it first"))?;
+        let mut content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        for (old, new) in edits {
+            if content.contains(old.as_str()) {
+                content = content.replacen(old, new, 1);
+            } else {
+                let clip: String = old.chars().take(60).collect();
+                return Err(format!("edit target not found in `{name}`: {clip:?}"));
+            }
+        }
+        std::fs::write(&path, &content).map_err(|e| e.to_string())?;
+        self.touch();
+        Ok(content)
+    }
+
     /// Bump `last_active` so `--continue` finds the right session. Best-effort.
     pub fn touch(&self) {
         if let Ok(mut m) = self.read_meta() {

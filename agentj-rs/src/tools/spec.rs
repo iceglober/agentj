@@ -111,12 +111,23 @@ pub fn tool_specs(
     if allow_delegate && has_session {
         specs.push(ToolSpec {
             name: "save_artifact".into(),
-            description: "Persist a named artifact for THIS session, stored outside the repo and keyed to the session so it never pollutes the working tree and a fresh session never inherits it. Overwrites the artifact each call. Three artifacts are conventional: `plan` (markdown — the settled APPROACH and its rationale; write it once the design is decided, revise only on new info) and `todos` (markdown — the CHECKLIST of what's pending / in-progress / done, with evidence; rewrite it as you go). `plan` and `todos` are handed back to you on resume, so keep todos current — it's what tells a resumed run what's left. The third is `blueprint` (format:\"html\" — a self-contained interactive HTML page: mockups, hierarchy, diagrams). Saving an html artifact OPENS IT IN THE USER'S BROWSER, so build a `blueprint` when a picture would align you with the user faster than prose — during scoping/planning, show what you understand and what you propose, and get their buy-in before you build.".into(),
+            description: "Persist a named artifact for THIS session, stored outside the repo and keyed to the session so it never pollutes the working tree and a fresh session never inherits it. Overwrites the artifact each call — for small incremental changes use `edit_artifact` instead. Three artifacts are conventional: `plan` (markdown — the settled APPROACH and its rationale; write it once the design is decided, revise only on new info) and `todos` (a markdown CHECKLIST, one item per line as `- [ ] pending` / `- [x] done` — the app shows it live). `plan` and `todos` are handed back to you on resume, so keep todos current — it's what tells a resumed run what's left. The third is `blueprint` (format:\"html\" — a self-contained interactive HTML page: mockups, hierarchy, diagrams). Saving an html artifact OPENS IT IN THE USER'S BROWSER, so build a `blueprint` when a picture would align you with the user faster than prose — during scoping/planning, show what you understand and what you propose, and get their buy-in before you build.".into(),
             parameters: json!({ "type": "object", "properties": {
                 "name": { "type": "string", "description": "artifact name, e.g. \"plan\", \"todos\", \"blueprint\"" },
                 "content": { "type": "string", "description": "the full artifact content (replaces any prior version)" },
                 "format": { "type": "string", "enum": ["markdown", "html"], "description": "\"markdown\" (default) for plan/todos/notes; \"html\" for a blueprint — a self-contained page opened in the user's browser on save" }
             }, "required": ["name", "content"] }),
+        });
+        specs.push(ToolSpec {
+            name: "edit_artifact".into(),
+            description: "Edit an EXISTING artifact in place with exact-string replacements — far cheaper than re-sending the whole thing with save_artifact. Use it for incremental changes, especially `todos` that change one line at a time: flip `- [ ] task` to `- [x] task`, or append a line. `edits` is applied in order (first occurrence of each old_string). The result echoes the updated artifact.".into(),
+            parameters: json!({ "type": "object", "properties": {
+                "name": { "type": "string", "description": "the artifact to edit, e.g. \"todos\"" },
+                "edits": { "type": "array", "description": "replacements applied in order", "items": { "type": "object", "properties": {
+                    "old_string": { "type": "string" },
+                    "new_string": { "type": "string" }
+                }, "required": ["old_string", "new_string"] } }
+            }, "required": ["name", "edits"] }),
         });
         specs.push(ToolSpec {
             name: "read_artifact".into(),

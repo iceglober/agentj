@@ -454,7 +454,7 @@ fn tray_collapses_into_transcript_summaries_when_the_delegate_batch_lands() {
     a.on_ui(UiMsg::Agent(AgentEvent::ToolEnd {
         ok: true,
         elapsed_ms: 2100,
-        summary: "[subagent 0] …".to_string(),
+        summary: "[subagent 0] …".to_string(),        result: String::new(),
     }));
     // Wave joined: rail empty, the frozen fork/join block is permanent transcript history.
     assert!(a.subagents.is_empty());

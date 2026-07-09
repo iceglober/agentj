@@ -14,11 +14,13 @@ pub enum AgentEvent {
         args: String,
         step: usize,
     },
-    /// A tool call finished. `ok` is false when the tool reported failure.
+    /// A tool call finished. `ok` is false when the tool reported failure. `summary` is the one-line
+    /// digest (shown collapsed); `result` is the fuller output (capped), for a UI that expands a row.
     ToolEnd {
         ok: bool,
         elapsed_ms: u128,
         summary: String,
+        result: String,
     },
     /// A subagent (delegate sub-task) started. `id` is its 0-based index in the batch.
     SubagentStart { id: usize, desc: String, agent_type: String },

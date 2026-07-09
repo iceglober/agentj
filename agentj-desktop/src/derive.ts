@@ -109,6 +109,7 @@ export function derive(events: StreamEvent[]): Derived {
           args: ev.data.args,
           elapsed_ms: null,
           summary: "",
+          result: "",
           ok: true,
           pending: true,
         };
@@ -130,6 +131,7 @@ export function derive(events: StreamEvent[]): Derived {
           line.ok = ev.data.ok;
           line.elapsed_ms = ev.data.elapsed_ms;
           line.summary = ev.data.summary;
+          line.result = ev.data.result;
           if (!ev.data.ok) line.prefix = "✗"; // failure wins over `·`/`+`
         }
         break;

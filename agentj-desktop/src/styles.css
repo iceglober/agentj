@@ -606,6 +606,33 @@ button,
 .tline {
   display: block;
 }
+.toolrow.expandable {
+  cursor: pointer;
+}
+.toolrow .twist {
+  color: var(--faint);
+  font-size: 9px;
+  margin-right: 3px;
+}
+.toolrow.expandable:hover .k {
+  text-decoration: underline;
+}
+.toolresult {
+  margin: 2px 0 4px 12px;
+  padding: 6px 8px;
+  max-height: 260px;
+  overflow: auto;
+  background: #f6f5ee;
+  color: #222;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light);
+}
 .tline.toolfail {
   color: var(--err);
 }

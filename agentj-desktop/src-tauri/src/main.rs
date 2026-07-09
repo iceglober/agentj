@@ -134,6 +134,23 @@ struct BlueprintPayload {
     html: String,
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TodosPayload {
+    session_id: String,
+    /// Raw markdown of the `todos` artifact (the UI parses the `- [ ]` / `- [x]` lines).
+    content: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FileEntry {
+    name: String,
+    /// Path relative to the worktree root.
+    rel: String,
+    is_dir: bool,
+}
+
 /// Build a full session for a worktree `root`, mirroring the CLI's interactive setup.
 fn build_ctx(root: &str) -> RepoCtx {
     let app_cfg = AppConfig::load(root);
@@ -313,7 +330,12 @@ fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) 
         while let Some(ev) = rx.recv().await {
             let _ = app_fwd.emit("agent-event", Tagged { session_id: sid.clone(), event: ev.clone() });
             if let AgentEvent::Artifact { name, format } = &ev {
-                if format == "html" {
+                if name == "todos" {
+                    if let Some(content) = store.read_artifact("todos") {
+                        let _ = app_fwd
+                            .emit("todos", TodosPayload { session_id: sid.clone(), content });
+                    }
+                } else if format == "html" {
                     if let Some(html) = store.read_artifact(name) {
                         let _ = app_fwd.emit(
                             "blueprint",
@@ -373,6 +395,54 @@ fn interrupt(session_id: String, state: State<'_, AppState>) {
 #[tauri::command]
 fn read_artifact(session_id: String, name: String, state: State<'_, AppState>) -> Option<String> {
     find(&state, &session_id).and_then(|e| e.ctx.store.read_artifact(&name))
+}
+
+/// The session's live `todos` markdown, or null if it hasn't created any yet.
+#[tauri::command]
+fn read_todos(session_id: String, state: State<'_, AppState>) -> Option<String> {
+    find(&state, &session_id).and_then(|e| e.ctx.store.read_artifact("todos"))
+}
+
+/// Resolve a repo-relative path against the worktree root, refusing anything that escapes it.
+fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
+    let base = std::fs::canonicalize(root).ok()?;
+    let joined = std::fs::canonicalize(base.join(rel)).ok()?;
+    joined.starts_with(&base).then_some(joined)
+}
+
+/// List one directory of the session's worktree (dirs first, then files; hidden/noise dirs skipped),
+/// for the file explorer. `sub` is a repo-relative subdirectory ("" for the root).
+#[tauri::command]
+fn list_files(session_id: String, sub: String, state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
+    const SKIP: &[&str] = &[".git", "node_modules", "target", "dist", ".aj"];
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    let root = entry.ctx.root.clone();
+    let dir = safe_join(&root, &sub).ok_or("path is outside the worktree")?;
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let is_dir = e.path().is_dir();
+        if is_dir && SKIP.contains(&name.as_str()) {
+            continue;
+        }
+        let rel = if sub.is_empty() { name.clone() } else { format!("{sub}/{name}") };
+        out.push(FileEntry { name, rel, is_dir });
+    }
+    out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(out)
+}
+
+/// Open a worktree file in the OS default application.
+#[tauri::command]
+fn open_path(session_id: String, rel: String, state: State<'_, AppState>) -> Result<(), String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    let path = safe_join(&entry.ctx.root, &rel).ok_or("path is outside the worktree")?;
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(opener)
+        .arg(&path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -439,6 +509,9 @@ fn main() {
             send_prompt,
             interrupt,
             read_artifact,
+            read_todos,
+            list_files,
+            open_path,
             tool_status
         ])
         .run(tauri::generate_context!())

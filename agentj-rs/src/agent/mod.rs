@@ -271,13 +271,15 @@ pub async fn run_turn(
                 ok,
                 elapsed_ms: start.elapsed().as_millis(),
                 summary: first_line(&text, 60),
+                // The fuller output, capped — a UI can expand a collapsed tool row to show it.
+                result: text.chars().take(4000).collect(),
             });
             if ok && is_mutating_tool(&tc.function.name) {
                 mutated = true;
             }
-            // Surface a saved artifact so a front-end can react (the desktop app docks a saved html
-            // `blueprint` beside the chat). Display-only; no effect on the loop.
-            if ok && tc.function.name == "save_artifact" {
+            // Surface a saved/edited artifact so a front-end can react (docks a saved html
+            // `blueprint`, refreshes the live `todos` view). Display-only; no effect on the loop.
+            if ok && matches!(tc.function.name.as_str(), "save_artifact" | "edit_artifact") {
                 if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
                     let format = args
                         .get("format")

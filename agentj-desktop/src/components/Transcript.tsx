@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Block, ToolLine, Wave } from "../types";
 
 const LABEL: Record<string, string> = {
@@ -35,20 +35,25 @@ function fmtMs(ms: number): string {
 }
 
 function ToolLineRow({ line }: { line: ToolLine }) {
+  const [open, setOpen] = useState(false);
+  const hasResult = !line.pending && line.result.trim().length > 0;
   return (
-    <span className={"tline" + (line.ok ? "" : " toolfail")}>
-      <span className="k">{line.name}</span>
-      <span className="rail">({line.args})</span>
-      {line.pending ? (
-        <span className="rail"> — …</span>
-      ) : (
-        <>
+    <div className={"tline" + (line.ok ? "" : " toolfail")}>
+      <span
+        className={"toolrow" + (hasResult ? " expandable" : "")}
+        onClick={hasResult ? () => setOpen((v) => !v) : undefined}
+      >
+        {hasResult && <span className="twist">{open ? "▾" : "▸"}</span>}
+        <span className="k">{line.name}</span>
+        <span className="rail">({line.args})</span>
+        {line.pending ? (
+          <span className="rail"> — …</span>
+        ) : (
           <span className="rail"> — {fmtMs(line.elapsed_ms ?? 0)}</span>
-          {line.summary ? " " : ""}
-          {line.summary}
-        </>
-      )}
-    </span>
+        )}
+      </span>
+      {open && <pre className="toolresult">{line.result}</pre>}
+    </div>
   );
 }
 

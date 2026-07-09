@@ -550,7 +550,7 @@ fn card_app() -> super::super::app::App {
     app.editor.insert_str("Finish GEN-3320");
     app.on_input(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))); // pushes the user card
     app.on_ui(UiMsg::Agent(AgentEvent::ToolStart { name:"bash".into(), args:"git status".into(), step:0 }));
-    app.on_ui(UiMsg::Agent(AgentEvent::ToolEnd { ok:true, elapsed_ms:39, summary:"clean".into() }));
+    app.on_ui(UiMsg::Agent(AgentEvent::ToolEnd { ok:true, elapsed_ms:39, summary:"clean".into(), result:String::new() }));
     app.on_ui(UiMsg::Agent(AgentEvent::Note("context compacted — elided 3 older tool results".into())));
     app.on_ui(UiMsg::Agent(AgentEvent::Message("Design is locked; implementing now.".into())));
     app

@@ -74,7 +74,7 @@ pub struct Tools {
 /// from an MCP tool (always passes through).
 const BUILTINS: &[&str] = &[
     "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "glob", "grep", "bash",
-    "save_artifact", "read_artifact", "job_start", "job_check",
+    "save_artifact", "edit_artifact", "read_artifact", "job_start", "job_check",
     "job_stop", "mcp_find_tools", "run_subagents",
 ];
 
@@ -188,6 +188,46 @@ impl Tools {
         }
     }
 
+    /// `edit_artifact` — surgical in-place edits to an existing artifact (cheap incremental updates,
+    /// e.g. flipping one `todos` checkbox instead of rewriting the list).
+    fn edit_artifact(&self, args: &Value) -> ToolOutcome {
+        let Some(name) = arg_str(args, "name") else {
+            return ToolOutcome::err("error: edit_artifact needs a name");
+        };
+        let Some(session) = &self.session else {
+            return ToolOutcome::err("error: no session artifact store attached");
+        };
+        let edits: Vec<(String, String)> = args
+            .get("edits")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| {
+                        let old = e.get("old_string")?.as_str()?.to_string();
+                        let new = e.get("new_string")?.as_str()?.to_string();
+                        Some((old, new))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if edits.is_empty() {
+            return ToolOutcome::err(
+                "error: edit_artifact needs `edits`: [{old_string, new_string}, …]",
+            );
+        }
+        match session.edit_artifact(name, &edits) {
+            Ok(content) => {
+                let shown: String = content.chars().take(2000).collect();
+                ToolOutcome::ok(format!(
+                    "edited artifact `{name}` ({} edit(s)) — now {} bytes:\n{shown}",
+                    edits.len(),
+                    content.len()
+                ))
+            }
+            Err(e) => ToolOutcome::err(format!("error: {e}")),
+        }
+    }
+
     /// `read_artifact` — read a named session artifact back.
     fn read_artifact(&self, args: &Value) -> ToolOutcome {
         let Some(name) = arg_str(args, "name") else {
@@ -225,6 +265,7 @@ impl Tools {
             "grep" => self.grep(args).await,
             "bash" => self.bash(args).await,
             "save_artifact" => self.save_artifact(args),
+            "edit_artifact" => self.edit_artifact(args),
             "read_artifact" => self.read_artifact(args),
             "job_start" => self.job_start(args).await,
             "job_check" => ToolOutcome::ok(

@@ -16,6 +16,7 @@ export interface ToolEnd {
   ok: boolean;
   elapsed_ms: number;
   summary: string;
+  result: string;
 }
 export interface SubagentStart {
   id: number;
@@ -136,6 +137,7 @@ export interface ToolLine {
   args: string;
   elapsed_ms: number | null;
   summary: string;
+  result: string;
   ok: boolean;
   pending: boolean;
 }
