@@ -2,7 +2,8 @@
   /* agentj Desktop — Windows 2000 / XP "classic" look: gray 3D-beveled
      controls, sunken white content wells, square corners, blue selection. */
   --sans: Tahoma, Verdana, Geneva, "DejaVu Sans", sans-serif;
-  --mono: "Lucida Console", "Courier New", monospace;
+  /* one UI font everywhere — --mono kept as an alias so existing rules restyle */
+  --mono: var(--sans);
 
   /* surfaces — the whole app is LIGHT now */
   --page: #ece9d8;
