@@ -13,10 +13,15 @@ DECIDE. Five things make a good one.
 - Lead with the decisions; keep rationale to a phrase. The user should be able to make every call in
   under a minute.
 
-## 2. High-fidelity, self-contained mockups
+## 2. High-fidelity, interactive, self-contained mockups
 - Make any UI mock look like the REAL product — real copy, real spacing, real components, real
   states — not grey wireframe boxes. Only drop to greyscale wireframe when STRUCTURE (not look) is
   the actual question.
+- **Fully interactive, not a static picture.** A UI mockup must actually WORK: tabs and accordions
+  switch, buttons and toggles respond, inputs accept text and forms show their validation states,
+  navigation moves between views, modals and menus open and close, hover/active states fire. Wire it
+  with inline vanilla JS so the user can click through the real flow and judge it — the point of a
+  blueprint is that they operate the thing, not squint at a screenshot.
 - Self-contained: inline all CSS/JS and embed assets as data URIs. No external fonts/CDN/network — a
   strict sandbox blocks them, so anything remote silently fails.
 - Design tokens as CSS custom properties at `:root` (color, type scale, spacing, radius) and reuse
