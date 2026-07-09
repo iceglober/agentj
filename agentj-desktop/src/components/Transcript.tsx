@@ -35,10 +35,8 @@ function fmtMs(ms: number): string {
 }
 
 function ToolLineRow({ line }: { line: ToolLine }) {
-  const prefixClass = line.prefix === "✗" ? "err" : "rail";
   return (
-    <span className="tline">
-      <span className={prefixClass}>{line.prefix}</span>{" "}
+    <span className={"tline" + (line.ok ? "" : " toolfail")}>
       <span className="k">{line.name}</span>
       <span className="rail">({line.args})</span>
       {line.pending ? (
@@ -83,20 +81,12 @@ function Tray({ wave }: { wave: Wave }) {
       {subs.map((s) => {
         const type = KNOWN_TYPES.includes(s.type) ? s.type : "other";
         const running = s.ok == null;
-        // Done: bar length shows this agent's share of the wave's wall-clock (slowest = full).
-        const pct = running ? 100 : Math.max(6, ((s.elapsed_ms ?? 0) / maxElapsed) * 100);
         const st = running ? s.status || "working…" : s.summary || (s.ok ? "done" : "failed");
         return (
           <div className="wrow" key={s.id}>
             <span className={"wchip " + type}>{s.type || "sub"}</span>
             <span className="wtitle" title={s.desc}>
               {s.desc}
-            </span>
-            <span className="wtrack">
-              <span
-                className={"wfill" + (running ? " run" : s.ok ? "" : " fail")}
-                style={{ width: pct + "%" }}
-              />
             </span>
             <span className={"wst" + (running ? "" : s.ok ? " ok" : " err")}>
               {running ? <span className="spin">◍</span> : s.ok ? "✓" : "✗"}{" "}
