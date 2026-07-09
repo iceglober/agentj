@@ -11,6 +11,7 @@ import type {
   AgentEventEnvelope,
   Blueprint,
   BlueprintEvent,
+  FileEntry,
   RepoScan,
   SessionMeta,
   StreamEvent,
@@ -20,6 +21,27 @@ import type {
 // Read an artifact by name from a specific session.
 export function readArtifact(sessionId: string, name: string): Promise<string | null> {
   return invoke<string | null>("read_artifact", { sessionId, name });
+}
+
+// Read the raw markdown of a session's `todos` artifact (null if none yet).
+export function readTodos(sessionId: string): Promise<string | null> {
+  return invoke<string | null>("read_todos", { sessionId });
+}
+
+// List a subdir of the session's worktree ("" = root). Backend sorts dirs-first.
+export function listFiles(sessionId: string, sub: string): Promise<FileEntry[]> {
+  return invoke<FileEntry[]>("list_files", { sessionId, sub });
+}
+
+// Open a repo-relative file in the OS default app.
+export function openPath(sessionId: string, rel: string): Promise<void> {
+  return invoke("open_path", { sessionId, rel });
+}
+
+// Payload of the "todos" event: the session whose todos changed + the new markdown.
+interface TodosEvent {
+  sessionId: string;
+  content: string;
 }
 
 // Fetch the built-in + MCP tool status for a session.
@@ -34,6 +56,8 @@ export interface SessionState {
   running: boolean;
   blueprint: Blueprint | null;
   bpOpen: boolean;
+  // Raw markdown of this session's `todos` artifact; null until fetched / if absent.
+  todos: string | null;
 }
 
 export interface SessionStore {
@@ -67,7 +91,7 @@ function freshSlice(meta: SessionMeta): SessionState {
   const events: StreamEvent[] = meta.notice
     ? [{ kind: "notice", data: meta.notice }]
     : [];
-  return { meta, events, running: false, blueprint: null, bpOpen: false };
+  return { meta, events, running: false, blueprint: null, bpOpen: false, todos: null };
 }
 
 export function useSessions(): SessionStore {
@@ -99,6 +123,16 @@ export function useSessions(): SessionStore {
     [],
   );
 
+  // Fetch a session's todos and store them; best-effort, errors ignored.
+  const loadTodos = useCallback(
+    (id: string) => {
+      readTodos(id)
+        .then((md) => patch(id, (s) => ({ ...s, todos: md })))
+        .catch(() => {});
+    },
+    [patch],
+  );
+
   // --- streams (subscribed once) ------------------------------------------
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -125,6 +159,12 @@ export function useSessions(): SessionStore {
       patch(sessionId, (s) => ({ ...s, blueprint: { name, html }, bpOpen: true }));
     }).then(track);
 
+    // The agent edited a session's todos — reflect the new markdown live.
+    listen<TodosEvent>("todos", (e) => {
+      const { sessionId, content } = e.payload;
+      patch(sessionId, (s) => ({ ...s, todos: content }));
+    }).then(track);
+
     // Restore whatever sessions the backend already has.
     invoke<SessionMeta[]>("list_sessions")
       .then((metas) => {
@@ -133,6 +173,8 @@ export function useSessions(): SessionStore {
         setSessions(metas);
         setActiveProject(metas[0].base);
         setActiveId(metas[0].id);
+        // Seed each restored session's todos (best-effort).
+        for (const m of metas) loadTodos(m.id);
       })
       .catch(() => {});
 
@@ -140,20 +182,24 @@ export function useSessions(): SessionStore {
       disposed = true;
       unlisteners.forEach((u) => u());
     };
-  }, [patch]);
+  }, [patch, loadTodos]);
 
   // Insert (or re-select, if already open) a session and make it active.
-  const adopt = useCallback((meta: SessionMeta) => {
-    setStore((prev) => {
-      if (prev.has(meta.id)) return prev; // keep existing transcript
-      const next = new Map(prev);
-      next.set(meta.id, freshSlice(meta));
-      return next;
-    });
-    setSessions((prev) => (prev.some((s) => s.id === meta.id) ? prev : [...prev, meta]));
-    setActiveProject(meta.base);
-    setActiveId(meta.id);
-  }, []);
+  const adopt = useCallback(
+    (meta: SessionMeta) => {
+      setStore((prev) => {
+        if (prev.has(meta.id)) return prev; // keep existing transcript
+        const next = new Map(prev);
+        next.set(meta.id, freshSlice(meta));
+        return next;
+      });
+      setSessions((prev) => (prev.some((s) => s.id === meta.id) ? prev : [...prev, meta]));
+      setActiveProject(meta.base);
+      setActiveId(meta.id);
+      loadTodos(meta.id); // seed todos for the freshly adopted session
+    },
+    [loadTodos],
+  );
 
   const selectSession = useCallback((id: string) => {
     const s = storeRef.current.get(id);

@@ -64,6 +64,14 @@ export interface Blueprint {
   html: string;
 }
 
+// One entry in the file explorer. `rel` is the repo-relative path from the
+// worktree root; the backend sorts dirs-first and skips .git/node_modules/etc.
+export interface FileEntry {
+  name: string;
+  rel: string;
+  isDir: boolean;
+}
+
 // --- tool & MCP status (invoke("tool_status", { sessionId })) --------------
 export interface McpServerStatus {
   name: string;

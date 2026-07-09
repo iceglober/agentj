@@ -8,6 +8,7 @@ import { Transcript } from "./components/Transcript";
 import { StatusRow } from "./components/StatusRow";
 import { InputRow } from "./components/InputRow";
 import { BlueprintPane } from "./components/BlueprintPane";
+import { LeftRail } from "./components/LeftRail";
 import { Welcome } from "./components/Welcome";
 import { WorkspaceChooser } from "./components/WorkspaceChooser";
 import { Settings } from "./components/Settings";
@@ -272,6 +273,10 @@ export function App() {
       />
 
       <div className="body">
+        {session.activeId && (
+          <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
+        )}
+
         <div className="chat">
           <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
           <StatusRow

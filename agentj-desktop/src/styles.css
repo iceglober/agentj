@@ -1714,3 +1714,252 @@ button,
   border-top: 1px solid var(--line);
   background: var(--field);
 }
+
+/* ---- left rail: todos + file explorer --------------------------------- */
+/* NB: container is `.leftrail`, not `.rail` — `.rail` is already taken by the
+   transcript's tool-arg spans. */
+.leftrail {
+  flex: 0 0 210px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark),
+    inset -1px -1px 0 var(--bevel-light);
+  transition: flex-basis 0.16s ease;
+  overflow: hidden;
+}
+.leftrail.collapsed {
+  flex-basis: 26px;
+}
+
+/* rail header strip */
+.railbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--bevel-shadow);
+  font-family: var(--sans);
+  font-size: 10px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  user-select: none;
+}
+.leftrail.collapsed .railbar {
+  justify-content: center;
+  padding: 3px 0;
+}
+.railtoggle {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
+    var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light),
+    inset -1px -1px 0 var(--bevel-shadow);
+}
+.railtoggle:active {
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark),
+    inset -1px -1px 0 var(--bevel-light);
+}
+
+/* a rail section (Todos / Files) */
+.leftrail .section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.leftrail .section.files {
+  flex: 1 1 auto;
+}
+.leftrail .shead {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  background: var(--panel-2);
+  border-bottom: 1px solid #cbc7b8;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+.leftrail .shead .tw {
+  font-size: 9px;
+  color: var(--faint);
+  width: 9px;
+  display: inline-block;
+}
+.leftrail .shead .count {
+  margin-left: auto;
+  color: var(--faint);
+  font-weight: normal;
+}
+.leftrail .shead .srefresh {
+  margin-left: auto;
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--dim);
+  background: var(--panel);
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
+    var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+.leftrail .shead .srefresh:active {
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark);
+}
+.leftrail .secbody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.leftrail .secbody.files-body {
+  flex: 1 1 auto;
+}
+
+/* todos checklist */
+.leftrail .todos {
+  padding: 5px 8px;
+  overflow: auto;
+  max-height: 180px;
+}
+.leftrail .todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.leftrail .todo .cb {
+  flex: 0 0 auto;
+  position: relative;
+  width: 12px;
+  height: 12px;
+  margin-top: 1px;
+  background: var(--field);
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark);
+}
+.leftrail .todo.done .cb::after {
+  content: "✔";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--accent);
+}
+.leftrail .todo.done .txt {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+.leftrail .todo.doing .txt {
+  font-weight: bold;
+}
+.leftrail .todo.doing .cb {
+  border-color: var(--accent);
+}
+.leftrail .prog {
+  flex: 0 0 auto;
+  padding: 3px 8px 6px;
+  color: var(--faint);
+  font-size: 10px;
+}
+.leftrail .progbar {
+  height: 5px;
+  margin-top: 3px;
+  overflow: hidden;
+  background: var(--field);
+  border: 1px solid #cbc7b8;
+}
+.leftrail .progbar > i {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+
+/* file tree */
+.leftrail .tree {
+  flex: 1 1 auto;
+  padding: 3px 4px;
+  overflow: auto;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.leftrail .tree-msg {
+  padding: 4px 6px;
+  color: var(--faint);
+  font-style: italic;
+}
+.leftrail .node {
+  user-select: none;
+}
+.leftrail .frow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.leftrail .frow:hover {
+  background: #e2dfd0;
+}
+.leftrail .frow.file:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.leftrail .frow .ic {
+  width: 14px;
+  text-align: center;
+  color: var(--faint);
+}
+.leftrail .frow .tw {
+  width: 8px;
+  display: inline-block;
+  font-size: 8px;
+  color: var(--faint);
+  transition: transform 0.1s ease;
+}
+.leftrail .children {
+  margin-left: 13px;
+  display: none;
+}
+.leftrail .node.open > .children {
+  display: block;
+}
+.leftrail .node.open > .frow > .tw {
+  transform: rotate(90deg);
+}
