@@ -27,9 +27,9 @@
   --t-faint: #6e6e6e;
   --faint: #6e6e6e;
 
-  /* classic Windows selection blue (white text) */
-  --accent: #316ac5;
-  --sel: #316ac5;
+  /* Windows selection blue, remastered a touch crisper (white text) */
+  --accent: #2f6fe0;
+  --sel: #2f6fe0;
 
   /* speaker label colors (flat — no colored bands) */
   --you: #0a246a; /* navy */
@@ -63,7 +63,8 @@
 *::before,
 *::after {
   box-sizing: border-box;
-  border-radius: 0; /* square corners are essential */
+  /* a whisper of radius — the "remastered" twist: reads designed-today, keeps the boxy soul */
+  border-radius: 2px;
 }
 html,
 body,
@@ -76,8 +77,21 @@ body {
   color: var(--ink);
   font-family: var(--sans);
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.4;
   overflow: hidden;
+  /* remastered: crisp modern text rendering over the classic controls */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* remastered: a whisper of motion on interactive chrome (reduced-motion zeroes it above) */
+button,
+.ptab,
+.stab,
+.repomenu-item,
+.cmd-item,
+.ts-tab {
+  transition: background 0.09s ease, color 0.09s ease, border-color 0.09s ease;
 }
 
 ::selection {
@@ -193,7 +207,7 @@ body {
   border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
     var(--bevel-lightest);
   box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow), 2px 2px 0 rgba(0, 0, 0, 0.35);
+    inset -1px -1px 0 var(--bevel-shadow), 0 6px 18px rgba(0, 0, 0, 0.28);
 }
 .repomenu-item {
   display: block;
@@ -781,7 +795,7 @@ body {
   border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
     var(--bevel-lightest);
   box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow), 3px 3px 0 rgba(0, 0, 0, 0.35);
+    inset -1px -1px 0 var(--bevel-shadow), 0 8px 22px rgba(0, 0, 0, 0.3);
 }
 .wtitlebar {
   display: flex;
@@ -918,7 +932,7 @@ body {
   border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
     var(--bevel-lightest);
   box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow), 3px 3px 0 rgba(0, 0, 0, 0.4);
+    inset -1px -1px 0 var(--bevel-shadow), 0 10px 28px rgba(0, 0, 0, 0.32);
 }
 /* head becomes the blue title strip */
 .chooser-head {
@@ -1154,7 +1168,7 @@ body {
   border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
     var(--bevel-lightest);
   box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow), 3px 3px 0 rgba(0, 0, 0, 0.4);
+    inset -1px -1px 0 var(--bevel-shadow), 0 10px 28px rgba(0, 0, 0, 0.32);
 }
 /* head is the blue XP title bar */
 .modal-head {
@@ -1362,7 +1376,7 @@ body {
   border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
     var(--bevel-lightest);
   box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow), 2px 2px 0 rgba(0, 0, 0, 0.3);
+    inset -1px -1px 0 var(--bevel-shadow), 0 6px 18px rgba(0, 0, 0, 0.26);
 }
 .cmd-item {
   display: flex;
