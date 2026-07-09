@@ -85,20 +85,21 @@ pub fn tool_specs(
     if allow_delegate {
         specs.push(ToolSpec {
             name: "run_subagents".into(),
-            description: "Run one or more sub-tasks as TYPED subagents that each run in their OWN context and return a concise result. Use for a sub-task of more than ~5 tool calls, or that runs in parallel / needs isolated context — it keeps YOUR context small. Map dependencies first: INDEPENDENT sub-tasks in ONE call run in PARALLEL, but a task that needs another's output goes in a LATER call fed by it — run the scouts, then hand their findings to a planner; do NOT put a consumer (e.g. a planner) in the same call as the producer (the scouts) it depends on. Each result comes back labeled `[subagent i]`. Pick the `type` that matches the work — each runs with a scoped toolset: `scout` (read-only investigation / answer a question), `planner` (read-only design / decompose / weigh options), `reviewer` (adversarial verify a diff or plan — read + run checks, no edits), `executor` (make a targeted change on files you name — the default). Write briefs that spend the budget well: name the exact files/paths/commands you already located and state precisely what to return.".into(),
+            description: "Run one or more sub-tasks as TYPED subagents that each run in their OWN context and return a concise result. Use for a sub-task of more than ~5 tool calls, or that runs in parallel / needs isolated context — it keeps YOUR context small. This is a dependency DAG: tasks WITHOUT `after` run in PARALLEL; a task with `after:[i,…]` runs in a LATER stage and RECEIVES those tasks' results as its context. So a scout→planner flow is ONE call — put the scouts first, give the planner `after` those scouts — instead of running the planner alongside the scouts it depends on. Each result comes back labeled `[subagent i]`, where i is the task's 0-based position in `tasks` (which is also what `after` references). Pick the `type` that matches the work — each runs with a scoped toolset: `scout` (read-only investigation / answer a question), `planner` (read-only design / decompose / weigh options), `reviewer` (adversarial verify a diff or plan — read + run checks, no edits), `executor` (make a targeted change on files you name — the default). Write briefs that spend the budget well: name the exact files/paths/commands you already located and state precisely what to return.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "tasks": {
                         "type": "array",
-                        "description": "One or more independent sub-tasks to run in parallel.",
+                        "description": "Sub-tasks. Those without `after` run in parallel; use `after` to sequence dependent ones (a planner after its scouts).",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "task": { "type": "string", "description": "The self-contained sub-task instruction." },
                                 "type": { "type": "string", "enum": ["scout", "planner", "reviewer", "executor"], "description": "The kind of subagent (default: executor). scout/planner/reviewer are read-only; executor makes changes." },
                                 "title": { "type": "string", "description": "A short 3–8 word label for this sub-task, shown in the UI while it runs (e.g. 'Map the Rust crate')." },
-                                "context": { "type": "string", "description": "Optional extra context (paths, findings) the subagent needs." }
+                                "context": { "type": "string", "description": "Optional extra context (paths, findings) the subagent needs." },
+                                "after": { "type": "array", "items": { "type": "integer" }, "description": "0-based indices of sub-tasks in THIS call that must finish first; their results are fed to this task as context. Omit for an independent task that can run immediately." }
                             },
                             "required": ["task"]
                         }

@@ -78,7 +78,7 @@ function Tray({ wave }: { wave: Wave }) {
     <div className="wave">
       <div className="wave-head">
         <span>
-          <b>run_subagents</b> · wave {wave.n} · {n} in parallel
+          <b>run_subagents</b> · wave {wave.n} · {n} subagent{n === 1 ? "" : "s"}
         </span>
         <span>{allDone ? "" : <><span className="spin">◍</span> running</>}</span>
       </div>

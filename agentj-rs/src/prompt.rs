@@ -140,16 +140,14 @@ fn instructions() -> String {
         ),
         enclose(
             "subagents",
-            "Use subagents as much as possible. But before you fan out, map the DEPENDENCIES between \
-             the sub-tasks as a small DAG: which are independent, and which need another's output. \
-             Put only INDEPENDENT tasks in one `run_subagents` call — those run in PARALLEL. A task \
-             that consumes another's result goes in a LATER wave, fed by the first: run the scouts, \
-             then hand their findings to a planner; NEVER launch a planner (or any consumer) in the \
-             same wave as the scouts it depends on. Sequence the dependent waves; parallelize within \
-             each. This applies to EVERY kind of task, not just building things: answering a question \
-             about the code, tracking down a bug, reviewing a change, refactoring, or auditing all \
-             fan out the same way. Delegate the reading and exploring to them; you synthesize and \
-             decide.",
+            "Use subagents as much as possible. Map the DEPENDENCIES first — which sub-tasks are \
+             independent, and which need another's output — then express that DAG in one \
+             `run_subagents` call: independent tasks run in PARALLEL, and a task that consumes \
+             another's result gets `after:[…]` those tasks, so it runs in a later stage and receives \
+             their results. A planner runs `after` the scouts that feed it, never in the same stage. \
+             This applies to EVERY kind of task, not just building things: answering a question about \
+             the code, tracking down a bug, reviewing a change, refactoring, or auditing all fan out \
+             the same way. Delegate the reading and exploring to them; you synthesize and decide.",
         ),
         enclose(
             "align",
@@ -243,9 +241,9 @@ mod tests {
         assert!(p.contains("in PARALLEL"));
         assert!(p.contains("one `run_subagents` call"));
         assert!(p.contains("EVERY kind of task"));
-        // dependency-aware: map a DAG, don't co-run a consumer with its producer
-        assert!(p.contains("map the DEPENDENCIES"));
-        assert!(p.contains("NEVER launch a planner"));
+        // dependency-aware: map a DAG and express it with `after` (a planner after its scouts)
+        assert!(p.contains("Map the DEPENDENCIES"));
+        assert!(p.contains("A planner runs `after` the scouts"));
         // 3. verify beyond a shadow of a doubt, matched to the kind of work
         assert!(p.contains("beyond a shadow of a doubt"));
         assert!(p.contains("Check your work no matter what the task was"));
