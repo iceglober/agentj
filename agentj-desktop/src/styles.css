@@ -265,8 +265,24 @@ button,
 /* tier 2 — sessions of the active project */
 .tier2 {
   height: 28px;
-  padding: 3px 6px 0 34px;
+  padding: 3px 6px 0 6px;
   background: var(--panel);
+}
+
+/* subtle tier labels: "Projects" over "Sessions" */
+.tier-label {
+  align-self: flex-end;
+  flex: 0 0 auto;
+  padding: 0 9px 5px 4px;
+  font-size: 9px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.tier2 .tier-label {
+  padding-left: 24px;
 }
 .stab {
   display: inline-flex;

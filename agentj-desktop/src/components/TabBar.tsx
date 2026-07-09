@@ -141,6 +141,7 @@ export function TabBar({
           onOpenShortcuts={onOpenShortcuts}
           onOpenTools={onOpenTools}
         />
+        <span className="tier-label">Projects</span>
         <div className="tabs">
           {projects.map((p) => (
             <button
@@ -164,6 +165,7 @@ export function TabBar({
 
       {/* tier 2 — sessions of the active project */}
       <div className="tier tier2">
+        <span className="tier-label">Sessions</span>
         <div className="tabs">
           {tier2.map((s) => {
             const live = runningIds.has(s.id);
