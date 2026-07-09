@@ -2,7 +2,7 @@
 
 A blueprint is a self-contained HTML page you save with `save_artifact(name, format:"html")`; it opens
 in the user's browser so you can align on a design BEFORE building. Its job is to get the user to
-DECIDE. Four things make a good one.
+DECIDE. Five things make a good one.
 
 ## 1. Surface the decisions (this is the point)
 - Find the 2–4 open choices that actually change the outcome (e.g. store: in-memory vs shared;
@@ -13,7 +13,7 @@ DECIDE. Four things make a good one.
 - Lead with the decisions; keep rationale to a phrase. The user should be able to make every call in
   under a minute.
 
-## 2. High-fidelity mockups
+## 2. High-fidelity, self-contained mockups
 - Make any UI mock look like the REAL product — real copy, real spacing, real components, real
   states — not grey wireframe boxes. Only drop to greyscale wireframe when STRUCTURE (not look) is
   the actual question.
@@ -22,7 +22,27 @@ DECIDE. Four things make a good one.
 - Design tokens as CSS custom properties at `:root` (color, type scale, spacing, radius) and reuse
   them; that keeps the mock coherent and easy to restyle.
 
-## 3. Responsive and operable
+## 3. Don't default to the AI look — these are YOUR reflexes
+You are a Claude model; left unprompted you converge on the same tells. Decide against them.
+- **Name the aesthetic in 2–3 words FIRST** (e.g. "warm editorial", "brutalist utility", "clinical
+  precision"). "Clean and modern" is the absence of a decision, and it shows.
+- **Break the defaults you reach for unprompted:** nested cards (card-in-card), the safe sans
+  (Inter / Roboto / system-ui), the purple triplet (`#6366F1` / `#8B5CF6` / `#A855F7`), cyan-on-dark
+  "dashboard", and purple→blue gradients. If you typed one without deciding, change it.
+- **Type:** pick a face for the mood (geometric sans = precision, humanist serif = warmth, slab =
+  authority); monospace only for real code or data.
+- **Color:** build from mood → a base hue; avoid pure `#000`/`#fff` (use tinted greys and hue-shifted
+  shadows); set hierarchy by weight > size > color, not gradient text.
+- **Layout:** vary the presentation — a hero, a list, a table, a callout — instead of the same card
+  3–6×; left-align body text; space proportionally (tight within a group, generous between).
+- **Detail:** vary shadow depth to signal hierarchy (not one uniform `0.08–0.12` alpha everywhere);
+  add blur/glow/animation only when it serves communication; hover only on interactive things.
+- **Copy:** specific and verifiable over "streamline / seamless / best-in-class"; `01 / 02 / 03` only
+  for a real sequence; skip the "Not X. Y." cadence and the em-dash habit.
+- **One signature move.** Give the page a single memorable element and keep everything around it
+  calm. Uniform restraint is itself a tell — earn character with 1–3 expressive moments, not five.
+
+## 4. Responsive and operable
 - Fluid layout (flex/grid, %/rem, `max-width:100%` on media); it must reflow down to a phone width
   with no horizontal overflow. Wide content (tables, diagrams) scrolls inside its own container.
 - Semantic HTML (`header/nav/main/section/button`); touch targets ≥ 44×44px; include a
@@ -33,7 +53,7 @@ DECIDE. Four things make a good one.
   know. Function before decoration — the mock must be operable at a glance (clear affordances,
   feedback, recognition over recall).
 
-## 4. If it shows data
+## 5. If it shows data
 - Choose the encoding that tells the truth (bar for comparison, line for trend, not a pie for many
   slices); label axes; never distort a scale to make a point.
 
