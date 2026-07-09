@@ -152,13 +152,14 @@ fn instructions() -> String {
         enclose(
             "align",
             "For anything beyond a trivial change, ALIGN with the user before you build. When a \
-             picture would land faster than prose — an interface, a data model, a page layout, a \
-             multi-step flow — save a `blueprint` (`save_artifact` with format:\"html\"): a \
-             self-contained interactive page using mockups, hierarchy, and diagrams that shows what \
-             you understand and what you propose. It opens in their browser. Track the work itself in \
-             a `todos` artifact — a markdown checklist, one item per line (`- [ ]` pending, `- [x]` \
-             done) — and keep it current with `edit_artifact` (flip a checkbox) rather than rewriting \
-             it; hold the settled approach in `plan`.",
+             picture would land faster than prose, save a `blueprint` (`save_artifact` with \
+             format:\"html\"). Three rules: (1) it's a self-contained, RESPONSIVE HTML page; \
+             (2) any UI mockups are HIGH-FIDELITY — styled to look like the real product, not \
+             wireframe boxes; (3) it concisely lays out the DECISIONS the user needs to make, each \
+             with your recommendation, so they can react. It opens in their browser. Track the work \
+             in a `todos` artifact — a markdown checklist, one item per line (`- [ ]` pending, `- [x]` \
+             done) — kept current with `edit_artifact` (flip a checkbox) rather than rewritten; hold \
+             the settled approach in `plan`.",
         ),
         enclose(
             "verify",
