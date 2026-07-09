@@ -354,6 +354,44 @@ button,
   color: var(--err);
 }
 
+/* tier 3 — view switch (Chat / Blueprint) for the active session */
+.tier3 {
+  height: 26px;
+  padding: 2px 6px 0 6px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--bevel-shadow);
+}
+.tier3 .tier-label {
+  padding-left: 44px;
+}
+.vtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 21px;
+  padding: 0 12px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  bottom: -1px;
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
+    var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+.vtab.active {
+  height: 23px;
+  background: var(--panel);
+  font-weight: bold;
+  color: var(--sel);
+  border-bottom-color: var(--panel);
+  z-index: 2;
+}
+
 /* shared "+" new-tab button — small raised 3D gray button */
 .newtab {
   align-self: center;
@@ -795,20 +833,14 @@ button,
   color: var(--t-faint);
 }
 
-/* ---- blueprint pane --------------------------------------------------- */
+/* ---- blueprint view (tier-3 tab) — fills the whole body ---------------- */
 .blueprint {
-  flex: 0 0 0;
-  width: 0;
+  flex: 1 1 auto;
   min-width: 0;
   background: var(--panel);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: width 0.2s ease, flex-basis 0.2s ease;
-}
-.blueprint.open {
-  flex-basis: 46%;
-  width: 46%;
   border: 1px solid;
   border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
     var(--bevel-lightest);
@@ -869,30 +901,6 @@ button,
   background: #fff;
 }
 
-/* collapsed-state reopen chip */
-.bpchip {
-  position: absolute;
-  right: 12px;
-  bottom: 74px;
-  font-family: var(--sans);
-  font-size: 11px;
-  color: var(--ink);
-  background: var(--panel);
-  padding: 3px 9px;
-  cursor: pointer;
-  z-index: 5;
-  border: 1px solid;
-  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
-    var(--bevel-lightest);
-  box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow);
-}
-.bpchip:active {
-  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
-    var(--bevel-shadow);
-  box-shadow: inset 1px 1px 0 var(--bevel-dark),
-    inset -1px -1px 0 var(--bevel-light);
-}
 
 /* ---- classic gray dialog boxes: shared button + title-bar + checkbox --- */
 /* Raised 3D gray push button */

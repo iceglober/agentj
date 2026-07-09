@@ -55,7 +55,8 @@ export interface SessionState {
   events: StreamEvent[];
   running: boolean;
   blueprint: Blueprint | null;
-  bpOpen: boolean;
+  // Which full-width view the session shows: the chat, or the blueprint (tier-3 tabs).
+  view: "chat" | "blueprint";
   // Raw markdown of this session's `todos` artifact; null until fetched / if absent.
   todos: string | null;
 }
@@ -74,7 +75,7 @@ export interface SessionStore {
 
   send: (prompt: string) => Promise<void>;
   interrupt: () => Promise<void>;
-  openBlueprint: (open: boolean) => void;
+  setView: (view: "chat" | "blueprint") => void;
   // Clear one session's transcript display; leaves backend/model history alone.
   clearEvents: (id: string) => void;
 
@@ -91,7 +92,7 @@ function freshSlice(meta: SessionMeta): SessionState {
   const events: StreamEvent[] = meta.notice
     ? [{ kind: "notice", data: meta.notice }]
     : [];
-  return { meta, events, running: false, blueprint: null, bpOpen: false, todos: null };
+  return { meta, events, running: false, blueprint: null, view: "chat", todos: null };
 }
 
 export function useSessions(): SessionStore {
@@ -156,7 +157,8 @@ export function useSessions(): SessionStore {
 
     listen<BlueprintEvent>("blueprint", (e) => {
       const { sessionId, name, html } = e.payload;
-      patch(sessionId, (s) => ({ ...s, blueprint: { name, html }, bpOpen: true }));
+      // A new/updated blueprint is the alignment moment — surface it full-width.
+      patch(sessionId, (s) => ({ ...s, blueprint: { name, html }, view: "blueprint" }));
     }).then(track);
 
     // The agent edited a session's todos — reflect the new markdown live.
@@ -285,11 +287,11 @@ export function useSessions(): SessionStore {
     patch(id, (s) => ({ ...s, running: false }));
   }, [patch]);
 
-  const openBlueprint = useCallback(
-    (open: boolean) => {
+  const setView = useCallback(
+    (view: "chat" | "blueprint") => {
       const id = activeIdRef.current;
       if (!id) return;
-      patch(id, (s) => ({ ...s, bpOpen: open }));
+      patch(id, (s) => ({ ...s, view }));
     },
     [patch],
   );
@@ -344,7 +346,7 @@ export function useSessions(): SessionStore {
     close,
     send,
     interrupt,
-    openBlueprint,
+    setView,
     clearEvents,
     inspectRepo,
     provisionWorktree,

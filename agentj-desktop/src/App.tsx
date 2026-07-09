@@ -254,6 +254,9 @@ export function App() {
   }
 
   const hasBlueprint = active?.blueprint != null;
+  // Full-width blueprint view, or chat. Guard against a stale "blueprint" view
+  // with no blueprint (shouldn't happen — view only flips on arrival — but cheap).
+  const showBlueprint = hasBlueprint && active?.view === "blueprint";
 
   return (
     <div className="app">
@@ -271,41 +274,42 @@ export function App() {
         onOpenSettings={() => setModal("settings")}
         onOpenShortcuts={() => setModal("shortcuts")}
         onOpenTools={() => setModal("tools")}
+        hasBlueprint={hasBlueprint}
+        blueprintName={active?.blueprint?.name ?? null}
+        view={showBlueprint ? "blueprint" : "chat"}
+        onSelectView={session.setView}
       />
 
       <div className="body">
-        {session.activeId && (
-          <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
-        )}
-
-        <div className="chat">
-          <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
-          <StatusRow
-            running={active?.running ?? false}
-            activity={derived.activity}
-            totalTokens={derived.totalTokens}
-            sawDone={derived.sawDone}
+        {showBlueprint ? (
+          <BlueprintPane
+            blueprint={active?.blueprint ?? null}
+            onClose={() => session.setView("chat")}
           />
-          <InputRow
-            onSend={session.send}
-            onInterrupt={session.interrupt}
-            running={active?.running ?? false}
-            commands={COMMANDS}
-            onRunCommand={runCommand}
-          />
+        ) : (
+          <>
+            {session.activeId && (
+              <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
+            )}
 
-          {hasBlueprint && !active?.bpOpen && (
-            <div className="bpchip" onClick={() => session.openBlueprint(true)}>
-              ⧉ blueprint
+            <div className="chat">
+              <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
+              <StatusRow
+                running={active?.running ?? false}
+                activity={derived.activity}
+                totalTokens={derived.totalTokens}
+                sawDone={derived.sawDone}
+              />
+              <InputRow
+                onSend={session.send}
+                onInterrupt={session.interrupt}
+                running={active?.running ?? false}
+                commands={COMMANDS}
+                onRunCommand={runCommand}
+              />
             </div>
-          )}
-        </div>
-
-        <BlueprintPane
-          blueprint={active?.blueprint ?? null}
-          open={active?.bpOpen ?? false}
-          onClose={() => session.openBlueprint(false)}
-        />
+          </>
+        )}
       </div>
 
       <StatusBar meta={active?.meta ?? null} />
