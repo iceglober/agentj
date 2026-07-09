@@ -24,6 +24,7 @@ pub enum AgentType {
 /// Read-only built-ins available to every investigator type.
 const READ_ONLY: &[&str] = &[
     "read_file", "list_dir", "glob", "grep", "mcp_find_tools", "job_check", "read_artifact",
+    "read_skill",
 ];
 
 impl AgentType {

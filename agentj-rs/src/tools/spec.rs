@@ -47,6 +47,11 @@ pub fn tool_specs(
             }, "required": ["path", "start_line", "end_line", "expect", "content"] }),
         },
         ToolSpec {
+            name: "read_skill".into(),
+            description: "Read a built-in agentj skill (design brief) on demand. Available: \"blueprint\" — how to build a high-fidelity, responsive HTML blueprint that surfaces the DECISIONS the user must make. Read the relevant skill BEFORE doing that kind of work; it's the depth behind the one-line reminders in your instructions.".into(),
+            parameters: json!({ "type": "object", "properties": { "name": { "type": "string", "description": "skill name, e.g. \"blueprint\"" } }, "required": ["name"] }),
+        },
+        ToolSpec {
             name: "list_dir".into(),
             description: "List the entries of a directory (relative to repo root). Directories end with /.".into(),
             parameters: json!({ "type": "object", "properties": { "path": { "type": "string" } } }),

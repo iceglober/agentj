@@ -74,9 +74,15 @@ pub struct Tools {
 /// from an MCP tool (always passes through).
 const BUILTINS: &[&str] = &[
     "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "glob", "grep", "bash",
-    "save_artifact", "edit_artifact", "read_artifact", "job_start", "job_check",
+    "save_artifact", "edit_artifact", "read_artifact", "read_skill", "job_start", "job_check",
     "job_stop", "mcp_find_tools", "run_subagents",
 ];
+
+/// Built-in skills shipped with agentj — reference docs the model reads on demand via `read_skill`,
+/// so their depth loads only when the work calls for it instead of bloating every prompt. Keyed by
+/// name; `read_skill` returns the raw markdown. `blueprint` is the design brief for the high-fidelity,
+/// responsive, decision-surfacing HTML the `<align>` doctrine tells the model to build.
+const SKILLS: &[(&str, &str)] = &[("blueprint", include_str!("../skills/blueprint.md"))];
 
 /// The value of `args[key]` when it's a string — the common shape of tool arguments.
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -267,6 +273,16 @@ impl Tools {
             "save_artifact" => self.save_artifact(args),
             "edit_artifact" => self.edit_artifact(args),
             "read_artifact" => self.read_artifact(args),
+            "read_skill" => match arg_str(args, "name") {
+                Some(n) => match SKILLS.iter().find(|(k, _)| *k == n) {
+                    Some((_, body)) => ToolOutcome::ok((*body).to_string()),
+                    None => {
+                        let avail = SKILLS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ");
+                        ToolOutcome::err(format!("error: no skill `{n}` (available: {avail})"))
+                    }
+                },
+                None => ToolOutcome::err("error: read_skill needs a name"),
+            },
             "job_start" => self.job_start(args).await,
             "job_check" => ToolOutcome::ok(
                 self.jobs

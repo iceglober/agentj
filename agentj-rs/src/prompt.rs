@@ -153,10 +153,10 @@ fn instructions() -> String {
             "align",
             "For anything beyond a trivial change, ALIGN with the user before you build. When a \
              picture would land faster than prose, save a `blueprint` (`save_artifact` with \
-             format:\"html\"). Three rules: (1) it's a self-contained, RESPONSIVE HTML page; \
-             (2) any UI mockups are HIGH-FIDELITY — styled to look like the real product, not \
-             wireframe boxes; (3) it concisely lays out the DECISIONS the user needs to make, each \
-             with your recommendation, so they can react. It opens in their browser. Track the work \
+             format:\"html\") — a self-contained, RESPONSIVE HTML page with HIGH-FIDELITY mockups \
+             that concisely lays out the DECISIONS the user needs to make, each with your \
+             recommendation. Read the `blueprint` skill first (`read_skill(\"blueprint\")`) — it's \
+             the design brief for doing each of those well. It opens in their browser. Track the work \
              in a `todos` artifact — a markdown checklist, one item per line (`- [ ]` pending, `- [x]` \
              done) — kept current with `edit_artifact` (flip a checkbox) rather than rewritten; hold \
              the settled approach in `plan`.",
