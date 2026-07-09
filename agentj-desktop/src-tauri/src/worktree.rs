@@ -55,9 +55,16 @@ pub fn base_repo(path: &str) -> Option<String> {
 }
 
 pub fn current_branch(path: &str) -> Option<String> {
-    git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+    // symbolic-ref reports the branch name even for an UNBORN branch (fresh repo / orphan worktree);
+    // it errors only on a truly detached HEAD, where we fall back to the abbrev name.
+    git(path, &["symbolic-ref", "--short", "HEAD"])
         .ok()
-        .filter(|b| !b.is_empty() && b != "HEAD")
+        .filter(|b| !b.is_empty())
+        .or_else(|| {
+            git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+                .ok()
+                .filter(|b| !b.is_empty() && b != "HEAD")
+        })
 }
 
 /// The remote's default branch: `origin/HEAD` if set, else the first of origin/main|master, else main.
@@ -186,17 +193,23 @@ pub fn provision(base: &str) -> Result<Provisioned, String> {
     if !is_git(base) {
         return Err(format!("not a git repository: {base}"));
     }
-    // An empty repo (no commits) has nothing to branch a worktree from — work in it directly and
-    // let agentj make the first commit. Future sessions get their own worktree once it has a commit.
+    // An empty repo (no commits) has nothing to branch a worktree from. Birth the default branch
+    // with an initial commit — the idiomatic first step of any repo — so this and every future
+    // session can branch a normal worktree off it (an orphan branch would leave `main` unborn
+    // forever, so every session would keep hitting this path).
+    let mut fresh_notice = None;
     if !ref_exists(base, "HEAD") {
-        return Ok(Provisioned {
-            path: base.to_string(),
-            notice: Some(
-                "This repository has no commits yet — agentj is working directly in it and will make the first commit here. Once it has a commit (and a remote), new sessions get their own worktree.".into(),
-            ),
-        });
+        git(base, &["commit", "--allow-empty", "-m", "Initial commit"]).map_err(|e| {
+            format!("couldn't create the first commit — set your git identity (`git config user.name` / `user.email`) and try again. ({e})")
+        })?;
+        let born = current_branch(base).unwrap_or_else(|| "main".into());
+        fresh_notice = Some(format!(
+            "Fresh repository — created the initial commit on `{born}` and branched this worktree from it. Add a remote and push when you're ready."
+        ));
     }
-    let (start, notice) = start_point(base)?;
+
+    let (start, start_notice) = start_point(base)?;
+    let notice = fresh_notice.or(start_notice);
     let id = short_id();
     let branch = format!("agentj/{id}");
     let dir = worktrees_dir()
