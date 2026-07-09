@@ -186,6 +186,16 @@ pub fn provision(base: &str) -> Result<Provisioned, String> {
     if !is_git(base) {
         return Err(format!("not a git repository: {base}"));
     }
+    // An empty repo (no commits) has nothing to branch a worktree from — work in it directly and
+    // let agentj make the first commit. Future sessions get their own worktree once it has a commit.
+    if !ref_exists(base, "HEAD") {
+        return Ok(Provisioned {
+            path: base.to_string(),
+            notice: Some(
+                "This repository has no commits yet — agentj is working directly in it and will make the first commit here. Once it has a commit (and a remote), new sessions get their own worktree.".into(),
+            ),
+        });
+    }
     let (start, notice) = start_point(base)?;
     let id = short_id();
     let branch = format!("agentj/{id}");
