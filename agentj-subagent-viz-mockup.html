@@ -1,0 +1,227 @@
+<meta charset="utf-8">
+<title>agentj — subagent wave visualization options</title>
+<style>
+  :root{
+    --face:#ece9d8; --face2:#d4d0c8; --field:#fff; --line:#808080;
+    --ink:#000; --dim:#4a4a4a; --faint:#6e6e6e;
+    --accent:#2f6fe0; --ok:#0a5e2a; --err:#aa0000; --warn:#9a6600;
+    --scout:#2f6fe0; --exec:#0a5e2a; --review:#8a4bd6; --plan:#9a6600;
+    --bl:#fff; --blt:#dfdccf; --bsh:#808080; --bdk:#404040;
+    --sans:Tahoma,Verdana,Geneva,"DejaVu Sans",sans-serif;
+  }
+  *{box-sizing:border-box;border-radius:2px}
+  body{margin:0;background:#c9c6b8;color:var(--ink);font-family:var(--sans);font-size:12px;
+       -webkit-font-smoothing:antialiased;line-height:1.4;padding:24px}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:#33301f;font-size:12px;margin-bottom:14px}
+  .raised{border:1px solid;border-color:var(--bl) var(--bdk) var(--bdk) var(--bl);
+          box-shadow:inset 1px 1px 0 var(--blt),inset -1px -1px 0 var(--bsh)}
+  .sunken{border:1px solid;border-color:var(--bsh) var(--bl) var(--bl) var(--bsh);
+          box-shadow:inset 1px 1px 0 var(--bdk),inset -1px -1px 0 var(--blt)}
+  .bar{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .btn{background:var(--face);padding:4px 12px;cursor:pointer;font-family:var(--sans);font-size:12px;
+       border:1px solid;border-color:var(--bl) var(--bdk) var(--bdk) var(--bl);
+       box-shadow:inset 1px 1px 0 var(--blt),inset -1px -1px 0 var(--bsh);transition:background .09s}
+  .btn:active,.btn.on{border-color:var(--bsh) var(--bl) var(--bl) var(--bsh);
+       box-shadow:inset 1px 1px 0 var(--bdk),inset -1px -1px 0 var(--blt);background:#e4e1d2}
+  .bar .lbl{color:#33301f}
+
+  /* option block */
+  .opt{background:var(--face);padding:14px 16px 16px;margin-bottom:16px}
+  .opt.rec{outline:2px solid var(--accent);outline-offset:2px}
+  .opt h2{font-size:13px;margin:0 0 2px;display:flex;align-items:center;gap:8px}
+  .tag{font-size:10px;font-weight:bold;color:#fff;background:var(--accent);padding:1px 6px}
+  .tag.rec{background:var(--ok)}
+  .opt .cap{color:var(--dim);font-size:11px;margin:0 0 12px}
+  .opt .cap b{color:var(--ink)}
+  .lib{color:var(--faint);font-size:10.5px;margin-top:10px;font-style:italic}
+
+  /* ===== the current (bad) baseline ===== */
+  .console{background:var(--field);padding:8px 10px;font-size:12px;color:#000;white-space:pre;overflow-x:auto}
+  .console .rail{color:var(--faint)}
+  .console .ok{color:var(--ok)}
+
+  /* ===== shared bits ===== */
+  .chip{font-size:9.5px;font-weight:bold;color:#fff;padding:1px 6px;text-transform:uppercase;letter-spacing:.3px}
+  .chip.scout{background:var(--scout)} .chip.executor{background:var(--exec)}
+  .chip.reviewer{background:var(--review)} .chip.planner{background:var(--plan)}
+  .tok{color:var(--faint);font-size:11px}
+  .dur{color:var(--faint);font-size:11px}
+  .spin{display:inline-block;width:11px;text-align:center;color:var(--warn);font-weight:bold}
+
+  /* ===== A: task rows ===== */
+  .rows{background:var(--field);padding:0}
+  .whead{display:flex;justify-content:space-between;padding:6px 10px;background:var(--face2);
+         border-bottom:1px solid var(--line);font-size:11px}
+  .whead b{color:var(--ink)}
+  .row{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid #e2dfd0}
+  .row:last-child{border-bottom:none}
+  .row .title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .st{display:inline-flex;align-items:center;gap:5px;color:var(--dim);font-size:11px}
+  .row .st.done{color:var(--ok)} .row .st.fail{color:var(--err)}
+  .wfoot{display:flex;justify-content:space-between;padding:6px 10px;background:var(--face2);
+         border-top:1px solid var(--line);font-size:11px;color:var(--dim)}
+  .wfoot b{color:var(--ink)}
+  .pbar{height:3px;background:#e2dfd0;margin:6px 10px 0;overflow:hidden}
+  .pbar>i{display:block;height:100%;background:var(--accent);width:40%;
+          animation:march 1.1s linear infinite}
+  @keyframes march{0%{margin-left:-40%}100%{margin-left:100%}}
+
+  /* ===== C / hybrid: duration bars ===== */
+  .lane{display:flex;align-items:center;gap:9px;padding:6px 10px;border-bottom:1px solid #e2dfd0}
+  .lane:last-child{border-bottom:none}
+  .lane .who{flex:0 0 210px;display:flex;align-items:center;gap:8px;min-width:0}
+  .lane .who .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .track{flex:1 1 auto;height:16px;background:#f2f0e6;position:relative;border:1px solid #d8d5c6}
+  .track>.fill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.85}
+  .track>.fill.run{background:repeating-linear-gradient(45deg,#3f7ce6,#3f7ce6 6px,#5b93ef 6px,#5b93ef 12px)}
+  .track>.cap2{position:absolute;top:1px;font-size:9.5px;color:#204}
+  .axis{display:flex;justify-content:space-between;padding:2px 10px 0 220px;color:var(--faint);font-size:9.5px}
+
+  /* ===== B: graph ===== */
+  .graph{background:var(--field);padding:16px;display:flex;align-items:center;gap:0;overflow-x:auto}
+  .node{background:var(--face);padding:6px 9px;font-size:11px;white-space:nowrap;
+        border:1px solid;border-color:var(--bl) var(--bdk) var(--bdk) var(--bl);
+        box-shadow:inset 1px 1px 0 var(--blt),inset -1px -1px 0 var(--bsh)}
+  .node.done{border-left:3px solid var(--ok)}
+  .node.run{border-left:3px solid var(--warn)}
+  .col{display:flex;flex-direction:column;gap:14px}
+  .edge{width:34px;height:2px;background:var(--line);flex:0 0 auto}
+  .edgewrap{display:flex;flex-direction:column;justify-content:center;gap:14px;align-self:stretch}
+  .foot{color:#33301f;font-size:11px;margin-top:8px;border-top:1px solid #b7b4a6;padding-top:10px}
+</style>
+
+<div class="wrap">
+  <h1>Subagent wave — visualization options</h1>
+  <div class="sub">Replacing the ASCII fork/join rail. Rendered in the app's retro-remastered theme so it's directly comparable. Toggle the run state; nothing in the app changes until you pick.</div>
+
+  <div class="bar">
+    <span class="lbl">State:</span>
+    <button class="btn on" id="b-run" onclick="setState('run')">Running</button>
+    <button class="btn" id="b-done" onclick="setState('done')">Done</button>
+    <span class="lbl" style="margin-left:auto">sample: <b>run_subagents</b> · wave 1 · 2 scouts in parallel</span>
+  </div>
+
+  <!-- BASELINE -->
+  <div class="opt">
+    <h2>Now — ASCII rail <span class="tag" style="background:#aa0000">the problem</span></h2>
+    <div class="cap">Box-drawing chars don't align in a proportional font; status/timing/tokens are cramped into one dim line.</div>
+    <div class="console"><span class="rail">├─┬─</span> ● Architecture options · bash({"command":"pwd && git status…"}) <span class="rail">— 1.1k tok</span>
+<span class="rail">│ ╰─</span> ● Repo survey · bash({"command":"git status --branch…"}) <span class="rail">— 1.5k tok</span>
+<span class="rail">├─╯  wave 1 · 0/2 · 0ms · 2.6k tok</span></div>
+  </div>
+
+  <!-- A -->
+  <div class="opt">
+    <h2>Option A — Task rows <span class="tag">custom, inline</span></h2>
+    <div class="cap">A small group box: a header, one scannable row per subagent (type chip · title · live status · tokens · elapsed), and a join footer. An indeterminate bar marks running rows. <b>Best fit for an inline transcript.</b></div>
+    <div class="rows raised" id="A"></div>
+    <div class="lib">Library: none needed — a purpose-built component. (This is what most agent UIs do.)</div>
+  </div>
+
+  <!-- HYBRID (recommended) -->
+  <div class="opt rec">
+    <h2>Option D — Rows + duration bars <span class="tag rec">recommended</span></h2>
+    <div class="cap">Option A, plus each row carries a <b>duration bar</b> so you SEE the parallelism and where wall-clock goes (the wave is as slow as its slowest agent). Running bars animate; finished bars show their span. Scannable and temporal, still fits inline.</div>
+    <div class="rows raised" id="D"></div>
+    <div class="lib">Library: none needed (thin CSS bars). If you later want a full gantt: <b>visx</b> or <b>nivo</b>.</div>
+  </div>
+
+  <!-- C -->
+  <div class="opt">
+    <h2>Option C — Timeline lanes <span class="tag">temporal</span></h2>
+    <div class="cap">A mini time axis with one lane per agent — bars start together and end at each finish. Makes overlap and the wall-clock obvious, but takes more vertical space and reads less like a task list.</div>
+    <div class="rows raised">
+      <div id="C"></div>
+      <div class="axis"><span>0s</span><span>10s</span><span>20s</span><span>25s</span></div>
+    </div>
+    <div class="lib">Library: <b>visx</b> / <b>nivo</b> for a real gantt, or custom CSS (shown).</div>
+  </div>
+
+  <!-- B -->
+  <div class="opt">
+    <h2>Option B — Fork/join graph <span class="tag">DAG</span></h2>
+    <div class="cap">An actual node graph: the delegate node fans to N task nodes and joins. Great for a <b>dedicated, zoomable panel</b> (like the old epic DAG), but an interactive canvas inside a scrolling log is awkward and heavy.</div>
+    <div class="graph raised" id="B"></div>
+    <div class="lib">Library: <b>React Flow (@xyflow/react)</b> — the standard for node/DAG graphs (auto-layout via <b>dagre</b>/<b>elkjs</b>).</div>
+  </div>
+
+  <div class="foot">My take: <b>Option D</b> (rows + duration bars) for the inline transcript — it fixes the alignment/scan problems and adds the one genuinely useful extra (where the parallel wall-clock goes), with zero heavy deps. Keep <b>React Flow</b> in reserve if you want to bring back a full zoomable DAG as its own panel. Tell me which and I'll build it into the app.</div>
+</div>
+
+<script>
+const AGENTS = [
+  { name:"Architecture options", type:"scout", tokens:"1.1k", dur:24.8, span:99, run:{status:"comparing app stacks…", pct:70} },
+  { name:"Repo survey",          type:"scout", tokens:"1.5k", dur:11.4, span:46, run:{status:"reading git status…", pct:55} },
+];
+let STATE = "run";
+
+function rowsHTML(withBar){
+  return AGENTS.map(a=>{
+    const done = STATE==="done";
+    const st = done
+      ? `<span class="st done">✓ ${a.name==="Repo survey"?"surveyed repo structure":"compared app stacks"}</span>`
+      : `<span class="st"><span class="spin">◍</span> ${a.run.status}</span>`;
+    const meta = `<span class="tok">${a.tokens} tok</span>${done?` <span class="dur">· ${a.dur}s</span>`:""}`;
+    const bar = withBar ? `
+      <div class="track" style="flex:0 0 200px">
+        <div class="fill ${done?"":"run"}" style="width:${done?a.span:a.run.pct}%"></div>
+        <div class="cap2" style="left:${done?Math.min(a.span,80):a.run.pct}%;transform:translateX(4px)">${done?a.dur+"s":""}</div>
+      </div>` : "";
+    return `<div class="row">
+      <span class="chip ${a.type}">${a.type}</span>
+      <span class="title">${a.name}</span>
+      ${bar}
+      ${st}
+      ${meta}
+    </div>${!withBar && !done ? `<div class="pbar"><i></i></div>`:""}`;
+  }).join("");
+}
+function wave(){
+  const done = STATE==="done";
+  return {
+    head:`<div class="whead"><span><b>run_subagents</b> · wave 1 · 2 in parallel</span><span>${done?"":'<span class="spin">◍</span> running'}</span></div>`,
+    foot:`<div class="wfoot"><span>${done?"<b>2/2 ok</b>":"0/2 done"}</span><span>2.6k tok${done?" · 24.8s wall (slowest)":""}</span></div>`
+  };
+}
+function lanesHTML(){
+  const done = STATE==="done";
+  return AGENTS.map(a=>{
+    const pct = done ? a.span : a.run.pct;
+    return `<div class="lane">
+      <span class="who"><span class="chip ${a.type}">${a.type}</span><span class="nm">${a.name}</span></span>
+      <span class="track"><span class="fill ${done?"":"run"}" style="width:${pct}%"></span>
+        <span class="cap2" style="left:${Math.min(pct,86)}%;transform:translateX(5px)">${done?"✓ "+a.dur+"s":""}</span></span>
+    </div>`;
+  }).join("");
+}
+function graphHTML(){
+  const done = STATE==="done";
+  const cls = done?"done":"run";
+  const mark = done?"✓":"◍";
+  return `
+    <div class="node ${cls}">run_subagents<br><small style="color:#6e6e6e">wave 1</small></div>
+    <div class="edgewrap"><div class="edge"></div><div class="edge"></div></div>
+    <div class="col">
+      <div class="node ${cls}"><span class="chip scout">scout</span> Architecture options ${mark}</div>
+      <div class="node ${cls}"><span class="chip scout">scout</span> Repo survey ${mark}</div>
+    </div>
+    <div class="edgewrap"><div class="edge"></div><div class="edge"></div></div>
+    <div class="node ${cls}">join<br><small style="color:#6e6e6e">${done?"2/2 · 2.6k tok":"…"}</small></div>`;
+}
+function render(){
+  const w = wave();
+  document.getElementById("A").innerHTML = w.head + rowsHTML(false) + w.foot;
+  document.getElementById("D").innerHTML = w.head + rowsHTML(true) + w.foot;
+  document.getElementById("C").innerHTML = lanesHTML();
+  document.getElementById("B").innerHTML = graphHTML();
+}
+function setState(s){
+  STATE=s;
+  document.getElementById("b-run").classList.toggle("on",s==="run");
+  document.getElementById("b-done").classList.toggle("on",s==="done");
+  render();
+}
+render();
+</script>

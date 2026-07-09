@@ -54,60 +54,74 @@ function ToolLineRow({ line }: { line: ToolLine }) {
   );
 }
 
-function fmtTok(tokens: number | null): string {
-  return tokens != null ? ` · ${(tokens / 1000).toFixed(1)}k tok` : "";
-}
-
-// The fork/join subagent tray, mirroring the ratatui view:
-//   ├─┬─ ✓ desc · status — 8.1s · 3.2k tok
-//   │ ╰─ ✓ desc · status — 11.4s · 4.0k tok
+// The subagent wave: a group box with one row per subagent — type chip · title · duration bar ·
+// live status · tokens/elapsed — and a join footer. The bar shows each agent's share of the wave's
+// wall-clock (the slowest fills it), so the parallel spread is visible at a glance.
 //   ├─╯  wave 1 · 2/2 ok · 11.4s · 7.2k tok
+const KNOWN_TYPES = ["scout", "planner", "reviewer", "executor"];
+const fmtTokShort = (t: number | null): string =>
+  t && t > 0 ? `${(t / 1000).toFixed(1)}k` : "";
+
 function Tray({ wave }: { wave: Wave }) {
   const subs = wave.subagents;
   const n = subs.length;
   const okCount = subs.filter((s) => s.ok === true).length;
-  const maxElapsed = subs.reduce((m, s) => Math.max(m, s.elapsed_ms ?? 0), 0);
+  const doneCount = subs.filter((s) => s.done).length;
+  const maxElapsed = subs.reduce((m, s) => Math.max(m, s.elapsed_ms ?? 0), 1);
   const totalTok = subs.reduce((m, s) => m + (s.tokens ?? 0), 0);
-
-  const connector = (i: number): string => {
-    if (n === 1) return "├──";
-    if (i === 0) return "├─┬─";
-    if (i === n - 1) return "│ ╰─";
-    return "│ ├─";
-  };
-  const mark = (s: (typeof subs)[number]) =>
-    s.ok == null ? (
-      <span className="spin">◍</span>
-    ) : s.ok ? (
-      <span className="ok">✓</span>
-    ) : (
-      <span className="err">✗</span>
-    );
+  const allDone = doneCount === n;
 
   return (
-    <>
-      {subs.map((s, i) => (
-        <span className="tline" key={s.id}>
-          <span className="rail">{connector(i)}</span> {mark(s)} {s.desc}
-          {s.status ? <span className="rail"> · {s.status}</span> : null}
-          {s.elapsed_ms != null ? (
-            <span className="rail">
-              {" "}
-              — {fmtMs(s.elapsed_ms)}
-              {fmtTok(s.tokens)}
+    <div className="wave">
+      <div className="wave-head">
+        <span>
+          <b>run_subagents</b> · wave {wave.n} · {n} in parallel
+        </span>
+        <span>{allDone ? "" : <><span className="spin">◍</span> running</>}</span>
+      </div>
+
+      {subs.map((s) => {
+        const type = KNOWN_TYPES.includes(s.type) ? s.type : "other";
+        const running = s.ok == null;
+        // Done: bar length shows this agent's share of the wave's wall-clock (slowest = full).
+        const pct = running ? 100 : Math.max(6, ((s.elapsed_ms ?? 0) / maxElapsed) * 100);
+        const st = running ? s.status || "working…" : s.summary || (s.ok ? "done" : "failed");
+        return (
+          <div className="wrow" key={s.id}>
+            <span className={"wchip " + type}>{s.type || "sub"}</span>
+            <span className="wtitle" title={s.desc}>
+              {s.desc}
             </span>
-          ) : (
-            <span className="rail">{fmtTok(s.tokens)}</span>
-          )}
+            <span className="wtrack">
+              <span
+                className={"wfill" + (running ? " run" : s.ok ? "" : " fail")}
+                style={{ width: pct + "%" }}
+              />
+            </span>
+            <span className={"wst" + (running ? "" : s.ok ? " ok" : " err")}>
+              {running ? <span className="spin">◍</span> : s.ok ? "✓" : "✗"}{" "}
+              <span className="wst-txt" title={st}>
+                {st}
+              </span>
+            </span>
+            <span className="wmeta">
+              {fmtTokShort(s.tokens)}
+              {s.elapsed_ms != null ? ` · ${fmtMs(s.elapsed_ms)}` : ""}
+            </span>
+          </div>
+        );
+      })}
+
+      <div className="wave-foot">
+        <span>
+          {allDone ? <b>{okCount}/{n} ok</b> : `${doneCount}/${n} done`}
         </span>
-      ))}
-      <span className="tline">
-        <span className="rail">
-          ├─╯&nbsp;&nbsp;wave {wave.n} · {okCount}/{n} ok · {fmtMs(maxElapsed)}
-          {totalTok > 0 ? ` · ${(totalTok / 1000).toFixed(1)}k tok` : ""}
+        <span>
+          {totalTok > 0 ? `${(totalTok / 1000).toFixed(1)}k tok` : ""}
+          {allDone ? ` · ${fmtMs(maxElapsed)} wall` : ""}
         </span>
-      </span>
-    </>
+      </div>
+    </div>
   );
 }
 

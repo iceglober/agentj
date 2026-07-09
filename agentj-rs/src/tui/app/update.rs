@@ -173,7 +173,7 @@ impl App {
                 self.since = Instant::now(); // per-step timer: time in THIS thinking stretch
                 self.set_effect(format!("done in {}", fmt_ms(elapsed_ms)));
             }
-            AgentEvent::SubagentStart { id, desc } => {
+            AgentEvent::SubagentStart { id, desc, .. } => {
                 let now = Instant::now();
                 if self.subagents.is_empty() {
                     // The tray materializes: cells coalesce into place over ~a quarter second.

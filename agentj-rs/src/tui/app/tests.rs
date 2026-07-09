@@ -421,7 +421,7 @@ fn tray_collapses_into_transcript_summaries_when_the_delegate_batch_lands() {
     }));
     a.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
         id: 0,
-        desc: "port the tests".to_string(),
+        desc: "port the tests".to_string(),        agent_type: "scout".into(),
     }));
     a.on_ui(UiMsg::Agent(AgentEvent::SubagentProgress {
         id: 0,

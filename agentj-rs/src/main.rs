@@ -347,7 +347,7 @@ async fn main() {
                     elapsed_ms,
                     ..
                 } => println!("  → {summary} ({elapsed_ms}ms)"),
-                AgentEvent::SubagentStart { id, desc } => println!("↳[{id}] {desc}"),
+                AgentEvent::SubagentStart { id, desc, .. } => println!("↳[{id}] {desc}"),
                 AgentEvent::SubagentProgress { id, status } => println!("↳[{id}] {status}"),
                 AgentEvent::SubagentEnd {
                     id,

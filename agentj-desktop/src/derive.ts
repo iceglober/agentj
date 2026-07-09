@@ -144,6 +144,7 @@ export function derive(events: StreamEvent[]): Derived {
         const sub: Subagent = {
           id: ev.data.id,
           desc: ev.data.desc,
+          type: ev.data.agent_type,
           status: "",
           ok: null,
           elapsed_ms: null,

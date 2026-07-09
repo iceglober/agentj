@@ -20,6 +20,7 @@ export interface ToolEnd {
 export interface SubagentStart {
   id: number;
   desc: string;
+  agent_type: string;
 }
 export interface SubagentProgress {
   id: number;
@@ -142,6 +143,7 @@ export interface ToolLine {
 export interface Subagent {
   id: number;
   desc: string;
+  type: string;
   status: string;
   ok: boolean | null;
   elapsed_ms: number | null;

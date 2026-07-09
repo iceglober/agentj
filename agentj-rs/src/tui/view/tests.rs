@@ -155,7 +155,7 @@ fn tray_app(rows: &[(&str, &str, Option<bool>)]) -> super::super::app::App {
     for (i, (desc, status, done)) in rows.iter().enumerate() {
         app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
             id: i,
-            desc: desc.to_string(),
+            desc: desc.to_string(),        agent_type: "scout".into(),
         }));
         app.on_ui(UiMsg::Agent(AgentEvent::SubagentProgress {
             id: i,
@@ -356,7 +356,7 @@ fn frame_composes_markdown_status_meter_and_subagent_panel() {
     })));
     app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
         id: 0,
-        desc: "port editor tests".to_string(),
+        desc: "port editor tests".to_string(),        agent_type: "scout".into(),
     }));
 
     let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();

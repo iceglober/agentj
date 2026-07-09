@@ -114,7 +114,11 @@ pub(super) async fn run_delegate(
         let sem = sem.clone();
         let handle = set.spawn(async move {
             let _permit = sem.acquire_owned().await;
-            let _ = parent.send(AgentEvent::SubagentStart { id: i, desc: label });
+            let _ = parent.send(AgentEvent::SubagentStart {
+                id: i,
+                desc: label,
+                agent_type: kind.as_str().to_string(),
+            });
             let started = Instant::now();
             let prompt = match context {
                 Some(c) => format!("{task}\n\nContext:\n{c}"),
