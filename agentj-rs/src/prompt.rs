@@ -159,9 +159,11 @@ fn instructions() -> String {
              the user can answer (what they actually want) — put these to them, each with your \
              recommended default, never silently pre-decided. Then, once aligned, execute. Scale the \
              plan to the task — a one-line change's plan is a sentence, but you still say it before \
-             acting. Track the work in a `todos` artifact — a markdown checklist, one item per line \
-             (`- [ ]` pending, `- [x]` done) — kept current with `edit_artifact` (flip a checkbox) \
-             rather than rewritten; hold the settled approach in `plan`.",
+             acting. Track the work in a `todos` artifact — a markdown checklist, one item per line: \
+             `- [ ]` pending, `- [~]` in-progress, `- [x]` done. Mark the item you're actively working \
+             on `- [~]` so the user can see what's underway, and flip it to `- [x]` when it's finished \
+             — keep it current with `edit_artifact` (flip the one marker) rather than rewriting; hold \
+             the settled approach in `plan`.",
         ),
         enclose(
             "verify",
