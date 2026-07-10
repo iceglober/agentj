@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentj — interactive live view</title>
+<style>
+  :root {
+    --page: #0b0e12; --term: #12161c; --bar: #171d25; --edge: #262d38; --edge-soft: #1e242d;
+    --fg: #cdd4dd; --muted: #7f8994; --faint: #49525c;
+    --accent: #e08a4c; --ok: #5bb56a; --warn: #d6a340; --bad: #e0605a; --link: #6cb6ff;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--fg); font-family: var(--sans); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 22px 20px 40px; }
+  .hint { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 12px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .hint .k { color: var(--faint); }
+  .hint b { color: var(--accent); font-weight: 600; }
+  .hint .try { color: var(--fg); cursor: pointer; border-bottom: 1px dashed var(--edge); }
+  .hint .try:hover { border-color: var(--accent); color: var(--accent); }
+  .hint .reset { margin-left: auto; cursor: pointer; color: var(--faint); }
+  .hint .reset:hover { color: var(--fg); }
+
+  .screen { position: relative; display: flex; flex-direction: column; height: 78vh; min-height: 520px; background: var(--term); border: 1px solid var(--edge); border-radius: 9px; overflow: hidden; box-shadow: 0 16px 50px rgba(0,0,0,0.4); }
+  .sbar { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--bar); border-bottom: 1px solid var(--edge); font-family: var(--mono); font-size: 12px; flex: none; }
+  .sbar .brand { color: var(--accent); font-weight: 650; }
+  .sbar .sep { color: var(--faint); }
+  .sbar .ctx { color: var(--fg); }
+  .sbar .right { margin-left: auto; color: var(--muted); }
+  .sbar .spin { color: var(--accent); }
+
+  .work { flex: none; border-bottom: 1px solid var(--edge); background: #0f141a; padding: 11px 16px; font-family: var(--mono); font-size: 13px; }
+  .work:empty { display: none; }
+  .summary { margin-bottom: 9px; }
+  .summary .title { color: #e8edf2; font-weight: 650; }
+  .summary .meta { color: var(--muted); margin-left: 10px; }
+  .wdiv { border-top: 1px solid var(--edge-soft); margin: 9px 0; }
+  .ledger { display: grid; grid-template-columns: 96px 104px 1fr; gap: 3px 16px; align-items: center; }
+  .ledger .h { color: var(--faint); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; padding-bottom: 2px; }
+  .ledger .id { color: var(--fg); white-space: pre; }
+  .ledger .pr { color: var(--link); }
+  .ledger .detail { color: var(--muted); }
+  .ledger .id .sel { color: var(--accent); font-weight: 650; }
+  .chip.rev { color: var(--warn); } .chip.wk { color: var(--accent); } .chip.block { color: var(--bad); }
+  .chip.pend { color: var(--faint); } .chip.merged, .chip.pr { color: var(--ok); }
+  .chip.propen { color: var(--link); }
+  .activity { color: var(--fg); } .activity .who { color: var(--accent); }
+  .activity .vhint { float: right; color: var(--faint); }
+  .ehead { border-left: 2px solid var(--muted); padding-left: 12px; margin: 4px 0 10px; color: var(--muted); }
+  .ehead .id { color: var(--fg); }
+  .spine { display: inline-flex; gap: 6px; align-items: center; }
+  .spine .ph { color: var(--faint); } .spine .ph.done { color: var(--ok); } .spine .ph.cur { color: var(--accent); font-weight: 700; }
+  .spine .lnk { color: var(--faint); } .spine .now { color: var(--accent); margin-left: 12px; letter-spacing: 0.08em; }
+  .fitem { margin: 2px 0; } .fitem .muted { color: var(--muted); }
+
+  .convo { flex: 1; overflow-y: auto; padding: 14px 16px; font-family: var(--mono); font-size: 13px; line-height: 1.6; }
+  .turn { margin: 10px 0; }
+  .turn.user { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--fg); }
+  .turn.asst { padding-left: 14px; color: var(--fg); }
+  .turn.asst .li { color: #bcc4ce; }
+  .fold { color: var(--faint); padding-left: 14px; margin: 5px 0; cursor: pointer; }
+  .fold:hover { color: var(--muted); }
+  .toolline { color: #8b95a0; padding-left: 26px; }
+  .toolline .res { color: var(--faint); }
+  .note { color: var(--faint); padding-left: 14px; }
+  .placeholder { color: var(--faint); }
+
+  .composer { flex: none; display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--edge); background: #0d1218; }
+  .composer .p { color: var(--accent); font-family: var(--mono); }
+  .composer input { flex: 1; background: none; border: 0; outline: none; color: var(--fg); font-family: var(--mono); font-size: 13.5px; caret-color: var(--accent); }
+  .composer input::placeholder { color: var(--faint); }
+  .kbar { flex: none; padding: 7px 14px; border-top: 1px solid var(--edge); background: var(--bar); font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .kbar b { color: var(--muted); cursor: pointer; }
+  .kbar b:hover { color: var(--accent); }
+
+  .menu { position: absolute; inset: 0; background: rgba(8,10,14,0.55); display: flex; align-items: center; justify-content: center; }
+  .menu[hidden] { display: none; }
+  .menu .box { background: var(--term); border: 1px solid var(--accent); border-radius: 8px; padding: 14px 16px; width: 520px; max-width: 90%; font-family: var(--mono); font-size: 13px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .menu .mtitle { color: var(--accent); font-weight: 650; margin-bottom: 8px; }
+  .menu .mrow { padding: 3px 6px; color: var(--muted); border-radius: 4px; }
+  .menu .mrow.sel { background: rgba(224,138,76,0.14); color: var(--fg); }
+  .menu .mrow .on { color: var(--ok); } .menu .mrow .off { color: var(--faint); }
+  .menu .mrow .note { color: var(--faint); }
+  .menu .mhint { color: var(--faint); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hint">
+    <span><span class="k">try:</span> <span class="try" data-fill="why does /login 500 sometimes, and where?">ask a question</span></span>
+    <span class="k">·</span>
+    <span><b>Ctrl-P</b> (or click below) for the menu — flip <b>Advanced delegation</b></span>
+    <span class="k">·</span>
+    <span><span class="try" data-fill="/epic ship the login redesign">/epic ship the login redesign</span></span>
+    <span class="reset" id="reset">↺ reset</span>
+  </div>
+
+  <div class="screen" id="screen">
+    <div class="sbar" id="sbar"></div>
+    <div class="work" id="work"></div>
+    <div class="convo" id="convo"></div>
+    <div class="composer"><span class="p">›</span><input id="inp" autocomplete="off" spellcheck="false" placeholder="type a prompt — Enter sends, / for commands"></div>
+    <div class="kbar" id="kbar"></div>
+    <div class="menu" id="menu" hidden></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var SPIN = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function fmtTok(n){ if(n<1000) return n+" tok"; if(n<1e6) return (n/1000).toFixed(n<10000?1:0)+"k tok"; return (n/1e6).toFixed(1)+"M tok"; }
+
+  var S, runId = 0, timers = [];
+  function fresh(){
+    return {
+      mode: "chat", project: null, running: false, activity: "",
+      steering: true, autoFollow: true, enableEpic: false, autoMerge: false,
+      menu: null, view: "manager", expandFold: false,
+      convo: [], ledger: [], spear: null,
+      ctx: 4, tokens: 1200, spinFrame: 0, t0: 0,
+      nextPr: 2851
+    };
+  }
+  function reset(){ runId++; timers.forEach(clearTimeout); timers = []; S = fresh(); S.convo.push({kind:"note", text:"prototype — responses are scripted, nothing hits the network"}); render(); $("inp").value=""; $("inp").focus(); }
+  function later(ms, fn){ var id = runId; var t = setTimeout(function(){ if(id===runId) fn(); }, ms); timers.push(t); }
+
+  /* ---------------- rendering ---------------- */
+  function render(){ renderStatus(); renderWork(); renderConvo(); renderKbar(); renderMenu(); updatePlaceholder(); }
+
+  // The agents you can page through: the primary (manager) plus any engineer that has launched.
+  // Selection lives in the ledger itself — no separate tab strip.
+  function viewList(){ return ["manager"].concat(S.ledger.filter(function(e){return e.started;}).map(function(e){return e.id;})); }
+  function updatePlaceholder(){
+    var multi = S.mode==="epic" && viewList().length>1;
+    $("inp").placeholder = !multi ? "type a prompt — Enter sends, / for commands"
+      : S.view==="manager" ? "talk to the manager — Enter sends"
+      : "viewing "+S.view+" (read-only) — type to talk to the manager";
+  }
+
+  function renderStatus(){
+    var left = '<span class="brand">agentj</span>' + (S.project ? ' <span class="sep">·</span> <span class="ctx">'+esc(S.project)+'</span>' : '');
+    var right = 'gpt-5.4 <span class="sep">·</span> ctx '+S.ctx+'% <span class="sep">·</span> '+fmtTok(S.tokens);
+    if(S.running){ var el = elapsed(); right += ' <span class="sep">·</span> <span class="spin">'+SPIN[S.spinFrame%SPIN.length]+'</span> '+el; }
+    $("sbar").innerHTML = left + '<span class="right">'+right+'</span>';
+  }
+  function elapsed(){ if(!S.t0) return "0s"; var s = Math.floor((Date.now()-S.t0)/1000); return s<60? s+"s" : Math.floor(s/60)+"m"+(s%60)+"s"; }
+
+  var CHIP = { pending:["pend","pending"], working:["wk","working"], "pr-open":["propen","pr-open"], "in-review":["rev","in review"], merged:["merged","merged"], blocked:["block","blocked"] };
+  function renderWork(){
+    var w = $("work");
+    if(S.mode==="epic"){
+      var total = S.ledger.length, done = S.ledger.filter(function(r){return r.status==="merged";}).length;
+      var blocked = S.ledger.filter(function(r){return r.status==="blocked";}).length;
+      var meta = done+" of "+total+" done" + (blocked? ' · <span class="chip block">'+blocked+' blocked</span>' : "");
+      var multi = viewList().length>1;
+      var rows = S.ledger.map(function(r){
+        var c = CHIP[r.status];
+        var detail = r.status==="blocked" ? esc(r.note||"") :
+                     r.pr ? '<span class="pr">#'+r.pr+'</span>' :
+                     '<span style="color:var(--faint)">—</span>';
+        // Tab selection lives right here: the viewed engineer's row gets the marker.
+        var id = S.view===r.id ? '<span class="sel">▸ '+r.id+'</span>' : '  '+r.id;
+        // Cells emitted flat into the grid — no wrapper (a display:contents row breaks the row-gap).
+        return '<div class="id">'+id+'</div><div class="chip '+c[0]+'">'+c[1]+'</div><div class="detail">'+detail+'</div>';
+      }).join("");
+      var mgr = S.view==="manager" && multi ? '<span style="color:var(--accent)">▸ </span>' : '  ';
+      var vhint = multi ? '<span class="vhint">Tab: next view</span>' : '';
+      w.innerHTML = '<div class="summary"><span class="title">'+esc(S.project||"epic")+'</span><span class="meta">'+meta+'</span></div>'+
+        '<div class="wdiv"></div><div class="ledger"><div class="h">issue</div><div class="h">status</div><div class="h">pr / note</div>'+rows+'</div>'+
+        '<div class="wdiv"></div><div class="activity" style="white-space:pre">'+mgr+'<span class="who">'+(S.running?"◐ ":"")+'manager</span> · '+esc(S.activity||"idle")+vhint+'</div>';
+    } else if(S.mode==="task"){
+      var ph = ["S","P","E","A","R"], cur = S.spear.phase;
+      var spine = ph.map(function(p,i){ var cls = i<cur?"done":(i===cur?"cur":""); return '<span class="ph '+cls+'">'+p+'</span>'; })
+        .join('<span class="lnk">──</span>');
+      var names = ["SCOPE","PLAN","EXECUTE","ASSESS","RESOLVE"];
+      var items = S.spear.items.map(function(it){
+        var g = it.done?'<span class="chip merged">✓</span>':(it.cur?'<span class="acc" style="color:var(--accent)">◑</span>':'<span style="color:var(--faint)">○</span>');
+        return '<div class="fitem">'+g+' '+esc(it.t)+(it.note?' <span class="muted">'+esc(it.note)+'</span>':'')+'</div>';
+      }).join("");
+      w.innerHTML = '<div class="summary"><span class="spine">'+spine+'<span class="now">'+names[cur]+'</span></span></div>'+
+        '<div class="wdiv"></div>'+items;
+    } else { w.innerHTML = ""; }
+  }
+
+  function renderConvo(){
+    var c = $("convo");
+    // Full-pane agent views: page Tab through the manager and each launched engineer.
+    if(S.mode==="epic" && S.view!=="manager"){
+      var e = S.ledger.find(function(r){return r.id===S.view;});
+      if(e){ c.innerHTML = renderEngineer(e); if(S.autoFollow) c.scrollTop = c.scrollHeight; return; }
+    }
+    var html = S.convo.map(function(b){
+      if(b.kind==="user") return '<div class="turn user"><span style="color:var(--accent)">›</span> '+esc(b.text)+'</div>';
+      if(b.kind==="asst") return '<div class="turn asst">'+b.html+'</div>';
+      if(b.kind==="note") return S.steering ? '<div class="note">» '+esc(b.text)+'</div>' : '';
+      if(b.kind==="tool") return '<div class="toolline">· '+esc(b.call)+(b.res?' → <span class="res">'+esc(b.res)+'</span>':'')+'</div>';
+      if(b.kind==="fold") {
+        var head = '<div class="fold" data-fold="1">'+(S.expandFold?"▾":"▸")+' '+esc(b.text)+'</div>';
+        if(!S.expandFold) return head;
+        return head + b.lines.map(function(l){return '<div class="toolline">· '+esc(l)+'</div>';}).join("");
+      }
+      return "";
+    }).join("");
+    c.innerHTML = html || '<div class="placeholder">ask anything, or open the menu (Ctrl-P) and turn on Advanced delegation, then /epic …</div>';
+    if(S.autoFollow) c.scrollTop = c.scrollHeight;
+  }
+
+  // An engineer's own session, filling the whole conversation pane (read-only — you steer the manager).
+  function renderEngineer(e){
+    var st = CHIP[e.status][1];
+    var head = '<div class="ehead"><span class="id">'+e.id+'</span> · '+esc(e.branch||"")+' · '+st+
+      (e.status==="working"? " · step "+e.step+"/"+e.stepMax : "")+'</div>';
+    var lines = (e.stream||[]).map(function(l){ return '<div class="toolline">· '+esc(l)+'</div>'; }).join("");
+    var tail = e.status==="working" ? '<div class="note">◐ working…</div>'
+      : (e.pr ? '<div class="turn asst"><div>opened PR <span style="color:var(--link)">#'+e.pr+'</span> · '+(e.status==="merged"?"merged":"in review")+'</div></div>' : "");
+    return head + lines + tail;
+  }
+
+  function renderKbar(){
+    var multi = S.mode==="epic" && viewList().length>1;
+    var base = 'Enter send · <b data-menu="1">Ctrl-P menu</b> · Tab '+(multi?"switch view (manager / engineers)":"expand") + ' · Ctrl-C×2 quit';
+    $("kbar").innerHTML = base;
+  }
+
+  var MENU = [
+    { t:"Show steering", key:"steering", kind:"toggle", note:"supervisor nudges in the transcript" },
+    { t:"Auto-scroll", key:"autoFollow", kind:"toggle", note:"jump to latest on new activity" },
+    { t:"Advanced delegation", key:"enableEpic", kind:"toggle", note:"beta: engineers run multi-PR work" },
+    { t:"Auto-merge engineer PRs", key:"autoMerge", kind:"toggle", note:"merge green PRs unattended" },
+    { t:"MCP servers", key:null, kind:"action", note:"connection status" },
+    { t:"Provider setup", key:null, kind:"action", note:"endpoint / key / model" }
+  ];
+  function renderMenu(){
+    var m = $("menu");
+    if(S.menu===null){ m.hidden = true; m.innerHTML=""; return; }
+    m.hidden = false;
+    var rows = MENU.map(function(it,i){
+      var sel = i===S.menu ? " sel":"";
+      var state = it.kind==="toggle" ? (S[it.key] ? '<span class="on">ON </span>':'<span class="off">OFF</span>') : "";
+      var label = it.kind==="toggle" ? it.t+": "+state : it.t;
+      return '<div class="mrow'+sel+'">'+(i===S.menu?"› ":"  ")+label+'  <span class="note">('+it.note+')</span></div>';
+    }).join("");
+    m.innerHTML = '<div class="box"><div class="mtitle">Menu</div>'+rows+'<div class="mhint">↑↓ move · Enter select · Esc close</div></div>';
+  }
+
+  /* ---------------- interactions ---------------- */
+  function openMenu(){ S.menu = S.menu===null ? 2 : null; render(); }
+  function menuMove(d){ if(S.menu===null) return; S.menu = (S.menu + d + MENU.length) % MENU.length; render(); }
+  function menuAccept(){
+    if(S.menu===null) return;
+    var it = MENU[S.menu];
+    if(it.kind==="toggle"){
+      S[it.key] = !S[it.key];
+      if(it.key==="enableEpic") note(S.enableEpic ? "Advanced delegation ON (beta) — multi-PR tasks run engineer sessions; single-PR tasks run as usual (from the next turn)" : "Advanced delegation OFF (from the next turn)");
+      render();
+    } else { S.menu = null; note(it.t+": (prototype — not wired)"); render(); }
+  }
+  function handleTab(){
+    if(S.mode==="epic"){
+      var list = viewList();
+      if(list.length>1){ var i = list.indexOf(S.view); S.view = list[(i+1) % list.length]; render(); return; }
+    }
+    S.expandFold = !S.expandFold; render();
+  }
+
+  function note(t){ S.convo.push({kind:"note", text:t}); if(S.autoFollow) $("convo").scrollTop = 1e9; render(); }
+  function user(t){ S.convo.push({kind:"user", text:t}); }
+  function bump(inTok, outTok){ S.tokens += inTok; S.ctx = Math.min(96, S.ctx + Math.round(inTok/9000)); }
+
+  function submit(){
+    var v = $("inp").value.trim();
+    if(!v) return;
+    var isCmd = v[0]==="/";
+    // While a turn runs you can still steer/answer the manager in an epic; commands wait.
+    if(S.running && (isCmd || S.mode!=="epic")) return;
+    $("inp").value = "";
+    if(v==="/exit"||v==="/quit"){ note("(prototype — quit is a no-op)"); return; }
+    if(v.slice(0,6)==="/epic "){ startEpic(v.slice(6).trim(), true); return; }
+    if(v.slice(0,6)==="/task "){ startTask(v.slice(6).trim()); return; }
+    if(S.mode==="epic"){
+      S.view = "manager";
+      var nb = S.ledger.find(function(e){return e.status==="blocked" && e.needsInfo;});
+      if(nb){ resolveBlocked(nb, v); return; }
+      user(v); later(500, function(){ S.convo.push({kind:"asst", html:'<div>Noted — folding that into the epic.</div>'}); render(); });
+      render(); return;
+    }
+    user(v);
+    runChat(v);
+  }
+
+  // The needs-info unblock loop: your answer lets the manager re-brief and re-dispatch the issue.
+  function resolveBlocked(nb, answer){
+    user(answer);
+    note("got it — re-briefing "+nb.id+" with the acceptance criteria");
+    nb.needsInfo = false; nb.status = "pending"; nb.note = "";
+    S.activity = "re-dispatching "+nb.id; render();
+    var pr = S.nextPr++;
+    later(1200, function(){ startEng(nb.id); S.activity = nb.id+" running (re-dispatched)"; render(); });
+    later(7000, function(){ toPR(nb.id, pr); render(); });
+    later(9000, function(){ toReview(nb.id); note(nb.id+" → PR #"+pr+", in review"); render(); });
+  }
+
+  /* ---- chat scenario ---- */
+  function runChat(q){
+    S.running = true; S.t0 = Date.now(); render();
+    later(600, function(){ note("scanning the code for the relevant path"); bump(4000,0); });
+    later(1500, function(){
+      var ans = '<div>Short version: it\'s a race, not a bad request — two requests hit the handler at once and both write, so the second reads a value that just got overwritten.</div>'+
+        '<div class="li">• where: <span class="muted">auth/session.ts:88</span> swaps state without a lock</div>'+
+        '<div class="li">• fix: a write lock, or a single-writer queue</div>'+
+        '<div class="li">• want me to draft it? <span class="muted">/task fix the session race</span></div>';
+      S.convo.push({kind:"asst", html: ans});
+      S.convo.push({kind:"fold", text:"ran 5 tools — grep, read_file ×3, bash", lines:["grep -n 'session' auth/ → 12 hits","read_file auth/session.ts:70-110","bash bun test session → 6 pass"]});
+      bump(3000, 700); S.running=false; render();
+    });
+  }
+
+  /* ---- task scenario ---- */
+  function startTask(task){
+    S.mode="task"; S.project = slug(task); S.running=true; S.t0=Date.now();
+    S.spear = { phase:0, items:[
+      {t:"reproduce it", done:false, cur:true},
+      {t:"locate the cause", done:false},
+      {t:"make the change", done:false},
+      {t:"run the suite", done:false, note:"bun test"}
+    ]};
+    user("/task "+task); note("re-keying worktree → "+S.project); render();
+    var steps = [
+      [1200, function(){ S.spear.phase=0; setItem(0,true,false); setItem(1,false,true); S.activity="scoping"; }],
+      [3000, function(){ S.spear.phase=1; }],
+      [4200, function(){ S.spear.phase=2; setItem(1,true,false); setItem(2,false,true); }],
+      [7000, function(){ setItem(2,true,false); setItem(3,false,true); S.spear.phase=3; }],
+      [9000, function(){ setItem(3,true,false); S.spear.phase=4; note("bun test → 24 pass"); }],
+      [10500, function(){ S.running=false; note("committed + pushed · opened PR #"+(S.nextPr)); var ans='<div>Done — fixed and shipped.</div><div class="li">• PR <span style="color:var(--link)">#'+S.nextPr+'</span> · 24 tests green</div>'; S.convo.push({kind:"asst",html:ans}); }]
+    ];
+    steps.forEach(function(s){ later(s[0], function(){ s[1](); bump(5000,600); render(); }); });
+  }
+  function setItem(i, done, cur){ if(!S.spear) return; S.spear.items[i].done=done; S.spear.items[i].cur=cur; }
+
+  /* ---- epic scenario ---- */
+  function startEpic(task, viaCmd){
+    if(viaCmd && !S.enableEpic){ S.enableEpic = true; }
+    if(!S.enableEpic){ user(task); note("Advanced delegation is off — running this as a single task. Turn it on in Ctrl-P (or use /epic)."); startTaskInline(task); return; }
+    S.mode="epic"; S.project = slug(task); S.running=true; S.t0=Date.now();
+    user((viaCmd?"/epic ":"")+task);
+    S.ledger = [
+      {id:"GEN-3278", status:"pending"}, {id:"GEN-3268", status:"pending"},
+      {id:"GEN-3258", status:"pending"}, {id:"GEN-3301", status:"pending"}, {id:"GEN-3312", status:"pending"}
+    ];
+    S.activity="reading the project + issues from the tracker"; render();
+    var pr1 = S.nextPr++, pr2 = S.nextPr++, pr3 = S.nextPr++;
+    var T = [
+      [1300, function(){ note("wrote .aj/epic/plan.md — 5 issues across 2 waves"); S.activity="planning waves"; }],
+      [2600, function(){ startEng("GEN-3278"); startEng("GEN-3268"); S.activity="wave 1 · 2 engineers running"; }],
+      [8000, function(){ toPR("GEN-3278", pr1); S.activity="wave 1 · reviewing"; }],
+      [9500, function(){ toPR("GEN-3268", pr2); }],
+      [11000, function(){ toReview("GEN-3278"); setBlock("GEN-3301","needs acceptance criteria — answer below"); eng("GEN-3301").needsInfo = true;
+        S.convo.push({kind:"asst", html:'<div><span style="color:var(--bad)">GEN-3301 is blocked.</span> I can\'t brief an engineer without the acceptance criteria — what defines "done" for locking editable persona fields after the first save? Answer here and I\'ll re-dispatch it.</div>'}); }],
+      [12500, function(){ toReview("GEN-3268"); startEng("GEN-3258"); S.activity="wave 2 · GEN-3258"; }],
+      [16000, function(){ if(S.autoMerge){ toMerged("GEN-3278"); S.activity="merged #"+pr1+" · continuing"; } else { S.activity="#"+pr1+" ready for review — auto-merge off, waiting on a human"; note("merge gate: auto-merge is OFF — marked PRs ready-for-review, not merging"); } }],
+      [19000, function(){ if(S.autoMerge){ toMerged("GEN-3268"); } S.running=false; S.activity = "idle — "+doneStr(); note("epic status: "+doneStr()); }]
+    ];
+    T.forEach(function(s){ later(s[0], function(){ s[1](); bump(9000,900); render(); }); });
+    startStepTicker();
+  }
+  function startTaskInline(task){ // /epic with Enable Epic off → behave like /task
+    later(300, function(){ startTask(task); });
+  }
+  function eng(id){ return S.ledger.find(function(r){return r.id===id;}); }
+  function startEng(id){ var e=eng(id); e.status="working"; e.started=true; e.branch="austin/"+id.toLowerCase()+"-…"; e.step=0; e.stepMax=60+Math.floor(Math.random()*24); e.stream=["read_file components/PersonaForm.tsx","grep the target fields"]; }
+  function toPR(id,pr){ var e=eng(id); e.status="pr-open"; e.pr=pr; }
+  function toReview(id){ eng(id).status="in-review"; }
+  function toMerged(id){ eng(id).status="merged"; }
+  function setBlock(id,reason){ var e=eng(id); e.status="blocked"; e.note=reason; }
+  function doneStr(){ var m=S.ledger.filter(function(r){return r.status==="merged";}).length;
+    var rv=S.ledger.filter(function(r){return r.status==="in-review"||r.status==="pr-open";}).length;
+    var b=S.ledger.filter(function(r){return r.status==="blocked";}).length;
+    var w=S.ledger.filter(function(r){return r.status==="working";}).length;
+    return m+" merged · "+rv+" in review · "+b+" blocked"+(w?" · "+w+" working":""); }
+
+  var ticking = false;
+  function startStepTicker(){ ticking = true; }
+  function tick(){
+    S.spinFrame++;
+    var changed = S.running; // spinner
+    if(ticking){
+      S.ledger.forEach(function(r){
+        if(r.status==="working" && r.step<r.stepMax){ r.step += 1 + Math.floor(Math.random()*2); if(r.step>r.stepMax) r.step=r.stepMax;
+          if(r.stream && Math.random()<0.16){ r.stream.push(pick(["edit_file PersonaForm.tsx","bash bun test persona → 6 pass","read_file api/persona.ts","git commit -m 'lock fields'"])); if(r.stream.length>10) r.stream.shift(); }
+          changed = true; }
+      });
+    }
+    if(changed) render();
+  }
+  function pick(a){ return a[Math.floor(Math.random()*a.length)]; }
+  function slug(t){ return t.replace(/^(complete|ship|build|implement|do|the)\s+/i,"").split(/\s+/).slice(0,3).map(function(w){return w;}).join(" "); }
+
+  /* ---------------- keys ---------------- */
+  document.addEventListener("keydown", function(e){
+    if(S.menu!==null){
+      if(e.key==="ArrowDown"){ menuMove(1); e.preventDefault(); return; }
+      if(e.key==="ArrowUp"){ menuMove(-1); e.preventDefault(); return; }
+      if(e.key==="Enter"){ menuAccept(); e.preventDefault(); return; }
+      if(e.key==="Escape"){ S.menu=null; render(); e.preventDefault(); return; }
+      e.preventDefault(); return;
+    }
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="p"){ openMenu(); e.preventDefault(); return; }
+    if(e.key==="Tab"){ handleTab(); e.preventDefault(); return; }
+    if(e.key==="Enter" && document.activeElement===$("inp")){ submit(); e.preventDefault(); return; }
+  }, true);
+
+  document.addEventListener("click", function(e){
+    var f = e.target.closest("[data-fold]"); if(f){ S.expandFold=!S.expandFold; render(); return; }
+    var m = e.target.closest("[data-menu]"); if(m){ openMenu(); $("inp").focus(); return; }
+    var t = e.target.closest("[data-fill]"); if(t){ $("inp").value = t.getAttribute("data-fill"); $("inp").focus(); return; }
+    if(e.target.id==="reset"){ reset(); return; }
+  });
+
+  $("inp").addEventListener("blur", function(){ if(S.menu===null) setTimeout(function(){ $("inp").focus(); }, 0); });
+
+  setInterval(tick, 130);
+  reset();
+})();
+</script>
+</body>
+</html>

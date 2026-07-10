@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentj — live view redesign</title>
+<style>
+  :root {
+    --page: #0b0e12;
+    --term: #12161c;
+    --bar: #171d25;
+    --edge: #262d38;
+    --edge-soft: #1e242d;
+    --fg: #cdd4dd;
+    --muted: #7f8994;
+    --faint: #49525c;
+    --accent: #e08a4c;
+    --ok: #5bb56a;
+    --warn: #d6a340;
+    --bad: #e0605a;
+    --link: #6cb6ff;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--fg); font-family: var(--sans); font-size: 15.5px; line-height: 1.6; }
+  main { max-width: 960px; margin: 0 auto; padding: 44px 24px 120px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent); margin: 0 0 10px; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 0 0 8px; font-weight: 650; letter-spacing: -0.01em; }
+  .dek { font-size: 17px; color: var(--muted); margin: 0 0 8px; max-width: 68ch; }
+  h2 { font-size: 19px; margin: 44px 0 6px; font-weight: 650; }
+  h2 .n { font-family: var(--mono); color: var(--faint); font-size: 15px; margin-right: 8px; }
+  p { max-width: 74ch; color: #bcc4ce; }
+  .cap { color: var(--muted); font-size: 14px; margin: 6px 0 14px; max-width: 74ch; }
+  strong { color: #e8edf2; font-weight: 640; }
+  code { font-family: var(--mono); font-size: 0.86em; background: #1b222b; border: 1px solid var(--edge); border-radius: 4px; padding: 1px 5px; color: #d7dde4; }
+  ul { max-width: 74ch; padding-left: 0; list-style: none; }
+  li { margin: 0 0 9px; padding-left: 20px; position: relative; color: #bcc4ce; }
+  li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); font-size: 12px; top: 3px; }
+  hr { border: 0; border-top: 1px solid var(--edge); margin: 40px 0; }
+  a { color: var(--link); }
+
+  /* ---------- terminal frame ---------- */
+  .term { background: var(--term); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; margin: 8px 0 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+  .term.ghost { opacity: 0.92; }
+  .t-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--bar); border-bottom: 1px solid var(--edge); font-family: var(--mono); font-size: 12px; }
+  .t-bar .brand { color: var(--accent); font-weight: 650; }
+  .t-bar .mode { color: var(--fg); }
+  .t-bar .sep { color: var(--faint); }
+  .t-bar .right { margin-left: auto; color: var(--muted); }
+  .t-body { padding: 12px 16px 6px; font-family: var(--mono); font-size: 13px; line-height: 1.62; }
+  .t-foot { padding: 7px 14px; border-top: 1px solid var(--edge); background: var(--bar); font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+
+  .sectlabel { color: var(--muted); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; margin: 10px 0 6px; }
+  .divider { border-top: 1px solid var(--edge-soft); margin: 12px 0; }
+
+  /* summary strip */
+  .summary { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+  .summary .title { color: #e8edf2; font-weight: 650; }
+  .summary .meta { color: var(--muted); }
+
+  /* SPEAR spine */
+  .spine { display: inline-flex; align-items: center; gap: 6px; }
+  .spine .ph { color: var(--faint); }
+  .spine .ph.done { color: var(--ok); }
+  .spine .ph.cur { color: var(--accent); font-weight: 700; }
+  .spine .link { color: var(--faint); }
+  .spine .now { color: var(--accent); margin-left: 12px; letter-spacing: 0.1em; }
+
+  /* ledger table */
+  .ledger { display: grid; grid-template-columns: 96px 104px 1fr; gap: 3px 16px; align-items: center; }
+  .ledger .h { color: var(--faint); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding-bottom: 3px; }
+  .ledger .row { display: contents; }
+  .ledger .id { color: var(--fg); }
+  .ledger .pr { color: var(--link); }
+  .ledger .pr.none { color: var(--faint); }
+  .ledger .detail { color: var(--muted); }
+
+  .chip { white-space: nowrap; }
+  .chip.rev { color: var(--warn); }
+  .chip.grn { color: var(--ok); }
+  .chip.work { color: var(--accent); }
+  .chip.block { color: var(--bad); }
+  .chip.pend { color: var(--faint); }
+  .chip.merged { color: var(--ok); }
+
+  .bar { letter-spacing: -1px; }
+  .bar .on { color: var(--accent); }
+  .bar .on.ok { color: var(--ok); }
+  .bar .off { color: #2b333d; }
+  .tok { color: var(--faint); }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .link { color: var(--link); }
+  .acc { color: var(--accent); }
+
+  /* activity spine */
+  .activity { color: var(--fg); }
+  .activity .who { color: var(--accent); }
+
+  /* transcript (demoted) */
+  .stream { color: var(--faint); }
+  .stream .toggle { color: var(--muted); }
+  .stream .call { color: #97a1ac; }
+  .stream .res { color: var(--faint); }
+
+  .input { color: var(--fg); }
+  .cursor { background: var(--accent); color: var(--term); }
+
+  .callouts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; margin: 10px 0 4px; }
+  .callouts div { font-size: 13.5px; color: var(--muted); padding-left: 18px; position: relative; }
+  .callouts div::before { content: "◆"; position: absolute; left: 0; top: 2px; color: var(--accent); font-size: 9px; }
+  .callouts b { color: #d7dde4; font-weight: 600; }
+
+  /* conversation blocks */
+  .turn { margin: 9px 0; }
+  .turn.user { border-left: 2px solid var(--accent); padding-left: 12px; color: var(--fg); }
+  .turn.asst { padding-left: 14px; color: var(--fg); }
+  .turn.asst .li { color: #bcc4ce; }
+  .fold { color: var(--faint); padding-left: 14px; margin: 6px 0 2px; }
+
+  /* the composer (where prompts are sent) */
+  .compose { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--edge); background: #0d1218; }
+  .compose .prompt { color: var(--accent); }
+  .compose .text { color: var(--fg); }
+  .compose .text.ph { color: var(--faint); }
+  .compose .cur { display: inline-block; width: 7px; height: 15px; background: var(--accent); vertical-align: -2px; }
+
+  /* anatomy */
+  .zone { display: flex; gap: 14px; align-items: baseline; margin: 7px 0; max-width: 82ch; }
+  .zone .k { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); min-width: 120px; flex: none; }
+  .zone .v { color: var(--muted); font-size: 14.5px; }
+  .zone .v b { color: #d7dde4; font-weight: 600; }
+
+  @media (max-width: 720px) { .callouts { grid-template-columns: 1fr; } .t-body { font-size: 11.5px; } .zone { flex-direction: column; gap: 2px; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">agentj · TUI redesign</div>
+  <h1>A live view that shows state, not just stream</h1>
+  <p class="dek">Today every surface — the manager's turn, each engineer, subagent waves, background jobs — interleaves into one scrolling transcript plus side panels. This keeps the <strong>conversation</strong> primary, pins <strong>work state</strong> above it (as much or as little as the mode needs), and folds the low-level <strong>machinery</strong> into summaries you can open.</p>
+
+  <h2>Anatomy — three zones, one adapts</h2>
+  <p>Every screen is the same three stacked zones. Two are constant; the middle one changes weight with what you're doing.</p>
+  <div class="zone"><span class="k">status bar</span><span class="v">Ambient, one line, always: model · context meter · tokens · elapsed.</span></div>
+  <div class="zone"><span class="k">work panel</span><span class="v"><b>Adapts to the mode.</b> Epic → the full ledger. A task in flight → a SPEAR spine + live frontier. Just chatting → it's gone. It summarizes the machinery's <i>state</i>, never the dialogue.</span></div>
+  <div class="zone"><span class="k">conversation</span><span class="v"><b>Constant and primary.</b> Your prompts and the assistant's answers as first-class blocks you read. Tool calls, notes, and subagent rails fold into one-line summaries so the answer stays clean.</span></div>
+  <div class="zone"><span class="k">composer</span><span class="v"><b>Constant, pinned at the bottom — where prompts are sent.</b> Enter sends, Ctrl-J adds a line, <code>/</code> opens commands. A sent prompt echoes as the next user block and the turn begins.</span></div>
+
+  <h2><span class="n">00</span>Today — one stream, reconstruct the rest</h2>
+  <p class="cap">The current view during the IV UX v2 run: activity, subagent rails, job notes, and reports all land in the same scroll. Legible for one focused change; a fog during a multi-engineer epic.</p>
+  <div class="term ghost">
+    <div class="t-bar"><span class="brand">agentj</span><span class="sep">·</span><span class="mode">custom/gpt-5.4</span><span class="right">ctx 58% · 1.2M tok</span></div>
+    <div class="t-body">
+      <div class="stream"><span class="acc">●</span> <span style="color:var(--fg)">GEN-3258 did not produce a salvageable branch state.</span></div>
+      <div class="stream">&nbsp;&nbsp;<span class="call">· git status --short</span> &nbsp;→ <span class="res">[no output] (28ms)</span></div>
+      <div class="stream">&nbsp;&nbsp;<span class="call">· git log --all --grep=GEN-3258</span> &nbsp;→ <span class="res">[no output] (44ms)</span></div>
+      <div class="stream"><span class="faint">» delegating 1 sub-task(s) in parallel</span></div>
+      <div class="stream"><span class="faint">├─┬─ ✓ Inspect GEN-3258 branch state · 28.0s · 123.2k tok</span></div>
+      <div class="stream"><span class="faint">├─╯&nbsp; wave 1 · 1/1 ok</span></div>
+      <div class="stream"><span class="faint">» waiting on a background job…</span></div>
+      <div class="stream"><span class="faint">» [job 2 `cd /var/folders/…` finished, exit 0]</span></div>
+      <div class="stream"><span class="faint">» tokens: 9,474 in / 812 out</span></div>
+      <div class="stream" style="color:var(--muted)">&nbsp;&nbsp;| GEN-3278 | #2846 | pr-open | … 5 more table rows buried mid-scroll …</div>
+    </div>
+    <div class="t-foot">Enter send · Ctrl-J newline · Esc interrupt · / commands · Ctrl-P menu · Ctrl-C×2 quit</div>
+  </div>
+
+  <h2><span class="n">01</span>Proposed — the work panel</h2>
+  <p class="cap"><strong>Enable Epic</strong> is a quiet flag (Ctrl-P), not a loud mode. It stays out of the way until a task actually spans several PRs — then the ledger takes over the conversation-first view. No mode banner in the chrome; the panel's own title is the only thing that names the project. One screen answers "what's done, what's running, what's stuck."</p>
+  <div class="term">
+    <div class="t-bar"><span class="brand">agentj</span><span class="sep">·</span><span class="mode">IV&nbsp;UX&nbsp;v2</span><span class="right">gpt-5.4 · ctx 58% · 1.2M tok</span></div>
+    <div class="t-body">
+      <div class="summary">
+        <span class="title">IV UX v2</span>
+        <span class="meta">5 of 12 done · <span class="bad">1 blocked</span></span>
+      </div>
+      <div class="divider"></div>
+      <div class="ledger">
+        <div class="h">issue</div><div class="h">status</div><div class="h">pr / note</div>
+        <div class="row"><div class="id">GEN-3278</div><div class="chip rev">in review</div><div class="pr">#2846</div></div>
+        <div class="row"><div class="id">GEN-3268</div><div class="chip rev">in review</div><div class="pr">#2847</div></div>
+        <div class="row"><div class="id">GEN-3258</div><div class="chip work">working</div><div class="detail faint">—</div></div>
+        <div class="row"><div class="id">GEN-3301</div><div class="chip block">blocked</div><div class="detail">acceptance criteria unclear</div></div>
+        <div class="row"><div class="id">GEN-3312</div><div class="chip pend">pending</div><div class="detail faint">—</div></div>
+      </div>
+      <div class="divider"></div>
+      <div class="activity"><span class="who">manager</span> · reviewing #2846 against the brief</div>
+      <div class="divider"></div>
+      <div class="stream"><span class="toggle">▸ transcript — Tab to expand</span></div>
+    </div>
+    <div class="compose"><span class="prompt">›</span> <span class="text ph">steer the epic, or ask for the ledger…</span><span class="cur"></span></div>
+    <div class="t-foot">Enter send · Tab focus panel · Ctrl-P menu · ↑↓ scroll · Ctrl-C×2 quit</div>
+  </div>
+  <div class="callouts">
+    <div><b>One status word per row</b> — colored, scannable; no bars, counts, or timers competing for the eye.</div>
+    <div><b>Detail on demand</b> — steps, tokens, checks, and threads live behind <code>Tab</code>, not on the overview.</div>
+  </div>
+
+  <h2><span class="n">02</span>Everyday — a conversation</h2>
+  <p class="cap">Most sessions aren't epics or even multi-step tasks — they're a back-and-forth. Here the conversation IS the surface: your prompt and the answer are blocks you read, the tools that produced the answer fold to one line, and the composer sits where you'd expect. No work panel — nothing's in flight.</p>
+  <div class="term">
+    <div class="t-bar"><span class="brand">agentj</span><span class="right">gpt-5.4 · ctx 9% · 21k tok</span></div>
+    <div class="t-body">
+      <div class="turn user"><span class="acc">›</span> why does /login 500 sometimes, and where?</div>
+      <div class="turn asst">
+        <div>Two requests can hit the refresh handler at once and both write a session token — one overwrites the other, so the second request 500s on a now-missing session. It's a race, not a bad request.</div>
+        <div class="li">• root cause: <span class="muted">auth/session.ts:88</span> swaps the token without a lock</div>
+        <div class="li">• repro: two parallel <code>POST /login</code> within ~20ms</div>
+        <div class="li">• fix: a write lock around the swap, or a single-writer queue</div>
+      </div>
+      <div class="fold">· ran 6 tools — grep, read_file ×3, bash — ▸ Tab to expand</div>
+    </div>
+    <div class="compose"><span class="prompt">›</span> <span class="text">draft the fix as a task on a fresh branch</span><span class="cur"></span></div>
+    <div class="t-foot">Enter send · Ctrl-J newline · / commands · Ctrl-P menu · Ctrl-C×2 quit</div>
+  </div>
+  <div class="callouts">
+    <div><b>Conversation is primary</b> — the prompt and the answer are read; the tools that found it fold to one line.</div>
+    <div><b>No work panel, pinned composer</b> — nothing's in flight so the panel is absent; the composer is always the bottom row.</div>
+  </div>
+
+  <h2><span class="n">03</span>Same idea, single task</h2>
+  <p class="cap">Off the epic path the panel becomes a SPEAR spine plus the live frontier — so ordinary work gets the same "state at a glance," not just epics.</p>
+  <div class="term">
+    <div class="t-bar"><span class="brand">agentj</span><span class="sep">·</span><span class="mode">austin/fix-auth</span><span class="right">gpt-5.4 · ctx 22% · 84k tok</span></div>
+    <div class="t-body">
+      <div class="summary">
+        <span class="spine">
+          <span class="ph done">S</span><span class="link">──</span><span class="ph done">P</span><span class="link">──</span><span class="ph cur">E</span><span class="link">──</span><span class="ph">A</span><span class="link">──</span><span class="ph">R</span>
+          <span class="now">EXECUTE</span>
+        </span>
+      </div>
+      <div class="divider"></div>
+      <div class="sectlabel">plan · frontier</div>
+      <div><span class="ok">✓</span> reproduce the 500 on /login</div>
+      <div><span class="ok">✓</span> locate the double-refresh race &nbsp;<span class="muted">(auth/session.ts:88)</span></div>
+      <div><span class="acc">◑</span> add the write lock &nbsp;<span class="muted">— editing</span></div>
+      <div><span class="faint">○ run the suite &nbsp;<code>bun test</code></span></div>
+      <div class="divider"></div>
+      <div class="stream"><span class="toggle">▸ transcript — Tab to expand</span></div>
+    </div>
+    <div class="compose"><span class="prompt">›</span> <span class="text ph">add a note, or redirect…</span><span class="cur"></span></div>
+    <div class="t-foot">Enter send · Tab focus panel · Ctrl-P menu · Ctrl-C×2 quit</div>
+  </div>
+
+  <h2><span class="n">04</span>Drill in — focus an engineer</h2>
+  <p class="cap"><code>Tab</code> onto a working row expands its live tail (its captured job output) inline — the detail is one keystroke away, never in your face.</p>
+  <div class="term">
+    <div class="t-bar"><span class="brand">agentj</span><span class="sep">·</span><span class="mode">IV&nbsp;UX&nbsp;v2</span><span class="sep">·</span><span class="mode">GEN-3258</span><span class="right">eng · step 44/80 · 142k tok</span></div>
+    <div class="t-body">
+      <div class="activity"><span class="who">◑ GEN-3258</span> &nbsp;<span class="muted">austin/gen-3258-lock-persona-fields · step 44/80</span> &nbsp;<span class="bar"><span class="on">█████</span><span class="off">██</span></span></div>
+      <div class="divider"></div>
+      <div class="stream" style="color:#97a1ac">
+        <div><span class="call">· edit_file components/PersonaForm.tsx</span> → <span class="res">edited (2 replacements)</span></div>
+        <div><span class="call">· bash bun test persona</span> → <span class="res"><span class="ok">6 pass</span> · 0 fail (1.2s)</span></div>
+        <div><span class="call">· git commit -m "lock persona fields after first save"</span> → <span class="res">[exit 0]</span></div>
+        <div class="faint">» SPEAR checkpoint — 12 calls in, well-scoped, keep going</div>
+        <div><span class="call">· gh pr create --fill</span> → <span class="link">#2851 opened</span></div>
+      </div>
+      <div class="divider"></div>
+      <div class="faint">Tab again to collapse · Esc stops this engineer (branch is kept, resumable)</div>
+    </div>
+    <div class="t-foot">Enter send · Tab collapse · Ctrl-P menu · Ctrl-C×2 quit</div>
+  </div>
+
+  <hr>
+  <h2>Principles</h2>
+  <ul>
+    <li><strong>State over stream.</strong> The ledger and the SPEAR spine answer "where are we" without reading scrollback. The transcript stays, demoted to a collapsed detail strip.</li>
+    <li><strong>Encode state in form.</strong> Status chips, a progress meter, step-budget and check bars — attention lands by color and shape before you read a word.</li>
+    <li><strong>Unify the three activity surfaces.</strong> Jobs panel + subagent tray + transcript spam collapse into one thing: rows in the work panel, each with live progress.</li>
+    <li><strong>Calm hierarchy.</strong> Status bar (ambient) → work panel (the answer) → activity spine (now) → transcript (detail). Fewer things move on screen.</li>
+    <li><strong>Long work looks normal.</strong> An engineer at <code>step 44/80</code> reads as productive, and a checkpointed one is a distinct chip — matching the step-limit resilience already in the loop.</li>
+  </ul>
+
+  <h2>What it takes to build</h2>
+  <ul>
+    <li><strong>New <code>src/tui/view/work.rs</code></strong> — renders the work panel from <code>App</code> state (ledger table / SPEAR spine + frontier), sitting between the status line and the transcript in <code>view/mod.rs</code>'s layout.</li>
+    <li><strong>A light live model on <code>App</code></strong> — reuse what's cheap: engineer rows come from the existing jobs snapshot (they're jobs — elapsed/tokens already tracked); the ledger table reads <code>.aj/epic/plan.md</code>; the SPEAR phase and frontier items derive from supervisor notes + the frontier file. Richer per-PR check/thread state is a follow-up that reads <code>gh</code>.</li>
+    <li><strong>One structured event (optional, phase 2)</strong> — an <code>AgentEvent::Phase</code> / <code>LedgerTick</code> so the panel updates crisply instead of re-deriving; not required for v1.</li>
+    <li><strong>Keys</strong> — <code>Tab</code> focuses/expands a work-panel row; a Ctrl-P toggle shows/hides the panel. Reuses the existing menu + keymap plumbing.</li>
+    <li><strong>Reuse</strong> — <code>human_tokens</code>, <code>fmt_ms</code>, the status line, and <code>theme</code> are already there; this is composition, not new rendering primitives.</li>
+  </ul>
+  <p class="cap">Honest scope: v1 renders what's cheaply available (engineer rows from jobs, the ledger file as the table, SPEAR from notes). Per-PR check state and review-thread counts want live <code>gh</code> queries and are a phase-2 enrichment — the layout already has the column for them.</p>
+</main>
+</body>
+</html>
