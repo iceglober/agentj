@@ -242,6 +242,16 @@ export function App() {
     />
   );
 
+  // A transcript link never navigates the app: a local dev URL opens as an in-app view tab; anything
+  // else opens in the system browser. (Declared before any early return — Rules of Hooks.)
+  const onOpenLink = useCallback(
+    (url: string) => {
+      if (isLocalHttp(url)) session.openView(url);
+      else void invoke("open_url", { url });
+    },
+    [session],
+  );
+
   // No sessions → welcome screen (still allow the chooser to overlay it).
   if (session.sessions.length === 0) {
     return (
@@ -266,16 +276,6 @@ export function App() {
       </div>
     );
   }
-
-  // A transcript link never navigates the app: a local dev URL opens as an in-app view tab; anything
-  // else opens in the system browser.
-  const onOpenLink = useCallback(
-    (url: string) => {
-      if (isLocalHttp(url)) session.openView(url);
-      else void invoke("open_url", { url });
-    },
-    [session],
-  );
 
   const activeView = active?.activeView ?? "chat";
   const viewObj = active?.views.find((v) => v.id === activeView) ?? null;
