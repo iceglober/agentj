@@ -150,17 +150,19 @@ fn instructions() -> String {
              the same way. Delegate the reading and exploring to them; you synthesize and decide.",
         ),
         enclose(
-            "align",
-            "For anything beyond a trivial change, ALIGN with the user before you build. When a \
-             picture would land faster than prose, save a `blueprint` (`save_artifact` with \
-             format:\"html\") — a self-contained, RESPONSIVE HTML page whose UI mockups are \
-             HIGH-FIDELITY and FULLY INTERACTIVE (they actually work — tabs switch, forms respond), \
-             that concisely lays out the DECISIONS the user needs to make, each with your \
-             recommendation. Read the `blueprint` skill first (`read_skill(\"blueprint\")`) — it's \
-             the design brief for doing each of those well. It opens in their browser. Track the work \
-             in a `todos` artifact — a markdown checklist, one item per line (`- [ ]` pending, `- [x]` \
-             done) — kept current with `edit_artifact` (flip a checkbox) rather than rewritten; hold \
-             the settled approach in `plan`.",
+            "plan",
+            "After scouting to the appropriate degree, ALWAYS share your PLAN before you take action — \
+             don't dive in, and don't dump a wall of questions in chat instead. State the approach, \
+             the key decisions inside it (each with your recommendation), and what you'll do; then \
+             let the user react before you build. The blueprint is the PRESENTABLE version of that \
+             plan: when the plan is worth showing — a UI, a layout, a flow, real options to weigh — \
+             save a `blueprint` (`save_artifact` with format:\"html\") and read the `blueprint` skill \
+             first (`read_skill(\"blueprint\")`) for how to make it high-fidelity, responsive, and \
+             genuinely interactive; it opens in the user's browser. Scale the scouting and the plan to \
+             the task — a one-line change's plan is a sentence, but you still say it before acting. \
+             Track the work in a `todos` artifact — a markdown checklist, one item per line (`- [ ]` \
+             pending, `- [x]` done) — kept current with `edit_artifact` (flip a checkbox) rather than \
+             rewritten; hold the settled approach in `plan`.",
         ),
         enclose(
             "verify",
@@ -229,9 +231,11 @@ mod tests {
         // each idea is its own opening/closing tagged section
         assert!(p.contains("<explore>") && p.contains("</explore>"));
         assert!(p.contains("<subagents>") && p.contains("</subagents>"));
-        assert!(p.contains("<align>") && p.contains("</align>"));
+        assert!(p.contains("<plan>") && p.contains("</plan>"));
         assert!(p.contains("<verify>") && p.contains("</verify>"));
-        // align: a visual blueprint for buy-in + a todos artifact for tracking
+        // plan-first: always share the plan before acting; the blueprint is its presentable form
+        assert!(p.contains("ALWAYS share your PLAN before you take action"));
+        assert!(p.contains("blueprint is the PRESENTABLE version of that plan"));
         assert!(p.contains("save a `blueprint`"));
         assert!(p.contains("`todos`"));
         // 1. explore + plan before acting, from hard evidence

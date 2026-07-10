@@ -1,8 +1,9 @@
 # Blueprint design skill
 
-A blueprint is a self-contained HTML page you save with `save_artifact(name, format:"html")`; it opens
-in the user's browser so you can align on a design BEFORE building. Its job is to get the user to
-DECIDE. Five things make a good one.
+A blueprint is the PRESENTABLE version of your plan — a self-contained HTML page you save with
+`save_artifact(name, format:"html")`; it opens in the user's browser so they can react to the plan
+BEFORE you build. Reach for it when the plan is worth showing (a UI, a layout, a flow, real options to
+weigh) rather than telling. Its job is to get the user to DECIDE. Five things make a good one.
 
 ## 1. Surface the decisions (this is the point)
 - Find the 2–4 open choices that actually change the outcome (e.g. store: in-memory vs shared;
