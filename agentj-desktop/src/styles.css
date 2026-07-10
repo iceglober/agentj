@@ -457,6 +457,11 @@ button,
   min-width: 0;
 }
 /* markdown-rendered message body (react-markdown) — tight spacing over the retro theme */
+/* .blk uses white-space: pre-wrap for plain-text rows; markdown lays out its own blocks, so the
+   source's blank lines must NOT also render literally (that was double-spacing every line). */
+.md {
+  white-space: normal;
+}
 .md > :first-child {
   margin-top: 0;
 }
@@ -589,111 +594,6 @@ button,
 }
 .blk.thinking .lbl {
   color: var(--think);
-}
-.blk.tray .cnt {
-  color: var(--t-dim);
-}
-
-/* ---- subagent wave (rows + duration bars) ------------------------------ */
-.wave {
-  margin: 4px 0;
-  background: var(--panel);
-  border: 1px solid;
-  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
-    var(--bevel-lightest);
-  box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow);
-}
-.wave-head,
-.wave-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 9px;
-  font-size: 11px;
-  color: var(--dim);
-  background: var(--panel-2);
-}
-.wave-head {
-  border-bottom: 1px solid var(--bevel-shadow);
-}
-.wave-foot {
-  border-top: 1px solid var(--bevel-shadow);
-}
-.wave-head b,
-.wave-foot b {
-  color: var(--ink);
-}
-.wrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 9px;
-  border-bottom: 1px solid #dcd9ca;
-}
-.wrow:last-of-type {
-  border-bottom: none;
-}
-.wchip {
-  flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: bold;
-  color: #fff;
-  padding: 1px 5px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.wchip.scout {
-  background: #2f6fe0;
-}
-.wchip.executor {
-  background: #0a5e2a;
-}
-.wchip.reviewer {
-  background: #8a4bd6;
-}
-.wchip.planner {
-  background: #9a6600;
-}
-.wchip.other {
-  background: #666;
-}
-.wtitle {
-  flex: 1 1 42%;
-  min-width: 60px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: normal;
-}
-.wst {
-  flex: 1 1 34%;
-  min-width: 60px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  color: var(--dim);
-  font-size: 11px;
-}
-.wst.ok {
-  color: var(--ok);
-}
-.wst.err {
-  color: var(--err);
-}
-.wst-txt {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.wmeta {
-  flex: 0 0 auto;
-  color: var(--faint);
-  font-size: 10.5px;
-  white-space: nowrap;
 }
 
 .tline {

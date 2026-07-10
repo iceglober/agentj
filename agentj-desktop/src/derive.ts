@@ -1,7 +1,7 @@
 // Fold the raw event stream into transcript blocks + status metadata.
 // Pure function: called on every render from the current event list.
 
-import type { Block, StreamEvent, Subagent, ToolLine, Wave } from "./types";
+import type { Block, StreamEvent, ToolLine } from "./types";
 
 export interface Derived {
   blocks: Block[];
@@ -27,14 +27,11 @@ export function derive(events: StreamEvent[]): Derived {
   let sawDone = false;
 
   // Contiguous tool calls collapse into one block; `+` marks a call that
-  // shares its step with the immediately-preceding tool call.
+  // shares its step with the immediately-preceding tool call. `run_subagents` is
+  // an ordinary tool row — its subagent_* events are ignored here so the tool line
+  // isn't orphaned and its tool_end (the aggregated result) lands normally.
   let lastToolStep: number | null = null;
   let currentTool: ToolBlock | null = null;
-
-  // Concurrent subagents group into a wave; a wave closes once every child ends.
-  let currentWave: Wave | null = null;
-  let waveCount = 0;
-  const subById = new Map<number, Subagent>();
 
   const breakTool = () => {
     currentTool = null;
@@ -134,55 +131,15 @@ export function derive(events: StreamEvent[]): Derived {
         break;
       }
 
-      case "subagent_start": {
-        breakTool();
-        if (!currentWave) {
-          currentWave = { n: ++waveCount, subagents: [] };
-          blocks.push({ type: "tray", wave: currentWave, id });
-        }
-        const sub: Subagent = {
-          id: ev.data.id,
-          desc: ev.data.desc,
-          type: ev.data.agent_type,
-          status: "",
-          ok: null,
-          elapsed_ms: null,
-          summary: "",
-          tokens: null,
-          done: false,
-        };
-        currentWave.subagents.push(sub);
-        subById.set(ev.data.id, sub);
+      // subagent_* events drive the aggregated `run_subagents` tool line's progress
+      // on the backend; the desktop shows run_subagents as a plain tool row, so they
+      // only nudge the activity label here.
+      case "subagent_start":
         activity = "delegating";
         break;
-      }
-
-      case "subagent_progress": {
-        const s = subById.get(ev.data.id);
-        if (s) s.status = ev.data.status;
+      case "subagent_progress":
         activity = ev.data.status || "subagents…";
         break;
-      }
-
-      case "subagent_end": {
-        const s = subById.get(ev.data.id);
-        if (s) {
-          s.done = true;
-          s.ok = ev.data.ok;
-          s.summary = ev.data.summary;
-          s.elapsed_ms = ev.data.elapsed_ms;
-        }
-        if (currentWave && currentWave.subagents.every((x) => x.done)) {
-          currentWave = null;
-        }
-        break;
-      }
-
-      case "subagent_usage": {
-        const s = subById.get(ev.data.id);
-        if (s) s.tokens = tokensOf(ev.data.usage);
-        break;
-      }
 
       case "done":
         breakTool();

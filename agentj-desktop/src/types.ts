@@ -138,28 +138,10 @@ export interface ToolLine {
   pending: boolean;
 }
 
-export interface Subagent {
-  id: number;
-  desc: string;
-  type: string;
-  status: string;
-  ok: boolean | null;
-  elapsed_ms: number | null;
-  summary: string;
-  tokens: number | null;
-  done: boolean;
-}
-
-export interface Wave {
-  n: number;
-  subagents: Subagent[];
-}
-
 export type Block =
   | { type: "card"; role: "you" | "agentj"; text: string; id: string }
   | { type: "thinking"; text: string; id: string }
   | { type: "note"; text: string; id: string }
   | { type: "notice"; text: string; id: string }
   | { type: "error"; text: string; id: string }
-  | { type: "tool"; lines: ToolLine[]; id: string }
-  | { type: "tray"; wave: Wave; id: string };
+  | { type: "tool"; lines: ToolLine[]; id: string };

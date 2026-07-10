@@ -10,7 +10,7 @@ interface Toggle {
 
 const TOGGLES: Toggle[] = [
   { key: "showThinking", label: "Show thinking", hint: "Display the agent's reasoning blocks." },
-  { key: "showTools", label: "Show tool calls", hint: "Display tool calls and the subagent tray." },
+  { key: "showTools", label: "Show tool calls", hint: "Display tool calls in the transcript." },
   { key: "autoScroll", label: "Auto-scroll to latest", hint: "Follow the transcript as new output lands." },
 ];
 

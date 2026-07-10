@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Block, ToolLine, Wave } from "../types";
+import type { Block, ToolLine } from "../types";
 
 const LABEL: Record<string, string> = {
   you: "you",
@@ -11,7 +11,6 @@ const LABEL: Record<string, string> = {
   notice: "notice",
   error: "error",
   tool: "tool",
-  tray: "",
 };
 
 // Render plain text, highlighting `code` spans between backticks. Used for short system/lifecycle
@@ -110,68 +109,6 @@ function ToolGroup({ name, lines }: { name: string; lines: ToolLine[] }) {
   );
 }
 
-// The subagent wave: a group box with one row per subagent — type chip · title · duration bar ·
-// live status · tokens/elapsed — and a join footer. The bar shows each agent's share of the wave's
-// wall-clock (the slowest fills it), so the parallel spread is visible at a glance.
-//   ├─╯  wave 1 · 2/2 ok · 11.4s · 7.2k tok
-const KNOWN_TYPES = ["scout", "planner", "reviewer", "executor"];
-const fmtTokShort = (t: number | null): string =>
-  t && t > 0 ? `${(t / 1000).toFixed(1)}k` : "";
-
-function Tray({ wave }: { wave: Wave }) {
-  const subs = wave.subagents;
-  const n = subs.length;
-  const okCount = subs.filter((s) => s.ok === true).length;
-  const doneCount = subs.filter((s) => s.done).length;
-  const maxElapsed = subs.reduce((m, s) => Math.max(m, s.elapsed_ms ?? 0), 1);
-  const totalTok = subs.reduce((m, s) => m + (s.tokens ?? 0), 0);
-  const allDone = doneCount === n;
-
-  return (
-    <div className="wave">
-      <div className="wave-head">
-        <span>
-          <b>run_subagents</b> · wave {wave.n} · {n} subagent{n === 1 ? "" : "s"}
-        </span>
-        <span>{allDone ? "" : <><span className="spin">◍</span> running</>}</span>
-      </div>
-
-      {subs.map((s) => {
-        const type = KNOWN_TYPES.includes(s.type) ? s.type : "other";
-        const running = s.ok == null;
-        const st = running ? s.status || "working…" : s.summary || (s.ok ? "done" : "failed");
-        return (
-          <div className="wrow" key={s.id}>
-            <span className={"wchip " + type}>{s.type || "sub"}</span>
-            <span className="wtitle" title={s.desc}>
-              {s.desc}
-            </span>
-            <span className={"wst" + (running ? "" : s.ok ? " ok" : " err")}>
-              {running ? <span className="spin">◍</span> : s.ok ? "✓" : "✗"}{" "}
-              <span className="wst-txt" title={st}>
-                {st}
-              </span>
-            </span>
-            <span className="wmeta">
-              {fmtTokShort(s.tokens)}
-              {s.elapsed_ms != null ? ` · ${fmtMs(s.elapsed_ms)}` : ""}
-            </span>
-          </div>
-        );
-      })}
-
-      <div className="wave-foot">
-        <span>
-          {allDone ? <b>{okCount}/{n} ok</b> : `${doneCount}/${n} done`}
-        </span>
-        <span>
-          {totalTok > 0 ? `${(totalTok / 1000).toFixed(1)}k tok` : ""}
-          {allDone ? ` · ${fmtMs(maxElapsed)} wall` : ""}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function BlockRow({ block }: { block: Block }) {
   const cls =
@@ -197,9 +134,6 @@ function BlockRow({ block }: { block: Block }) {
           <ToolGroup name={g.name} lines={g.lines} key={i} />
         ),
       );
-      break;
-    case "tray":
-      content = <Tray wave={block.wave} />;
       break;
   }
 
