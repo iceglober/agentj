@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { Block, ToolLine, Wave } from "../types";
 
 const LABEL: Record<string, string> = {
@@ -12,7 +14,8 @@ const LABEL: Record<string, string> = {
   tray: "",
 };
 
-// Render plain text, highlighting `code` spans between backticks.
+// Render plain text, highlighting `code` spans between backticks. Used for short system/lifecycle
+// lines (note/notice/error) where full markdown would be overkill and errors should stay literal.
 function Ticks({ text }: { text: string }) {
   const parts = text.split(/(`[^`]+`)/g);
   return (
@@ -27,6 +30,16 @@ function Ticks({ text }: { text: string }) {
         ),
       )}
     </>
+  );
+}
+
+// Render message text as GitHub-flavored markdown (bold, italics, lists, code, tables, …).
+// react-markdown does NOT render raw HTML, so model output can't inject markup.
+function Markdown({ text }: { text: string }) {
+  return (
+    <div className="md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
   );
 }
 
@@ -57,11 +70,51 @@ function ToolLineRow({ line }: { line: ToolLine }) {
   );
 }
 
+// Group consecutive lines that call the SAME tool, so a run collapses to "name × N".
+function groupLines(lines: ToolLine[]): { name: string; lines: ToolLine[] }[] {
+  const groups: { name: string; lines: ToolLine[] }[] = [];
+  for (const l of lines) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === l.name) last.lines.push(l);
+    else groups.push({ name: l.name, lines: [l] });
+  }
+  return groups;
+}
+
+// A run of ≥2 consecutive calls to the same tool: collapsed as "name × N", click to expand into the
+// individual calls. Aggregate status — a spinner while any is pending, an ✗N count if any failed.
+function ToolGroup({ name, lines }: { name: string; lines: ToolLine[] }) {
+  const [open, setOpen] = useState(false);
+  const pending = lines.some((l) => l.pending);
+  const fails = lines.filter((l) => !l.pending && !l.ok).length;
+  return (
+    <div className={"tline tgroup" + (fails > 0 ? " toolfail" : "")}>
+      <span className="toolrow expandable" onClick={() => setOpen((v) => !v)}>
+        <span className="twist">{open ? "▾" : "▸"}</span>
+        <span className="k">{name}</span>
+        <span className="tcount">× {lines.length}</span>
+        {pending ? (
+          <span className="rail"> — …</span>
+        ) : fails > 0 ? (
+          <span className="rail"> — ✗{fails}</span>
+        ) : null}
+      </span>
+      {open && (
+        <div className="tgroup-body">
+          {lines.map((l, i) => (
+            <ToolLineRow line={l} key={i} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // The subagent wave: a group box with one row per subagent — type chip · title · duration bar ·
 // live status · tokens/elapsed — and a join footer. The bar shows each agent's share of the wave's
 // wall-clock (the slowest fills it), so the parallel spread is visible at a glance.
 //   ├─╯  wave 1 · 2/2 ok · 11.4s · 7.2k tok
-const KNOWN_TYPES = ["questioner", "scout", "planner", "reviewer", "executor"];
+const KNOWN_TYPES = ["scout", "planner", "reviewer", "executor"];
 const fmtTokShort = (t: number | null): string =>
   t && t > 0 ? `${(t / 1000).toFixed(1)}k` : "";
 
@@ -129,13 +182,21 @@ function BlockRow({ block }: { block: Block }) {
   switch (block.type) {
     case "card":
     case "thinking":
+      content = <Markdown text={block.text} />;
+      break;
     case "note":
     case "notice":
     case "error":
       content = <Ticks text={block.text} />;
       break;
     case "tool":
-      content = block.lines.map((l, i) => <ToolLineRow line={l} key={i} />);
+      content = groupLines(block.lines).map((g, i) =>
+        g.lines.length === 1 ? (
+          <ToolLineRow line={g.lines[0]} key={i} />
+        ) : (
+          <ToolGroup name={g.name} lines={g.lines} key={i} />
+        ),
+      );
       break;
     case "tray":
       content = <Tray wave={block.wave} />;

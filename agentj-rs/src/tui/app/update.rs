@@ -249,7 +249,7 @@ impl App {
                 self.dirty = true;
             }
             // The save already shows as a tool line in the TUI; the Artifact signal is for the
-            // desktop app (which docks a saved html blueprint beside the chat).
+            // desktop app (which refreshes its live todos view).
             AgentEvent::Artifact { .. } => {}
             AgentEvent::StepLimit(n) => {
                 self.step_limit_hit = true;

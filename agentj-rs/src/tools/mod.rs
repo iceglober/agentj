@@ -74,31 +74,13 @@ pub struct Tools {
 /// from an MCP tool (always passes through).
 const BUILTINS: &[&str] = &[
     "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "glob", "grep", "bash",
-    "save_artifact", "edit_artifact", "read_artifact", "read_skill", "job_start", "job_check",
+    "save_artifact", "edit_artifact", "read_artifact", "job_start", "job_check",
     "job_stop", "mcp_find_tools", "run_subagents",
 ];
-
-/// Built-in skills shipped with agentj — reference docs the model reads on demand via `read_skill`,
-/// so their depth loads only when the work calls for it instead of bloating every prompt. Keyed by
-/// name; `read_skill` returns the raw markdown. `blueprint` is the design brief for the high-fidelity,
-/// responsive, decision-surfacing HTML the `<align>` doctrine tells the model to build.
-const SKILLS: &[(&str, &str)] = &[("blueprint", include_str!("../skills/blueprint.md"))];
 
 /// The value of `args[key]` when it's a string — the common shape of tool arguments.
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
     args.get(key).and_then(|v| v.as_str())
-}
-
-/// Fire-and-forget open of a saved HTML artifact in the user's default browser (`open` on macOS,
-/// `xdg-open` elsewhere). Detached — we don't wait or surface its exit; returns whether the opener
-/// launched at all. Suppressed when `AGENTJ_DESKTOP=1`: the desktop app renders the blueprint in a
-/// pane beside the chat (via `AgentEvent::Artifact`), so a second system-browser tab would be noise.
-fn open_in_browser(path: &std::path::Path) -> bool {
-    if std::env::var("AGENTJ_DESKTOP").is_ok_and(|v| v == "1") {
-        return false;
-    }
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    std::process::Command::new(opener).arg(path).spawn().is_ok()
 }
 
 impl Tools {
@@ -162,10 +144,9 @@ impl Tools {
         self.root.to_string_lossy().into_owned()
     }
 
-    /// `save_artifact` — persist a named session artifact (the model's `plan`/`todos`, a `blueprint`,
-    /// a decision log, …) to the global session store, OUTSIDE the repo. Only reachable when a
-    /// session is attached (its spec is gated the same way). An `html` artifact is opened in the
-    /// user's browser on save, so a visual `blueprint` lands in front of them for alignment.
+    /// `save_artifact` — persist a named session artifact (the model's `plan`/`todos`, a decision
+    /// log, …) to the global session store, OUTSIDE the repo. Only reachable when a session is
+    /// attached (its spec is gated the same way).
     fn save_artifact(&self, args: &Value) -> ToolOutcome {
         let (Some(name), Some(content)) = (arg_str(args, "name"), arg_str(args, "content")) else {
             return ToolOutcome::err("error: save_artifact needs a name and content");
@@ -173,23 +154,12 @@ impl Tools {
         let Some(session) = &self.session else {
             return ToolOutcome::err("error: no session artifact store attached");
         };
-        let html = arg_str(args, "format").is_some_and(|f| f.eq_ignore_ascii_case("html"));
-        match session.save_artifact(name, content, html) {
-            Ok(path) => {
-                let opened = if html { open_in_browser(&path) } else { false };
-                let tail = if opened {
-                    " — opened in your browser for review"
-                } else if html {
-                    " (HTML; open it in a browser to view)"
-                } else {
-                    ""
-                };
-                ToolOutcome::ok(format!(
-                    "saved artifact `{name}` ({} bytes) to this session — it persists across resume \
-                     and is not written into the repo{tail}",
-                    content.len()
-                ))
-            }
+        match session.save_artifact(name, content) {
+            Ok(_) => ToolOutcome::ok(format!(
+                "saved artifact `{name}` ({} bytes) to this session — it persists across resume \
+                 and is not written into the repo",
+                content.len()
+            )),
             Err(e) => ToolOutcome::err(format!("error: could not save artifact `{name}`: {e}")),
         }
     }
@@ -273,16 +243,6 @@ impl Tools {
             "save_artifact" => self.save_artifact(args),
             "edit_artifact" => self.edit_artifact(args),
             "read_artifact" => self.read_artifact(args),
-            "read_skill" => match arg_str(args, "name") {
-                Some(n) => match SKILLS.iter().find(|(k, _)| *k == n) {
-                    Some((_, body)) => ToolOutcome::ok((*body).to_string()),
-                    None => {
-                        let avail = SKILLS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ");
-                        ToolOutcome::err(format!("error: no skill `{n}` (available: {avail})"))
-                    }
-                },
-                None => ToolOutcome::err("error: read_skill needs a name"),
-            },
             "job_start" => self.job_start(args).await,
             "job_check" => ToolOutcome::ok(
                 self.jobs

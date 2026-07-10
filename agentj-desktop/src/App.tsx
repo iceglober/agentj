@@ -7,7 +7,6 @@ import { TabBar } from "./components/TabBar";
 import { Transcript } from "./components/Transcript";
 import { StatusRow } from "./components/StatusRow";
 import { InputRow } from "./components/InputRow";
-import { BlueprintPane } from "./components/BlueprintPane";
 import { LeftRail } from "./components/LeftRail";
 import { StatusBar } from "./components/StatusBar";
 import { Welcome } from "./components/Welcome";
@@ -253,11 +252,6 @@ export function App() {
     );
   }
 
-  const hasBlueprint = active?.blueprint != null;
-  // Full-width blueprint view, or chat. Guard against a stale "blueprint" view
-  // with no blueprint (shouldn't happen — view only flips on arrival — but cheap).
-  const showBlueprint = hasBlueprint && active?.view === "blueprint";
-
   return (
     <div className="app">
       <TabBar
@@ -274,42 +268,29 @@ export function App() {
         onOpenSettings={() => setModal("settings")}
         onOpenShortcuts={() => setModal("shortcuts")}
         onOpenTools={() => setModal("tools")}
-        hasBlueprint={hasBlueprint}
-        blueprintName={active?.blueprint?.name ?? null}
-        view={showBlueprint ? "blueprint" : "chat"}
-        onSelectView={session.setView}
       />
 
       <div className="body">
-        {showBlueprint ? (
-          <BlueprintPane
-            blueprint={active?.blueprint ?? null}
-            onClose={() => session.setView("chat")}
-          />
-        ) : (
-          <>
-            {session.activeId && (
-              <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
-            )}
-
-            <div className="chat">
-              <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
-              <StatusRow
-                running={active?.running ?? false}
-                activity={derived.activity}
-                totalTokens={derived.totalTokens}
-                sawDone={derived.sawDone}
-              />
-              <InputRow
-                onSend={session.send}
-                onInterrupt={session.interrupt}
-                running={active?.running ?? false}
-                commands={COMMANDS}
-                onRunCommand={runCommand}
-              />
-            </div>
-          </>
+        {session.activeId && (
+          <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
         )}
+
+        <div className="chat">
+          <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
+          <StatusRow
+            running={active?.running ?? false}
+            activity={derived.activity}
+            totalTokens={derived.totalTokens}
+            sawDone={derived.sawDone}
+          />
+          <InputRow
+            onSend={session.send}
+            onInterrupt={session.interrupt}
+            running={active?.running ?? false}
+            commands={COMMANDS}
+            onRunCommand={runCommand}
+          />
+        </div>
       </div>
 
       <StatusBar meta={active?.meta ?? null} />

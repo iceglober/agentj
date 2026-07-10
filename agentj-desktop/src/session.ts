@@ -1,7 +1,7 @@
 // Multi-session bridge to the Tauri backend. All backend contact lives here:
 // it subscribes to the tagged event streams and exposes the session commands.
 // The backend can run many concurrent sessions (one per git worktree); this
-// hook keeps a per-session slice of transcript/blueprint/running state and
+// hook keeps a per-session slice of transcript/running state and
 // tracks which project + session tab is active.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,8 +9,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEventEnvelope,
-  Blueprint,
-  BlueprintEvent,
   FileEntry,
   RepoScan,
   SessionMeta,
@@ -54,9 +52,6 @@ export interface SessionState {
   meta: SessionMeta;
   events: StreamEvent[];
   running: boolean;
-  blueprint: Blueprint | null;
-  // Which full-width view the session shows: the chat, or the blueprint (tier-3 tabs).
-  view: "chat" | "blueprint";
   // Raw markdown of this session's `todos` artifact; null until fetched / if absent.
   todos: string | null;
 }
@@ -75,7 +70,6 @@ export interface SessionStore {
 
   send: (prompt: string) => Promise<void>;
   interrupt: () => Promise<void>;
-  setView: (view: "chat" | "blueprint") => void;
   // Clear one session's transcript display; leaves backend/model history alone.
   clearEvents: (id: string) => void;
 
@@ -92,7 +86,7 @@ function freshSlice(meta: SessionMeta): SessionState {
   const events: StreamEvent[] = meta.notice
     ? [{ kind: "notice", data: meta.notice }]
     : [];
-  return { meta, events, running: false, blueprint: null, view: "chat", todos: null };
+  return { meta, events, running: false, todos: null };
 }
 
 export function useSessions(): SessionStore {
@@ -153,12 +147,6 @@ export function useSessions(): SessionStore {
         // running on any live event; clear it on done/error.
         running: ends ? false : true,
       }));
-    }).then(track);
-
-    listen<BlueprintEvent>("blueprint", (e) => {
-      const { sessionId, name, html } = e.payload;
-      // A new/updated blueprint is the alignment moment — surface it full-width.
-      patch(sessionId, (s) => ({ ...s, blueprint: { name, html }, view: "blueprint" }));
     }).then(track);
 
     // The agent edited a session's todos — reflect the new markdown live.
@@ -287,15 +275,6 @@ export function useSessions(): SessionStore {
     patch(id, (s) => ({ ...s, running: false }));
   }, [patch]);
 
-  const setView = useCallback(
-    (view: "chat" | "blueprint") => {
-      const id = activeIdRef.current;
-      if (!id) return;
-      patch(id, (s) => ({ ...s, view }));
-    },
-    [patch],
-  );
-
   const clearEvents = useCallback(
     (id: string) => {
       patch(id, (s) => ({ ...s, events: [] }));
@@ -346,7 +325,6 @@ export function useSessions(): SessionStore {
     close,
     send,
     interrupt,
-    setView,
     clearEvents,
     inspectRepo,
     provisionWorktree,

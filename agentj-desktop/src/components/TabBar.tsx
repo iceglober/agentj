@@ -1,10 +1,7 @@
-// The signature chrome: a stacked tab bar at the top of the window.
+// The signature chrome: a two-tier tab bar at the top of the window.
 //   TIER 1 — projects: one tab per distinct base repo among the open sessions.
 //   TIER 2 — sessions: only the active project's sessions (worktrees).
-//   TIER 3 — view: Chat vs Blueprint for the active session; only shown once a
-//            blueprint exists, so the blueprint can render FULL WIDTH (a 46% side
-//            pane wasn't enough for a real UX mockup). Tier 2 nests under the active
-//            project; tier 3 nests under the active session. All grotesk (--sans).
+// Tier 2 visually nests under the active project. All grotesk (--sans).
 
 import { useEffect, useRef, useState } from "react";
 import type { SessionMeta } from "../types";
@@ -108,10 +105,6 @@ export function TabBar({
   onOpenSettings,
   onOpenShortcuts,
   onOpenTools,
-  hasBlueprint,
-  blueprintName,
-  view,
-  onSelectView,
 }: {
   sessions: SessionMeta[];
   activeProject: string | null;
@@ -126,10 +119,6 @@ export function TabBar({
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenTools: () => void;
-  hasBlueprint: boolean;
-  blueprintName: string | null;
-  view: "chat" | "blueprint";
-  onSelectView: (v: "chat" | "blueprint") => void;
 }) {
   // Distinct projects, in first-seen order.
   const projects: Project[] = [];
@@ -213,28 +202,6 @@ export function TabBar({
           </button>
         </div>
       </div>
-
-      {/* tier 3 — view: chat vs full-width blueprint (only once a blueprint exists) */}
-      {hasBlueprint && (
-        <div className="tier tier3">
-          <span className="tier-label">View</span>
-          <div className="tabs">
-            <button
-              className={"vtab" + (view === "chat" ? " active" : "")}
-              onClick={() => onSelectView("chat")}
-            >
-              Chat
-            </button>
-            <button
-              className={"vtab" + (view === "blueprint" ? " active" : "")}
-              title={blueprintName ?? "blueprint"}
-              onClick={() => onSelectView("blueprint")}
-            >
-              ⧉ {blueprintName ?? "blueprint"}
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

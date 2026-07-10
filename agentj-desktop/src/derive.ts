@@ -90,15 +90,12 @@ export function derive(events: StreamEvent[]): Derived {
         break;
 
       case "artifact":
-        // The HTML blueprint arrives via its own event; only note other artifacts.
-        if (ev.data.format !== "html") {
-          breakTool();
-          blocks.push({
-            type: "note",
-            text: `» saved artifact \`${ev.data.name}\``,
-            id,
-          });
-        }
+        breakTool();
+        blocks.push({
+          type: "note",
+          text: `» saved artifact \`${ev.data.name}\``,
+          id,
+        });
         break;
 
       case "tool_start": {

@@ -47,11 +47,6 @@ pub fn tool_specs(
             }, "required": ["path", "start_line", "end_line", "expect", "content"] }),
         },
         ToolSpec {
-            name: "read_skill".into(),
-            description: "Read a built-in agentj skill (design brief) on demand. Available: \"blueprint\" — how to build a high-fidelity, responsive HTML blueprint that surfaces the DECISIONS the user must make. Read the relevant skill BEFORE doing that kind of work; it's the depth behind the one-line reminders in your instructions.".into(),
-            parameters: json!({ "type": "object", "properties": { "name": { "type": "string", "description": "skill name, e.g. \"blueprint\"" } }, "required": ["name"] }),
-        },
-        ToolSpec {
             name: "list_dir".into(),
             description: "List the entries of a directory (relative to repo root). Directories end with /.".into(),
             parameters: json!({ "type": "object", "properties": { "path": { "type": "string" } } }),
@@ -90,7 +85,7 @@ pub fn tool_specs(
     if allow_delegate {
         specs.push(ToolSpec {
             name: "run_subagents".into(),
-            description: "Run one or more sub-tasks as TYPED subagents that each run in their OWN context and return a concise result. Use for a sub-task of more than ~5 tool calls, or that runs in parallel / needs isolated context — it keeps YOUR context small. This is a dependency DAG: tasks WITHOUT `after` run in PARALLEL; a task with `after:[i,…]` runs in a LATER stage and RECEIVES those tasks' results as its context. So a scout→planner flow is ONE call — put the scouts first, give the planner `after` those scouts — instead of running the planner alongside the scouts it depends on. Each result comes back labeled `[subagent i]`, where i is the task's 0-based position in `tasks` (which is also what `after` references). Pick the `type` that matches the work — each runs with a scoped toolset: `questioner` (read-only clarify pass — run these FIRST, before the scouts: turn the request's ambiguities into 2–4 sharp questions, or report it's clear), `scout` (read-only investigation / answer a question), `planner` (read-only design / decompose / weigh options), `reviewer` (adversarial verify a diff or plan — read + run checks, no edits), `executor` (make a targeted change on files you name — the default). Write briefs that spend the budget well: name the exact files/paths/commands you already located and state precisely what to return.".into(),
+            description: "Run one or more sub-tasks as TYPED subagents that each run in their OWN context and return a concise result. Use for a sub-task of more than ~5 tool calls, or that runs in parallel / needs isolated context — it keeps YOUR context small. This is a dependency DAG: tasks WITHOUT `after` run in PARALLEL; a task with `after:[i,…]` runs in a LATER stage and RECEIVES those tasks' results as its context. So a scout→planner flow is ONE call — put the scouts first, give the planner `after` those scouts — instead of running the planner alongside the scouts it depends on. Each result comes back labeled `[subagent i]`, where i is the task's 0-based position in `tasks` (which is also what `after` references). Pick the `type` that matches the work — each runs with a scoped toolset: `scout` (read-only investigation / answer a question), `planner` (read-only design / decompose / weigh options), `reviewer` (adversarial verify a diff or plan — read + run checks, no edits), `executor` (make a targeted change on files you name — the default). Write briefs that spend the budget well: name the exact files/paths/commands you already located and state precisely what to return.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -101,7 +96,7 @@ pub fn tool_specs(
                             "type": "object",
                             "properties": {
                                 "task": { "type": "string", "description": "The self-contained sub-task instruction." },
-                                "type": { "type": "string", "enum": ["questioner", "scout", "planner", "reviewer", "executor"], "description": "The kind of subagent (default: executor). questioner/scout/planner/reviewer are read-only (questioner runs first to ask clarifying questions); executor makes changes." },
+                                "type": { "type": "string", "enum": ["scout", "planner", "reviewer", "executor"], "description": "The kind of subagent (default: executor). scout/planner/reviewer are read-only; executor makes changes." },
                                 "title": { "type": "string", "description": "A short 3–8 word label for this sub-task, shown in the UI while it runs (e.g. 'Map the Rust crate')." },
                                 "context": { "type": "string", "description": "Optional extra context (paths, findings) the subagent needs." },
                                 "after": { "type": "array", "items": { "type": "integer" }, "description": "0-based indices of sub-tasks in THIS call that must finish first; their results are fed to this task as context. Omit for an independent task that can run immediately." }
@@ -117,11 +112,10 @@ pub fn tool_specs(
     if allow_delegate && has_session {
         specs.push(ToolSpec {
             name: "save_artifact".into(),
-            description: "Persist a named artifact for THIS session, stored outside the repo and keyed to the session so it never pollutes the working tree and a fresh session never inherits it. Overwrites the artifact each call — for small incremental changes use `edit_artifact` instead. Three artifacts are conventional: `plan` (markdown — the settled APPROACH and its rationale; write it once the design is decided, revise only on new info) and `todos` (a markdown CHECKLIST, one item per line as `- [ ] pending` / `- [x] done` — the app shows it live). `plan` and `todos` are handed back to you on resume, so keep todos current — it's what tells a resumed run what's left. The third is `blueprint` (format:\"html\") — the PRESENTABLE version of the `plan`: a self-contained, RESPONSIVE HTML page with HIGH-FIDELITY, FULLY INTERACTIVE mockups (styled like the real product and wired to actually work — tabs switch, forms respond — not static wireframes) that concisely lays out the DECISIONS the user needs to make, each with your recommendation. Saving an html artifact OPENS IT IN THE USER'S BROWSER, so present the plan as a `blueprint` when it's worth showing rather than telling — during scoping/planning, before you build.".into(),
+            description: "Persist a named markdown artifact for THIS session, stored outside the repo and keyed to the session so it never pollutes the working tree and a fresh session never inherits it. Overwrites the artifact each call — for small incremental changes use `edit_artifact` instead. Two artifacts are conventional: `plan` (the settled APPROACH and its rationale; write it once the design is decided, revise only on new info) and `todos` (a CHECKLIST, one item per line as `- [ ] pending` / `- [x] done` — the app shows it live). `plan` and `todos` are handed back to you on resume, so keep todos current — it's what tells a resumed run what's left.".into(),
             parameters: json!({ "type": "object", "properties": {
-                "name": { "type": "string", "description": "artifact name, e.g. \"plan\", \"todos\", \"blueprint\"" },
-                "content": { "type": "string", "description": "the full artifact content (replaces any prior version)" },
-                "format": { "type": "string", "enum": ["markdown", "html"], "description": "\"markdown\" (default) for plan/todos/notes; \"html\" for a blueprint — a self-contained page opened in the user's browser on save" }
+                "name": { "type": "string", "description": "artifact name, e.g. \"plan\", \"todos\"" },
+                "content": { "type": "string", "description": "the full artifact content (replaces any prior version)" }
             }, "required": ["name", "content"] }),
         });
         specs.push(ToolSpec {

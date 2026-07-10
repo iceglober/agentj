@@ -317,7 +317,7 @@ fn session_in(root: &str, steps: Vec<ScriptStep>, check: Option<&str>) -> Sessio
 fn session_with_store(steps: Vec<ScriptStep>, store_dir: &std::path::Path, plan: Option<&str>) -> Session {
     let store = crate::session::Session::at_dir(store_dir.to_path_buf());
     if let Some(p) = plan {
-        store.save_artifact("plan", p, false).unwrap();
+        store.save_artifact("plan", p).unwrap();
     }
     let jobs = JobManager::new(".".to_string());
     let tools = Tools::with_session(PathBuf::from("."), jobs, None, Some(Arc::new(store)));
@@ -376,8 +376,8 @@ async fn a_surviving_frontier_is_injected_on_the_first_turn_only() {
 fn resume_leads_with_todos_then_plan() {
     let dir = temp_root("resume-order");
     let store = crate::session::Session::at_dir(dir.clone());
-    store.save_artifact("plan", "APPROACH: rewrite the parser", false).unwrap();
-    store.save_artifact("todos", "- [ ] port lexer\n- [x] scaffold", false).unwrap();
+    store.save_artifact("plan", "APPROACH: rewrite the parser").unwrap();
+    store.save_artifact("todos", "- [ ] port lexer\n- [x] scaffold").unwrap();
     let jobs = JobManager::new(".".to_string());
     let tools = Tools::with_session(PathBuf::from("."), jobs, None, Some(Arc::new(store)));
     let sess = Session {

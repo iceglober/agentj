@@ -4,8 +4,7 @@
 //! worktree (its own checkout, artifact store, and conversation) grouped under the project (base
 //! repo) it belongs to, which is what the two-tier tab bar renders. Every command is scoped to a
 //! session id. Agent events stream to the webview tagged with their session id so the UI routes them
-//! to the right tab. A saved html `blueprint` is read and emitted for the docked pane; the CLI's
-//! browser-open is suppressed here via `AGENTJ_DESKTOP=1`.
+//! to the right tab.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod worktree;
@@ -124,14 +123,6 @@ impl SessionMeta {
 struct Tagged {
     session_id: String,
     event: AgentEvent,
-}
-
-#[derive(serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct BlueprintPayload {
-    session_id: String,
-    name: String,
-    html: String,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -329,18 +320,11 @@ fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) 
     let fwd = tauri::async_runtime::spawn(async move {
         while let Some(ev) = rx.recv().await {
             let _ = app_fwd.emit("agent-event", Tagged { session_id: sid.clone(), event: ev.clone() });
-            if let AgentEvent::Artifact { name, format } = &ev {
+            if let AgentEvent::Artifact { name } = &ev {
                 if name == "todos" {
                     if let Some(content) = store.read_artifact("todos") {
                         let _ = app_fwd
                             .emit("todos", TodosPayload { session_id: sid.clone(), content });
-                    }
-                } else if format == "html" {
-                    if let Some(html) = store.read_artifact(name) {
-                        let _ = app_fwd.emit(
-                            "blueprint",
-                            BlueprintPayload { session_id: sid.clone(), name: name.clone(), html },
-                        );
                     }
                 }
             }
@@ -477,7 +461,6 @@ fn tool_status(session_id: String, state: State<'_, AppState>) -> Result<ToolSta
 }
 
 fn build_state() -> AppState {
-    std::env::set_var("AGENTJ_DESKTOP", "1"); // render blueprints in-app, not the system browser
     // Reopen the sessions from last launch whose worktrees still look like git checkouts.
     let sessions: Vec<Arc<SessionEntry>> = worktree::remembered_sessions()
         .into_iter()

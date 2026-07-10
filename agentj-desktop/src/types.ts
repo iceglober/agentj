@@ -39,7 +39,6 @@ export interface SubagentUsage {
 }
 export interface ArtifactMeta {
   name: string;
-  format: "markdown" | "html" | string;
 }
 
 // Adjacently-tagged agent events: { kind, data? }.
@@ -58,11 +57,6 @@ export type AgentEvent =
   | { kind: "step_limit"; data: number }
   | { kind: "error"; data: string }
   | { kind: "done" };
-
-export interface Blueprint {
-  name: string;
-  html: string;
-}
 
 // One entry in the file explorer. `rel` is the repo-relative path from the
 // worktree root; the backend sorts dirs-first and skips .git/node_modules/etc.
@@ -104,12 +98,6 @@ export interface AgentEventEnvelope {
   sessionId: string;
   event: AgentEvent;
 }
-export interface BlueprintEvent {
-  sessionId: string;
-  name: string;
-  html: string;
-}
-
 // One selectable checkout under a repo: the base checkout or an agentj worktree.
 export interface WorktreeEntry {
   path: string;

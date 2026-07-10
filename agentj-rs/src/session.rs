@@ -126,49 +126,27 @@ impl Session {
         best.map(|(_, s)| s)
     }
 
-    /// Read a named artifact's content, or `None` if it was never saved. Resolves either format:
-    /// the bare name (markdown — the historical layout) or the `<name>.html` file.
+    /// Read a named artifact's content, or `None` if it was never saved.
     pub fn read_artifact(&self, name: &str) -> Option<String> {
         let base = self.dir.join("artifacts");
-        let n = safe_name(name);
-        std::fs::read_to_string(base.join(&n))
-            .or_else(|_| std::fs::read_to_string(base.join(format!("{n}.html"))))
-            .ok()
+        std::fs::read_to_string(base.join(safe_name(name))).ok()
     }
 
-    /// Save (overwrite) a named artifact and mark the session active. `html` artifacts are stored as
-    /// `<name>.html` (the caller opens them in a browser); everything else keeps the bare name.
-    /// Returns the file's absolute path so the caller can open or reference it.
-    pub fn save_artifact(&self, name: &str, content: &str, html: bool) -> io::Result<PathBuf> {
+    /// Save (overwrite) a named artifact and mark the session active. Returns the file's absolute
+    /// path so the caller can reference it.
+    pub fn save_artifact(&self, name: &str, content: &str) -> io::Result<PathBuf> {
         let dir = self.dir.join("artifacts");
         std::fs::create_dir_all(&dir)?;
-        let n = safe_name(name);
-        // Keep one file per artifact: drop the other-format sibling so a re-save can't leave a
-        // stale copy that read_artifact would resolve first.
-        let (path, stale) = if html {
-            (dir.join(format!("{n}.html")), dir.join(&n))
-        } else {
-            (dir.join(&n), dir.join(format!("{n}.html")))
-        };
-        let _ = std::fs::remove_file(stale);
+        let path = dir.join(safe_name(name));
         std::fs::write(&path, content)?;
         self.touch();
         Ok(path)
     }
 
-    /// The on-disk path of an existing artifact (bare markdown or `<name>.html`), if any.
+    /// The on-disk path of an existing artifact, if any.
     fn artifact_path(&self, name: &str) -> Option<PathBuf> {
-        let base = self.dir.join("artifacts");
-        let n = safe_name(name);
-        let bare = base.join(&n);
-        if bare.exists() {
-            return Some(bare);
-        }
-        let html = base.join(format!("{n}.html"));
-        if html.exists() {
-            return Some(html);
-        }
-        None
+        let path = self.dir.join("artifacts").join(safe_name(name));
+        path.exists().then_some(path)
     }
 
     /// Apply ordered exact-string replacements (first occurrence each) to an existing artifact,
@@ -260,7 +238,7 @@ mod tests {
         assert!(!s.id.is_empty());
         assert!(s.read_artifact("plan").is_none(), "a fresh session owns no artifacts");
 
-        s.save_artifact("plan", "# do the thing\n- pending: build it", false).unwrap();
+        s.save_artifact("plan", "# do the thing\n- pending: build it").unwrap();
         let reloaded = Session::load(&s.id).unwrap();
         assert_eq!(
             reloaded.read_artifact("plan").as_deref(),
@@ -270,20 +248,18 @@ mod tests {
     }
 
     #[test]
-    fn html_and_markdown_artifacts_round_trip_and_reformatting_leaves_no_stale_copy() {
+    fn artifacts_round_trip_and_overwrite_in_place() {
         let _home = TempHome::new("fmt");
         let wt = std::env::temp_dir().to_string_lossy().into_owned();
         let s = Session::mint(&wt, None).unwrap();
 
-        // An html artifact lands as `<name>.html` and reads back through the same name.
-        let path = s.save_artifact("blueprint", "<h1>hi</h1>", true).unwrap();
-        assert!(path.to_string_lossy().ends_with("blueprint.html"), "html gets the .html extension");
-        assert_eq!(s.read_artifact("blueprint").as_deref(), Some("<h1>hi</h1>"));
+        let path = s.save_artifact("todos", "- [ ] a").unwrap();
+        assert!(path.to_string_lossy().ends_with("todos"), "stored under the bare name");
+        assert_eq!(s.read_artifact("todos").as_deref(), Some("- [ ] a"));
 
-        // Re-saving the SAME name as markdown must drop the stale .html so the read isn't ambiguous.
-        s.save_artifact("blueprint", "now markdown", false).unwrap();
-        assert!(!path.exists(), "the old .html sibling is removed on reformat");
-        assert_eq!(s.read_artifact("blueprint").as_deref(), Some("now markdown"));
+        // Re-saving the same name overwrites in place.
+        s.save_artifact("todos", "- [x] a").unwrap();
+        assert_eq!(s.read_artifact("todos").as_deref(), Some("- [x] a"));
     }
 
     #[test]

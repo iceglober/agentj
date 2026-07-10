@@ -354,43 +354,6 @@ button,
   color: var(--err);
 }
 
-/* tier 3 — view switch (Chat / Blueprint) for the active session */
-.tier3 {
-  height: 26px;
-  padding: 2px 6px 0 6px;
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--bevel-shadow);
-}
-.tier3 .tier-label {
-  padding-left: 44px;
-}
-.vtab {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 21px;
-  padding: 0 12px;
-  background: var(--panel-2);
-  color: var(--ink);
-  font-family: var(--sans);
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-  position: relative;
-  bottom: -1px;
-  border: 1px solid;
-  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
-    var(--bevel-lightest);
-  box-shadow: inset 1px 1px 0 var(--bevel-light);
-}
-.vtab.active {
-  height: 23px;
-  background: var(--panel);
-  font-weight: bold;
-  color: var(--sel);
-  border-bottom-color: var(--panel);
-  z-index: 2;
-}
 
 /* shared "+" new-tab button — small raised 3D gray button */
 .newtab {
@@ -492,6 +455,75 @@ button,
 .blk .cnt {
   padding: 1px 0;
   min-width: 0;
+}
+/* markdown-rendered message body (react-markdown) — tight spacing over the retro theme */
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 6px;
+}
+.md ul,
+.md ol {
+  margin: 4px 0 6px;
+  padding-left: 20px;
+}
+.md li {
+  margin: 1px 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+.md h1 {
+  font-size: 14px;
+}
+.md h2 {
+  font-size: 13px;
+}
+.md a {
+  color: var(--sel);
+}
+.md blockquote {
+  margin: 4px 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--bevel-shadow);
+  color: var(--muted);
+}
+.md code {
+  font-family: var(--mono);
+  color: #000080;
+}
+.md pre {
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  background: #f6f5ee;
+  color: #222;
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light);
+}
+.md pre code {
+  color: #222;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 4px 0;
+}
+.md th,
+.md td {
+  border: 1px solid var(--bevel-shadow);
+  padding: 2px 6px;
+  text-align: left;
 }
 .blk.you .lbl {
   color: var(--you);
@@ -604,9 +636,6 @@ button,
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
-.wchip.questioner {
-  background: #0a7d8c;
-}
 .wchip.scout {
   background: #2f6fe0;
 }
@@ -695,6 +724,17 @@ button,
 }
 .tline.toolfail .k {
   color: var(--err);
+}
+/* a run of same-name tool calls collapsed to "name × N" */
+.tcount {
+  color: var(--faint);
+  font-weight: bold;
+  margin-left: 5px;
+}
+.tgroup-body {
+  margin-left: 12px;
+  border-left: 1px solid var(--bevel-shadow);
+  padding-left: 6px;
 }
 .k {
   color: #000080;
@@ -835,75 +875,6 @@ button,
 .input textarea::placeholder {
   color: var(--t-faint);
 }
-
-/* ---- blueprint view (tier-3 tab) — fills the whole body ---------------- */
-.blueprint {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: var(--panel);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid;
-  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
-    var(--bevel-lightest);
-  box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow);
-}
-.bpbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: linear-gradient(180deg, #3a81f3, #1c5fd8);
-  padding: 3px 5px;
-  flex: 0 0 auto;
-}
-.bpbar .name {
-  font-family: var(--sans);
-  font-size: 11px;
-  color: #fff;
-  font-weight: bold;
-}
-.bpbar .addr {
-  flex: 1 1 auto;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: #dfe8ff;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bpbar .x {
-  width: 18px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ink);
-  cursor: pointer;
-  font-family: var(--sans);
-  font-size: 11px;
-  line-height: 1;
-  background: var(--panel);
-  border: 1px solid;
-  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
-    var(--bevel-lightest);
-  box-shadow: inset 1px 1px 0 var(--bevel-light),
-    inset -1px -1px 0 var(--bevel-shadow);
-}
-.bpbar .x:active {
-  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
-    var(--bevel-shadow);
-  box-shadow: inset 1px 1px 0 var(--bevel-dark),
-    inset -1px -1px 0 var(--bevel-light);
-}
-.blueprint iframe {
-  flex: 1 1 auto;
-  width: 100%;
-  border: none;
-  background: #fff;
-}
-
 
 /* ---- classic gray dialog boxes: shared button + title-bar + checkbox --- */
 /* Raised 3D gray push button */

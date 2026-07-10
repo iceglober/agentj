@@ -52,24 +52,6 @@ async fn artifact_tools_error_without_a_session_store() {
 }
 
 #[tokio::test]
-async fn read_skill_returns_a_bundled_skill_and_errors_otherwise() {
-    let t = tools();
-    // The blueprint skill is bundled and readable by name.
-    let o = t.call("read_skill", &json!({ "name": "blueprint" })).await;
-    assert!(o.ok && o.text.contains("Blueprint design skill"), "{}", o.text);
-    // An unknown skill names what IS available; a missing arg is refused.
-    let o = t.call("read_skill", &json!({ "name": "nope" })).await;
-    assert!(!o.ok && o.text.contains("blueprint"), "{}", o.text);
-    assert!(!t.call("read_skill", &json!({})).await.ok);
-    // Read-only subagents (scout) may still read a skill.
-    assert!(t
-        .scoped_to(crate::agent::AgentType::Scout)
-        .call("read_skill", &json!({ "name": "blueprint" }))
-        .await
-        .ok);
-}
-
-#[tokio::test]
 async fn unknown_tool_reports_not_ok() {
     let o = tools().call("no_such_tool", &json!({})).await;
     assert!(!o.ok);

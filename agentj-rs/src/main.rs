@@ -369,7 +369,7 @@ async fn main() {
                     usage.prompt_tokens, usage.completion_tokens
                 ),
                 AgentEvent::Thinking(t) => println!("thinking: {t}"),
-                AgentEvent::Artifact { name, format } => println!("» saved artifact `{name}` ({format})"),
+                AgentEvent::Artifact { name } => println!("» saved artifact `{name}`"),
                 AgentEvent::Note(t) => println!("» {t}"),
                 AgentEvent::StepLimit(n) => {
                     // Not a failure — long work runs out of step budget. Committed work is safe.

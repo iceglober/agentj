@@ -277,16 +277,11 @@ pub async fn run_turn(
             if ok && is_mutating_tool(&tc.function.name) {
                 mutated = true;
             }
-            // Surface a saved/edited artifact so a front-end can react (docks a saved html
-            // `blueprint`, refreshes the live `todos` view). Display-only; no effect on the loop.
+            // Surface a saved/edited artifact so a front-end can react (refreshes the live `todos`
+            // view). Display-only; no effect on the loop.
             if ok && matches!(tc.function.name.as_str(), "save_artifact" | "edit_artifact") {
                 if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
-                    let format = args
-                        .get("format")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("markdown")
-                        .to_string();
-                    let _ = tx.send(AgentEvent::Artifact { name: name.to_string(), format });
+                    let _ = tx.send(AgentEvent::Artifact { name: name.to_string() });
                 }
             }
             let tool_msg = ChatMessage {

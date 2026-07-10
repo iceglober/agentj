@@ -140,10 +140,7 @@ fn instructions() -> String {
         ),
         enclose(
             "subagents",
-            "Use subagents as much as possible. START every scouting effort with short `questioner` \
-             subagents: before any scout digs in, they turn the request's genuine ambiguities into \
-             the sharpest 2–4 questions — or report it's already clear — and those questions steer \
-             what you scout next and become the decisions you present in the plan. Map the \
+            "Use subagents as much as possible. Map the \
              DEPENDENCIES first — which sub-tasks are independent, which need another's output — then \
              express that DAG in one `run_subagents` call: independent tasks run in PARALLEL, and a \
              task that consumes another's result gets `after:[…]` those tasks, so it runs in a later \
@@ -159,18 +156,12 @@ fn instructions() -> String {
              don't dive in, and don't dump a wall of questions in chat instead. State the approach and \
              what you'll do, and split what's still open in two: DECISIONS you can default (stack, \
              storage, file layout) — give each your recommendation and move on — and QUESTIONS only \
-             the user can answer (what they actually want, prototype vs production, what a fuzzy term \
-             means to them) — put these to them as real questions, each with your recommended default, \
-             never silently pre-decided. If the plan touches ANY user-facing surface — a UI, a screen, \
-             a layout, a flow — the blueprint is NOT optional; it IS the form the plan takes: save a \
-             `blueprint` (`save_artifact` with format:\"html\"), reading the `blueprint` skill first \
-             (`read_skill(\"blueprint\")`), as a mockup of the screens plus those decisions and \
-             questions — high-fidelity, responsive, genuinely interactive; it opens in the user's \
-             browser. With no user-facing surface, a prose plan is fine. Scale scouting and the plan \
-             to the task — a one-line change's plan is a sentence, but you still say it before acting. \
-             Track the work in a `todos` artifact — a markdown checklist, one item per line (`- [ ]` \
-             pending, `- [x]` done) — kept current with `edit_artifact` (flip a checkbox) rather than \
-             rewritten; hold the settled approach in `plan`.",
+             the user can answer (what they actually want) — put these to them, each with your \
+             recommended default, never silently pre-decided. Then, once aligned, execute. Scale the \
+             plan to the task — a one-line change's plan is a sentence, but you still say it before \
+             acting. Track the work in a `todos` artifact — a markdown checklist, one item per line \
+             (`- [ ]` pending, `- [x]` done) — kept current with `edit_artifact` (flip a checkbox) \
+             rather than rewritten; hold the settled approach in `plan`.",
         ),
         enclose(
             "verify",
@@ -241,12 +232,9 @@ mod tests {
         assert!(p.contains("<subagents>") && p.contains("</subagents>"));
         assert!(p.contains("<plan>") && p.contains("</plan>"));
         assert!(p.contains("<verify>") && p.contains("</verify>"));
-        // plan-first: always share the plan before acting; UI plans MUST take blueprint form,
-        // and genuinely-open questions are put to the user, not silently pre-decided
+        // plan-first: always share the plan before acting; genuinely-open questions go to the user
         assert!(p.contains("ALWAYS share your PLAN before you take action"));
         assert!(p.contains("QUESTIONS only the user can answer"));
-        assert!(p.contains("the blueprint is NOT optional"));
-        assert!(p.contains("save a `blueprint`"));
         assert!(p.contains("`todos`"));
         // 1. explore + plan before acting, from hard evidence
         assert!(p.contains("Always explore and always plan before you take any action"));
@@ -254,7 +242,6 @@ mod tests {
         assert!(p.contains("never work from assumption"));
         // 2. subagents, in parallel — and it applies to EVERY kind of task, not just building
         assert!(p.contains("Use subagents as much as possible"));
-        assert!(p.contains("START every scouting effort with short `questioner` subagents"));
         assert!(p.contains("in PARALLEL"));
         assert!(p.contains("one `run_subagents` call"));
         assert!(p.contains("EVERY kind of task"));
@@ -265,11 +252,15 @@ mod tests {
         assert!(p.contains("beyond a shadow of a doubt"));
         assert!(p.contains("Check your work no matter what the task was"));
         assert!(p.contains("run the tests, run the code, and manually exercise it"));
-        // no SPEAR, no epic/manager doctrine, no removed tools survive
+        // no SPEAR, no epic/manager doctrine, no removed tools/features survive
         assert!(!p.contains("SPEAR"));
         assert!(!p.contains("engineer_start"));
         assert!(!p.contains("web_check"));
         assert!(!p.contains(".aj/epic/plan.md"));
+        // the reverted blueprint / questioner arc leaves no trace in the corpus
+        assert!(!p.contains("blueprint"));
+        assert!(!p.contains("read_skill"));
+        assert!(!p.contains("questioner"));
     }
 
     #[test]
