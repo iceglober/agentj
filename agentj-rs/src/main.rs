@@ -31,8 +31,8 @@ agentj — a simple terminal coding agent (ratatui edition)
 
 Usage:
   agentj                     chat in the current repo (a fresh session)
-  agentj --continue          resume the most-recent session for this worktree
-  agentj --resume <uuid>     resume a specific session by its id
+  agentj --continue          resume the most-recent session for this worktree (conversation + artifacts)
+  agentj --resume <uuid>     resume a specific session by its id (conversation + artifacts)
   agentj --once \"<task>\"      run one task headlessly, then exit
   agentj mcp list            show configured MCP servers + tool count
 
@@ -291,6 +291,9 @@ async fn main() {
     } else {
         None
     };
+    // The persisted conversation of a resumed session (empty for a fresh one). Loaded once here;
+    // the TUI seeds its model history from it and replays it into the transcript.
+    let restored = session.as_ref().map(|s| s.load_history()).unwrap_or_default();
 
     let jobs = jobs::JobManager::new(root.clone());
     // Kept so every exit path below can kill MCP child-process trees (else an orphaned mcp-remote
@@ -402,6 +405,7 @@ async fn main() {
         sess,
         mcp_status,
         needs_setup,
+        restored,
     )
     .await;
     jobs.kill_all().await;

@@ -169,6 +169,20 @@ export function useSessions(): SessionStore {
     [patch],
   );
 
+  // Seed a session's transcript from its persisted conversation (the backend replays committed
+  // history as display events). Prepended so live events that raced in stay after it; best-effort.
+  const loadHistory = useCallback(
+    (id: string) => {
+      invoke<StreamEvent[]>("session_history", { sessionId: id })
+        .then((events) => {
+          if (events.length === 0) return;
+          patch(id, (s) => ({ ...s, events: [...events, ...s.events] }));
+        })
+        .catch(() => {});
+    },
+    [patch],
+  );
+
   // --- streams (subscribed once) ------------------------------------------
   useEffect(() => {
     const unlisteners: UnlistenFn[] = [];
@@ -196,16 +210,22 @@ export function useSessions(): SessionStore {
       patch(sessionId, (s) => ({ ...s, todos: content }));
     }).then(track);
 
-    // Restore whatever sessions the backend already has.
+    // Restore whatever sessions the backend already has, focusing the remembered active tab.
     invoke<SessionMeta[]>("list_sessions")
-      .then((metas) => {
+      .then(async (metas) => {
         if (disposed || metas.length === 0) return;
+        const rememberedId = await invoke<string | null>("active_session").catch(() => null);
+        if (disposed) return;
+        const focus = metas.find((m) => m.id === rememberedId) ?? metas[0];
         setStore(new Map(metas.map((m) => [m.id, freshSlice(m)])));
         setSessions(metas);
-        setActiveProject(metas[0].base);
-        setActiveId(metas[0].id);
-        // Seed each restored session's todos (best-effort).
-        for (const m of metas) loadTodos(m.id);
+        setActiveProject(focus.base);
+        setActiveId(focus.id);
+        // Seed each restored session's todos and persisted transcript (best-effort).
+        for (const m of metas) {
+          loadTodos(m.id);
+          loadHistory(m.id);
+        }
       })
       .catch(() => {});
 
@@ -213,11 +233,20 @@ export function useSessions(): SessionStore {
       disposed = true;
       unlisteners.forEach((u) => u());
     };
-  }, [patch, loadTodos]);
+  }, [patch, loadTodos, loadHistory]);
+
+  // Report tab focus to the backend so a relaunch reopens the tab the user was on. Fires on any
+  // path that changes the active session (select, adopt, close-neighbor, restore); best-effort.
+  useEffect(() => {
+    if (activeId) {
+      invoke("set_active_session", { sessionId: activeId }).catch(() => {});
+    }
+  }, [activeId]);
 
   // Insert (or re-select, if already open) a session and make it active.
   const adopt = useCallback(
     (meta: SessionMeta) => {
+      const isNew = !storeRef.current.has(meta.id);
       setStore((prev) => {
         if (prev.has(meta.id)) return prev; // keep existing transcript
         const next = new Map(prev);
@@ -228,8 +257,11 @@ export function useSessions(): SessionStore {
       setActiveProject(meta.base);
       setActiveId(meta.id);
       loadTodos(meta.id); // seed todos for the freshly adopted session
+      // A reopened worktree resumes its persisted conversation (fresh ones return no events).
+      // Only on first adoption — re-selecting an open tab must not re-prepend its history.
+      if (isNew) loadHistory(meta.id);
     },
-    [loadTodos],
+    [loadTodos, loadHistory],
   );
 
   const selectSession = useCallback((id: string) => {

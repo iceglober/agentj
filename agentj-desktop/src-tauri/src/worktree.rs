@@ -226,11 +226,72 @@ pub fn provision(base: &str) -> Result<Provisioned, String> {
 
 // ---- persistence ----------------------------------------------------------
 
-#[derive(Serialize, Deserialize, Default)]
+/// A per-session model override, persisted WITHOUT its API key (keys stay in the provider config;
+/// they're refilled from it on restore, exactly like a live model switch).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ModelRecord {
+    pub provider: String,
+    pub model: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_version: Option<String>,
+}
+
+/// One remembered session: its worktree, (when known) its persistent store id — so a relaunch
+/// reopens the SAME conversation + artifacts instead of minting a fresh store — and its model
+/// override, if the user pointed this session at a non-default model.
+#[derive(Serialize, Clone)]
+pub struct SessionRecord {
+    pub root: String,
+    pub store: Option<String>,
+    pub model: Option<ModelRecord>,
+}
+
+/// Accepts both the current record shape and the pre-history format (a bare path string), so an
+/// upgrade doesn't drop the user's open sessions. Order matters: the object shape is tried first.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SessionRecordCompat {
+    Full {
+        root: String,
+        #[serde(default)]
+        store: Option<String>,
+        #[serde(default)]
+        model: Option<ModelRecord>,
+    },
+    Path(String),
+}
+
+impl From<SessionRecordCompat> for SessionRecord {
+    fn from(c: SessionRecordCompat) -> Self {
+        match c {
+            SessionRecordCompat::Full { root, store, model } => SessionRecord { root, store, model },
+            SessionRecordCompat::Path(root) => SessionRecord { root, store: None, model: None },
+        }
+    }
+}
+
+#[derive(Serialize, Default)]
 struct DesktopConfig {
     /// Worktrees open as sessions last launch, in tab order.
+    sessions: Vec<SessionRecord>,
+    /// Worktree root of the session that was active (focused) last launch.
+    active: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct DesktopConfigCompat {
     #[serde(default)]
-    sessions: Vec<String>,
+    sessions: Vec<SessionRecordCompat>,
+    #[serde(default)]
+    active: Option<String>,
+}
+
+/// Everything remembered across launches: the open sessions (tab order) + the focused one's root.
+pub struct Remembered {
+    pub sessions: Vec<SessionRecord>,
+    pub active: Option<String>,
 }
 
 fn store_home() -> PathBuf {
@@ -244,16 +305,22 @@ fn config_path() -> PathBuf {
     store_home().join("desktop.json")
 }
 
-pub fn remembered_sessions() -> Vec<String> {
-    std::fs::read_to_string(config_path())
+pub fn remembered_sessions() -> Remembered {
+    let cfg = std::fs::read_to_string(config_path())
         .ok()
-        .and_then(|t| serde_json::from_str::<DesktopConfig>(&t).ok())
-        .map(|c| c.sessions)
-        .unwrap_or_default()
+        .and_then(|t| serde_json::from_str::<DesktopConfigCompat>(&t).ok())
+        .unwrap_or_default();
+    Remembered {
+        sessions: cfg.sessions.into_iter().map(SessionRecord::from).collect(),
+        active: cfg.active,
+    }
 }
 
-pub fn remember_sessions(roots: &[String]) {
-    let cfg = DesktopConfig { sessions: roots.to_vec() };
+pub fn remember_sessions(records: &[SessionRecord], active_root: Option<&str>) {
+    let cfg = DesktopConfig {
+        sessions: records.to_vec(),
+        active: active_root.map(str::to_string),
+    };
     if let Ok(text) = serde_json::to_string_pretty(&cfg) {
         let _ = std::fs::create_dir_all(store_home());
         let _ = std::fs::write(config_path(), text);
@@ -284,4 +351,51 @@ fn slugify(s: &str) -> String {
         .collect();
     let trimmed = out.trim_matches('-').to_string();
     if trimmed.is_empty() { "repo".into() } else { trimmed }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_config_parses_all_three_generations() {
+        // Pre-history format: bare path strings, no active field.
+        let v1: DesktopConfigCompat =
+            serde_json::from_str(r#"{"sessions":["/a","/b"]}"#).unwrap();
+        let recs: Vec<SessionRecord> = v1.sessions.into_iter().map(SessionRecord::from).collect();
+        assert_eq!(recs.len(), 2);
+        assert_eq!(recs[0].root, "/a");
+        assert!(recs[0].store.is_none() && recs[0].model.is_none());
+        assert!(v1.active.is_none());
+
+        // Store-only records (the first persistence release).
+        let v2: DesktopConfigCompat =
+            serde_json::from_str(r#"{"sessions":[{"root":"/a","store":"uuid-1"}]}"#).unwrap();
+        let recs: Vec<SessionRecord> = v2.sessions.into_iter().map(SessionRecord::from).collect();
+        assert_eq!(recs[0].store.as_deref(), Some("uuid-1"));
+        assert!(recs[0].model.is_none());
+
+        // Current format: model override + active root round-trip through the writer shape.
+        let cfg = DesktopConfig {
+            sessions: vec![SessionRecord {
+                root: "/a".into(),
+                store: Some("uuid-1".into()),
+                model: Some(ModelRecord {
+                    provider: "custom".into(),
+                    model: "gpt-5".into(),
+                    base_url: "http://x".into(),
+                    api_version: None,
+                }),
+            }],
+            active: Some("/a".into()),
+        };
+        let text = serde_json::to_string(&cfg).unwrap();
+        let back: DesktopConfigCompat = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.active.as_deref(), Some("/a"));
+        let recs: Vec<SessionRecord> = back.sessions.into_iter().map(SessionRecord::from).collect();
+        let m = recs[0].model.as_ref().expect("model override survives");
+        assert_eq!(m.provider, "custom");
+        assert_eq!(m.model, "gpt-5");
+        assert_eq!(m.base_url, "http://x");
+    }
 }

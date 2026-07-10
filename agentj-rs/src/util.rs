@@ -11,6 +11,13 @@ pub fn first_line(s: &str, max: usize) -> String {
     }
 }
 
+/// Whether a `user`-role message in the durable history was injected by the harness rather than
+/// typed: job nudges (`[job …]`), the interrupt orientation note (`[note: …]`), and the
+/// frontier-resume block. Transcript replay renders these as dim notes, not user cards.
+pub fn is_injected_user_text(text: &str) -> bool {
+    text.starts_with('[') || text.starts_with(crate::agent::RESUME_PREFIX)
+}
+
 /// `s` unchanged when it fits, else its first `max` characters with a trailing ellipsis.
 pub fn clip(s: &str, max: usize) -> String {
     if s.chars().count() <= max {

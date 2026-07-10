@@ -34,6 +34,9 @@ struct RepoCtx {
     sess: Mutex<Session>,
     /// The active model id, for display (kept in step with `sess`).
     model: Mutex<String>,
+    /// The per-session model override, when this session was pointed at a non-default model —
+    /// persisted (sans API key) so a relaunch restores it instead of reverting to the default.
+    model_override: Mutex<Option<worktree::ModelRecord>>,
     store: Arc<Store>,
     root: String,
     branch: Option<String>,
@@ -122,6 +125,8 @@ struct SessionEntry {
 struct AppState {
     /// Open sessions in tab order.
     sessions: Mutex<Vec<Arc<SessionEntry>>>,
+    /// Id of the focused session tab (the frontend reports switches); persisted by worktree root.
+    active: Mutex<Option<String>>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -183,14 +188,38 @@ struct FileEntry {
 }
 
 /// Build a full session for a worktree `root`, mirroring the CLI's interactive setup.
-fn build_ctx(root: &str, choice: Option<&ModelChoice>) -> RepoCtx {
+/// `store_id` reopens a specific persistent store (a remembered session from the last launch);
+/// otherwise the most-recent store for this worktree is resumed, and only a worktree that never had
+/// one mints a fresh store — reopening a worktree continues its conversation. `model` is a
+/// remembered per-session override; it's rebuilt with its key refilled from the stored provider
+/// config, and if it no longer builds the session falls back to the global default.
+fn build_ctx(
+    root: &str,
+    model: Option<&worktree::ModelRecord>,
+    store_id: Option<&str>,
+) -> RepoCtx {
     let app_cfg = AppConfig::load(root);
 
-    // An explicit choice (per-session model) is used verbatim; otherwise resolve the global default
-    // from config. Either way, a failure leaves the session Unconfigured (a friendly nudge on run).
-    let resolved = match choice {
-        Some(c) => choice_to_config(c)
-            .and_then(|cfg| Llm::from_config(&cfg).map(|l| (l, cfg.model_id)).map_err(|e| e.to_string())),
+    let from_override = model.and_then(|r| {
+        let choice = fill_from_config(
+            ModelChoice {
+                provider: r.provider.clone(),
+                model: r.model.clone(),
+                base_url: r.base_url.clone(),
+                api_key: None, // never persisted — refilled from the provider config
+                api_version: r.api_version.clone(),
+            },
+            &app_cfg,
+        );
+        choice_to_config(&choice)
+            .ok()
+            .and_then(|cfg| Llm::from_config(&cfg).ok().map(|l| (l, cfg.model_id)))
+    });
+    // The override is only recorded as live if it actually built, so display + the next persist
+    // reflect what the session really runs on.
+    let override_used = from_override.is_some().then(|| model.cloned()).flatten();
+    let resolved = match from_override {
+        Some(r) => Ok(r),
         None => {
             let provider = resolve_provider(None, &app_cfg);
             let sel = Selector { provider, model: None, base_url: None };
@@ -211,7 +240,12 @@ fn build_ctx(root: &str, choice: Option<&ModelChoice>) -> RepoCtx {
     let branch = worktree::current_branch(root);
     let base = worktree::base_repo(root).unwrap_or_else(|| root.to_string());
 
-    let store = Arc::new(Store::mint(root, branch.clone()).expect("mint session store"));
+    let store = Arc::new(
+        store_id
+            .and_then(|id| Store::load(id).ok())
+            .or_else(|| Store::most_recent_for(root))
+            .unwrap_or_else(|| Store::mint(root, branch.clone()).expect("mint session store")),
+    );
     let jobs = jobs::JobManager::new(root.to_string());
     let (mcp, mcp_status) = connect_mcp(root);
     let tools = tools::Tools::with_session(PathBuf::from(root), jobs, mcp, Some(store.clone()));
@@ -224,6 +258,7 @@ fn build_ctx(root: &str, choice: Option<&ModelChoice>) -> RepoCtx {
     RepoCtx {
         sess: Mutex::new(sess),
         model: Mutex::new(model_id),
+        model_override: Mutex::new(override_used),
         store,
         root: root.to_string(),
         branch,
@@ -233,9 +268,16 @@ fn build_ctx(root: &str, choice: Option<&ModelChoice>) -> RepoCtx {
     }
 }
 
-fn make_entry(root: &str) -> Arc<SessionEntry> {
-    let ctx = build_ctx(root, None);
-    let messages = vec![ChatMessage::system(ctx.system.clone())];
+fn make_entry(
+    root: &str,
+    store_id: Option<&str>,
+    model: Option<&worktree::ModelRecord>,
+) -> Arc<SessionEntry> {
+    let ctx = build_ctx(root, model, store_id);
+    // Seed the conversation from the store's persisted history (empty for a fresh store), behind a
+    // fresh system prompt — resuming a session restores what was said, not a stale prompt.
+    let mut messages = vec![ChatMessage::system(ctx.system.clone())];
+    messages.extend(ctx.store.load_history());
     Arc::new(SessionEntry {
         id: worktree::short_id(),
         ctx,
@@ -250,14 +292,24 @@ fn find(state: &AppState, id: &str) -> Option<Arc<SessionEntry>> {
 }
 
 fn persist(state: &AppState) {
-    let roots: Vec<String> = state
-        .sessions
+    let sessions = state.sessions.lock().unwrap();
+    let records: Vec<worktree::SessionRecord> = sessions
+        .iter()
+        .map(|e| worktree::SessionRecord {
+            root: e.ctx.root.clone(),
+            store: Some(e.ctx.store.id.clone()),
+            model: e.ctx.model_override.lock().unwrap().clone(),
+        })
+        .collect();
+    // The active tab is remembered by its worktree root — session ids are re-minted per launch.
+    let active_root = state
+        .active
         .lock()
         .unwrap()
-        .iter()
-        .map(|e| e.ctx.root.clone())
-        .collect();
-    worktree::remember_sessions(&roots);
+        .as_ref()
+        .and_then(|id| sessions.iter().find(|e| &e.id == id).map(|e| e.ctx.root.clone()));
+    drop(sessions);
+    worktree::remember_sessions(&records, active_root.as_deref());
 }
 
 // ---- commands -------------------------------------------------------------
@@ -285,7 +337,7 @@ fn provision_worktree(
     state: State<'_, AppState>,
 ) -> Result<SessionMeta, String> {
     let worktree::Provisioned { path, notice } = worktree::provision(&base)?;
-    let entry = make_entry(&path);
+    let entry = make_entry(&path, None, None);
     let mut meta = SessionMeta::of(&entry);
     meta.notice = notice;
     spawn_waker(entry.clone(), app);
@@ -310,7 +362,7 @@ fn open_worktree(
     if let Some(e) = state.sessions.lock().unwrap().iter().find(|e| e.ctx.root == path) {
         return Ok(SessionMeta::of(e)); // already open — the UI just selects its tab
     }
-    let entry = make_entry(&path);
+    let entry = make_entry(&path, None, None);
     let meta = SessionMeta::of(&entry);
     spawn_waker(entry.clone(), app);
     state.sessions.lock().unwrap().push(entry);
@@ -364,19 +416,23 @@ fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) 
     let mut msgs = {
         let mut g = messages.lock().unwrap();
         if let Some(p) = prompt {
-            g.push(ChatMessage::user(p));
+            let m = ChatMessage::user(p);
+            // The prompt is durable the moment it's accepted — a crash mid-turn keeps it.
+            let _ = store.append_history(std::slice::from_ref(&m));
+            g.push(m);
         }
         g.clone()
     };
 
     let (tx, mut rx) = unbounded_channel::<AgentEvent>();
     let app_fwd = app.clone();
+    let store_fwd = store.clone();
     let fwd = tauri::async_runtime::spawn(async move {
         while let Some(ev) = rx.recv().await {
             let _ = app_fwd.emit("agent-event", Tagged { session_id: sid.clone(), event: ev.clone() });
             if let AgentEvent::Artifact { name } = &ev {
                 if name == "todos" {
-                    if let Some(content) = store.read_artifact("todos") {
+                    if let Some(content) = store_fwd.read_artifact("todos") {
                         let _ = app_fwd
                             .emit("todos", TodosPayload { session_id: sid.clone(), content });
                     }
@@ -385,11 +441,24 @@ fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) 
         }
     });
 
+    // Committed deltas land in the durable in-memory history AND on disk AS THE TURN PROGRESSES,
+    // so an interrupt (or a crash) keeps every step that already applied — the model doesn't forget
+    // what it did before the interrupt, and a restart resumes from it.
+    let (ctx_tx, mut ctx_rx) = unbounded_channel::<Vec<ChatMessage>>();
+    let messages_commit = messages.clone();
+    let commits = tauri::async_runtime::spawn(async move {
+        while let Some(delta) = ctx_rx.recv().await {
+            let _ = store.append_history(&delta);
+            messages_commit.lock().unwrap().extend(delta);
+        }
+    });
+
     let handle = tauri::async_runtime::spawn(async move {
-        let _ = agent::run_turn(&sess, &mut msgs, &tx, true, None).await;
+        let _ = agent::run_turn(&sess, &mut msgs, &tx, true, Some(&ctx_tx)).await;
         drop(tx);
+        drop(ctx_tx);
         let _ = fwd.await;
-        *messages.lock().unwrap() = msgs;
+        let _ = commits.await;
         running.store(false, Ordering::SeqCst);
     });
     *entry.turn.lock().unwrap() = Some(handle);
@@ -428,6 +497,66 @@ fn interrupt(session_id: String, state: State<'_, AppState>) {
         }
         entry.running.store(false, Ordering::SeqCst);
     }
+}
+
+/// The committed conversation of a session, mapped to the same display-event shapes the live
+/// stream emits, so the webview rebuilds a restored session's transcript with the renderer it
+/// already has. User prompts map to `user` cards (machine-injected ones to `note`s), assistant
+/// replies to `message`s, and each tool call to a `tool_start`/`tool_end` pair whose summary is
+/// the first line of the persisted reply (elapsed time isn't persisted, so it reads 0).
+fn history_events(msgs: &[ChatMessage]) -> Vec<serde_json::Value> {
+    use agentj::util::{first_line, is_injected_user_text};
+    use serde_json::json;
+    let mut replies: std::collections::HashMap<&str, &str> = msgs
+        .iter()
+        .filter(|m| m.role == "tool")
+        .filter_map(|m| {
+            Some((m.tool_call_id.as_deref()?, m.content.as_deref().unwrap_or("")))
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (step, m) in msgs.iter().enumerate() {
+        match m.role.as_str() {
+            "user" => {
+                let text = m.content.as_deref().unwrap_or("");
+                if is_injected_user_text(text) {
+                    out.push(json!({ "kind": "note", "data": format!("» {}", first_line(text, 100)) }));
+                } else {
+                    out.push(json!({ "kind": "user", "data": text }));
+                }
+            }
+            "assistant" => {
+                for tc in &m.tool_calls {
+                    // The message index as `step` batches calls from one response with `+`.
+                    out.push(json!({ "kind": "tool_start", "data": {
+                        "name": tc.function.name,
+                        "args": first_line(&tc.function.arguments, 100),
+                        "step": step,
+                    }}));
+                    let reply = replies.remove(tc.id.as_str()).unwrap_or("");
+                    out.push(json!({ "kind": "tool_end", "data": {
+                        "ok": true,
+                        "elapsed_ms": 0,
+                        "summary": first_line(reply, 60),
+                        "result": reply.chars().take(4000).collect::<String>(),
+                    }}));
+                }
+                if let Some(t) = m.content.as_deref().filter(|t| !t.trim().is_empty()) {
+                    out.push(json!({ "kind": "message", "data": t }));
+                }
+            }
+            _ => {} // system never persists; tool replies surface on their call's row
+        }
+    }
+    out
+}
+
+/// The restored/committed transcript of a session as display events (see `history_events`).
+#[tauri::command]
+fn session_history(session_id: String, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    let msgs = entry.messages.lock().unwrap().clone();
+    Ok(history_events(&msgs))
 }
 
 #[tauri::command]
@@ -642,7 +771,28 @@ fn set_session_model(
         *guard = Session { llm: Arc::new(llm), tools, cfg: Arc::new(run_cfg) };
     }
     *entry.ctx.model.lock().unwrap() = cfg.model_id.clone();
+    // Remember the override (sans key) so a relaunch restores this session's model.
+    *entry.ctx.model_override.lock().unwrap() = Some(worktree::ModelRecord {
+        provider: choice.provider.clone(),
+        model: cfg.model_id.clone(),
+        base_url: choice.base_url.clone(),
+        api_version: choice.api_version.clone(),
+    });
+    persist(&state);
     Ok(cfg.model_id)
+}
+
+/// The frontend reports tab switches here so a relaunch reopens the tab the user was on.
+#[tauri::command]
+fn set_active_session(session_id: String, state: State<'_, AppState>) {
+    *state.active.lock().unwrap() = Some(session_id);
+    persist(&state);
+}
+
+/// The session id (this launch's) of the tab that was focused last time, if it was reopened.
+#[tauri::command]
+fn active_session(state: State<'_, AppState>) -> Option<String> {
+    state.active.lock().unwrap().clone()
 }
 
 /// Open a URL in the user's default browser (external links, and the "open in browser" escape hatch
@@ -663,13 +813,20 @@ fn open_url(url: String) -> Result<(), String> {
 }
 
 fn build_state() -> AppState {
-    // Reopen the sessions from last launch whose worktrees still look like git checkouts.
-    let sessions: Vec<Arc<SessionEntry>> = worktree::remembered_sessions()
+    // Reopen the sessions from last launch whose worktrees still look like git checkouts — each
+    // with its remembered store (conversation + artifacts) and model override.
+    let remembered = worktree::remembered_sessions();
+    let sessions: Vec<Arc<SessionEntry>> = remembered
+        .sessions
         .into_iter()
-        .filter(|p| worktree::is_git(p))
-        .map(|p| make_entry(&p))
+        .filter(|r| worktree::is_git(&r.root))
+        .map(|r| make_entry(&r.root, r.store.as_deref(), r.model.as_ref()))
         .collect();
-    AppState { sessions: Mutex::new(sessions) }
+    // Re-resolve the remembered active root to this launch's session id.
+    let active = remembered
+        .active
+        .and_then(|root| sessions.iter().find(|e| e.ctx.root == root).map(|e| e.id.clone()));
+    AppState { sessions: Mutex::new(sessions), active: Mutex::new(active) }
 }
 
 fn main() {
@@ -693,6 +850,7 @@ fn main() {
             close_session,
             send_prompt,
             interrupt,
+            session_history,
             read_artifact,
             read_todos,
             list_files,
@@ -702,6 +860,8 @@ fn main() {
             set_default_model,
             list_models,
             set_session_model,
+            set_active_session,
+            active_session,
             open_url
         ])
         .run(tauri::generate_context!())

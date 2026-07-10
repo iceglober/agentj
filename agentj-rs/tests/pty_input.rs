@@ -44,6 +44,24 @@ fn drain_until_quiet(rx: &mpsc::Receiver<Vec<u8>>, quiet_for: Duration, max_wait
     out
 }
 
+/// Accumulate output until its ANSI-stripped text contains `needle` (or `max_wait` elapses).
+/// Waiting for a concrete startup marker instead of "quiet for 200ms" matters: a cold debug binary
+/// can stay silent longer than that, and input written before the TUI is up is eaten by the line
+/// discipline instead of the app.
+fn drain_until_contains(rx: &mpsc::Receiver<Vec<u8>>, needle: &str, max_wait: Duration) -> Vec<u8> {
+    let started = Instant::now();
+    let mut out = Vec::new();
+    while started.elapsed() < max_wait {
+        if strip_ansi(&String::from_utf8_lossy(&out)).contains(needle) {
+            break;
+        }
+        if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(50)) {
+            out.extend_from_slice(&chunk);
+        }
+    }
+    out
+}
+
 fn strip_ansi(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut i = 0;
@@ -83,6 +101,10 @@ fn strip_ansi(s: &str) -> String {
 }
 
 fn run_once_with_input(input: &[u8]) -> String {
+    run_with(&[], &[], input)
+}
+
+fn run_with(extra_args: &[&str], env: &[(&str, &str)], input: &[u8]) -> String {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -103,6 +125,12 @@ fn run_once_with_input(input: &[u8]) -> String {
     cmd.arg("dummy");
     cmd.arg("--base-url");
     cmd.arg("http://127.0.0.1:1");
+    for a in extra_args {
+        cmd.arg(a);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     cmd.cwd(std::env::current_dir().expect("cwd"));
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn command");
@@ -126,15 +154,20 @@ fn run_once_with_input(input: &[u8]) -> String {
         }
     });
 
-    let _ = drain_until_quiet(&rx, Duration::from_millis(200), Duration::from_secs(2));
+    // Wait for the TUI to be up (the cheat sheet is its first transcript line) before typing, and
+    // let it process the keystrokes before the writer drop delivers EOF.
+    let mut early = drain_until_contains(&rx, "Enter send", Duration::from_secs(10));
+    early.extend(drain_until_quiet(&rx, Duration::from_millis(200), Duration::from_secs(2)));
     writer.write_all(input).expect("write input");
     writer.flush().expect("flush input");
+    early.extend(drain_until_quiet(&rx, Duration::from_millis(500), Duration::from_secs(3)));
     drop(writer);
 
     let status = child.wait().expect("wait child");
     assert!(status.success(), "agentj exited with {status:?}");
 
-    let mut output = drain_until_quiet(&rx, Duration::from_millis(200), Duration::from_secs(2));
+    let mut output = early;
+    output.extend_from_slice(&drain_until_quiet(&rx, Duration::from_millis(200), Duration::from_secs(2)));
     reader_thread.join().expect("join reader thread");
     output.extend_from_slice(&drain_until_quiet(
         &rx,
@@ -178,17 +211,111 @@ fn ctrl_backspace_byte_deletes_a_word_through_pty() {
 
 #[test]
 fn long_burst_input_survives_pty_round_trip() {
+    // The transcript wraps long lines, so byte-exact survival is asserted on the persisted
+    // history instead of the rendered screen: the submitted message must be the full payload.
+    let home = std::env::temp_dir().join(format!("agentj-pty-burst-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("mk temp home");
+
     let payload = "a".repeat(512);
     let mut input = payload.clone().into_bytes();
     input.push(b'\r');
-    let output = run_once_with_input(&input);
+    let output = run_with(&[], &[("HOME", home.to_str().unwrap())], &input);
     assert!(
-        output.contains(&payload[..128]),
-        "expected long PTY burst input prefix in output, got:\n{output}"
+        output.contains(&payload[..64]),
+        "expected the burst to render in the transcript, got:\n{output}"
+    );
+
+    let sessions = home.join(".config/aj/sessions");
+    let history = std::fs::read_dir(&sessions)
+        .expect("session store exists")
+        .flatten()
+        .find_map(|e| std::fs::read_to_string(e.path().join("history.jsonl")).ok())
+        .expect("a session persisted its history");
+    let _ = std::fs::remove_dir_all(&home);
+    let first: serde_json::Value =
+        serde_json::from_str(history.lines().next().expect("one message")).expect("valid json");
+    assert_eq!(first["role"], "user");
+    assert_eq!(
+        first["content"].as_str().unwrap(),
+        payload,
+        "the persisted prompt must be byte-identical to the typed burst"
+    );
+}
+
+#[test]
+fn resume_restores_the_persisted_conversation_through_pty() {
+    // Fabricate a persisted session under a throwaway HOME: a meta.json (as Session::mint writes)
+    // and a two-message history.jsonl — then launch the real binary with --resume and check the
+    // conversation is replayed into the transcript.
+    let home = std::env::temp_dir().join(format!("agentj-pty-resume-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let id = "11111111-2222-3333-4444-555555555555";
+    let dir = home.join(".config/aj/sessions").join(id);
+    std::fs::create_dir_all(dir.join("artifacts")).expect("mk session dir");
+    std::fs::write(
+        dir.join("meta.json"),
+        format!(
+            r#"{{"id":"{id}","worktree":"{}","branch":null,"created":0,"last_active":0}}"#,
+            std::env::current_dir().unwrap().display()
+        ),
+    )
+    .expect("write meta");
+    std::fs::write(
+        dir.join("history.jsonl"),
+        concat!(
+            r#"{"role":"user","content":"remember the zebra password"}"#,
+            "\n",
+            r#"{"role":"assistant","content":"Noted: the zebra password."}"#,
+            "\n"
+        ),
+    )
+    .expect("write history");
+
+    let output = run_with(
+        &["--resume", id],
+        &[("HOME", home.to_str().unwrap())],
+        b"\r",
+    );
+    let _ = std::fs::remove_dir_all(&home);
+
+    // ASCII-only assertion: strip_ansi is byte-wise, so multibyte punctuation (the notice's
+    // em-dash) doesn't survive it.
+    assert!(
+        output.contains("2 prior messages restored"),
+        "expected the resume notice in the transcript, got:\n{output}"
     );
     assert!(
-        output.contains(&payload[payload.len() - 128..]),
-        "expected long PTY burst input suffix in output, got:\n{output}"
+        output.contains("remember the zebra password"),
+        "expected the restored user prompt in the transcript, got:\n{output}"
+    );
+    assert!(
+        output.contains("Noted: the zebra password."),
+        "expected the restored assistant reply in the transcript, got:\n{output}"
+    );
+}
+
+#[test]
+fn submitted_prompts_persist_and_continue_restores_them_through_pty() {
+    // Full round trip through the real binary: run 1 submits a prompt (the turn itself dies on the
+    // dead endpoint — the prompt still commits), run 2 with --continue must replay it.
+    let home = std::env::temp_dir().join(format!("agentj-pty-continue-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).expect("mk temp home");
+    let env = [("HOME", home.to_str().unwrap().to_string())];
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    let _ = run_with(&[], &env, b"persist across runs\r");
+    let output = run_with(&["--continue"], &env, b"\r");
+    let _ = std::fs::remove_dir_all(&home);
+
+    assert!(
+        output.contains("prior messages restored"),
+        "expected --continue to restore the previous run's conversation, got:\n{output}"
+    );
+    assert!(
+        output.contains("persist across runs"),
+        "expected the previous run's prompt to replay in the transcript, got:\n{output}"
     );
 }
 

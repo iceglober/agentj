@@ -61,9 +61,11 @@ impl App {
         self.transcript
             .push(dim_line(format!("» clean on {branch}, synced to origin")));
         // A re-key wipes history for the new worktree, so a deferred interrupt note from the old
-        // conversation is now moot.
+        // conversation is now moot. The wipe must persist as a rewrite (not an append), else a
+        // resume would resurrect the pre-re-key conversation.
         self.pending_interrupt_note = false;
         self.messages = vec![ChatMessage::system(self.system.clone())];
+        self.history_reset = true;
         if desc.is_empty() {
             self.set_effect(format!("switched to {branch}"));
             AppEffect::None

@@ -35,7 +35,7 @@ pub use tray::SubagentRow;
 
 use super::editor::Editor;
 use super::theme;
-use super::view::{dim_line, InputLayoutCache, LineKind, TranscriptView};
+use super::view::{assistant_block, dim_line, InputLayoutCache, LineKind, TranscriptView};
 use crate::jobs::JobInfo;
 use crate::mcp::client::McpStatus;
 use crate::provider::{ChatMessage, TokenUsage};
@@ -63,6 +63,13 @@ pub struct App {
     pub model_id: String,
     // conversation
     pub messages: Vec<ChatMessage>,
+    /// How many of `messages` are already persisted to the session's `history.jsonl` (the leading
+    /// system prompt counts but is never written). The event loop appends `messages[history_saved..]`
+    /// after each state change; only appends happen, except a `/task` re-key (see `history_reset`).
+    pub history_saved: usize,
+    /// A `/task` re-key wiped the conversation — the next persist rewrites the file instead of
+    /// appending (lengths alone can't detect a wipe followed by a push).
+    pub history_reset: bool,
     pub transcript: TranscriptView,
     // input
     pub editor: Editor,
@@ -166,6 +173,8 @@ impl App {
             provider: provider.to_string(),
             model_id: model_id.to_string(),
             messages: vec![ChatMessage::system(system)],
+            history_saved: 1, // the system prompt is never persisted
+            history_reset: false,
             transcript,
             editor: Editor::default(),
             input_cache: InputLayoutCache::default(),
@@ -242,6 +251,64 @@ impl App {
         let path = std::path::Path::new(&self.root).join(format!("agentj-transcript-{ts}.md"));
         std::fs::write(&path, self.transcript.export_markdown())?;
         Ok(path.to_string_lossy().into_owned())
+    }
+
+    /// Seed a resumed session: extend the model history with the persisted conversation and replay
+    /// it into the transcript — user prompts as cards, assistant replies as cards, tool calls as dim
+    /// one-liners (paired with the first line of their reply), injected messages (job nudges,
+    /// interrupt notes, the frontier-resume block) as dim notes. Call once, right after `App::new`,
+    /// before any turn runs.
+    pub fn restore_history(&mut self, restored: Vec<ChatMessage>) {
+        use crate::util::{first_line, is_injected_user_text};
+        if restored.is_empty() {
+            return;
+        }
+        // First line of each tool reply, keyed by call id, so the tool line can show its outcome.
+        let mut summaries: std::collections::HashMap<String, String> = restored
+            .iter()
+            .filter(|m| m.role == "tool")
+            .filter_map(|m| {
+                let id = m.tool_call_id.clone()?;
+                Some((id, first_line(m.content.as_deref().unwrap_or(""), 60)))
+            })
+            .collect();
+        for m in &restored {
+            match m.role.as_str() {
+                "user" => {
+                    let text = m.content.as_deref().unwrap_or("");
+                    if is_injected_user_text(text) {
+                        self.transcript
+                            .push_kind(dim_line(format!("» {}", first_line(text, 100))), LineKind::Note);
+                    } else {
+                        self.push_user_line(text);
+                    }
+                }
+                "assistant" => {
+                    for tc in &m.tool_calls {
+                        let summary = summaries.remove(&tc.id).unwrap_or_default();
+                        let sep = if summary.is_empty() { "" } else { " — " };
+                        self.transcript.push_kind(
+                            dim_line(format!(
+                                "· {}({}){sep}{summary}",
+                                tc.function.name,
+                                first_line(&tc.function.arguments, 100)
+                            )),
+                            LineKind::Tool,
+                        );
+                    }
+                    if let Some(t) = m.content.as_deref().filter(|t| !t.trim().is_empty()) {
+                        self.transcript.push_kind(Line::default(), LineKind::Assistant);
+                        self.transcript.extend_kind(assistant_block(t), LineKind::Assistant);
+                        self.transcript.push_kind(Line::default(), LineKind::Assistant);
+                    }
+                }
+                _ => {} // tool replies surface on their call's line; system never persists
+            }
+        }
+        let n = restored.len();
+        self.messages.extend(restored);
+        self.history_saved = self.messages.len(); // it all came FROM disk — nothing to re-append
+        self.notice(format!("resumed — {n} prior messages restored"));
     }
 
     /// A dim `»` note line in the transcript (lifecycle chatter, not conversation content).

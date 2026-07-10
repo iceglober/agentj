@@ -95,6 +95,7 @@ pub async fn run(
     sess: Session,
     mcp_status: Vec<crate::mcp::client::McpStatus>,
     needs_setup: bool,
+    restored: Vec<ChatMessage>,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -123,6 +124,7 @@ pub async fn run(
         mcp_status,
         needs_setup,
     );
+    app.restore_history(restored);
     let mut sess = sess;
     let mut app_cfg = app_cfg; // reloaded from disk after the setup wizard writes a provider block
 
@@ -416,6 +418,20 @@ pub async fn run(
                         }
                     }
                 }
+            }
+        }
+
+        // Persist newly committed conversation to the session's history.jsonl, so `--continue` /
+        // `--resume` restore the chat. Appends the unsaved tail after every state change (turn
+        // deltas, user prompts, injected notes); a `/task` re-key rewrites the file so the wipe
+        // sticks. Best-effort, like the rest of the session store.
+        if let Some(store) = sess.tools.session.as_ref() {
+            if std::mem::take(&mut app.history_reset) {
+                let _ = store.rewrite_history(&app.messages[1..]);
+                app.history_saved = app.messages.len();
+            } else if app.messages.len() > app.history_saved {
+                let _ = store.append_history(&app.messages[app.history_saved..]);
+                app.history_saved = app.messages.len();
             }
         }
     }

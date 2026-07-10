@@ -10,12 +10,20 @@
 //! route here — so session state never touches the repo. Headless `--once` runs are unaffected:
 //! they keep their in-tree brief (`.aj/task/plan.md`, which can't bleed across a fresh checkout).
 //!
-//! Deliberately simple (KISS): one directory per session, a `meta.json`, and files under
-//! `artifacts/`. "Which sessions belong here" is answered by scanning the metas and matching the
-//! canonical worktree path — no separate index to corrupt.
+//! Deliberately simple (KISS): one directory per session, a `meta.json`, files under
+//! `artifacts/`, and the conversation in `history.jsonl`. "Which sessions belong here" is answered
+//! by scanning the metas and matching the canonical worktree path — no separate index to corrupt.
+//!
+//! `history.jsonl` is what makes `--resume`/`--continue` restore the CONVERSATION, not just the
+//! artifacts: one committed `ChatMessage` per line, appended as the turn progresses (so a crash
+//! keeps everything committed so far) and reloaded through `load_history`, which stops at the
+//! first corrupt line and drops a trailing assistant message whose tool calls have no replies —
+//! the reloaded history is always well-formed for the wire.
 
+use crate::provider::ChatMessage;
 use serde::{Deserialize, Serialize};
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -170,6 +178,66 @@ impl Session {
         Ok(content)
     }
 
+    fn history_path(&self) -> PathBuf {
+        self.dir.join("history.jsonl")
+    }
+
+    /// Append committed messages to the durable conversation, one JSON line each. Called with each
+    /// commit-group delta as a turn progresses, so a crash loses at most the uncommitted tail. The
+    /// whole delta is serialized into one buffer and written with a single call, so a commit group
+    /// (assistant + its tool replies) can't be torn across a crash mid-loop.
+    pub fn append_history(&self, delta: &[ChatMessage]) -> io::Result<()> {
+        if delta.is_empty() {
+            return Ok(());
+        }
+        let mut buf = String::new();
+        for m in delta {
+            buf.push_str(&serde_json::to_string(m).map_err(io::Error::other)?);
+            buf.push('\n');
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.history_path())?;
+        f.write_all(buf.as_bytes())?;
+        self.touch();
+        Ok(())
+    }
+
+    /// Replace the durable conversation wholesale (a `/task` re-key wipes the chat). Written to a
+    /// temp file and renamed, so a crash can't leave a half-written history.
+    pub fn rewrite_history(&self, messages: &[ChatMessage]) -> io::Result<()> {
+        let mut buf = String::new();
+        for m in messages {
+            buf.push_str(&serde_json::to_string(m).map_err(io::Error::other)?);
+            buf.push('\n');
+        }
+        let tmp = self.dir.join("history.jsonl.tmp");
+        std::fs::write(&tmp, buf)?;
+        std::fs::rename(&tmp, self.history_path())?;
+        self.touch();
+        Ok(())
+    }
+
+    /// The persisted conversation (never includes the system prompt — callers prepend a fresh one).
+    /// Reads stop at the first corrupt line (a crash mid-append leaves a partial tail), and a
+    /// trailing assistant message whose tool calls lack their replies is dropped, so what's returned
+    /// is always safe to send back to the model.
+    pub fn load_history(&self) -> Vec<ChatMessage> {
+        let Ok(text) = std::fs::read_to_string(self.history_path()) else {
+            return Vec::new();
+        };
+        let mut msgs: Vec<ChatMessage> = Vec::new();
+        for line in text.lines() {
+            match serde_json::from_str::<ChatMessage>(line) {
+                Ok(m) => msgs.push(m),
+                Err(_) => break, // partial write from a crash — keep the intact prefix
+            }
+        }
+        msgs.truncate(well_formed_prefix(&msgs));
+        msgs
+    }
+
     /// Bump `last_active` so `--continue` finds the right session. Best-effort.
     pub fn touch(&self) {
         if let Ok(mut m) = self.read_meta() {
@@ -193,6 +261,29 @@ impl Session {
         std::fs::create_dir_all(dir.join("artifacts")).unwrap();
         Session { id: "test-session".into(), dir }
     }
+}
+
+/// The longest prefix of `msgs` in which every assistant tool-call request has all its tool
+/// replies immediately after it. A truncated load (crash mid-commit, corrupt tail) may end on an
+/// assistant message with dangling `tool_calls`; sending that back to the model is a wire error,
+/// so resumption cuts the history at that message instead.
+fn well_formed_prefix(msgs: &[ChatMessage]) -> usize {
+    let mut i = 0;
+    while i < msgs.len() {
+        let m = &msgs[i];
+        if m.role == "assistant" && !m.tool_calls.is_empty() {
+            let need = m.tool_calls.len();
+            let replies_ok =
+                i + need < msgs.len() && msgs[i + 1..=i + need].iter().all(|t| t.role == "tool");
+            if !replies_ok {
+                return i;
+            }
+            i += need + 1;
+        } else {
+            i += 1;
+        }
+    }
+    msgs.len()
 }
 
 #[cfg(test)]
@@ -285,6 +376,120 @@ mod tests {
         let c = std::env::temp_dir().join("wt-c").to_string_lossy().into_owned();
         std::fs::create_dir_all(&c).unwrap();
         assert!(Session::most_recent_for(&c).is_none());
+    }
+
+    fn assistant_with_calls(ids: &[&str]) -> ChatMessage {
+        ChatMessage {
+            role: "assistant".into(),
+            content: None,
+            tool_calls: ids
+                .iter()
+                .map(|id| crate::provider::ToolCall {
+                    id: id.to_string(),
+                    kind: "function".into(),
+                    function: crate::provider::FunctionCall {
+                        name: "read_file".into(),
+                        arguments: "{}".into(),
+                    },
+                })
+                .collect(),
+            tool_call_id: None,
+        }
+    }
+
+    fn tool_reply(id: &str) -> ChatMessage {
+        ChatMessage {
+            role: "tool".into(),
+            content: Some("ok".into()),
+            tool_calls: vec![],
+            tool_call_id: Some(id.to_string()),
+        }
+    }
+
+    #[test]
+    fn history_appends_and_reloads_across_sessions() {
+        let _home = TempHome::new("hist");
+        let wt = std::env::temp_dir().to_string_lossy().into_owned();
+        let s = Session::mint(&wt, None).unwrap();
+        assert!(s.load_history().is_empty(), "a fresh session has no conversation");
+
+        s.append_history(&[ChatMessage::user("hello")]).unwrap();
+        s.append_history(&[
+            assistant_with_calls(&["c1"]),
+            tool_reply("c1"),
+            ChatMessage {
+                role: "assistant".into(),
+                content: Some("done".into()),
+                ..Default::default()
+            },
+        ])
+        .unwrap();
+
+        let loaded = Session::load(&s.id).unwrap().load_history();
+        assert_eq!(loaded.len(), 4);
+        assert_eq!(loaded[0].content.as_deref(), Some("hello"));
+        assert_eq!(loaded[1].tool_calls[0].id, "c1");
+        assert_eq!(loaded[3].content.as_deref(), Some("done"));
+    }
+
+    #[test]
+    fn history_load_stops_at_a_corrupt_line() {
+        let _home = TempHome::new("corrupt");
+        let wt = std::env::temp_dir().to_string_lossy().into_owned();
+        let s = Session::mint(&wt, None).unwrap();
+        s.append_history(&[ChatMessage::user("a"), ChatMessage::user("b")]).unwrap();
+        // Simulate a crash mid-append: a partial line, then a line that would otherwise parse.
+        let path = s.history_path();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"{\"role\":\"user\",\"cont").unwrap();
+        drop(f);
+        s.append_history(&[ChatMessage::user("after-crash")]).unwrap();
+
+        let loaded = s.load_history();
+        // The partial line and everything after it are dropped — an intact prefix only.
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[1].content.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn history_load_drops_a_dangling_tool_call_group() {
+        let _home = TempHome::new("dangle");
+        let wt = std::env::temp_dir().to_string_lossy().into_owned();
+        let s = Session::mint(&wt, None).unwrap();
+        s.append_history(&[ChatMessage::user("go")]).unwrap();
+        // An assistant asking for two tools but only one reply persisted (torn commit).
+        s.append_history(&[assistant_with_calls(&["c1", "c2"]), tool_reply("c1")]).unwrap();
+
+        let loaded = s.load_history();
+        assert_eq!(loaded.len(), 1, "the incomplete tool-call group is cut");
+        assert_eq!(loaded[0].content.as_deref(), Some("go"));
+    }
+
+    #[test]
+    fn rewrite_history_replaces_wholesale() {
+        let _home = TempHome::new("rewrite");
+        let wt = std::env::temp_dir().to_string_lossy().into_owned();
+        let s = Session::mint(&wt, None).unwrap();
+        s.append_history(&[ChatMessage::user("old conversation")]).unwrap();
+        s.rewrite_history(&[ChatMessage::user("fresh start")]).unwrap();
+        let loaded = s.load_history();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].content.as_deref(), Some("fresh start"));
+
+        s.rewrite_history(&[]).unwrap();
+        assert!(s.load_history().is_empty(), "a wipe persists as empty");
+    }
+
+    #[test]
+    fn well_formed_prefix_accepts_complete_groups() {
+        let msgs = vec![
+            ChatMessage::user("q"),
+            assistant_with_calls(&["a", "b"]),
+            tool_reply("a"),
+            tool_reply("b"),
+            ChatMessage { role: "assistant".into(), content: Some("r".into()), ..Default::default() },
+        ];
+        assert_eq!(well_formed_prefix(&msgs), msgs.len());
     }
 
     #[test]

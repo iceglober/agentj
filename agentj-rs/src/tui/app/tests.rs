@@ -702,6 +702,69 @@ fn rekey_result_failure_notices_and_success_resets_history_then_starts_the_task(
 }
 
 #[test]
+fn restore_history_seeds_messages_and_replays_the_transcript() {
+    use crate::provider::{FunctionCall, ToolCall};
+    let mut a = app();
+    let restored = vec![
+        ChatMessage::user("fix the login bug"),
+        ChatMessage {
+            role: "assistant".into(),
+            content: None,
+            tool_calls: vec![ToolCall {
+                id: "c1".into(),
+                kind: "function".into(),
+                function: FunctionCall { name: "read_file".into(), arguments: "{\"path\":\"a.rs\"}".into() },
+            }],
+            tool_call_id: None,
+        },
+        ChatMessage {
+            role: "tool".into(),
+            content: Some("fn main() {}".into()),
+            tool_calls: vec![],
+            tool_call_id: Some("c1".into()),
+        },
+        ChatMessage {
+            role: "assistant".into(),
+            content: Some("The bug is in a.rs.".into()),
+            ..Default::default()
+        },
+        ChatMessage::user("[job 3 `tests` finished, exit 0]\nok"),
+    ];
+    a.restore_history(restored);
+
+    assert_eq!(a.messages.len(), 6, "system + the 5 restored messages");
+    assert_eq!(a.history_saved, 6, "restored history must not be re-appended to disk");
+    let text = a.transcript.plain();
+    assert!(text.contains("fix the login bug"), "user prompt replays as a card");
+    assert!(text.contains("read_file"), "tool call replays as a line");
+    assert!(text.contains("fn main() {}"), "tool line carries its reply's first line");
+    assert!(text.contains("The bug is in a.rs."), "assistant reply replays");
+    assert!(text.contains("[job 3 `tests` finished"), "injected nudge replays as a note");
+    assert!(!text.contains("› [job"), "…but NOT as a user card");
+    assert!(text.contains("resumed — 5 prior messages restored"));
+
+    // An empty restore is a no-op (fresh session): no notice, nothing to save.
+    let mut fresh = app();
+    fresh.restore_history(Vec::new());
+    assert_eq!(fresh.messages.len(), 1);
+    assert_eq!(fresh.history_saved, 1);
+    assert!(!fresh.transcript.plain().contains("resumed"));
+}
+
+#[test]
+fn rekey_marks_the_history_for_a_rewrite() {
+    use crate::rekey::RekeyResult;
+    let mut a = app();
+    a.messages.push(ChatMessage::user("old conversation"));
+    assert!(!a.history_reset);
+    a.apply_rekey_result(
+        RekeyResult { ok: true, branch: Some("feature/x".into()), steps: vec![], error: None },
+        "new task".into(),
+    );
+    assert!(a.history_reset, "the wipe must persist as a rewrite, not an append");
+}
+
+#[test]
 fn idle_tab_opens_the_completion_popover() {
     let mut a = app();
     // A slash token under the cursor: typing opens the popover, so Tab accepts the completion.

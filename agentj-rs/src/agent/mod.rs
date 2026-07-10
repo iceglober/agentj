@@ -38,6 +38,10 @@ fn is_mutating_tool(name: &str) -> bool {
     matches!(name, "write_file" | "edit_file" | "edit_lines")
 }
 
+/// Leading text of the frontier-resume injection below. Public so transcript replay
+/// (`util::is_injected_user_text`) can recognize the message as machine-injected, not typed.
+pub const RESUME_PREFIX: &str = "Work from this session survives";
+
 /// Resume — a `--resume`/`--continue` convenience, NOT a steering nudge. On the first turn of a
 /// session that has surviving work, embed it so the model picks up where it left off instead of
 /// re-deriving scope. It leads with `todos` (what's left) and follows with `plan` (the approach the
@@ -69,7 +73,7 @@ fn frontier_resume(sess: &Session) -> Option<String> {
         return None;
     }
     Some(format!(
-        "Work from this session survives — resume from it instead of re-deriving scope, and keep \
+        "{RESUME_PREFIX} — resume from it instead of re-deriving scope, and keep \
          your `todos` current as you go:\n\n{}",
         parts.join("\n\n")
     ))
