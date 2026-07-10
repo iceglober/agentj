@@ -464,15 +464,22 @@ button,
   margin-bottom: 0;
 }
 .md p {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 .md ul,
 .md ol {
-  margin: 4px 0 6px;
-  padding-left: 20px;
+  margin: 2px 0 4px;
+  padding-left: 18px;
 }
 .md li {
-  margin: 1px 0;
+  margin: 0;
+}
+/* loose lists (blank lines between items) wrap each <li> in a <p> — kill that gap */
+.md li p {
+  margin: 0;
+}
+.md li + li {
+  margin-top: 1px;
 }
 .md h1,
 .md h2,
