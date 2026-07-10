@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Block, ToolLine } from "../types";
+import { parseDag } from "../dag";
+import { SubagentDag } from "./SubagentDag";
 
 const LABEL: Record<string, string> = {
   you: "you",
@@ -11,6 +13,7 @@ const LABEL: Record<string, string> = {
   notice: "notice",
   error: "error",
   tool: "tool",
+  task: "task",
 };
 
 // Render plain text, highlighting `code` spans between backticks. Used for short system/lifecycle
@@ -49,13 +52,16 @@ function fmtMs(ms: number): string {
 function ToolLineRow({ line }: { line: ToolLine }) {
   const [open, setOpen] = useState(false);
   const hasResult = !line.pending && line.result.trim().length > 0;
+  // run_subagents shows its task DAG: a popover on hover, and inline when the row is expanded.
+  const dag = line.name === "run_subagents" ? parseDag(line.args) : null;
+  const expandable = hasResult || !!dag;
   return (
-    <div className={"tline" + (line.ok ? "" : " toolfail")}>
+    <div className={"tline" + (line.ok ? "" : " toolfail") + (dag ? " dagrow" : "")}>
       <span
-        className={"toolrow" + (hasResult ? " expandable" : "")}
-        onClick={hasResult ? () => setOpen((v) => !v) : undefined}
+        className={"toolrow" + (expandable ? " expandable" : "")}
+        onClick={expandable ? () => setOpen((v) => !v) : undefined}
       >
-        {hasResult && <span className="twist">{open ? "▾" : "▸"}</span>}
+        {expandable && <span className="twist">{open ? "▾" : "▸"}</span>}
         <span className="k">{line.name}</span>
         <span className="rail">({line.args})</span>
         {line.pending ? (
@@ -64,7 +70,43 @@ function ToolLineRow({ line }: { line: ToolLine }) {
           <span className="rail"> — {fmtMs(line.elapsed_ms ?? 0)}</span>
         )}
       </span>
-      {open && <pre className="toolresult">{line.result}</pre>}
+      {dag && !open && (
+        <div className="dagpop">
+          <SubagentDag dag={dag} />
+        </div>
+      )}
+      {open && dag && (
+        <div className="daginline">
+          <SubagentDag dag={dag} />
+        </div>
+      )}
+      {open && hasResult && <pre className="toolresult">{line.result}</pre>}
+    </div>
+  );
+}
+
+// One subagent launched by run_subagents: `task[type]: title` with live status; expand to read what
+// it returned. Same visual as a tool row.
+function TaskRow({ block }: { block: Extract<Block, { type: "task" }> }) {
+  const [open, setOpen] = useState(false);
+  const running = block.state === "running";
+  const hasResult = !running && block.summary.trim().length > 0;
+  return (
+    <div className={"tline" + (block.state === "fail" ? " toolfail" : "")}>
+      <span
+        className={"toolrow" + (hasResult ? " expandable" : "")}
+        onClick={hasResult ? () => setOpen((v) => !v) : undefined}
+      >
+        {hasResult && <span className="twist">{open ? "▾" : "▸"}</span>}
+        <span className="k">[{block.agentType}]</span>
+        <span className="rail">: {block.title}</span>
+        {running ? (
+          <span className="rail"> — …</span>
+        ) : (
+          <span className="rail"> — {fmtMs(block.elapsed_ms ?? 0)}</span>
+        )}
+      </span>
+      {open && hasResult && <pre className="toolresult">{block.summary}</pre>}
     </div>
   );
 }
@@ -134,6 +176,9 @@ function BlockRow({ block }: { block: Block }) {
           <ToolGroup name={g.name} lines={g.lines} key={i} />
         ),
       );
+      break;
+    case "task":
+      content = <TaskRow block={block} />;
       break;
   }
 

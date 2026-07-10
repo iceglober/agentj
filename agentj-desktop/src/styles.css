@@ -645,6 +645,67 @@ button,
   border-left: 1px solid var(--bevel-shadow);
   padding-left: 6px;
 }
+
+/* run_subagents DAG — popover on hover, inline when the row is expanded */
+.dagrow {
+  position: relative;
+}
+.dagpop {
+  display: none;
+  position: absolute;
+  left: 14px;
+  top: 100%;
+  z-index: 60;
+  max-width: 560px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark) var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-shadow),
+    0 6px 18px rgba(0, 0, 0, 0.28);
+}
+.dagrow:hover .dagpop {
+  display: block;
+}
+.daginline {
+  margin: 3px 0 5px 12px;
+  padding: 8px;
+  overflow: auto;
+  background: #f6f5ee;
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest) var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light);
+}
+.dag svg {
+  display: block;
+}
+.dagnode {
+  fill: var(--panel);
+  stroke-width: 1.5;
+}
+.dagtype {
+  font-family: var(--sans);
+  font-size: 8px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.dagtitle {
+  font-family: var(--sans);
+  font-size: 10px;
+  fill: var(--ink);
+}
+.dagedge {
+  fill: none;
+  stroke: var(--bevel-shadow);
+  stroke-width: 1.5;
+}
+
+.blk.task .lbl {
+  color: #6a5aa0;
+}
 .k {
   color: #000080;
 }

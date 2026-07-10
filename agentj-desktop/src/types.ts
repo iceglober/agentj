@@ -167,4 +167,14 @@ export type Block =
   | { type: "note"; text: string; id: string }
   | { type: "notice"; text: string; id: string }
   | { type: "error"; text: string; id: string }
-  | { type: "tool"; lines: ToolLine[]; id: string };
+  | { type: "tool"; lines: ToolLine[]; id: string }
+  // One subagent launched by run_subagents, shown as `task[type]: title` with live status.
+  | {
+      type: "task";
+      agentType: string;
+      title: string;
+      state: "running" | "ok" | "fail";
+      elapsed_ms: number | null;
+      summary: string;
+      id: string;
+    };

@@ -46,7 +46,7 @@ export function App() {
   const visibleBlocks = useMemo(() => {
     return derived.blocks.filter((b) => {
       if (!settings.showThinking && b.type === "thinking") return false;
-      if (!settings.showTools && b.type === "tool") return false;
+      if (!settings.showTools && (b.type === "tool" || b.type === "task")) return false;
       return true;
     });
   }, [derived.blocks, settings.showThinking, settings.showTools]);

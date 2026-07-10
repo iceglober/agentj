@@ -31,7 +31,7 @@ export function derive(events: StreamEvent[]): Derived {
   // subagents gets its OWN tool row too (via subagent_start/_end) so you can watch them run + finish.
   let lastToolStep: number | null = null;
   let currentTool: ToolBlock | null = null;
-  const subLine = new Map<number, ToolLine>(); // subagent id → its (mutable) tool row
+  const taskById = new Map<number, Extract<Block, { type: "task" }>>(); // subagent id → its task block
 
   const breakTool = () => {
     currentTool = null;
@@ -60,6 +60,12 @@ export function derive(events: StreamEvent[]): Derived {
         break;
 
       case "note":
+        // The "delegating N sub-task(s)…" note is replaced by the run_subagents DAG (hover/expand),
+        // and skipping it WITHOUT breaking the tool block lets run_subagents' own tool_end still land.
+        if (/^delegating \d+ sub-task/.test(ev.data)) {
+          activity = "delegating";
+          break;
+        }
         breakTool();
         blocks.push({ type: "note", text: ev.data, id });
         activity = ev.data.replace(/^»\s*/, "").trim() || "note";
@@ -131,26 +137,20 @@ export function derive(events: StreamEvent[]): Derived {
         break;
       }
 
-      // Each subagent is a plain tool row: appears (pending) on start, completes on end — same
-      // visual as any tool call, so you can see what's running and when each finishes.
+      // Each subagent is a `task` block — `task[type]: title` with live status — so you can see what's
+      // running and when each finishes. It does NOT touch currentTool, so run_subagents' tool_end lands.
       case "subagent_start": {
-        const line: ToolLine = {
-          prefix: "·",
-          name: ev.data.desc || "subagent",
-          args: ev.data.agent_type || "",
+        const block: Extract<Block, { type: "task" }> = {
+          type: "task",
+          agentType: ev.data.agent_type || "executor",
+          title: ev.data.desc || "task",
+          state: "running",
           elapsed_ms: null,
           summary: "",
-          result: "",
-          ok: true,
-          pending: true,
+          id,
         };
-        if (currentTool) {
-          currentTool.lines.push(line);
-        } else {
-          currentTool = { type: "tool", lines: [line], id };
-          blocks.push(currentTool);
-        }
-        subLine.set(ev.data.id, line);
+        taskById.set(ev.data.id, block);
+        blocks.push(block);
         activity = "delegating";
         break;
       }
@@ -158,14 +158,11 @@ export function derive(events: StreamEvent[]): Derived {
         activity = ev.data.status || "subagents…";
         break;
       case "subagent_end": {
-        const line = subLine.get(ev.data.id);
-        if (line) {
-          line.pending = false;
-          line.ok = ev.data.ok;
-          line.elapsed_ms = ev.data.elapsed_ms;
-          line.summary = ev.data.summary;
-          line.result = ev.data.summary;
-          if (!ev.data.ok) line.prefix = "✗";
+        const b = taskById.get(ev.data.id);
+        if (b) {
+          b.state = ev.data.ok ? "ok" : "fail";
+          b.elapsed_ms = ev.data.elapsed_ms;
+          b.summary = ev.data.summary;
         }
         break;
       }
