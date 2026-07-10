@@ -58,6 +58,14 @@ export type AgentEvent =
   | { kind: "error"; data: string }
   | { kind: "done" };
 
+// An in-app "view" tab: a URL (e.g. a locally-running dev server) opened from a transcript link,
+// shown in an iframe so it never hijacks the agentj window. `id` is the url (dedupes tabs).
+export interface OpenView {
+  id: string;
+  url: string;
+  title: string;
+}
+
 // One entry in the file explorer. `rel` is the repo-relative path from the
 // worktree root; the backend sorts dirs-first and skips .git/node_modules/etc.
 export interface FileEntry {

@@ -12,6 +12,7 @@ import type {
   FileEntry,
   ModelChoice,
   ModelSettings,
+  OpenView,
   RepoScan,
   SessionMeta,
   StreamEvent,
@@ -74,6 +75,20 @@ export interface SessionState {
   running: boolean;
   // Raw markdown of this session's `todos` artifact; null until fetched / if absent.
   todos: string | null;
+  // In-app tabs for URLs opened from transcript links; `activeView` is "chat" or a view id.
+  views: OpenView[];
+  activeView: string;
+}
+
+// A short tab label for an opened URL.
+function viewTitle(url: string): string {
+  try {
+    const u = new URL(url);
+    const p = u.pathname === "/" ? "" : u.pathname;
+    return (u.host + p).slice(0, 28);
+  } catch {
+    return url.slice(0, 28);
+  }
 }
 
 export interface SessionStore {
@@ -92,6 +107,10 @@ export interface SessionStore {
   interrupt: () => Promise<void>;
   // Switch one session to a different model; updates that session's meta.model.
   setSessionModel: (id: string, choice: ModelChoice) => Promise<string>;
+  // In-app views: open a URL as a tab (dedupes by url), close one, switch active.
+  openView: (url: string) => void;
+  closeView: (viewId: string) => void;
+  setActiveView: (view: string) => void;
   // Clear one session's transcript display; leaves backend/model history alone.
   clearEvents: (id: string) => void;
 
@@ -108,7 +127,7 @@ function freshSlice(meta: SessionMeta): SessionState {
   const events: StreamEvent[] = meta.notice
     ? [{ kind: "notice", data: meta.notice }]
     : [];
-  return { meta, events, running: false, todos: null };
+  return { meta, events, running: false, todos: null, views: [], activeView: "chat" };
 }
 
 export function useSessions(): SessionStore {
@@ -304,6 +323,42 @@ export function useSessions(): SessionStore {
     [patch],
   );
 
+  const openView = useCallback(
+    (url: string) => {
+      const id = activeIdRef.current;
+      if (!id) return;
+      patch(id, (s) => {
+        const views = s.views.some((v) => v.url === url)
+          ? s.views
+          : [...s.views, { id: url, url, title: viewTitle(url) }];
+        return { ...s, views, activeView: url };
+      });
+    },
+    [patch],
+  );
+
+  const closeView = useCallback(
+    (viewId: string) => {
+      const id = activeIdRef.current;
+      if (!id) return;
+      patch(id, (s) => ({
+        ...s,
+        views: s.views.filter((v) => v.id !== viewId),
+        activeView: s.activeView === viewId ? "chat" : s.activeView,
+      }));
+    },
+    [patch],
+  );
+
+  const setActiveView = useCallback(
+    (view: string) => {
+      const id = activeIdRef.current;
+      if (!id) return;
+      patch(id, (s) => ({ ...s, activeView: view }));
+    },
+    [patch],
+  );
+
   const setSessionModel = useCallback(
     async (id: string, choice: ModelChoice) => {
       const model = await invoke<string>("set_session_model", { sessionId: id, choice });
@@ -360,6 +415,9 @@ export function useSessions(): SessionStore {
     send,
     interrupt,
     setSessionModel,
+    openView,
+    closeView,
+    setActiveView,
     clearEvents,
     inspectRepo,
     provisionWorktree,

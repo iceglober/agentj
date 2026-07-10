@@ -4,7 +4,7 @@
 // Tier 2 visually nests under the active project. All grotesk (--sans).
 
 import { useEffect, useRef, useState } from "react";
-import type { SessionMeta } from "../types";
+import type { OpenView, SessionMeta } from "../types";
 
 interface Project {
   base: string;
@@ -111,6 +111,10 @@ export function TabBar({
   onOpenShortcuts,
   onOpenTools,
   onOpenModels,
+  views,
+  activeView,
+  onSelectView,
+  onCloseView,
 }: {
   sessions: SessionMeta[];
   activeProject: string | null;
@@ -126,6 +130,10 @@ export function TabBar({
   onOpenShortcuts: () => void;
   onOpenTools: () => void;
   onOpenModels: () => void;
+  views: OpenView[];
+  activeView: string;
+  onSelectView: (view: string) => void;
+  onCloseView: (viewId: string) => void;
 }) {
   // Distinct projects, in first-seen order.
   const projects: Project[] = [];
@@ -210,6 +218,42 @@ export function TabBar({
           </button>
         </div>
       </div>
+
+      {/* tier 3 — views: Chat + any URLs opened from transcript links (in-app iframes) */}
+      {views.length > 0 && (
+        <div className="tier tier3">
+          <span className="tier-label">Views</span>
+          <div className="tabs">
+            <button
+              className={"vtab" + (activeView === "chat" ? " active" : "")}
+              onClick={() => onSelectView("chat")}
+            >
+              Chat
+            </button>
+            {views.map((v) => (
+              <div
+                key={v.id}
+                className={"vtab vtab-doc" + (activeView === v.id ? " active" : "")}
+                title={v.url}
+                onClick={() => onSelectView(v.id)}
+              >
+                <span className="vtab-name">{v.title}</span>
+                <button
+                  className="stab-x"
+                  aria-label="Close view"
+                  title="Close view"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseView(v.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

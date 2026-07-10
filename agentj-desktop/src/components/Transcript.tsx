@@ -193,9 +193,11 @@ function BlockRow({ block }: { block: Block }) {
 export function Transcript({
   blocks,
   autoScroll,
+  onOpenLink,
 }: {
   blocks: Block[];
   autoScroll: boolean;
+  onOpenLink: (url: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -207,8 +209,18 @@ export function Transcript({
     if (el) el.scrollTop = el.scrollHeight;
   }, [blocks, autoScroll]);
 
+  // Intercept ALL link clicks (event delegation) so a link never navigates the whole webview away
+  // from agentj — route it to the app instead (an in-app view tab, or the system browser).
+  const onClick = (e: React.MouseEvent) => {
+    const a = (e.target as HTMLElement).closest("a[href]") as HTMLAnchorElement | null;
+    if (a && a.getAttribute("href")) {
+      e.preventDefault();
+      onOpenLink(a.href);
+    }
+  };
+
   return (
-    <div className="screen" ref={ref}>
+    <div className="screen" ref={ref} onClick={onClick}>
       {blocks.map((b) => (
         <BlockRow block={b} key={b.id} />
       ))}

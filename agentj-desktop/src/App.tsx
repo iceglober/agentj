@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { useSessions } from "./session";
 import { useSettings } from "./settings";
 import { derive } from "./derive";
@@ -15,6 +16,7 @@ import { Settings } from "./components/Settings";
 import { Shortcuts } from "./components/Shortcuts";
 import { ToolStatus } from "./components/ToolStatus";
 import { ModelPicker } from "./components/ModelPicker";
+import { ViewPane } from "./components/ViewPane";
 import { COMMANDS } from "./commands";
 import type { RepoScan } from "./types";
 
@@ -26,6 +28,18 @@ function loadRecents(): string[] {
     return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 6) : [];
   } catch {
     return [];
+  }
+}
+
+// A locally-running server (dev app) — safe to frame in an in-app view. Anything else opens in the
+// system browser (external sites often refuse framing, and belong in a real browser anyway).
+function isLocalHttp(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    return ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"].includes(u.hostname);
+  } catch {
+    return false;
   }
 }
 
@@ -253,6 +267,19 @@ export function App() {
     );
   }
 
+  // A transcript link never navigates the app: a local dev URL opens as an in-app view tab; anything
+  // else opens in the system browser.
+  const onOpenLink = useCallback(
+    (url: string) => {
+      if (isLocalHttp(url)) session.openView(url);
+      else void invoke("open_url", { url });
+    },
+    [session],
+  );
+
+  const activeView = active?.activeView ?? "chat";
+  const viewObj = active?.views.find((v) => v.id === activeView) ?? null;
+
   return (
     <div className="app">
       <TabBar
@@ -270,29 +297,43 @@ export function App() {
         onOpenShortcuts={() => setModal("shortcuts")}
         onOpenTools={() => setModal("tools")}
         onOpenModels={() => setModal("models")}
+        views={active?.views ?? []}
+        activeView={activeView}
+        onSelectView={session.setActiveView}
+        onCloseView={session.closeView}
       />
 
       <div className="body">
-        {session.activeId && (
-          <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
-        )}
+        {viewObj ? (
+          <ViewPane view={viewObj} onClose={() => session.closeView(viewObj.id)} />
+        ) : (
+          <>
+            {session.activeId && (
+              <LeftRail sessionId={session.activeId} todos={active?.todos ?? null} />
+            )}
 
-        <div className="chat">
-          <Transcript blocks={visibleBlocks} autoScroll={settings.autoScroll} />
-          <StatusRow
-            running={active?.running ?? false}
-            activity={derived.activity}
-            totalTokens={derived.totalTokens}
-            sawDone={derived.sawDone}
-          />
-          <InputRow
-            onSend={session.send}
-            onInterrupt={session.interrupt}
-            running={active?.running ?? false}
-            commands={COMMANDS}
-            onRunCommand={runCommand}
-          />
-        </div>
+            <div className="chat">
+              <Transcript
+                blocks={visibleBlocks}
+                autoScroll={settings.autoScroll}
+                onOpenLink={onOpenLink}
+              />
+              <StatusRow
+                running={active?.running ?? false}
+                activity={derived.activity}
+                totalTokens={derived.totalTokens}
+                sawDone={derived.sawDone}
+              />
+              <InputRow
+                onSend={session.send}
+                onInterrupt={session.interrupt}
+                running={active?.running ?? false}
+                commands={COMMANDS}
+                onRunCommand={runCommand}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       <StatusBar meta={active?.meta ?? null} onOpenModels={() => setModal("models")} />

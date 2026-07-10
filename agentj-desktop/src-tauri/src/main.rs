@@ -645,6 +645,23 @@ fn set_session_model(
     Ok(cfg.model_id)
 }
 
+/// Open a URL in the user's default browser (external links, and the "open in browser" escape hatch
+/// for pages that refuse to be framed in an in-app view).
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let (cmd, args): (&str, Vec<&str>) = ("open", vec![&url]);
+    #[cfg(target_os = "windows")]
+    let (cmd, args): (&str, Vec<&str>) = ("cmd", vec!["/C", "start", "", &url]);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let (cmd, args): (&str, Vec<&str>) = ("xdg-open", vec![&url]);
+    std::process::Command::new(cmd)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn build_state() -> AppState {
     // Reopen the sessions from last launch whose worktrees still look like git checkouts.
     let sessions: Vec<Arc<SessionEntry>> = worktree::remembered_sessions()
@@ -684,7 +701,8 @@ fn main() {
             model_settings,
             set_default_model,
             list_models,
-            set_session_model
+            set_session_model,
+            open_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running agentj-desktop");

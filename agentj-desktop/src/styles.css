@@ -286,6 +286,50 @@ button,
 .tier2 .tier-label {
   padding-left: 24px;
 }
+/* tier 3 — views (Chat + opened URLs) */
+.tier3 {
+  height: 26px;
+  padding: 2px 6px 0 6px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--bevel-shadow);
+}
+.tier3 .tier-label {
+  padding-left: 44px;
+}
+.vtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 21px;
+  padding: 0 12px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  bottom: -1px;
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark) var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+.vtab.vtab-doc {
+  padding: 0 4px 0 10px;
+}
+.vtab.active {
+  height: 23px;
+  background: var(--panel);
+  font-weight: bold;
+  color: var(--sel);
+  border-bottom-color: var(--panel);
+  z-index: 2;
+}
+.vtab .vtab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
 .stab {
   display: inline-flex;
   align-items: center;
@@ -405,6 +449,61 @@ button,
   flex-direction: column;
   min-width: 0;
   position: relative;
+}
+
+/* in-app view (a URL opened from a transcript link) — fills the body */
+.viewpane {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark) var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-shadow);
+}
+.vbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 5px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--bevel-shadow);
+}
+.vbar .vaddr {
+  flex: 1 1 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vbtn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 11px;
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark) var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light), inset -1px -1px 0 var(--bevel-shadow);
+}
+.vbtn:active {
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest) var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light);
+}
+.viewpane iframe {
+  flex: 1 1 auto;
+  width: 100%;
+  border: none;
+  background: #fff;
 }
 
 /* transcript — a SUNKEN WHITE well with black Lucida Console text */
