@@ -26,12 +26,12 @@ export function derive(events: StreamEvent[]): Derived {
   let activity = "working…";
   let sawDone = false;
 
-  // Contiguous tool calls collapse into one block; `+` marks a call that
-  // shares its step with the immediately-preceding tool call. `run_subagents` is
-  // an ordinary tool row — its subagent_* events are ignored here so the tool line
-  // isn't orphaned and its tool_end (the aggregated result) lands normally.
+  // Contiguous tool calls collapse into one block; `+` marks a call that shares its step with the
+  // immediately-preceding tool call. `run_subagents` renders as an ordinary tool row, and each of its
+  // subagents gets its OWN tool row too (via subagent_start/_end) so you can watch them run + finish.
   let lastToolStep: number | null = null;
   let currentTool: ToolBlock | null = null;
+  const subLine = new Map<number, ToolLine>(); // subagent id → its (mutable) tool row
 
   const breakTool = () => {
     currentTool = null;
@@ -131,15 +131,44 @@ export function derive(events: StreamEvent[]): Derived {
         break;
       }
 
-      // subagent_* events drive the aggregated `run_subagents` tool line's progress
-      // on the backend; the desktop shows run_subagents as a plain tool row, so they
-      // only nudge the activity label here.
-      case "subagent_start":
+      // Each subagent is a plain tool row: appears (pending) on start, completes on end — same
+      // visual as any tool call, so you can see what's running and when each finishes.
+      case "subagent_start": {
+        const line: ToolLine = {
+          prefix: "·",
+          name: ev.data.desc || "subagent",
+          args: ev.data.agent_type || "",
+          elapsed_ms: null,
+          summary: "",
+          result: "",
+          ok: true,
+          pending: true,
+        };
+        if (currentTool) {
+          currentTool.lines.push(line);
+        } else {
+          currentTool = { type: "tool", lines: [line], id };
+          blocks.push(currentTool);
+        }
+        subLine.set(ev.data.id, line);
         activity = "delegating";
         break;
+      }
       case "subagent_progress":
         activity = ev.data.status || "subagents…";
         break;
+      case "subagent_end": {
+        const line = subLine.get(ev.data.id);
+        if (line) {
+          line.pending = false;
+          line.ok = ev.data.ok;
+          line.elapsed_ms = ev.data.elapsed_ms;
+          line.summary = ev.data.summary;
+          line.result = ev.data.summary;
+          if (!ev.data.ok) line.prefix = "✗";
+        }
+        break;
+      }
 
       case "done":
         breakTool();
