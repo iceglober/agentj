@@ -304,11 +304,17 @@ export function useSessions(): SessionStore {
     [patch],
   );
 
-  const setSessionModel = useCallback(async (id: string, choice: ModelChoice) => {
-    const model = await invoke<string>("set_session_model", { sessionId: id, choice });
-    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, model } : s)));
-    return model;
-  }, []);
+  const setSessionModel = useCallback(
+    async (id: string, choice: ModelChoice) => {
+      const model = await invoke<string>("set_session_model", { sessionId: id, choice });
+      // Update BOTH representations: the tab list AND the active session's slice (which is what
+      // `active.meta` — and thus the status-bar chip — reads).
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, model } : s)));
+      patch(id, (s) => ({ ...s, meta: { ...s.meta, model } }));
+      return model;
+    },
+    [patch],
+  );
 
   const inspectRepo = useCallback(
     (path: string) => invoke<RepoScan>("inspect_repo", { path }),
