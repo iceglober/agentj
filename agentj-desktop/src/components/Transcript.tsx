@@ -61,7 +61,7 @@ function ToolLineRow({ line }: { line: ToolLine }) {
 // live status · tokens/elapsed — and a join footer. The bar shows each agent's share of the wave's
 // wall-clock (the slowest fills it), so the parallel spread is visible at a glance.
 //   ├─╯  wave 1 · 2/2 ok · 11.4s · 7.2k tok
-const KNOWN_TYPES = ["scout", "planner", "reviewer", "executor"];
+const KNOWN_TYPES = ["questioner", "scout", "planner", "reviewer", "executor"];
 const fmtTokShort = (t: number | null): string =>
   t && t > 0 ? `${(t / 1000).toFixed(1)}k` : "";
 

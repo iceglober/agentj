@@ -604,6 +604,9 @@ button,
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
+.wchip.questioner {
+  background: #0a7d8c;
+}
 .wchip.scout {
   background: #2f6fe0;
 }

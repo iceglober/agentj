@@ -140,14 +140,18 @@ fn instructions() -> String {
         ),
         enclose(
             "subagents",
-            "Use subagents as much as possible. Map the DEPENDENCIES first — which sub-tasks are \
-             independent, and which need another's output — then express that DAG in one \
-             `run_subagents` call: independent tasks run in PARALLEL, and a task that consumes \
-             another's result gets `after:[…]` those tasks, so it runs in a later stage and receives \
-             their results. A planner runs `after` the scouts that feed it, never in the same stage. \
-             This applies to EVERY kind of task, not just building things: answering a question about \
-             the code, tracking down a bug, reviewing a change, refactoring, or auditing all fan out \
-             the same way. Delegate the reading and exploring to them; you synthesize and decide.",
+            "Use subagents as much as possible. START every scouting effort with short `questioner` \
+             subagents: before any scout digs in, they turn the request's genuine ambiguities into \
+             the sharpest 2–4 questions — or report it's already clear — and those questions steer \
+             what you scout next and become the decisions you present in the plan. Map the \
+             DEPENDENCIES first — which sub-tasks are independent, which need another's output — then \
+             express that DAG in one `run_subagents` call: independent tasks run in PARALLEL, and a \
+             task that consumes another's result gets `after:[…]` those tasks, so it runs in a later \
+             stage and receives their results. A planner runs `after` the scouts that feed it, never \
+             in the same stage. This applies to EVERY kind of task, not just building things: \
+             answering a question about the code, tracking down a bug, reviewing a change, \
+             refactoring, or auditing all fan out the same way. Delegate the reading and exploring to \
+             them; you synthesize and decide.",
         ),
         enclose(
             "plan",
@@ -244,6 +248,7 @@ mod tests {
         assert!(p.contains("never work from assumption"));
         // 2. subagents, in parallel — and it applies to EVERY kind of task, not just building
         assert!(p.contains("Use subagents as much as possible"));
+        assert!(p.contains("START every scouting effort with short `questioner` subagents"));
         assert!(p.contains("in PARALLEL"));
         assert!(p.contains("one `run_subagents` call"));
         assert!(p.contains("EVERY kind of task"));

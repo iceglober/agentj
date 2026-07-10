@@ -11,6 +11,9 @@
 /// change-maker last.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AgentType {
+    /// Read-only clarify pass. Runs FIRST: turns the request's ambiguities into sharp questions
+    /// (or reports it's already clear). Short by contract — light reads only, no shell.
+    Questioner,
     /// Read-only investigation / context-gathering. Answers a question with evidence.
     Scout,
     /// Read-only design / decomposition. Produces a plan or design, weighs alternatives.
@@ -31,6 +34,7 @@ impl AgentType {
     /// Parse the `type` field of a `run_subagents` task; unknown/absent → the default `Executor`.
     pub fn parse(s: Option<&str>) -> AgentType {
         match s.map(|x| x.trim().to_ascii_lowercase()).as_deref() {
+            Some("questioner") | Some("question") => AgentType::Questioner,
             Some("scout") => AgentType::Scout,
             Some("planner") => AgentType::Planner,
             Some("reviewer") => AgentType::Reviewer,
@@ -40,6 +44,7 @@ impl AgentType {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            AgentType::Questioner => "questioner",
             AgentType::Scout => "scout",
             AgentType::Planner => "planner",
             AgentType::Reviewer => "reviewer",
@@ -53,6 +58,9 @@ impl AgentType {
     pub fn allows(self, tool: &str) -> bool {
         match self {
             AgentType::Executor => tool != "run_subagents",
+            // Questioner is deliberately the tightest: light reads only, no shell — it asks, it
+            // doesn't investigate. That keeps it SHORT, which is the whole point of running it first.
+            AgentType::Questioner => READ_ONLY.contains(&tool),
             AgentType::Scout => READ_ONLY.contains(&tool) || tool == "bash",
             AgentType::Planner => READ_ONLY.contains(&tool) || tool == "bash",
             AgentType::Reviewer => {
@@ -64,6 +72,16 @@ impl AgentType {
     /// The type's role identity — prepended to the shared subagent prompt.
     pub fn identity(self) -> &'static str {
         match self {
+            AgentType::Questioner =>
+                "You are a QUESTIONER subagent — you run FIRST, before any deeper scouting. Your job is \
+                 to surface the GENUINE ambiguity in the request as the sharpest possible clarifying \
+                 questions, fast. Think in 2–4 competing interpretations of what the user might mean, \
+                 find the axis that separates them, and ask ONE focused, non-leading, discriminative \
+                 question per real gap — missing audience, scope, platform, data shape, success \
+                 criteria, or a wrong premise. Do NOT ask what the request or the repo already answers, \
+                 and never ask about implementation trivia. Ground yourself with only the lightest read \
+                 of the repo. If the request is already unambiguous, SAY SO and return no questions — \
+                 never manufacture them to fill space.",
             AgentType::Scout =>
                 "You are a SCOUT subagent. Your job is to FIND OUT, not to change anything: explore the \
                  code read-only and answer the exact question you were given with hard evidence. You do \
@@ -93,6 +111,13 @@ impl AgentType {
     /// dictated by the brief. Emitted as the `<rubric>` section of the subagent prompt.
     pub fn report_rubric(self) -> Option<&'static str> {
         match self {
+            AgentType::Questioner => Some(
+                "Return ONLY this. If the request is already clear enough to act on, return the single \
+                 line `no open questions` — do not invent questions to fill the list. Otherwise return \
+                 the 2–4 highest-value questions, worst-ambiguity first. For EACH: the question in one \
+                 non-leading sentence; 2–4 candidate answers; and your RECOMMENDED default with a \
+                 one-phrase why. No preamble, no meta-commentary — just the questions.",
+            ),
             AgentType::Reviewer => Some(
                 "Judge the work against these FOUR dimensions. They are mutually exclusive (a fault \
                  belongs to exactly one) and collectively exhaustive (together they cover every way \
@@ -126,15 +151,20 @@ mod tests {
         assert_eq!(AgentType::parse(Some(" Scout ")), AgentType::Scout);
         assert_eq!(AgentType::parse(Some("REVIEWER")), AgentType::Reviewer);
         assert_eq!(AgentType::parse(Some("planner")), AgentType::Planner);
+        assert_eq!(AgentType::parse(Some("questioner")), AgentType::Questioner);
     }
 
     #[test]
     fn read_only_types_are_denied_writes_the_executor_is_not() {
-        for ro in [AgentType::Scout, AgentType::Planner, AgentType::Reviewer] {
+        for ro in [AgentType::Scout, AgentType::Planner, AgentType::Reviewer, AgentType::Questioner] {
             assert!(!ro.allows("write_file"), "{ro:?} must not write");
             assert!(!ro.allows("edit_file"), "{ro:?} must not edit");
             assert!(ro.allows("read_file"), "{ro:?} can read");
         }
+        // The questioner is tightest: it may read but not even shell out — it asks, it doesn't dig.
+        assert!(!AgentType::Questioner.allows("bash"), "questioner stays short: no shell");
+        assert!(AgentType::Scout.allows("bash"), "scout may shell out");
+        assert!(AgentType::Questioner.report_rubric().is_some(), "questioner returns a fixed shape");
         // The executor gets the full subagent set, never the fan-out tool.
         assert!(AgentType::Executor.allows("write_file"));
         assert!(AgentType::Executor.allows("edit_file"));
