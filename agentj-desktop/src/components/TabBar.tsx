@@ -34,10 +34,12 @@ function GearMenu({
   onOpenSettings,
   onOpenShortcuts,
   onOpenTools,
+  onOpenModels,
 }: {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenTools: () => void;
+  onOpenModels: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,6 +87,9 @@ function GearMenu({
           <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenTools)}>
             Tool status
           </button>
+          <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenModels)}>
+            Models
+          </button>
         </div>
       )}
     </div>
@@ -105,6 +110,7 @@ export function TabBar({
   onOpenSettings,
   onOpenShortcuts,
   onOpenTools,
+  onOpenModels,
 }: {
   sessions: SessionMeta[];
   activeProject: string | null;
@@ -119,6 +125,7 @@ export function TabBar({
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenTools: () => void;
+  onOpenModels: () => void;
 }) {
   // Distinct projects, in first-seen order.
   const projects: Project[] = [];
@@ -140,6 +147,7 @@ export function TabBar({
           onOpenSettings={onOpenSettings}
           onOpenShortcuts={onOpenShortcuts}
           onOpenTools={onOpenTools}
+          onOpenModels={onOpenModels}
         />
         <span className="tier-label">Projects</span>
         <div className="tabs">

@@ -10,6 +10,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEventEnvelope,
   FileEntry,
+  ModelChoice,
+  ModelSettings,
   RepoScan,
   SessionMeta,
   StreamEvent,
@@ -47,6 +49,24 @@ export function toolStatus(sessionId: string): Promise<ToolStatus> {
   return invoke<ToolStatus>("tool_status", { sessionId });
 }
 
+// --- model selection -------------------------------------------------------
+// The global default provider+model + stored provider configs (to prefill the panel).
+export function modelSettings(): Promise<ModelSettings> {
+  return invoke<ModelSettings>("model_settings");
+}
+// Persist a provider+model as the global default; returns the resolved model id.
+export function setDefaultModel(choice: ModelChoice): Promise<string> {
+  return invoke<string>("set_default_model", { choice });
+}
+// Best-effort enumerate models from an OpenAI-compatible endpoint (empty if unsupported).
+export function listModels(
+  baseUrl: string,
+  apiKey: string | undefined,
+  apiVersion: string | undefined,
+): Promise<string[]> {
+  return invoke<string[]>("list_models", { baseUrl, apiKey, apiVersion });
+}
+
 // Per-session view state. `events` starts empty for restored sessions.
 export interface SessionState {
   meta: SessionMeta;
@@ -70,6 +90,8 @@ export interface SessionStore {
 
   send: (prompt: string) => Promise<void>;
   interrupt: () => Promise<void>;
+  // Switch one session to a different model; updates that session's meta.model.
+  setSessionModel: (id: string, choice: ModelChoice) => Promise<string>;
   // Clear one session's transcript display; leaves backend/model history alone.
   clearEvents: (id: string) => void;
 
@@ -282,6 +304,12 @@ export function useSessions(): SessionStore {
     [patch],
   );
 
+  const setSessionModel = useCallback(async (id: string, choice: ModelChoice) => {
+    const model = await invoke<string>("set_session_model", { sessionId: id, choice });
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, model } : s)));
+    return model;
+  }, []);
+
   const inspectRepo = useCallback(
     (path: string) => invoke<RepoScan>("inspect_repo", { path }),
     [],
@@ -325,6 +353,7 @@ export function useSessions(): SessionStore {
     close,
     send,
     interrupt,
+    setSessionModel,
     clearEvents,
     inspectRepo,
     provisionWorktree,

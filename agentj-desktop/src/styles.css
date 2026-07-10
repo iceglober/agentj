@@ -30,6 +30,8 @@
   /* Windows selection blue, remastered a touch crisper (white text) */
   --accent: #2f6fe0;
   --sel: #2f6fe0;
+  --selwash: #e5eefc; /* faint blue fill for selected chips/rows */
+  --selline: #7ea6ec; /* selected-chip border */
 
   /* speaker label colors (flat — no colored bands) */
   --you: #0a246a; /* navy */
@@ -811,6 +813,137 @@ button,
 .btn3d:disabled {
   color: var(--t-faint);
   cursor: default;
+}
+.btn3d.primary {
+  font-weight: bold;
+  color: #fff;
+  background: linear-gradient(180deg, #3a81f3, #1c5fd8);
+  border-color: #1c5fd8 #10387f #10387f #1c5fd8;
+}
+.btn3d.primary:disabled {
+  color: #cdd8ef;
+  background: var(--panel-2);
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
+    var(--bevel-lightest);
+}
+
+/* status-bar model chip (click to change the session's model) */
+.sb-model {
+  flex: 0 0 auto;
+  font-family: var(--sans);
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--sel);
+  font-weight: bold;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
+    var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+.sb-model:active {
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark);
+}
+
+/* ---- Models picker ---------------------------------------------------- */
+.mp-current {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.mp-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.mp-tab {
+  font-family: var(--sans);
+  font-size: 11px;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid;
+  border-color: var(--bevel-lightest) var(--bevel-dark) var(--bevel-dark)
+    var(--bevel-lightest);
+  box-shadow: inset 1px 1px 0 var(--bevel-light);
+}
+.mp-tab.active {
+  background: var(--selwash);
+  color: var(--sel);
+  font-weight: bold;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark);
+}
+.mp-field {
+  display: block;
+  margin-bottom: 10px;
+}
+.mp-field > span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.mp-field input {
+  width: 100%;
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 5px 7px;
+  background: var(--field);
+  color: var(--ink);
+  border: 1px solid;
+  border-color: var(--bevel-shadow) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-shadow);
+  box-shadow: inset 1px 1px 0 var(--bevel-dark), inset -1px -1px 0 var(--bevel-light);
+}
+.mp-modelrow {
+  display: flex;
+  gap: 6px;
+}
+.mp-modelrow input {
+  flex: 1 1 auto;
+}
+.mp-modelrow .btn3d {
+  flex: 0 0 auto;
+}
+.mp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: -4px 0 10px;
+  max-height: 96px;
+  overflow-y: auto;
+}
+.mp-chip {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 7px;
+  cursor: pointer;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--bevel-shadow);
+}
+.mp-chip.active {
+  background: var(--selwash);
+  color: var(--sel);
+  border-color: var(--selline);
+}
+.mp-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.mp-error {
+  color: var(--err);
+  font-size: 11px;
+  margin: 4px 0;
+}
+.mp-msg {
+  color: var(--aj);
+  font-size: 11px;
+  margin: 4px 0;
 }
 
 /* XP-style blue title bar */

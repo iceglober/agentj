@@ -16,9 +16,10 @@ use std::sync::{Arc, Mutex};
 use agentj::agent::{self, Session};
 use agentj::config::{self, AppConfig};
 use agentj::events::AgentEvent;
-use agentj::model::{preflight, resolve_model, resolve_provider, Selector};
+use agentj::model::{preflight, resolve_model, resolve_provider, ModelConfig, Provider, Selector};
 use agentj::prompt;
 use agentj::mcp::client::{connect_all, McpClients, McpOutcome};
+use agentj::provider::openai::list_models as provider_list_models;
 use agentj::provider::{ChatMessage, Llm};
 use agentj::session::Session as Store;
 use agentj::{jobs, tools};
@@ -28,7 +29,11 @@ use tokio::sync::mpsc::unbounded_channel;
 
 /// The agent session built for one worktree.
 struct RepoCtx {
-    sess: Session,
+    /// The model client + run config. Behind a Mutex so a session can switch models at runtime
+    /// (`set_session_model` rebuilds and swaps it); `start_turn` clones it out per turn.
+    sess: Mutex<Session>,
+    /// The active model id, for display (kept in step with `sess`).
+    model: Mutex<String>,
     store: Arc<Store>,
     root: String,
     branch: Option<String>,
@@ -36,6 +41,38 @@ struct RepoCtx {
     system: String,
     /// Connection result for each MCP server configured in this worktree (for the tool-status view).
     mcp_status: Vec<McpServerStatus>,
+}
+
+/// A model chosen from the app — either as the global default or for one session. `provider` is
+/// "azure" or "custom" (the wired OpenAI-compatible providers).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelChoice {
+    provider: String,
+    model: String,
+    base_url: String,
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    api_version: Option<String>,
+}
+
+fn nonempty(s: Option<String>) -> Option<String> {
+    s.filter(|v| !v.is_empty())
+}
+
+/// Build a runnable `ModelConfig` straight from an explicit choice (bypassing config resolution).
+fn choice_to_config(c: &ModelChoice) -> Result<ModelConfig, String> {
+    let provider = Provider::parse(&c.provider)
+        .filter(|p| matches!(p, Provider::Azure | Provider::Custom))
+        .ok_or_else(|| format!("provider `{}` is not selectable (use azure or custom)", c.provider))?;
+    Ok(ModelConfig {
+        provider,
+        model_id: c.model.clone(),
+        base_url: c.base_url.clone(),
+        api_key: nonempty(c.api_key.clone()),
+        api_version: nonempty(c.api_version.clone()),
+    })
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -98,6 +135,8 @@ struct SessionMeta {
     base: String,
     project_name: String,
     is_worktree: bool,
+    /// The active model id for this session (may differ from the global default).
+    model: String,
     /// A one-off message to show first in the session's transcript (e.g. a provisioning fallback).
     notice: Option<String>,
 }
@@ -112,6 +151,7 @@ impl SessionMeta {
             base: c.base.clone(),
             project_name: worktree::dir_name(&c.base),
             is_worktree: c.root != c.base,
+            model: c.model.lock().unwrap().clone(),
             notice: None,
         }
     }
@@ -143,18 +183,23 @@ struct FileEntry {
 }
 
 /// Build a full session for a worktree `root`, mirroring the CLI's interactive setup.
-fn build_ctx(root: &str) -> RepoCtx {
+fn build_ctx(root: &str, choice: Option<&ModelChoice>) -> RepoCtx {
     let app_cfg = AppConfig::load(root);
-    let provider = resolve_provider(None, &app_cfg);
-    let sel = Selector { provider, model: None, base_url: None };
 
-    let (llm, model_id) = match preflight(&sel, &app_cfg)
-        .and_then(|_| resolve_model(&sel, &app_cfg))
-        .and_then(|cfg| Llm::from_config(&cfg).map(|l| (cfg, l)).map_err(|e| e.to_string()))
-    {
-        Ok((cfg, llm)) => (llm, cfg.model_id),
-        Err(_) => (Llm::Unconfigured, "(none)".to_string()),
+    // An explicit choice (per-session model) is used verbatim; otherwise resolve the global default
+    // from config. Either way, a failure leaves the session Unconfigured (a friendly nudge on run).
+    let resolved = match choice {
+        Some(c) => choice_to_config(c)
+            .and_then(|cfg| Llm::from_config(&cfg).map(|l| (l, cfg.model_id)).map_err(|e| e.to_string())),
+        None => {
+            let provider = resolve_provider(None, &app_cfg);
+            let sel = Selector { provider, model: None, base_url: None };
+            preflight(&sel, &app_cfg)
+                .and_then(|_| resolve_model(&sel, &app_cfg))
+                .and_then(|cfg| Llm::from_config(&cfg).map(|l| (l, cfg.model_id)).map_err(|e| e.to_string()))
+        }
     };
+    let (llm, model_id) = resolved.unwrap_or((Llm::Unconfigured, "(none)".to_string()));
 
     let company = AppConfig::env_or_file("AGENTJ_COMPANY", app_cfg.company.as_deref());
     let mut run_cfg = config::Config::from_sources(&model_id, &app_cfg);
@@ -176,11 +221,20 @@ fn build_ctx(root: &str) -> RepoCtx {
         tools: Arc::new(tools),
         cfg: Arc::new(run_cfg),
     };
-    RepoCtx { sess, store, root: root.to_string(), branch, base, system, mcp_status }
+    RepoCtx {
+        sess: Mutex::new(sess),
+        model: Mutex::new(model_id),
+        store,
+        root: root.to_string(),
+        branch,
+        base,
+        system,
+        mcp_status,
+    }
 }
 
 fn make_entry(root: &str) -> Arc<SessionEntry> {
-    let ctx = build_ctx(root);
+    let ctx = build_ctx(root, None);
     let messages = vec![ChatMessage::system(ctx.system.clone())];
     Arc::new(SessionEntry {
         id: worktree::short_id(),
@@ -301,7 +355,7 @@ fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) 
     if entry.running.swap(true, Ordering::SeqCst) {
         return false;
     }
-    let sess = entry.ctx.sess.clone();
+    let sess = entry.ctx.sess.lock().unwrap().clone();
     let store = entry.ctx.store.clone();
     let messages = entry.messages.clone();
     let running = entry.running.clone();
@@ -347,7 +401,7 @@ fn start_turn(entry: Arc<SessionEntry>, app: AppHandle, prompt: Option<String>) 
 /// nudges itself, so we only step in once the session goes idle.
 fn spawn_waker(entry: Arc<SessionEntry>, app: AppHandle) {
     use std::time::Duration;
-    let jobs = entry.ctx.sess.tools.jobs.clone();
+    let jobs = entry.ctx.sess.lock().unwrap().tools.jobs.clone();
     tauri::async_runtime::spawn(async move {
         loop {
             jobs.wait_nudge().await; // a nudge is queued (not consumed)
@@ -460,6 +514,137 @@ fn tool_status(session_id: String, state: State<'_, AppState>) -> Result<ToolSta
     Ok(ToolStatus { builtins, mcp, mcp_tool_count })
 }
 
+// ---- model selection ------------------------------------------------------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderInfo {
+    provider: String,
+    base_url: String,
+    model: String,
+    api_version: String,
+    has_key: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelSettings {
+    default_provider: String,
+    default_model: String,
+    providers: Vec<ProviderInfo>,
+}
+
+/// Fill blank fields (key / base_url / api-version) from the stored provider config, so switching
+/// models doesn't force the user to re-type a saved key.
+fn fill_from_config(mut c: ModelChoice, app: &AppConfig) -> ModelChoice {
+    let stored = match c.provider.as_str() {
+        "azure" => Some(&app.providers.azure),
+        "custom" => Some(&app.providers.custom),
+        _ => None,
+    };
+    if let Some(p) = stored {
+        if c.base_url.is_empty() {
+            if let Some(b) = p.base_url() {
+                c.base_url = b;
+            }
+        }
+        if c.api_key.as_deref().unwrap_or("").is_empty() {
+            c.api_key = p.api_key();
+        }
+        if c.api_version.as_deref().unwrap_or("").is_empty() {
+            c.api_version = p.api_version();
+        }
+    }
+    c
+}
+
+fn provider_info(name: &str, p: &agentj::config::ProviderConfig) -> ProviderInfo {
+    ProviderInfo {
+        provider: name.to_string(),
+        base_url: p.base_url().unwrap_or_default(),
+        model: p.model().unwrap_or_default(),
+        api_version: p.api_version().unwrap_or_default(),
+        has_key: p.api_key().is_some(),
+    }
+}
+
+/// The global default provider+model plus the stored Azure/Custom provider configs, so the Models
+/// panel can prefill. Reads the merged config (global + the active session's repo, if any).
+#[tauri::command]
+fn model_settings(state: State<'_, AppState>) -> ModelSettings {
+    let root = state.sessions.lock().unwrap().first().map(|e| e.ctx.root.clone());
+    let app_cfg = AppConfig::load(root.as_deref().unwrap_or("."));
+    let provider = resolve_provider(None, &app_cfg);
+    let default_model = resolve_model(&Selector { provider, model: None, base_url: None }, &app_cfg)
+        .map(|c| c.model_id)
+        .unwrap_or_default();
+    ModelSettings {
+        default_provider: provider.as_str().to_string(),
+        default_model,
+        providers: vec![
+            provider_info("azure", &app_cfg.providers.azure),
+            provider_info("custom", &app_cfg.providers.custom),
+        ],
+    }
+}
+
+/// Persist a provider+model as the global default (`~/.config/aj/aj.json`). New sessions pick it up.
+#[tauri::command]
+fn set_default_model(choice: ModelChoice) -> Result<String, String> {
+    let app_cfg = AppConfig::load(".");
+    let choice = fill_from_config(choice, &app_cfg);
+    let cfg = choice_to_config(&choice)?; // validates provider + that it builds
+    Llm::from_config(&cfg).map_err(|e| e.to_string())?;
+    let key = choice.api_key.as_deref().unwrap_or("");
+    if key.is_empty() {
+        return Err("an API key is required (none entered and none stored)".into());
+    }
+    config::write_provider_config(
+        &choice.provider,
+        &choice.model,
+        &choice.base_url,
+        key,
+        choice.api_version.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(cfg.model_id)
+}
+
+/// Best-effort model enumeration for an OpenAI-compatible endpoint (`GET {base_url}/models`).
+/// Empty when unsupported — the UI then relies on free-text entry.
+#[tauri::command]
+async fn list_models(
+    base_url: String,
+    api_key: Option<String>,
+    api_version: Option<String>,
+) -> Vec<String> {
+    provider_list_models(&base_url, api_key.as_deref(), api_version.as_deref()).await
+}
+
+/// Switch ONE session to a different model at runtime — rebuilds its client + run config (keeping its
+/// tools and conversation) and swaps them in. Returns the new model id.
+#[tauri::command]
+fn set_session_model(
+    state: State<'_, AppState>,
+    session_id: String,
+    choice: ModelChoice,
+) -> Result<String, String> {
+    let entry = find(&state, &session_id).ok_or_else(|| "no such session".to_string())?;
+    let app_cfg = AppConfig::load(&entry.ctx.root);
+    let choice = fill_from_config(choice, &app_cfg);
+    let cfg = choice_to_config(&choice)?;
+    let llm = Llm::from_config(&cfg).map_err(|e| e.to_string())?;
+    let mut run_cfg = config::Config::from_sources(&cfg.model_id, &app_cfg);
+    run_cfg.host_manages_jobs = true;
+    {
+        let mut guard = entry.ctx.sess.lock().unwrap();
+        let tools = guard.tools.clone();
+        *guard = Session { llm: Arc::new(llm), tools, cfg: Arc::new(run_cfg) };
+    }
+    *entry.ctx.model.lock().unwrap() = cfg.model_id.clone();
+    Ok(cfg.model_id)
+}
+
 fn build_state() -> AppState {
     // Reopen the sessions from last launch whose worktrees still look like git checkouts.
     let sessions: Vec<Arc<SessionEntry>> = worktree::remembered_sessions()
@@ -495,7 +680,11 @@ fn main() {
             read_todos,
             list_files,
             open_path,
-            tool_status
+            tool_status,
+            model_settings,
+            set_default_model,
+            list_models,
+            set_session_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running agentj-desktop");

@@ -89,6 +89,45 @@ impl OpenAiProvider {
 /// retry. Worst-case added latency ≈ 2s.
 const RETRY_BACKOFF_MS: [u64; 3] = [0, 400, 1600];
 
+/// Best-effort model enumeration for an OpenAI-compatible endpoint: `GET {base_url}/models` →
+/// the `data[].id` list, sorted. Returns an EMPTY vec (never an error) when the endpoint doesn't
+/// support listing — so a caller can fall back to free-text entry (e.g. an Azure deployment that
+/// the data-plane `/models` doesn't enumerate).
+#[allow(dead_code)] // used by the desktop app (lib consumer); the CLI bin doesn't call it
+pub async fn list_models(
+    base_url: &str,
+    api_key: Option<&str>,
+    api_version: Option<&str>,
+) -> Vec<String> {
+    #[derive(Deserialize)]
+    struct ModelList {
+        #[serde(default)]
+        data: Vec<ModelEntry>,
+    }
+    #[derive(Deserialize)]
+    struct ModelEntry {
+        id: String,
+    }
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let mut req = reqwest::Client::new().get(&url);
+    if let Some(k) = api_key {
+        req = req.bearer_auth(k);
+    }
+    if let Some(v) = api_version {
+        req = req.query(&[("api-version", v)]);
+    }
+    let Ok(resp) = req.send().await else { return Vec::new() };
+    if !resp.status().is_success() {
+        return Vec::new();
+    }
+    let Ok(text) = resp.text().await else { return Vec::new() };
+    let mut ids: Vec<String> = serde_json::from_str::<ModelList>(&text)
+        .map(|l| l.data.into_iter().map(|m| m.id).collect())
+        .unwrap_or_default();
+    ids.sort();
+    ids
+}
+
 fn parse_turn(text: &str) -> anyhow::Result<AssistantTurn> {
     let parsed: ChatResponse = serde_json::from_str(text).map_err(|e| {
         anyhow::anyhow!(

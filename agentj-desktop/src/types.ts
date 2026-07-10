@@ -89,8 +89,31 @@ export interface SessionMeta {
   base: string;
   projectName: string;
   isWorktree: boolean;
+  /** The active model id for this session (may differ from the global default). */
+  model: string;
   /** A one-off message to show first in the transcript (e.g. a provisioning fallback). */
   notice: string | null;
+}
+
+// --- model selection -------------------------------------------------------
+export interface ProviderInfo {
+  provider: string; // "azure" | "custom"
+  baseUrl: string;
+  model: string;
+  apiVersion: string;
+  hasKey: boolean;
+}
+export interface ModelSettings {
+  defaultProvider: string;
+  defaultModel: string;
+  providers: ProviderInfo[];
+}
+export interface ModelChoice {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKey?: string;
+  apiVersion?: string;
 }
 
 // Backend event payloads are tagged with the session they belong to.

@@ -14,6 +14,7 @@ import { WorkspaceChooser } from "./components/WorkspaceChooser";
 import { Settings } from "./components/Settings";
 import { Shortcuts } from "./components/Shortcuts";
 import { ToolStatus } from "./components/ToolStatus";
+import { ModelPicker } from "./components/ModelPicker";
 import { COMMANDS } from "./commands";
 import type { RepoScan } from "./types";
 
@@ -51,7 +52,7 @@ export function App() {
   }, [derived.blocks, settings.showThinking, settings.showTools]);
 
   // Only one modal open at a time.
-  const [modal, setModal] = useState<"settings" | "shortcuts" | "tools" | null>(null);
+  const [modal, setModal] = useState<"settings" | "shortcuts" | "tools" | "models" | null>(null);
 
   // Open flow state, owned here so Welcome, the tier-1 "+", and recents drive it.
   const [scan, setScan] = useState<RepoScan | null>(null); // chooser open ⇔ non-null
@@ -268,6 +269,7 @@ export function App() {
         onOpenSettings={() => setModal("settings")}
         onOpenShortcuts={() => setModal("shortcuts")}
         onOpenTools={() => setModal("tools")}
+        onOpenModels={() => setModal("models")}
       />
 
       <div className="body">
@@ -293,7 +295,7 @@ export function App() {
         </div>
       </div>
 
-      <StatusBar meta={active?.meta ?? null} />
+      <StatusBar meta={active?.meta ?? null} onOpenModels={() => setModal("models")} />
 
       {chooser}
 
@@ -309,6 +311,14 @@ export function App() {
       {modal === "shortcuts" && <Shortcuts onClose={() => setModal(null)} />}
       {modal === "tools" && (
         <ToolStatus sessionId={session.activeId} onClose={() => setModal(null)} />
+      )}
+      {modal === "models" && (
+        <ModelPicker
+          sessionId={session.activeId}
+          sessionModel={active?.meta.model ?? null}
+          onClose={() => setModal(null)}
+          onSessionModel={session.setSessionModel}
+        />
       )}
     </div>
   );
