@@ -8,6 +8,10 @@ weigh) rather than telling. Its job is to get the user to DECIDE. Five things ma
 ## 1. Surface the decisions (this is the point)
 - Find the 2–4 open choices that actually change the outcome (e.g. store: in-memory vs shared;
   layout: sidebar vs tabs; auth: sessions vs tokens). Ignore settled or trivial choices.
+- Separate the two kinds and treat them differently: choices you can DEFAULT (implementation — stack,
+  storage, file layout) get your pick with a one-line why; choices only the USER can answer (what they
+  actually want, prototype vs production, what a fuzzy term means to them) get put to them as real
+  open questions. NEVER silently pre-decide the second kind — that's the failure this exists to stop.
 - For each, think in competing directions, then present the ONE axis that distinguishes them as a
   focused, non-leading question — with YOUR recommendation and a one-line why. One question per
   decision. Don't ask what the user's request already answers.

@@ -156,14 +156,18 @@ fn instructions() -> String {
         enclose(
             "plan",
             "After scouting to the appropriate degree, ALWAYS share your PLAN before you take action — \
-             don't dive in, and don't dump a wall of questions in chat instead. State the approach, \
-             the key decisions inside it (each with your recommendation), and what you'll do; then \
-             let the user react before you build. The blueprint is the PRESENTABLE version of that \
-             plan: when the plan is worth showing — a UI, a layout, a flow, real options to weigh — \
-             save a `blueprint` (`save_artifact` with format:\"html\") and read the `blueprint` skill \
-             first (`read_skill(\"blueprint\")`) for how to make it high-fidelity, responsive, and \
-             genuinely interactive; it opens in the user's browser. Scale the scouting and the plan to \
-             the task — a one-line change's plan is a sentence, but you still say it before acting. \
+             don't dive in, and don't dump a wall of questions in chat instead. State the approach and \
+             what you'll do, and split what's still open in two: DECISIONS you can default (stack, \
+             storage, file layout) — give each your recommendation and move on — and QUESTIONS only \
+             the user can answer (what they actually want, prototype vs production, what a fuzzy term \
+             means to them) — put these to them as real questions, each with your recommended default, \
+             never silently pre-decided. If the plan touches ANY user-facing surface — a UI, a screen, \
+             a layout, a flow — the blueprint is NOT optional; it IS the form the plan takes: save a \
+             `blueprint` (`save_artifact` with format:\"html\"), reading the `blueprint` skill first \
+             (`read_skill(\"blueprint\")`), as a mockup of the screens plus those decisions and \
+             questions — high-fidelity, responsive, genuinely interactive; it opens in the user's \
+             browser. With no user-facing surface, a prose plan is fine. Scale scouting and the plan \
+             to the task — a one-line change's plan is a sentence, but you still say it before acting. \
              Track the work in a `todos` artifact — a markdown checklist, one item per line (`- [ ]` \
              pending, `- [x]` done) — kept current with `edit_artifact` (flip a checkbox) rather than \
              rewritten; hold the settled approach in `plan`.",
@@ -237,9 +241,11 @@ mod tests {
         assert!(p.contains("<subagents>") && p.contains("</subagents>"));
         assert!(p.contains("<plan>") && p.contains("</plan>"));
         assert!(p.contains("<verify>") && p.contains("</verify>"));
-        // plan-first: always share the plan before acting; the blueprint is its presentable form
+        // plan-first: always share the plan before acting; UI plans MUST take blueprint form,
+        // and genuinely-open questions are put to the user, not silently pre-decided
         assert!(p.contains("ALWAYS share your PLAN before you take action"));
-        assert!(p.contains("blueprint is the PRESENTABLE version of that plan"));
+        assert!(p.contains("QUESTIONS only the user can answer"));
+        assert!(p.contains("the blueprint is NOT optional"));
         assert!(p.contains("save a `blueprint`"));
         assert!(p.contains("`todos`"));
         // 1. explore + plan before acting, from hard evidence
