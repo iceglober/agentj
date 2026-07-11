@@ -86,21 +86,32 @@ fn frontmatter(raw: &str) -> std::collections::BTreeMap<String, String> {
     map
 }
 
-/// Repo playbooks (`.claude/skills/*/SKILL.md`), indexed by name + description so the agent knows
-/// they exist without paying for their bodies — it reads the matching SKILL.md at task time. Same
-/// rationale as embedding AGENTS.md: a playbook the agent doesn't know about might as well not
-/// exist (observed live: a PR-feedback run that never touched the repo's addressing-pr-feedback
-/// skill).
-fn skills_index(cwd: &str) -> Option<String> {
-    let dir = std::path::Path::new(cwd).join(".claude").join("skills");
-    let rd = std::fs::read_dir(&dir).ok()?;
-    let mut entries: Vec<String> = Vec::new();
+/// The user-level skills directory (`~/.claude/skills`) — playbooks shared across repos.
+fn global_skills_dir() -> Option<std::path::PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(|h| std::path::Path::new(&h).join(".claude").join("skills"))
+}
+
+/// Collect `<dir>/*/SKILL.md` index lines. `label` renders the path the agent should read —
+/// repo-relative for repo skills, absolute for global ones (read_file allows the global skills dir
+/// read-only). `seen` dedupes by skill directory name across roots (first collector wins).
+fn collect_skills(
+    dir: &std::path::Path,
+    label: &dyn Fn(&str) -> String,
+    seen: &mut std::collections::BTreeSet<String>,
+    entries: &mut Vec<String>,
+) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let raw = match std::fs::read_to_string(e.path().join("SKILL.md")) {
             Ok(r) => r,
             Err(_) => continue,
         };
         let dir_name = e.file_name().to_string_lossy().to_string();
+        if !seen.insert(dir_name.clone()) {
+            continue; // repo skill of the same name shadows the global one
+        }
         let fm = frontmatter(&raw);
         let name = fm
             .get("name")
@@ -112,7 +123,30 @@ fn skills_index(cwd: &str) -> Option<String> {
             .filter(|d| !d.is_empty())
             .map(|d| d.chars().take(MAX_SKILL_DESC).collect::<String>())
             .unwrap_or_else(|| "(no description — read the file)".to_string());
-        entries.push(format!("- {name} — {desc} (.claude/skills/{dir_name}/SKILL.md)"));
+        entries.push(format!("- {name} — {desc} ({})", label(&dir_name)));
+    }
+}
+
+/// Task playbooks (skills), indexed by name + description so the agent knows they exist without
+/// paying for their bodies — it reads the matching SKILL.md at task time. Two roots: the repo's
+/// `.claude/skills` and the user-level `~/.claude/skills` (repo wins on a name collision). Same
+/// rationale as embedding AGENTS.md: a playbook the agent doesn't know about might as well not
+/// exist (observed live: a PR-feedback run that never touched the repo's addressing-pr-feedback
+/// skill).
+fn skills_index(cwd: &str) -> Option<String> {
+    let repo = std::path::Path::new(cwd).join(".claude").join("skills");
+    skills_index_from(&repo, global_skills_dir().as_deref())
+}
+
+fn skills_index_from(
+    repo_dir: &std::path::Path,
+    global_dir: Option<&std::path::Path>,
+) -> Option<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut entries: Vec<String> = Vec::new();
+    collect_skills(repo_dir, &|d| format!(".claude/skills/{d}/SKILL.md"), &mut seen, &mut entries);
+    if let Some(g) = global_dir {
+        collect_skills(g, &|d| g.join(d).join("SKILL.md").display().to_string(), &mut seen, &mut entries);
     }
     if entries.is_empty() {
         return None;
@@ -121,8 +155,9 @@ fn skills_index(cwd: &str) -> Option<String> {
     Some(enclose(
         "skills",
         &format!(
-            "The repository ships task playbooks (skills). Before starting a task, check this \
-             index; if one matches the task, READ its SKILL.md FIRST and follow it — a repo \
+            "Task playbooks (skills) are available — from this repository and from the user's \
+             global skills directory. Before starting a task, check this index; if one matches \
+             the task, READ its SKILL.md FIRST (read_file on the path shown) and follow it — a \
              playbook outranks your general approach, the same way AGENTS.md outranks your \
              instincts.\n\n{}",
             entries.join("\n")
@@ -130,7 +165,21 @@ fn skills_index(cwd: &str) -> Option<String> {
     ))
 }
 
-fn instructions() -> String {
+/// `has_artifacts` = a session artifact store is attached (interactive TUI / desktop). Headless
+/// `--once` runs have no store — telling them to track `todos` via `save_artifact` would mandate a
+/// tool they don't have (observed: wasted calls answered with "no session artifact store attached"),
+/// so they get an inline-checklist instruction instead.
+fn instructions(has_artifacts: bool) -> String {
+    let tracking = if has_artifacts {
+        "Track the work in a `todos` artifact — a markdown checklist, one item per line: \
+         `- [ ]` pending, `- [~]` in-progress, `- [x]` done. Mark the item you're actively working \
+         on `- [~]` so the user can see what's underway, and flip it to `- [x]` when it's finished \
+         — keep it current with `edit_artifact` (flip the one marker) rather than rewriting; hold \
+         the settled approach in `plan`."
+    } else {
+        "Track the work as a short checklist in your plan message and restate progress against it \
+         as you go — this run has no artifact store, so the checklist lives in your replies."
+    };
     [
         enclose(
             "explore",
@@ -152,18 +201,28 @@ fn instructions() -> String {
         ),
         enclose(
             "plan",
-            "After scouting to the appropriate degree, ALWAYS share your PLAN before you take action — \
-             don't dive in, and don't dump a wall of questions in chat instead. State the approach and \
-             what you'll do, and split what's still open in two: DECISIONS you can default (stack, \
-             storage, file layout) — give each your recommendation and move on — and QUESTIONS only \
-             the user can answer (what they actually want) — put these to them, each with your \
-             recommended default, never silently pre-decided. Then, once aligned, execute. Scale the \
-             plan to the task — a one-line change's plan is a sentence, but you still say it before \
-             acting. Track the work in a `todos` artifact — a markdown checklist, one item per line: \
-             `- [ ]` pending, `- [~]` in-progress, `- [x]` done. Mark the item you're actively working \
-             on `- [~]` so the user can see what's underway, and flip it to `- [x]` when it's finished \
-             — keep it current with `edit_artifact` (flip the one marker) rather than rewriting; hold \
-             the settled approach in `plan`.",
+            &format!(
+                "After scouting to the appropriate degree, ALWAYS share your PLAN before you take action — \
+                 don't dive in, and don't dump a wall of questions in chat instead. State the approach and \
+                 what you'll do, and split what's still open in two: DECISIONS you can default (stack, \
+                 storage, file layout) — give each your recommendation and move on — and QUESTIONS only \
+                 the user can answer (what they actually want) — put these to them, each with your \
+                 recommended default, never silently pre-decided. Then, once aligned, execute. Scale the \
+                 plan to the task — a one-line change's plan is a sentence, but you still say it before \
+                 acting. {tracking}"
+            ),
+        ),
+        enclose(
+            "environment",
+            "The environment is provisioned DETERMINISTICALLY, not per conversation: the repo's \
+             `.aj/hooks/worktree_new` script runs automatically when agentj opens a new worktree, \
+             before you ever act. If you hit a missing/broken tool anyway (pnpm not found, a \
+             runtime absent), that is a HOLE IN THE HOOK: fix the environment for the task at hand \
+             (`packageManager` in package.json → `corepack enable`, version-manager shims, \
+             `node_modules/.bin`), then fold the working fix into `.aj/hooks/worktree_new` — create \
+             it if absent — so it is provisioned automatically for every future worktree and never \
+             debugged again. Never end a task with \"your shell lacks X\" — that is a diagnosis, \
+             not a result.",
         ),
         enclose(
             "verify",
@@ -171,22 +230,29 @@ fn instructions() -> String {
              work no matter what the task was. If you answered a question about the codebase, \
              double-check your reasoning and make sure your conclusion rests on hard evidence. If you \
              made a code change, run the tests, run the code, and manually exercise it — cURL an \
-             endpoint, run a script, or drive the UI with a browser.",
+             endpoint, run a script, or drive the UI with a browser. And RUN THE LAST MILE: when the \
+             remaining step is a command your tools can run (a dry-run, a backfill, a migration \
+             check), run it yourself — long ones via job_start — and deliver its OUTPUT; a command \
+             handed back to the user to paste is an unfinished task. Hand a step back only when it \
+             genuinely requires the user (credentials you don't have, an approval, an irreversible \
+             production effect), and say exactly why it's theirs.",
         ),
     ]
     .join("\n\n")
 }
 
 
-/// Build the system prompt for a session rooted at `cwd`.
-pub fn system_prompt(cwd: &str, company: Option<&str>) -> String {
+/// Build the system prompt for a session rooted at `cwd`. `has_artifacts` = a session artifact
+/// store is attached (interactive runs); headless `--once` passes false and gets checklist-in-reply
+/// tracking instead of artifact tooling it doesn't have.
+pub fn system_prompt(cwd: &str, company: Option<&str>, has_artifacts: bool) -> String {
     let mut sections = vec![
         identity("a staff software engineer and architect", company),
         working_context(cwd),
     ];
     sections.extend(project_docs(cwd));
     sections.extend(skills_index(cwd));
-    sections.push(instructions());
+    sections.push(instructions(has_artifacts));
     sections.join("\n\n")
 }
 
@@ -228,7 +294,7 @@ mod tests {
 
     #[test]
     fn prime_prompt_is_the_simple_explore_delegate_verify_triad() {
-        let p = system_prompt("/repo", None);
+        let p = system_prompt("/repo", None, true);
         // each idea is its own opening/closing tagged section
         assert!(p.contains("<explore>") && p.contains("</explore>"));
         assert!(p.contains("<subagents>") && p.contains("</subagents>"));
@@ -266,6 +332,36 @@ mod tests {
     }
 
     #[test]
+    fn environment_and_last_mile_doctrine_are_present() {
+        let p = system_prompt("/repo", None, true);
+        // Environments are provisioned by the worktree_new hook; a gap is fixed INTO the hook.
+        assert!(p.contains("<environment>") && p.contains("</environment>"));
+        assert!(p.contains(".aj/hooks/worktree_new"));
+        assert!(p.contains("HOLE IN THE HOOK"));
+        assert!(p.contains("corepack enable"));
+        assert!(!p.contains("workspace_notes"), "the notes layer is gone");
+        assert!(!p.contains("`remember`"), "the notes tool is gone");
+        // The last mile is run, not handed back.
+        assert!(p.contains("RUN THE LAST MILE"));
+        assert!(p.contains("a command handed back to the user to paste is an unfinished task"));
+        assert!(p.contains("irreversible"));
+    }
+
+    #[test]
+    fn headless_prompt_never_mandates_artifact_tools_it_doesnt_have() {
+        // `--once` runs have no session store: save/edit_artifact aren't advertised, so the prompt
+        // must not tell the model to use them (that instruction burned steps on every eval run).
+        let headless = system_prompt("/repo", None, false);
+        assert!(!headless.contains("`todos` artifact"));
+        assert!(!headless.contains("edit_artifact"));
+        assert!(headless.contains("checklist"), "still tracks progress, inline");
+        // Interactive runs keep the artifact workflow.
+        let interactive = system_prompt("/repo", None, true);
+        assert!(interactive.contains("`todos` artifact"));
+        assert!(interactive.contains("edit_artifact"));
+    }
+
+    #[test]
     fn subagents_get_the_same_context_and_project_docs() {
         let dir = std::env::temp_dir().join(format!(
             "agentj-subprompt-test-{}-{}",
@@ -298,10 +394,11 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let root = dir.to_str().unwrap().to_string();
-        // No .claude/skills → no section.
+        // The injectable form isolates the test from the developer's real ~/.claude/skills.
+        let repo_skills = dir.join(".claude/skills");
+        // No skills anywhere → no section.
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(!system_prompt(&root, None).contains("<skills>"));
+        assert!(skills_index_from(&repo_skills, None).is_none());
 
         // One skill with frontmatter (folded description), one without any frontmatter.
         let pr = dir.join(".claude/skills/addressing-pr-feedback");
@@ -315,15 +412,57 @@ mod tests {
         std::fs::create_dir_all(&bare).unwrap();
         std::fs::write(bare.join("SKILL.md"), "# Deploying\nSteps…\n").unwrap();
 
-        let p = system_prompt(&root, None);
+        let p = skills_index_from(&repo_skills, None).unwrap();
         assert!(p.contains("<skills>"));
         assert!(p.contains("addressing-pr-feedback — Fetch review threads, fix, push, THEN resolve."));
         assert!(p.contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
         assert!(p.contains("- deploy — (no description — read the file)"), "{p}");
         assert!(p.contains("READ its SKILL.md FIRST"));
+        // The full prompt embeds the index (via the real global dir, which may add more entries).
+        let full = system_prompt(dir.to_str().unwrap(), None, true);
+        assert!(full.contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
         // Subagents get the same index.
-        assert!(subagent_system_prompt(crate::agent::AgentType::Executor, &root).contains("<skills>"));
+        assert!(subagent_system_prompt(crate::agent::AgentType::Executor, dir.to_str().unwrap())
+            .contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn global_skills_merge_and_repo_shadows_on_name_collision() {
+        let dir = std::env::temp_dir().join(format!(
+            "agentj-global-skills-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = dir.join("repo/.claude/skills");
+        let global = dir.join("home/.claude/skills");
+        for (root, skills) in [
+            (&repo, vec![("linear", "Repo linear playbook.")]),
+            (&global, vec![("linear", "GLOBAL linear playbook."), ("deploy-notes", "Global deploy notes.")]),
+        ] {
+            for (name, desc) in skills {
+                let d = root.join(name);
+                std::fs::create_dir_all(&d).unwrap();
+                std::fs::write(
+                    d.join("SKILL.md"),
+                    format!("---\nname: {name}\ndescription: {desc}\n---\nbody\n"),
+                )
+                .unwrap();
+            }
+        }
+        let p = skills_index_from(&repo, Some(&global)).unwrap();
+        // Repo wins the name collision; the global-only skill still appears, with an ABSOLUTE path.
+        assert!(p.contains("linear — Repo linear playbook."));
+        assert!(!p.contains("GLOBAL linear playbook."));
+        assert!(p.contains("deploy-notes — Global deploy notes."));
+        assert!(p.contains(&global.join("deploy-notes").join("SKILL.md").display().to_string()));
+        // Global-only skills still index when the repo has none.
+        let p = skills_index_from(&dir.join("repo-without-skills"), Some(&global)).unwrap();
+        assert!(p.contains("GLOBAL linear playbook."));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -341,17 +480,17 @@ mod tests {
         let root = dir.to_str().unwrap();
 
         // No AGENTS.md → no project_docs section.
-        assert!(!system_prompt(root, None).contains("<project_docs>"));
+        assert!(!system_prompt(root, None, true).contains("<project_docs>"));
 
         std::fs::write(dir.join("AGENTS.md"), "# The Map\nBuild with `make x`.").unwrap();
-        let p = system_prompt(root, None);
+        let p = system_prompt(root, None, true);
         assert!(p.contains("<project_docs>"));
         assert!(p.contains("Build with `make x`."));
         assert!(p.contains("Subdirectories may carry their own AGENTS.md"));
 
         // Oversized docs are truncated with a pointer, not dropped.
         std::fs::write(dir.join("AGENTS.md"), "x".repeat(30_000)).unwrap();
-        let p = system_prompt(root, None);
+        let p = system_prompt(root, None, true);
         assert!(p.contains("truncated — read AGENTS.md"));
 
         let _ = std::fs::remove_dir_all(&dir);

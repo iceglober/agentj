@@ -17,6 +17,7 @@
     - `src/provider/`, `src/model.rs` — provider abstraction and OpenAI-compatible client; Azure/custom wired.
     - `src/mcp/` — `.mcp.json` loading/merge and RMCP client.
     - `src/rekey.rs` — `/task` worktree re-key flow.
+    - `src/hooks.rs` — `.aj/hooks/` lifecycle hooks (the `HookKind` catalog): `worktree_new` auto-runs once per (worktree, script version), `session_start` on every session open — both before the model acts.
     - `tests/pty_input.rs` — PTY integration tests.
 - `bin/`
   - `bin/agentj` — symlink-safe bash launcher; builds `agentj-rs/target/release/agentj` on first run.

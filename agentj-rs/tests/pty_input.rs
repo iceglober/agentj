@@ -105,6 +105,15 @@ fn run_once_with_input(input: &[u8]) -> String {
 }
 
 fn run_with(extra_args: &[&str], env: &[(&str, &str)], input: &[u8]) -> String {
+    run_with_cwd(extra_args, env, input, None)
+}
+
+fn run_with_cwd(
+    extra_args: &[&str],
+    env: &[(&str, &str)],
+    input: &[u8],
+    cwd: Option<&std::path::Path>,
+) -> String {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -131,7 +140,10 @@ fn run_with(extra_args: &[&str], env: &[(&str, &str)], input: &[u8]) -> String {
     for (k, v) in env {
         cmd.env(k, v);
     }
-    cmd.cwd(std::env::current_dir().expect("cwd"));
+    match cwd {
+        Some(dir) => cmd.cwd(dir),
+        None => cmd.cwd(std::env::current_dir().expect("cwd")),
+    }
 
     let mut child = pair.slave.spawn_command(cmd).expect("spawn command");
     drop(pair.slave);
@@ -293,6 +305,40 @@ fn resume_restores_the_persisted_conversation_through_pty() {
         output.contains("Noted: the zebra password."),
         "expected the restored assistant reply in the transcript, got:\n{output}"
     );
+}
+
+#[test]
+fn worktree_new_hook_runs_automatically_and_only_once_through_pty() {
+    // A worktree with .aj/hooks/worktree_new: launching agentj must run it BEFORE the session is
+    // usable, note it in the transcript, and stamp it so a second launch doesn't re-run it.
+    let home = std::env::temp_dir().join(format!("agentj-pty-hook-home-{}", std::process::id()));
+    let wt = std::env::temp_dir().join(format!("agentj-pty-hook-wt-{}", std::process::id()));
+    for d in [&home, &wt] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    std::fs::create_dir_all(home.as_path()).unwrap();
+    std::fs::create_dir_all(wt.join(".aj/hooks")).unwrap();
+    std::fs::write(
+        wt.join(".aj/hooks/worktree_new"),
+        "echo provisioned >> hook.log\necho toolchain-ready\n",
+    )
+    .unwrap();
+    let env = [("HOME", home.to_str().unwrap())];
+
+    let out1 = run_with_cwd(&[], &env, b"\r", Some(&wt));
+    assert!(
+        out1.contains("worktree_new hook") && out1.contains("toolchain-ready"),
+        "expected the hook note (with output tail) in the transcript, got:\n{out1}"
+    );
+    let _ = run_with_cwd(&[], &env, b"\r", Some(&wt));
+    let log = std::fs::read_to_string(wt.join("hook.log")).expect("hook ran");
+    assert_eq!(
+        log.lines().count(),
+        1,
+        "the hook must run exactly ONCE across launches (stamped), got log:\n{log}"
+    );
+    let _ = std::fs::remove_dir_all(&home);
+    let _ = std::fs::remove_dir_all(&wt);
 }
 
 #[test]

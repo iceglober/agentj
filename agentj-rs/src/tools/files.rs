@@ -2,7 +2,7 @@
 //! passes through `safe_resolve`; edits echo the changed region so a verification re-read is
 //! unnecessary.
 
-use super::paths::safe_resolve;
+use super::paths::{safe_resolve, safe_resolve_read};
 use super::{arg_str, ToolOutcome, Tools};
 use crate::util::clip;
 use serde_json::Value;
@@ -33,7 +33,8 @@ impl Tools {
             Some(p) => p,
             None => return ToolOutcome::err("error: read_file needs a path"),
         };
-        let abs = match safe_resolve(&self.root, path) {
+        // Reads (only) may also reach the user-level skills dir the prompt index advertises.
+        let abs = match safe_resolve_read(&self.root, path) {
             Ok(a) => a,
             Err(e) => return ToolOutcome::err(format!("error: {e}")),
         };

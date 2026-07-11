@@ -15,6 +15,7 @@ mod rekey;
 mod session;
 mod tools;
 mod tui;
+mod hooks;
 mod util;
 mod worktree;
 
@@ -209,6 +210,10 @@ async fn main() {
     }
 
     let root = repo_root().await;
+    // Provision the environment DETERMINISTICALLY before anything else touches the worktree:
+    // `.aj/hooks/worktree_new` runs once per (worktree, script version), `session_start` on every
+    // open. The model never debugs pnpm — the hooks already did the setup.
+    let hook_runs = hooks::run_startup(&root).await;
     let app_cfg = config::AppConfig::load(&root);
 
     let provider = args.provider.unwrap_or_else(|| resolve_provider(None, &app_cfg));
@@ -236,10 +241,12 @@ async fn main() {
     };
 
     let company = config::AppConfig::env_or_file("AGENTJ_COMPANY", app_cfg.company.as_deref());
-    // Resolve the runtime config once, before the prompt, so the check command shown to the model and
-    // the one the ASSESS gate enforces come from the same source and can't diverge.
+    // Resolve the runtime config once at startup (its budgets/window drive the loop) instead of
+    // re-reading it every iteration.
     let run_cfg = config::Config::from_sources(&model_id, &app_cfg);
-    let system = prompt::system_prompt(&root, company.as_deref());
+    // Interactive runs get a session artifact store below; headless `--once` runs don't, and their
+    // prompt must not mandate artifact tools they can't call.
+    let system = prompt::system_prompt(&root, company.as_deref(), interactive);
 
     // Connect MCP servers once at startup; results are surfaced in the TUI (a modal on failure), not
     // spewed to the terminal.
@@ -318,6 +325,9 @@ async fn main() {
 
     if let Some(task) = args.once {
         // Headless one-shot: run a turn, print events to stdout, exit on the result.
+        for h in &hook_runs {
+            println!("» {}", h.summary);
+        }
         for s in &mcp_status {
             match &s.outcome {
                 mcp::client::McpOutcome::Err(e) => eprintln!("! MCP \"{}\": {e}", s.name),
@@ -406,6 +416,7 @@ async fn main() {
         mcp_status,
         needs_setup,
         restored,
+        hook_runs.into_iter().map(|h| h.summary).collect(),
     )
     .await;
     jobs.kill_all().await;

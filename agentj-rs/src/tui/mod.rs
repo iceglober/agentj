@@ -96,6 +96,7 @@ pub async fn run(
     mcp_status: Vec<crate::mcp::client::McpStatus>,
     needs_setup: bool,
     restored: Vec<ChatMessage>,
+    startup_notes: Vec<String>,
 ) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -125,6 +126,10 @@ pub async fn run(
         needs_setup,
     );
     app.restore_history(restored);
+    // Pre-turn lifecycle results (the worktree_new hook) land as notes at the transcript's head.
+    for note in startup_notes {
+        app.notice(note);
+    }
     let mut sess = sess;
     let mut app_cfg = app_cfg; // reloaded from disk after the setup wizard writes a provider block
 

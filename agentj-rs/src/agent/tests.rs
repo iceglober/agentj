@@ -47,7 +47,6 @@ fn test_cfg() -> Config {
         max_parallel_subagents: 4,
         context_window: None,
         compact_threshold: 12_000,
-        check: None,
         continuation_judge: false, // off by default in unit tests; opted in per-test
         host_manages_jobs: false,
     }
@@ -300,15 +299,13 @@ async fn delegate_title_becomes_the_tray_label() {
         .any(|e| matches!(e, AgentEvent::SubagentStart { desc, .. } if desc == "Map the Rust crate")));
 }
 
-fn session_in(root: &str, steps: Vec<ScriptStep>, check: Option<&str>) -> Session {
+fn session_in(root: &str, steps: Vec<ScriptStep>) -> Session {
     let jobs = JobManager::new(root.to_string());
     let tools = Tools::new(PathBuf::from(root), jobs, None);
-    let mut cfg = test_cfg();
-    cfg.check = check.map(String::from);
     Session {
         llm: Arc::new(Llm::Script(std::sync::Mutex::new(VecDeque::from(steps)))),
         tools: Arc::new(tools),
-        cfg: Arc::new(cfg),
+        cfg: Arc::new(test_cfg()),
     }
 }
 
@@ -355,17 +352,13 @@ async fn a_surviving_frontier_is_injected_on_the_first_turn_only() {
     let dir = temp_root("frontier");
     std::fs::create_dir_all(dir.join(".aj/task")).unwrap();
     std::fs::write(dir.join(".aj/task/plan.md"), "## pending\n- port the parser").unwrap();
-    let sess = session_in(
-        dir.to_str().unwrap(),
-        vec![ScriptStep::Turn(turn_text("resuming"))],
-        None,
-    );
+    let sess = session_in(dir.to_str().unwrap(), vec![ScriptStep::Turn(turn_text("resuming"))]);
     let events = run_and_collect(&sess).await;
     assert_eq!(notes_containing(&events, "re-deriving scope"), 1, "{events:?}");
 
     // No frontier on disk → no injection.
     let dir2 = temp_root("frontier-none");
-    let sess = session_in(dir2.to_str().unwrap(), vec![ScriptStep::Turn(turn_text("hi"))], None);
+    let sess = session_in(dir2.to_str().unwrap(), vec![ScriptStep::Turn(turn_text("hi"))]);
     let events = run_and_collect(&sess).await;
     assert_eq!(notes_containing(&events, "re-deriving scope"), 0, "{events:?}");
     let _ = std::fs::remove_dir_all(&dir);

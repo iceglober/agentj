@@ -290,8 +290,9 @@ fn well_formed_prefix(msgs: &[ChatMessage]) -> usize {
 mod tests {
     use super::*;
 
-    /// HOME is process-global, so the HOME-mutating tests must not run concurrently.
-    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// HOME is process-global, so the HOME-mutating tests must not run concurrently — with each
+    /// other OR with the HOME-reading tests elsewhere in the crate (hence the shared lock).
+    use crate::util::HOME_LOCK;
 
     /// Point HOME at a fresh temp dir so the store is isolated per test; holds the serialization
     /// lock for the test's lifetime.

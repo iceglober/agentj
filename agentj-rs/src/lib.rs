@@ -20,5 +20,6 @@ pub mod rekey;
 pub mod session;
 pub mod tools;
 pub mod tui;
+pub mod hooks;
 pub mod util;
 pub mod worktree;

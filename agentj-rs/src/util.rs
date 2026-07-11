@@ -1,5 +1,10 @@
 //! Small shared helpers.
 
+/// HOME is process-global; every test that mutates it (session TempHome) or does a write-then-read
+/// through it (workspace notes, global skills) serializes here, or a concurrent flip breaks it.
+#[cfg(test)]
+pub(crate) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// The first non-blank line of `s`, trimmed, capped at `max` characters (not bytes).
 /// Pass `usize::MAX` for no cap.
 pub fn first_line(s: &str, max: usize) -> String {

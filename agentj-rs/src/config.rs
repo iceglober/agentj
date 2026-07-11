@@ -98,10 +98,6 @@ pub struct AppConfig {
     pub max_idle_nudges: Option<u64>,
     #[serde(default)]
     pub job_idle_wait_s: Option<u64>,
-    /// The project's check command (tests/build/lint), e.g. "cargo test". Drives the ASSESS gate
-    /// and is surfaced in the system prompt.
-    #[serde(default)]
-    pub check: Option<String>,
 }
 
 impl AppConfig {
@@ -114,7 +110,6 @@ impl AppConfig {
         self.max_steps = other.max_steps.or(self.max_steps.take());
         self.max_idle_nudges = other.max_idle_nudges.or(self.max_idle_nudges.take());
         self.job_idle_wait_s = other.job_idle_wait_s.or(self.job_idle_wait_s.take());
-        self.check = other.check.or(self.check.take());
     }
 
     pub fn load(root: &str) -> Self {
@@ -157,8 +152,6 @@ pub struct Config {
     /// fired on every call of a genuinely large task and shredded the exploration context the model
     /// still needed (e.g. reading a whole monorepo, then writing per-package docs FROM those reads).
     pub compact_threshold: u64,
-    /// The project's check command (`AGENTJ_CHECK` > aj.json `check` > None → heuristics).
-    pub check: Option<String>,
     /// When the model goes idle with work still framed but unfinished, consult a fresh-context
     /// judge inference for a keep-going/stop verdict instead of ending the turn (`AGENTJ_CONTINUATION_JUDGE`,
     /// default ON; set `0`/`false` to disable). Bounds premature "shall I proceed?" stops on
@@ -179,7 +172,6 @@ impl Config {
                 max_steps: app.max_steps,
                 max_idle_nudges: app.max_idle_nudges,
                 job_idle_wait_s: app.job_idle_wait_s,
-                check: app.check.clone(),
             },
         )
     }
@@ -212,7 +204,6 @@ impl Config {
                 .filter(|n| *n >= 1000)
                 .or_else(|| context_window.map(|w| w * 7 / 10))
                 .unwrap_or(96_000),
-            check: get("AGENTJ_CHECK").filter(|s| !s.is_empty()).or(file.check),
             continuation_judge: env_flag_default_on("AGENTJ_CONTINUATION_JUDGE"),
             host_manages_jobs: false,
         }
@@ -224,7 +215,6 @@ struct RuntimeFileConfig {
     max_steps: Option<u64>,
     max_idle_nudges: Option<u64>,
     job_idle_wait_s: Option<u64>,
-    check: Option<String>,
 }
 
 /// Persist a provider setup to the GLOBAL config (`~/.config/aj/aj.json`) so every repo picks it up.
@@ -305,18 +295,8 @@ mod tests {
                 max_steps: None,
                 max_idle_nudges: None,
                 job_idle_wait_s: None,
-                check: None,
             },
         )
-    }
-
-    fn e_file() -> RuntimeFileConfig {
-        RuntimeFileConfig {
-            max_steps: None,
-            max_idle_nudges: None,
-            job_idle_wait_s: None,
-            check: Some("make check".into()),
-        }
     }
 
     fn from_all(pairs: &[(&str, &str)], model_id: &str, file: RuntimeFileConfig) -> Config {
@@ -358,7 +338,6 @@ mod tests {
             max_steps: Some(9),
             max_idle_nudges: Some(3),
             job_idle_wait_s: Some(15),
-            check: Some("make check".into()),
         };
         let d = from_all(&[], "unknown-model", file.clone());
         assert_eq!(d.max_steps, 9);
@@ -369,11 +348,6 @@ mod tests {
 
         let e = from_all(&[("AGENTJ_MAX_STEPS", "11")], "unknown-model", file);
         assert_eq!(e.max_steps, 11);
-        assert_eq!(e.check.as_deref(), Some("make check"));
-        assert_eq!(
-            from_all(&[("AGENTJ_CHECK", "bun test")], "unknown-model", e_file()).check.as_deref(),
-            Some("bun test")
-        );
     }
 
     #[test]
@@ -408,7 +382,6 @@ mod tests {
                     max_steps: None,
                     max_idle_nudges: None,
                     job_idle_wait_s: None,
-                    check: None,
                 }
             )
             .context_window,
@@ -422,7 +395,6 @@ mod tests {
                     max_steps: None,
                     max_idle_nudges: None,
                     job_idle_wait_s: None,
-                    check: None,
                 }
             )
             .context_window,

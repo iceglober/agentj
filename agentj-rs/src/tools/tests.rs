@@ -24,6 +24,36 @@ fn temp_tools() -> (Tools, PathBuf) {
 }
 
 #[tokio::test]
+async fn read_file_reaches_global_skills_but_nothing_else_outside_the_repo() {
+    let _home = crate::util::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (t, dir) = temp_tools();
+    // Absolute paths outside both the repo and the skills dir stay refused.
+    let out = t.call("read_file", &json!({ "path": "/etc/hosts" })).await;
+    assert!(!out.ok, "arbitrary absolute reads must stay confined: {}", out.text);
+    // Relative escapes stay refused.
+    let out = t.call("read_file", &json!({ "path": "../../etc/hosts" })).await;
+    assert!(!out.ok);
+    // Writes never get the carve-out, even under the skills dir.
+    let Ok(home) = std::env::var("HOME") else { return };
+    let skills = PathBuf::from(&home).join(".claude/skills");
+    let mine = skills.join(format!("agentj-test-{}", std::process::id()));
+    fs::create_dir_all(&mine).unwrap();
+    let skill_md = mine.join("SKILL.md");
+    fs::write(&skill_md, "---\nname: t\n---\nglobal playbook body\n").unwrap();
+    let abs = skill_md.to_string_lossy().into_owned();
+    let read = t.call("read_file", &json!({ "path": abs })).await;
+    let write = t
+        .call("write_file", &json!({ "path": abs, "content": "clobbered" }))
+        .await;
+    let cleanup = fs::remove_dir_all(&mine); // clean before asserting so a failure doesn't leak the dir
+    assert!(read.ok, "global SKILL.md must be readable: {}", read.text);
+    assert!(read.text.contains("global playbook body"));
+    assert!(!write.ok, "the carve-out is READ-only: {}", write.text);
+    cleanup.unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
 async fn a_scout_scoped_tool_set_refuses_writes_at_dispatch() {
     use crate::agent::AgentType;
     let (base, dir) = temp_tools();

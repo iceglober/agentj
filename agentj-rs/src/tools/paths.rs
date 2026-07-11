@@ -29,3 +29,26 @@ pub(super) fn safe_resolve(root: &Path, rel: &str) -> Result<PathBuf, String> {
     }
     Ok(final_path)
 }
+
+/// READ-ONLY resolution: repo confinement plus exactly one carve-out — the user-level skills
+/// directory (`~/.claude/skills`), whose SKILL.md paths the system prompt itself advertises. The
+/// candidate is canonicalized before the containment check, so a symlink planted inside the skills
+/// dir that points elsewhere still resolves outside it and is refused. Write/edit paths keep the
+/// strict [`safe_resolve`].
+pub(super) fn safe_resolve_read(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let confined = safe_resolve(root, rel);
+    if confined.is_ok() {
+        return confined;
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let skills = Path::new(&home).join(".claude").join("skills");
+        if let (Ok(skills_real), Ok(candidate)) =
+            (fs::canonicalize(&skills), fs::canonicalize(Path::new(rel)))
+        {
+            if candidate.starts_with(&skills_real) {
+                return Ok(candidate);
+            }
+        }
+    }
+    confined
+}
