@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tickets": {
+      "command": "bun",
+      "args": ["fake-mcp/tickets.mjs"]
+    }
+  }
+}

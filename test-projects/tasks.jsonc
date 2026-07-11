@@ -57,6 +57,17 @@
     "note": "Full[Advanced] — staff+: introduce currency as a first-class concept (a Money value type with currency guards) and migrate money + cart to it while preserving formatUSD. Cross-module, architectural, behavior-preserving."
   },
   {
+    "id": "js-ticket-verify",
+    "project": "pnpm-vitest-monorepo",
+    "prompt": "Help me finish TICK-42.",
+    "seed": "cp -R _seeds/ticket-mcp/. .",
+    "needs": ["bun"],
+    "verify": "test -f .agentj/ticket-fetched && test -f .agentj/backfill-ran",
+    "expect": ["formatUSD", "3 candidate"],
+    "expectNoChange": true,
+    "note": "Ticket-driven, verify-first, run-the-last-mile (the 'help me finish GEN-XXXX' shape): a fake tracker MCP server (fake-mcp/tickets.mjs) serves TICK-42. The code AC are ALREADY satisfied (money.ts formatUSD + tests); the last AC is a runnable dry-run (scripts/backfill.mjs). Correct behavior: read the tickets skill, fetch the ticket over MCP (.agentj/ticket-fetched sentinel), verify code AC against the repo, RUN the dry-run itself (.agentj/backfill-ran sentinel + '3 candidate' in the report) — all with ZERO diff. Handing the command back to the user fails verify; re-implementing landed work fails expectNoChange."
+  },
+  {
     "id": "js-architect",
     "project": "pnpm-vitest-monorepo",
     "prompt": "The store applies money adjustments (a discount here, an order limit there) ad-hoc, and the team keeps needing new ones — taxes, shipping fees, loyalty credits. Design and implement an EXTENSIBLE pricing pipeline in @harness/core: a clean way to define pricing rules that transform a cart's running total in an explicit order, so adding a new rule type is easy and the order of application is clear. Decide the abstraction yourself, wire at least two concrete rules (e.g. a percentage discount and a flat fee) through it, and keep the existing code working. There is no test spec — make the design sound and verify it builds.",
