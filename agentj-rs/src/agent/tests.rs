@@ -563,3 +563,98 @@ async fn delegate_reports_failure_when_a_subagent_returns_an_error_result() {
         .iter()
         .any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, .. })));
 }
+
+/// A session whose Tools carry an artifact store, so `ask_user` interception is armed
+/// (it's gated on `has_session`, like the artifact tools).
+fn session_with_ask_store(steps: Vec<ScriptStep>) -> Session {
+    let dir = temp_root("askuser");
+    let store = crate::session::Session::at_dir(dir.join("store"));
+    let jobs = JobManager::new(dir.to_string_lossy().into_owned());
+    let tools = Tools::with_session(dir, jobs, None, Some(Arc::new(store)));
+    Session {
+        llm: Arc::new(Llm::Script(std::sync::Mutex::new(VecDeque::from(steps)))),
+        tools: Arc::new(tools),
+        cfg: Arc::new(test_cfg()),
+    }
+}
+
+#[tokio::test]
+async fn ask_user_posts_questions_and_ends_the_turn_wire_complete() {
+    let questions = serde_json::json!({ "questions": [
+        { "question": "Which storage?", "header": "Storage",
+          "options": [ { "label": "sqlite (recommended)", "description": "zero setup" },
+                        { "label": "postgres" } ] },
+        { "question": "Ship behind a flag?", "options": [ { "label": "yes" }, { "label": "no" } ] }
+    ]});
+    // Only ONE scripted step: if the loop wrongly continued past ask_user it would hit
+    // "script exhausted" and emit an Error event.
+    let sess = session_with_ask_store(vec![ScriptStep::Turn(turn_tool("ask_user", questions))]);
+
+    let (tx, mut rx) = unbounded_channel::<AgentEvent>();
+    let mut msgs = vec![ChatMessage::system("sys"), ChatMessage::user("go")];
+    let _ = run_turn(&sess, &mut msgs, &tx, true, None).await;
+    drop(tx);
+    let mut events = Vec::new();
+    while let Some(e) = rx.recv().await {
+        events.push(e);
+    }
+
+    let asked = events.iter().find_map(|e| match e {
+        AgentEvent::AskUser { questions } => Some(questions.clone()),
+        _ => None,
+    });
+    let asked = asked.expect("AskUser event emitted");
+    assert_eq!(asked.len(), 2);
+    assert_eq!(asked[0].header.as_deref(), Some("Storage"));
+    assert_eq!(asked[0].options[0].label, "sqlite (recommended)");
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error(_))), "{events:?}");
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::Done)));
+    // Wire-complete: the ask_user tool_call got its reply as the LAST message.
+    let last = msgs.last().unwrap();
+    assert_eq!(last.role, "tool");
+    assert!(last.content.as_deref().unwrap_or("").contains("questions posted"));
+}
+
+#[tokio::test]
+async fn ask_user_with_malformed_args_errors_and_the_turn_continues() {
+    let sess = session_with_ask_store(vec![
+        ScriptStep::Turn(turn_tool("ask_user", serde_json::json!({}))),
+        ScriptStep::Turn(turn_text("recovered")),
+    ]);
+    let events = run_and_collect_from(&sess).await;
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::AskUser { .. })));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, .. })));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::Message(t) if t == "recovered")));
+}
+
+/// `run_and_collect` for an arbitrary session (the original helper builds its own).
+async fn run_and_collect_from(sess: &Session) -> Vec<AgentEvent> {
+    let (tx, mut rx) = unbounded_channel::<AgentEvent>();
+    let mut msgs = vec![ChatMessage::system("sys"), ChatMessage::user("go")];
+    let _ = run_turn(sess, &mut msgs, &tx, true, None).await;
+    drop(tx);
+    let mut events = Vec::new();
+    while let Some(e) = rx.recv().await {
+        events.push(e);
+    }
+    events
+}
+
+#[tokio::test]
+async fn ask_user_without_a_session_store_is_refused_not_intercepted() {
+    // No store (headless-shaped session): the call falls through to plain dispatch, which tells
+    // the model to proceed on stated assumptions; the turn continues normally.
+    let sess = session(vec![
+        ScriptStep::Turn(turn_tool(
+            "ask_user",
+            serde_json::json!({ "questions": [ { "question": "hm?", "options": [ { "label": "a" }, { "label": "b" } ] } ] }),
+        )),
+        ScriptStep::Turn(turn_text("proceeding on defaults")),
+    ]);
+    let events = run_and_collect(&sess).await;
+    assert!(!events.iter().any(|e| matches!(e, AgentEvent::AskUser { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, result, .. } if result.contains("state your assumption"))));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::Message(t) if t == "proceeding on defaults")));
+}

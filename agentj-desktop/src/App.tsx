@@ -333,6 +333,7 @@ export function App() {
                 blocks={visibleBlocks}
                 autoScroll={settings.autoScroll}
                 onOpenLink={onOpenLink}
+                onAnswer={(t) => void session.send(t)}
               />
               <StatusRow
                 running={active?.running ?? false}

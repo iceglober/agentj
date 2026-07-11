@@ -4,7 +4,7 @@
 - Product: `agentj-rs/` — Rust terminal coding agent with a ratatui TUI and headless `--once` mode.
 - Root layer: thin Bun/bash wrappers for build/test/eval convenience; not a separate app.
 - Eval harness: `test-projects/` — fixed fixture projects and task runner used to grade agent behavior.
-- Historical notes: `docs/` — prior-architecture/design documents (incl. `docs/heuristics.md`), not current build inputs. The prompt is now a short prime in `src/prompt.rs::instructions()`; the SPEAR doctrine and the supervisor gates those docs describe were removed.
+- Historical notes: `docs/` — prior-architecture/design documents (incl. `docs/heuristics.md`), not current build inputs. The SPEAR doctrine (Scope → Plan → Execute → Assess → Resolve) is reinstated as PROMPT doctrine in `src/prompt.rs::instructions()` — one tagged section per phase, plus the `ask_user` tool for structured user questions (ends the turn; interactive primary only). The supervisor gates `docs/heuristics.md` describes remain removed; that file stays historical.
 
 ## Component map
 - `agentj-rs/`

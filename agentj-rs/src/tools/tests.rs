@@ -330,3 +330,13 @@ async fn edits_fail_stale_when_the_file_changed_since_the_last_read() {
         .await;
     assert!(o.ok, "{}", o.text);
 }
+
+#[test]
+fn ask_user_is_advertised_only_to_the_interactive_primary() {
+    use crate::agent::AgentType;
+    let has = |specs: &[crate::provider::ToolSpec]| specs.iter().any(|s| s.name == "ask_user");
+    assert!(has(&tool_specs(true, true, None)), "primary with a session store asks");
+    assert!(!has(&tool_specs(true, false, None)), "headless --once cannot ask");
+    assert!(!has(&tool_specs(false, true, None)), "subagents cannot ask");
+    assert!(!has(&tool_specs(false, true, Some(AgentType::Scout))), "typed subagents cannot ask");
+}

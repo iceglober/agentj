@@ -25,7 +25,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const AGENTJ = join(HERE, "..", "bin", "agentj");
 
 // Keep installed deps + caches out of git so `git add -A` only ever stages agentj's real changes.
-const GITIGNORE = ["node_modules/", "**/node_modules/", ".venv/", "__pycache__/", "*.pyc", ".pytest_cache/", ".turbo/", "dist/", ".agentj/"].join("\n");
+// Lockfiles the agent's own environment bootstrap may drop (bun install to get vitest running)
+// are provisioning artifacts, not solution changes — ignore them too.
+const GITIGNORE = ["node_modules/", "**/node_modules/", ".venv/", "__pycache__/", "*.pyc", ".pytest_cache/", ".turbo/", "dist/", ".agentj/", "bun.lock", "bun.lockb"].join("\n");
 // Pathspec excluded from every diff — belt-and-suspenders alongside the .gitignore.
 const EXCLUDE = ":(exclude).agentj";
 

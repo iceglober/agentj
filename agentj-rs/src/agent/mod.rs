@@ -253,12 +253,18 @@ pub async fn run_turn(
         // Commit the assistant message and all its tool replies together, so an interrupt can't leave
         // a dangling `tool_calls` request without its matching tool responses in the committed history.
         let mut delta = vec![assistant];
+        // Set when an `ask_user` call posted questions: every call in this response still gets its
+        // tool reply (wire-format complete), then the turn ends — answers arrive as the next message.
+        let mut asked_user = false;
         for tc in &turn.tool_calls {
             let args: Value = serde_json::from_str(&tc.function.arguments)
                 .unwrap_or_else(|_| serde_json::json!({}));
 
-            // `run_subagents` is intercepted here (not run through tools.call) so it can spawn nested loops.
+            // `run_subagents` is intercepted here (not run through tools.call) so it can spawn nested
+            // loops; `ask_user` likewise (it emits an event and ends the turn — the plain dispatch
+            // path only carries its "unavailable here" error for subagents/headless).
             let is_delegate = allow_delegate && tc.function.name == "run_subagents";
+            let is_ask = allow_delegate && sess.tools.has_session() && tc.function.name == "ask_user";
             let _ = tx.send(AgentEvent::ToolStart {
                 name: tc.function.name.clone(),
                 args: first_line(&tc.function.arguments, 100),
@@ -267,6 +273,27 @@ pub async fn run_turn(
             let start = Instant::now();
             let (text, ok) = if is_delegate {
                 run_delegate(sess, &args, tx).await
+            } else if is_ask {
+                match serde_json::from_value::<Vec<crate::events::AskQuestion>>(
+                    args.get("questions").cloned().unwrap_or(Value::Null),
+                ) {
+                    Ok(questions) if !questions.is_empty() => {
+                        let _ = tx.send(AgentEvent::AskUser { questions });
+                        asked_user = true;
+                        (
+                            "questions posted to the user — the turn ends here; their answers \
+                             arrive as your next message"
+                                .to_string(),
+                            true,
+                        )
+                    }
+                    _ => (
+                        "error: ask_user needs `questions`: [{question, options: [{label, \
+                         description?}], header?, multi_select?}]"
+                            .to_string(),
+                        false,
+                    ),
+                }
             } else {
                 let o = sess.tools.call(&tc.function.name, &args).await;
                 (o.text, o.ok)
@@ -298,5 +325,11 @@ pub async fn run_turn(
             delta.push(tool_msg);
         }
         commit_delta(delta);
+        if asked_user {
+            // The model is waiting on the user: end the turn with the history wire-complete (every
+            // tool_call answered). The answers arrive as the next user message and a fresh turn.
+            let _ = tx.send(AgentEvent::Done);
+            return final_text;
+        }
     }
 }

@@ -101,6 +101,13 @@ export function derive(events: StreamEvent[]): Derived {
         });
         break;
 
+      // ask_user questions land BETWEEN the tool's start and end events, so this must not break
+      // the current tool block (the ask_user row still gets its tool_end).
+      case "ask_user":
+        blocks.push({ type: "questions", questions: ev.data.questions, id });
+        activity = "questions for you";
+        break;
+
       case "tool_start": {
         const shares = lastToolStep !== null && ev.data.step === lastToolStep;
         const line: ToolLine = {

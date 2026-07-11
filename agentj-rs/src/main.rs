@@ -382,6 +382,16 @@ async fn main() {
                     usage.prompt_tokens, usage.completion_tokens
                 ),
                 AgentEvent::Thinking(t) => println!("thinking: {t}"),
+                // Headless runs never see this (ask_user isn't advertised without a session), but
+                // print it faithfully if it ever arrives rather than dropping questions.
+                AgentEvent::AskUser { questions } => {
+                    for q in &questions {
+                        println!("? {}", q.question);
+                        for (i, o) in q.options.iter().enumerate() {
+                            println!("    {}. {}", i + 1, o.label);
+                        }
+                    }
+                }
                 AgentEvent::Artifact { name } => println!("» saved artifact `{name}`"),
                 AgentEvent::Note(t) => println!("» {t}"),
                 AgentEvent::StepLimit(n) => {

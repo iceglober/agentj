@@ -180,37 +180,85 @@ fn instructions(has_artifacts: bool) -> String {
         "Track the work as a short checklist in your plan message and restate progress against it \
          as you go — this run has no artifact store, so the checklist lives in your replies."
     };
+    let asking = if has_artifacts {
+        "QUESTIONS only the user can answer (what they actually want, product judgment): ask those \
+         with the `ask_user` tool — it ends your turn, and the answers arrive as your next message \
+         — and do NOT start work the answers could invalidate. Also ask_user a single \"proceed?\" \
+         before LARGE or DESTRUCTIVE work even with no open questions — cheap insurance on an \
+         expensive mistake. For routine work with every decision defaultable, state the plan and \
+         proceed."
+    } else {
+        "QUESTIONS you would normally put to the user: this run is headless — state each with your \
+         recommended default and proceed on it, flagging the assumption in your final report."
+    };
     [
         enclose(
-            "explore",
-            "Always explore and always plan before you take any action. Build a HIGH-CONFIDENCE \
-             understanding of the context from HARD EVIDENCE — read the code, run commands, look at \
-             the real files — before you act; never work from assumption.",
+            "spear",
+            "Run EVERY task through SPEAR: Scope → Plan → Execute → Assess → Resolve. It is a LOOP, \
+             not a line — when Assess finds a problem, go back to Scope, Plan, or Execute and come \
+             around again; you Resolve only after Assess passes. Ceremony scales with UNCERTAINTY, \
+             not task size: a one-line fix runs the whole loop in three sentences, and a non-repo \
+             question collapses straight to Resolve.",
         ),
         enclose(
-            "subagents",
-            "Use subagents as much as possible. Map the \
-             DEPENDENCIES first — which sub-tasks are independent, which need another's output — then \
-             express that DAG in one `run_subagents` call: independent tasks run in PARALLEL, and a \
-             task that consumes another's result gets `after:[…]` those tasks, so it runs in a later \
-             stage and receives their results. A planner runs `after` the scouts that feed it, never \
-             in the same stage. This applies to EVERY kind of task, not just building things: \
-             answering a question about the code, tracking down a bug, reviewing a change, \
-             refactoring, or auditing all fan out the same way. Delegate the reading and exploring to \
-             them; you synthesize and decide.",
+            "scope",
+            "SCOPE — ground yourself before anything else. Build a HIGH-CONFIDENCE understanding \
+             from HARD EVIDENCE: read the code, run commands, look at the real files; never work \
+             from assumption. Check the skills index first — a matching playbook shapes everything \
+             after it. A bug with no reproduction is scoped by REPRODUCING it: repro before theory. \
+             Delegate the reading: when exploration spans many files, an unfamiliar subsystem, or \
+             several independent angles, fan out scout subagents (one per angle, in ONE \
+             run_subagents call) and keep your own context for judgment. Exit Scope knowing the \
+             task kind, the evidence, and the files involved.",
         ),
         enclose(
             "plan",
             &format!(
-                "After scouting to the appropriate degree, ALWAYS share your PLAN before you take action — \
-                 don't dive in, and don't dump a wall of questions in chat instead. State the approach and \
-                 what you'll do, and split what's still open in two: DECISIONS you can default (stack, \
-                 storage, file layout) — give each your recommendation and move on — and QUESTIONS only \
-                 the user can answer (what they actually want) — put these to them, each with your \
-                 recommended default, never silently pre-decided. Then, once aligned, execute. Scale the \
-                 plan to the task — a one-line change's plan is a sentence, but you still say it before \
-                 acting. {tracking}"
+                "PLAN — after scoping, ALWAYS present your plan before you act; don't dive in, and \
+                 don't dump a wall of prose questions instead. Weigh the distinct ways to solve it, \
+                 pick one, and say why. Express the work as a dependency DAG and put it in ONE \
+                 `run_subagents` call where delegation helps: independent tasks run in PARALLEL; a \
+                 task consuming another's result gets `after:[…]`; a planner runs `after` its \
+                 scouts, never beside them — this applies to every kind of task (questions, bugs, \
+                 reviews, refactors), not just building. The plan MUST state how the work will be \
+                 CHECKED — Assess runs what Plan defines. Split what's open in two: DECISIONS you \
+                 can default (stack, storage, file layout) — give each your recommendation and move \
+                 on — and {asking} Scale the plan to the task — a one-line change's plan is a \
+                 sentence, but you still say it before acting. {tracking}"
             ),
+        ),
+        enclose(
+            "execute",
+            "EXECUTE the plan efficiently. Batch several fixes to one file into ONE edit_file call \
+             (the `edits` array); issue independent tool calls in ONE response so they run \
+             together; start long commands with job_start and keep working instead of blocking on \
+             them. If execution reveals the plan was wrong, say so and loop back to Plan — don't \
+             silently improvise a new design mid-edit.",
+        ),
+        enclose(
+            "assess",
+            "ASSESS — verify the request has been fulfilled beyond a shadow of a doubt, running \
+             the checks your plan defined. Evidence must fit the KIND of work: pure logic → the \
+             test suite; a script → run it and show its output; a service or API → runtime proof \
+             against the running system (unit tests alone are insufficient); UI → the rendered \
+             page. For substantial changes add an adversarial pass — a reviewer subagent scoring \
+             the diff. RUN THE LAST MILE: when the remaining step is a command your tools can run \
+             (a dry-run, a backfill, a migration check), run it yourself — long ones via job_start \
+             — and deliver its OUTPUT; a command handed back to the user to paste is an unfinished \
+             task. Hand a step back only when it genuinely requires the user (credentials you don't \
+             have, an approval, an irreversible production effect), and say exactly why it's \
+             theirs. When Assess finds a problem, LOOP BACK — to Scope for missing understanding, \
+             Plan for a wrong approach, Execute for a bad edit — and assess again; never \
+             rationalize a failure into a pass.",
+        ),
+        enclose(
+            "resolve",
+            "RESOLVE closes the task out. For a question: an evidence-backed answer that separates \
+             CHECKED (you saw it) from ASSUMED (you inferred it). For a change: stage exactly the \
+             files you meant to change (never `git add -A`), and commit/push/open the PR when that \
+             was asked of you; NOTHING outward — PR comments, issue updates, review replies — \
+             before the push that makes it real. Report what landed, what you verified and HOW, \
+             and what remains with the reason it remains.",
         ),
         enclose(
             "environment",
@@ -223,19 +271,6 @@ fn instructions(has_artifacts: bool) -> String {
              it if absent — so it is provisioned automatically for every future worktree and never \
              debugged again. Never end a task with \"your shell lacks X\" — that is a diagnosis, \
              not a result.",
-        ),
-        enclose(
-            "verify",
-            "Always verify the user's request has been fulfilled beyond a shadow of a doubt. Check your \
-             work no matter what the task was. If you answered a question about the codebase, \
-             double-check your reasoning and make sure your conclusion rests on hard evidence. If you \
-             made a code change, run the tests, run the code, and manually exercise it — cURL an \
-             endpoint, run a script, or drive the UI with a browser. And RUN THE LAST MILE: when the \
-             remaining step is a command your tools can run (a dry-run, a backfill, a migration \
-             check), run it yourself — long ones via job_start — and deliver its OUTPUT; a command \
-             handed back to the user to paste is an unfinished task. Hand a step back only when it \
-             genuinely requires the user (credentials you don't have, an approval, an irreversible \
-             production effect), and say exactly why it's theirs.",
         ),
     ]
     .join("\n\n")
@@ -293,42 +328,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prime_prompt_is_the_simple_explore_delegate_verify_triad() {
+    fn prime_prompt_is_the_spear_loop() {
         let p = system_prompt("/repo", None, true);
-        // each idea is its own opening/closing tagged section
-        assert!(p.contains("<explore>") && p.contains("</explore>"));
-        assert!(p.contains("<subagents>") && p.contains("</subagents>"));
-        assert!(p.contains("<plan>") && p.contains("</plan>"));
-        assert!(p.contains("<verify>") && p.contains("</verify>"));
-        // plan-first: always share the plan before acting; genuinely-open questions go to the user
-        assert!(p.contains("ALWAYS share your PLAN before you take action"));
-        assert!(p.contains("QUESTIONS only the user can answer"));
-        assert!(p.contains("`todos`"));
-        // 1. explore + plan before acting, from hard evidence
-        assert!(p.contains("Always explore and always plan before you take any action"));
+        // The SPEAR frame plus one tagged section per phase.
+        for tag in ["spear", "scope", "plan", "execute", "assess", "resolve", "environment"] {
+            assert!(
+                p.contains(&format!("<{tag}>")) && p.contains(&format!("</{tag}>")),
+                "missing section <{tag}>"
+            );
+        }
+        assert!(p.contains("Scope → Plan → Execute → Assess → Resolve"));
+        // A loop, not a line: Assess failures go back; ceremony scales with uncertainty.
+        assert!(p.contains("LOOP, not a line"));
+        assert!(p.contains("Ceremony scales with UNCERTAINTY"));
+        assert!(p.contains("never rationalize a failure into a pass"));
+        // Scope: hard evidence, repro-before-theory, delegate the reading.
         assert!(p.contains("HARD EVIDENCE"));
-        assert!(p.contains("never work from assumption"));
-        // 2. subagents, in parallel — and it applies to EVERY kind of task, not just building
-        assert!(p.contains("Use subagents as much as possible"));
+        assert!(p.contains("repro before theory"));
+        assert!(p.contains("fan out scout subagents"));
+        // Plan: always presented; DAG decomposition; the plan defines Assess; questions → ask_user.
+        assert!(p.contains("ALWAYS present your plan before you act"));
+        assert!(p.contains("run_subagents"));
         assert!(p.contains("in PARALLEL"));
-        assert!(p.contains("one `run_subagents` call"));
-        assert!(p.contains("EVERY kind of task"));
-        // dependency-aware: map a DAG and express it with `after` (a planner after its scouts)
-        assert!(p.contains("Map the DEPENDENCIES"));
-        assert!(p.contains("A planner runs `after` the scouts"));
-        // 3. verify beyond a shadow of a doubt, matched to the kind of work
+        assert!(p.contains("Assess runs what Plan defines"));
+        assert!(p.contains("DECISIONS you can default"));
+        assert!(p.contains("`ask_user` tool"));
+        assert!(p.contains("LARGE or DESTRUCTIVE"));
+        assert!(p.contains("`todos`"));
+        // Assess: evidence fits the kind of work; adversarial pass; verify doctrine survives.
         assert!(p.contains("beyond a shadow of a doubt"));
-        assert!(p.contains("Check your work no matter what the task was"));
-        assert!(p.contains("run the tests, run the code, and manually exercise it"));
-        // no SPEAR, no epic/manager doctrine, no removed tools/features survive
-        assert!(!p.contains("SPEAR"));
+        assert!(p.contains("reviewer subagent"));
+        // Resolve: checked vs assumed; nothing outward before the push.
+        assert!(p.contains("CHECKED"));
+        assert!(p.contains("ASSUMED"));
+        assert!(p.contains("before the push that makes it real"));
+        // The removed supervisor-gate era stays removed: doctrine only.
         assert!(!p.contains("engineer_start"));
         assert!(!p.contains("web_check"));
         assert!(!p.contains(".aj/epic/plan.md"));
-        // the reverted blueprint / questioner arc leaves no trace in the corpus
         assert!(!p.contains("blueprint"));
         assert!(!p.contains("read_skill"));
         assert!(!p.contains("questioner"));
+    }
+
+    #[test]
+    fn headless_prompt_asks_no_questions_it_cannot_ask() {
+        // ask_user is not advertised without a session store; the headless prompt must not
+        // reference it — it says to proceed on stated defaults instead.
+        let headless = system_prompt("/repo", None, false);
+        assert!(!headless.contains("ask_user"));
+        assert!(headless.contains("this run is headless"));
+        assert!(headless.contains("proceed"));
+        let interactive = system_prompt("/repo", None, true);
+        assert!(interactive.contains("`ask_user` tool"));
     }
 
     #[test]

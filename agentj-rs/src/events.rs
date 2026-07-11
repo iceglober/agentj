@@ -2,6 +2,27 @@
 
 use crate::provider::TokenUsage;
 
+/// One option of an [`AskQuestion`] — a short label plus an optional explanation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AskOption {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// One structured question from the `ask_user` tool. `header` is a short chip/tag (e.g. "Plan
+/// gate"); the recommended option comes FIRST in `options` by convention.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AskQuestion {
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    #[serde(default)]
+    pub options: Vec<AskOption>,
+    #[serde(default)]
+    pub multi_select: bool,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum AgentEvent {
@@ -44,6 +65,10 @@ pub enum AgentEvent {
     /// A named artifact was just saved/edited (`save_artifact`/`edit_artifact`). Lets a front-end
     /// react — e.g. the desktop app refreshes the live `todos` view.
     Artifact { name: String },
+    /// The model asked the user structured questions (`ask_user`) — the turn ends right after this
+    /// event; answers arrive as the next user message. Desktop renders clickable options; the TUI
+    /// renders a numbered block.
+    AskUser { questions: Vec<AskQuestion> },
     /// A lifecycle note (job update, context compacted, hit the cap, …).
     Note(String),
     /// The turn exhausted its step budget with work possibly unfinished — a gate, not a wall: the

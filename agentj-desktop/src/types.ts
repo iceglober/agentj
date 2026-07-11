@@ -40,6 +40,17 @@ export interface SubagentUsage {
 export interface ArtifactMeta {
   name: string;
 }
+// One option of an ask_user question; the recommended option is listed first by convention.
+export interface AskOption {
+  label: string;
+  description?: string;
+}
+export interface AskQuestion {
+  question: string;
+  header?: string;
+  options: AskOption[];
+  multi_select: boolean;
+}
 
 // Adjacently-tagged agent events: { kind, data? }.
 export type AgentEvent =
@@ -53,6 +64,7 @@ export type AgentEvent =
   | { kind: "usage"; data: Usage }
   | { kind: "subagent_usage"; data: SubagentUsage }
   | { kind: "artifact"; data: ArtifactMeta }
+  | { kind: "ask_user"; data: { questions: AskQuestion[] } }
   | { kind: "note"; data: string }
   | { kind: "step_limit"; data: number }
   | { kind: "error"; data: string }
@@ -191,6 +203,8 @@ export interface ToolLine {
 
 export type Block =
   | { type: "card"; role: "you" | "agentj"; text: string; id: string }
+  // Structured questions from ask_user — the turn ended right after; options are clickable.
+  | { type: "questions"; questions: AskQuestion[]; id: string }
   | { type: "thinking"; text: string; id: string }
   | { type: "note"; text: string; id: string }
   | { type: "notice"; text: string; id: string }

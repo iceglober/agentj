@@ -245,6 +245,43 @@ impl App {
                 self.set_effect("thinking");
                 self.dirty = true;
             }
+            AgentEvent::AskUser { questions } => {
+                // Structured questions block: numbered options per question, recommended first
+                // (by the tool's convention). v1 has no picker widget — the user answers in the
+                // normal input, by number or free text; the turn ends right after this event.
+                use crate::tui::view::LineKind;
+                self.transcript.push_kind(Line::default(), LineKind::Note);
+                for q in &questions {
+                    let head = match q.header.as_deref() {
+                        Some(h) => format!("? [{h}] {}", q.question),
+                        None => format!("? {}", q.question),
+                    };
+                    self.transcript
+                        .push_kind(Line::from(Span::styled(head, theme::accent())), LineKind::Note);
+                    for (i, o) in q.options.iter().enumerate() {
+                        let desc = o
+                            .description
+                            .as_deref()
+                            .map(|d| format!(" — {d}"))
+                            .unwrap_or_default();
+                        self.transcript.push_kind(
+                            dim_line(format!("    {}. {}{desc}", i + 1, o.label)),
+                            LineKind::Note,
+                        );
+                    }
+                    if q.multi_select {
+                        self.transcript
+                            .push_kind(dim_line("    (several may apply)".to_string()), LineKind::Note);
+                    }
+                }
+                self.transcript.push_kind(
+                    dim_line("» answer by option number or free text".to_string()),
+                    LineKind::Note,
+                );
+                self.follow = true;
+                self.set_effect("questions for you");
+                self.dirty = true;
+            }
             AgentEvent::Note(t) => {
                 let line = dim_line(format!("» {t}"));
                 self.transcript.push_kind(line, crate::tui::view::LineKind::Note);

@@ -74,7 +74,7 @@ pub struct Tools {
 /// from an MCP tool (always passes through).
 const BUILTINS: &[&str] = &[
     "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "glob", "grep", "bash",
-    "save_artifact", "edit_artifact", "read_artifact", "job_start", "job_check",
+    "save_artifact", "edit_artifact", "read_artifact", "ask_user", "job_start", "job_check",
     "job_stop", "mcp_find_tools", "run_subagents",
 ];
 
@@ -243,6 +243,11 @@ impl Tools {
             "save_artifact" => self.save_artifact(args),
             "edit_artifact" => self.edit_artifact(args),
             "read_artifact" => self.read_artifact(args),
+            // `ask_user` is intercepted by the agent loop (it ends the turn and needs the event
+            // channel); reaching plain dispatch means a context without a user to ask.
+            "ask_user" => ToolOutcome::err(
+                "error: ask_user is unavailable here — state your assumption and proceed",
+            ),
             "job_start" => self.job_start(args).await,
             "job_check" => ToolOutcome::ok(
                 self.jobs

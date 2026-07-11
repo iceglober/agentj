@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Block, ToolLine } from "../types";
+import type { AskQuestion, Block, ToolLine } from "../types";
 import { parseDag } from "../dag";
 import { SubagentDag } from "./SubagentDag";
 
@@ -14,6 +14,7 @@ const LABEL: Record<string, string> = {
   error: "error",
   tool: "tool",
   task: "task",
+  questions: "agentj asks",
 };
 
 // Render plain text, highlighting `code` spans between backticks. Used for short system/lifecycle
@@ -152,7 +153,110 @@ function ToolGroup({ name, lines }: { name: string; lines: ToolLine[] }) {
 }
 
 
-function BlockRow({ block }: { block: Block }) {
+// Strip the "(recommended)" marker the tool convention puts on the preferred option — the sent
+// answer should read like the user's words, not the menu's.
+const cleanLabel = (label: string) => label.replace(/\s*\(recommended\)\s*/i, " ").trim();
+
+// The ask_user block: clickable options per question. A single single-select question sends on
+// click; anything richer selects locally and sends once every question has an answer. Free-text
+// answers still work through the normal input — this is a shortcut, not a cage.
+function QuestionsBlock({
+  questions,
+  onAnswer,
+}: {
+  questions: AskQuestion[];
+  onAnswer: (text: string) => void;
+}) {
+  const [picked, setPicked] = useState<Record<number, number[]>>({});
+  const [sent, setSent] = useState(false);
+
+  const compose = (sel: Record<number, number[]>) =>
+    questions
+      .map((q, qi) => {
+        const labels = (sel[qi] ?? []).map((oi) => cleanLabel(q.options[oi]?.label ?? ""));
+        const name = q.header ?? `Q${qi + 1}`;
+        return `${name}: ${labels.join(", ")}`;
+      })
+      .join(" · ");
+
+  const pick = (qi: number, oi: number) => {
+    if (sent) return;
+    const q = questions[qi];
+    // The common case: one single-select question — clicking IS the answer.
+    if (questions.length === 1 && !q.multi_select) {
+      setSent(true);
+      onAnswer(cleanLabel(q.options[oi].label));
+      return;
+    }
+    setPicked((p) => {
+      const cur = p[qi] ?? [];
+      const next = q.multi_select
+        ? cur.includes(oi)
+          ? cur.filter((x) => x !== oi)
+          : [...cur, oi]
+        : [oi];
+      return { ...p, [qi]: next };
+    });
+  };
+
+  const complete = questions.every((_, qi) => (picked[qi] ?? []).length > 0);
+  const showSend = questions.length > 1 || questions[0]?.multi_select;
+
+  return (
+    <div className={"qs" + (sent ? " sent" : "")}>
+      {questions.map((q, qi) => (
+        <div className="q" key={qi}>
+          <div className="q-head">
+            {q.header && <span className="q-chip">{q.header}</span>}
+            <span className="q-text">{q.question}</span>
+          </div>
+          <div className="q-opts">
+            {q.options.map((o, oi) => (
+              <button
+                key={oi}
+                className={"q-opt" + ((picked[qi] ?? []).includes(oi) ? " on" : "")}
+                disabled={sent}
+                title={o.description ?? undefined}
+                onClick={() => pick(qi, oi)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {q.options.some((o) => o.description) && (
+            <div className="q-descs">
+              {q.options.map((o, oi) =>
+                o.description ? (
+                  <div className="q-desc" key={oi}>
+                    <span className="q-desc-label">{cleanLabel(o.label)}</span> — {o.description}
+                  </div>
+                ) : null,
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+      {showSend && !sent && (
+        <div className="q-actions">
+          <button
+            className="btn3d primary"
+            disabled={!complete}
+            onClick={() => {
+              setSent(true);
+              onAnswer(compose(picked));
+            }}
+          >
+            Send answers
+          </button>
+          <span className="q-hint">or type a reply below</span>
+        </div>
+      )}
+      {sent && <div className="q-hint">answered</div>}
+    </div>
+  );
+}
+
+function BlockRow({ block, onAnswer }: { block: Block; onAnswer: (text: string) => void }) {
   const cls =
     block.type === "card" ? `card ${block.role}` : block.type;
   const label = block.type === "card" ? LABEL[block.role] : LABEL[block.type];
@@ -180,6 +284,9 @@ function BlockRow({ block }: { block: Block }) {
     case "task":
       content = <TaskRow block={block} />;
       break;
+    case "questions":
+      content = <QuestionsBlock questions={block.questions} onAnswer={onAnswer} />;
+      break;
   }
 
   return (
@@ -194,10 +301,13 @@ export function Transcript({
   blocks,
   autoScroll,
   onOpenLink,
+  onAnswer,
 }: {
   blocks: Block[];
   autoScroll: boolean;
   onOpenLink: (url: string) => void;
+  /** Send an ask_user answer as the next user message (option clicks compose it). */
+  onAnswer: (text: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -222,7 +332,7 @@ export function Transcript({
   return (
     <div className="screen" ref={ref} onClick={onClick}>
       {blocks.map((b) => (
-        <BlockRow block={b} key={b.id} />
+        <BlockRow block={b} key={b.id} onAnswer={onAnswer} />
       ))}
     </div>
   );

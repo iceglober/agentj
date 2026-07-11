@@ -111,6 +111,21 @@ pub fn tool_specs(
     }
     if allow_delegate && has_session {
         specs.push(ToolSpec {
+            name: "ask_user".into(),
+            description: "Ask the user STRUCTURED questions and END YOUR TURN — their answers arrive as your next message. Use it during Scope/Plan/Assess for decisions only the user can make (what they actually want, product judgment, irreversible actions) — never for facts you can check yourself. Put your RECOMMENDED option FIRST and mark it in its label. The user can always answer with free text instead of an option. Batch related questions into ONE call (1–4 questions, 2–4 options each); after calling this, stop — do not start work the answers could invalidate.".into(),
+            parameters: json!({ "type": "object", "properties": {
+                "questions": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "object", "properties": {
+                    "question": { "type": "string", "description": "the complete question, ending with ?" },
+                    "header": { "type": "string", "description": "short chip label, e.g. \"Approach\", \"Scope\" (max ~12 chars)" },
+                    "options": { "type": "array", "minItems": 2, "maxItems": 4, "items": { "type": "object", "properties": {
+                        "label": { "type": "string", "description": "concise choice text; put \"(recommended)\" on your preferred one, listed first" },
+                        "description": { "type": "string", "description": "one line on what this choice means / its tradeoff" }
+                    }, "required": ["label"] } },
+                    "multi_select": { "type": "boolean", "description": "true when several options can apply at once" }
+                }, "required": ["question", "options"] } }
+            }, "required": ["questions"] }),
+        });
+        specs.push(ToolSpec {
             name: "save_artifact".into(),
             description: "Persist a named markdown artifact for THIS session, stored outside the repo and keyed to the session so it never pollutes the working tree and a fresh session never inherits it. Overwrites the artifact each call — for small incremental changes use `edit_artifact` instead. Two artifacts are conventional: `plan` (the settled APPROACH and its rationale; write it once the design is decided, revise only on new info) and `todos` (a CHECKLIST, one item per line: `- [ ] pending` / `- [~] in-progress` / `- [x] done` — the app shows it live; mark the item you're actively working on `- [~]`). `plan` and `todos` are handed back to you on resume, so keep todos current — it's what tells a resumed run what's left.".into(),
             parameters: json!({ "type": "object", "properties": {
