@@ -12,7 +12,7 @@ import { LeftRail } from "./components/LeftRail";
 import { StatusBar } from "./components/StatusBar";
 import { Welcome } from "./components/Welcome";
 import { WorkspaceChooser } from "./components/WorkspaceChooser";
-import { Settings } from "./components/Settings";
+import { Settings, type SettingsTab } from "./components/Settings";
 import { Shortcuts } from "./components/Shortcuts";
 import { ToolStatus } from "./components/ToolStatus";
 import { ModelPicker } from "./components/ModelPicker";
@@ -67,6 +67,8 @@ export function App() {
 
   // Only one modal open at a time.
   const [modal, setModal] = useState<"settings" | "shortcuts" | "tools" | "models" | null>(null);
+  // Which Settings section to land on ("/config" and the gear item open straight to Project).
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
 
   // Open flow state, owned here so Welcome, the tier-1 "+", and recents drive it.
   const [scan, setScan] = useState<RepoScan | null>(null); // chooser open ⇔ non-null
@@ -174,6 +176,11 @@ export function App() {
           if (session.activeId) void session.close(session.activeId);
           break;
         case "/settings":
+          setSettingsTab("general");
+          setModal("settings");
+          break;
+        case "/config":
+          setSettingsTab("hooks");
           setModal("settings");
           break;
         case "/shortcuts":
@@ -196,6 +203,7 @@ export function App() {
       switch (e.key) {
         case ",": // ⌘, — Settings
           e.preventDefault();
+          setSettingsTab("general");
           setModal("settings");
           break;
         case "/": // ⌘/ — Keyboard shortcuts
@@ -270,6 +278,7 @@ export function App() {
             onClose={() => setModal(null)}
             meta={null}
             totalTokens={0}
+            initialTab={settingsTab}
           />
         )}
         {modal === "shortcuts" && <Shortcuts onClose={() => setModal(null)} />}
@@ -293,10 +302,17 @@ export function App() {
         onCloseSession={session.close}
         onNewProject={pickRepo}
         onNewSession={newSession}
-        onOpenSettings={() => setModal("settings")}
+        onOpenSettings={() => {
+          setSettingsTab("general");
+          setModal("settings");
+        }}
         onOpenShortcuts={() => setModal("shortcuts")}
         onOpenTools={() => setModal("tools")}
         onOpenModels={() => setModal("models")}
+        onOpenConfig={() => {
+          setSettingsTab("hooks");
+          setModal("settings");
+        }}
         views={active?.views ?? []}
         activeView={activeView}
         onSelectView={session.setActiveView}
@@ -347,6 +363,7 @@ export function App() {
           onClose={() => setModal(null)}
           meta={active?.meta ?? null}
           totalTokens={derived.totalTokens}
+          initialTab={settingsTab}
         />
       )}
       {modal === "shortcuts" && <Shortcuts onClose={() => setModal(null)} />}

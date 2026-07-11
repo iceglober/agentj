@@ -9,7 +9,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AgentEventEnvelope,
+  ConfigFile,
   FileEntry,
+  HookInfo,
+  HookRunLite,
   ModelChoice,
   ModelSettings,
   OpenView,
@@ -48,6 +51,27 @@ interface TodosEvent {
 // Fetch the built-in + MCP tool status for a session.
 export function toolStatus(sessionId: string): Promise<ToolStatus> {
   return invoke<ToolStatus>("tool_status", { sessionId });
+}
+
+// --- project configuration (.aj files + .mcp.json) --------------------------
+export function configFiles(sessionId: string): Promise<ConfigFile[]> {
+  return invoke<ConfigFile[]>("config_files", { sessionId });
+}
+export function writeConfigFile(sessionId: string, path: string, content: string): Promise<void> {
+  return invoke("write_config_file", { sessionId, path, content });
+}
+
+// --- hooks (typed; file paths abstracted away) -------------------------------
+export function hooksCatalog(sessionId: string): Promise<HookInfo[]> {
+  return invoke<HookInfo[]>("hooks_catalog", { sessionId });
+}
+// Blank content removes the hook — form semantics (an empty field doesn't exist).
+export function writeHook(sessionId: string, kind: string, content: string): Promise<void> {
+  return invoke("write_hook", { sessionId, kind, content });
+}
+// Run one hook on demand; null = nothing to do (stamped kinds that already ran, unchanged).
+export function runHookNow(sessionId: string, kind: string): Promise<HookRunLite | null> {
+  return invoke<HookRunLite | null>("run_hook_now", { sessionId, kind });
 }
 
 // --- model selection -------------------------------------------------------

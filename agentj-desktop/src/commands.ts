@@ -13,6 +13,7 @@ export const COMMANDS: Command[] = [
   { id: "new", name: "/new", description: "New worktree session" },
   { id: "close", name: "/close", description: "Close this session" },
   { id: "settings", name: "/settings", description: "Open settings" },
+  { id: "config", name: "/config", description: "Edit project config (.aj hooks, aj.json, .mcp.json)" },
   { id: "shortcuts", name: "/shortcuts", description: "Keyboard shortcuts" },
   { id: "clear", name: "/clear", description: "Clear this transcript" },
 ];

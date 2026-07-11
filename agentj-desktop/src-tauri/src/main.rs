@@ -44,6 +44,8 @@ struct RepoCtx {
     system: String,
     /// Connection result for each MCP server configured in this worktree (for the tool-status view).
     mcp_status: Vec<McpServerStatus>,
+    /// The worktree_new hook's outcome, when it ran at session build — shown first in the transcript.
+    hook_notice: Option<String>,
 }
 
 /// A model chosen from the app — either as the global default or for one session. `provider` is
@@ -157,7 +159,7 @@ impl SessionMeta {
             project_name: worktree::dir_name(&c.base),
             is_worktree: c.root != c.base,
             model: c.model.lock().unwrap().clone(),
-            notice: None,
+            notice: c.hook_notice.clone(),
         }
     }
 }
@@ -198,6 +200,11 @@ fn build_ctx(
     model: Option<&worktree::ModelRecord>,
     store_id: Option<&str>,
 ) -> RepoCtx {
+    // Deterministic provisioning first: worktree_new (once per worktree per script version) then
+    // session_start (every open) run before the session exists — same contract as the CLI.
+    let hook_runs = tauri::async_runtime::block_on(agentj::hooks::run_startup(root));
+    let hook_notice = (!hook_runs.is_empty())
+        .then(|| hook_runs.iter().map(|h| h.summary.clone()).collect::<Vec<_>>().join("\n"));
     let app_cfg = AppConfig::load(root);
 
     let from_override = model.and_then(|r| {
@@ -236,7 +243,7 @@ fn build_ctx(
     // left to do (so the user can send another message), and a per-session waker starts a fresh turn
     // when a job pings (finish / soft timeout) — see `spawn_waker`.
     run_cfg.host_manages_jobs = true;
-    let system = prompt::system_prompt(root, company.as_deref());
+    let system = prompt::system_prompt(root, company.as_deref(), true); // desktop sessions always carry a store
     let branch = worktree::current_branch(root);
     let base = worktree::base_repo(root).unwrap_or_else(|| root.to_string());
 
@@ -265,6 +272,7 @@ fn build_ctx(
         base,
         system,
         mcp_status,
+        hook_notice,
     }
 }
 
@@ -339,7 +347,11 @@ fn provision_worktree(
     let worktree::Provisioned { path, notice } = worktree::provision(&base)?;
     let entry = make_entry(&path, None, None);
     let mut meta = SessionMeta::of(&entry);
-    meta.notice = notice;
+    // Keep BOTH the provisioning fallback and the hook outcome (of() seeds the hook notice).
+    meta.notice = match (notice, meta.notice) {
+        (Some(p), Some(h)) => Some(format!("{p}\n{h}")),
+        (p, h) => p.or(h),
+    };
     spawn_waker(entry.clone(), app);
     state.sessions.lock().unwrap().push(entry);
     persist(&state);
@@ -643,6 +655,161 @@ fn tool_status(session_id: String, state: State<'_, AppState>) -> Result<ToolSta
     Ok(ToolStatus { builtins, mcp, mcp_tool_count })
 }
 
+// ---- project configuration ------------------------------------------------
+
+/// The agentj configuration files the UI may read/write, repo-relative. A FIXED allowlist — the
+/// API can only ever touch these paths, so there is no traversal surface. Hooks are NOT here:
+/// they have their own typed API (`hooks_catalog`/`write_hook`/…) built on the crate's HookKind
+/// catalog, so the UI never deals in their file paths.
+const CONFIG_FILES: &[(&str, &str)] = &[
+    (".aj/aj.json", "Project agentj config (committed; models, budgets)"),
+    (".aj/aj.local.json", "Per-developer overrides (keep out of git)"),
+    (".mcp.json", "MCP servers for this repo (stdio/http)"),
+];
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigFile {
+    path: String,
+    label: String,
+    exists: bool,
+    content: String,
+}
+
+/// The editable config files of a session's worktree, with current contents.
+#[tauri::command]
+fn config_files(session_id: String, state: State<'_, AppState>) -> Result<Vec<ConfigFile>, String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    let root = std::path::Path::new(&entry.ctx.root);
+    Ok(CONFIG_FILES
+        .iter()
+        .map(|(rel, label)| {
+            let content = std::fs::read_to_string(root.join(rel)).ok();
+            ConfigFile {
+                path: (*rel).to_string(),
+                label: (*label).to_string(),
+                exists: content.is_some(),
+                content: content.unwrap_or_default(),
+            }
+        })
+        .collect())
+}
+
+/// The pure write path: allowlist check, JSON validation BEFORE disk is touched (a typo can't
+/// leave broken config behind), parent dirs created. FORM semantics: an emptied field means "this
+/// doesn't exist" — blank content removes the file. Split from the command so it's unit-testable.
+fn write_config(root: &std::path::Path, rel: &str, content: &str) -> Result<(), String> {
+    if !CONFIG_FILES.iter().any(|(r, _)| *r == rel) {
+        return Err(format!("`{rel}` is not an editable agentj config file"));
+    }
+    let abs = root.join(rel);
+    if content.trim().is_empty() {
+        return match std::fs::remove_file(&abs) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string()),
+        };
+    }
+    if rel.ends_with(".json") {
+        serde_json::from_str::<serde_json::Value>(content)
+            .map_err(|e| format!("not valid JSON: {e}"))?;
+    }
+    if let Some(dir) = abs.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&abs, content).map_err(|e| e.to_string())
+}
+
+/// Write one allowlisted config file for a session's worktree.
+#[tauri::command]
+fn write_config_file(
+    session_id: String,
+    path: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    write_config(std::path::Path::new(&entry.ctx.root), &path, &content)
+}
+
+// ---- hooks (typed, file paths abstracted away) ------------------------------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HookInfo {
+    /// The hook's kind name (`worktree_new`, `session_start`) — the id the other commands take.
+    kind: String,
+    description: String,
+    exists: bool,
+    content: String,
+}
+
+/// Every hook point the harness supports, with this worktree's current script (if any). The UI's
+/// "Add hook" dropdown is exactly the `exists: false` subset.
+#[tauri::command]
+fn hooks_catalog(session_id: String, state: State<'_, AppState>) -> Result<Vec<HookInfo>, String> {
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    Ok(agentj::hooks::HookKind::all()
+        .iter()
+        .map(|k| {
+            let content = std::fs::read_to_string(k.script_path(&entry.ctx.root)).ok();
+            HookInfo {
+                kind: k.name().to_string(),
+                description: k.description().to_string(),
+                exists: content.is_some(),
+                content: content.unwrap_or_default(),
+            }
+        })
+        .collect())
+}
+
+/// Create/update one hook's script. The kind must be in the catalog — the UI never names a path.
+/// FORM semantics: blank content removes the hook (a hook that doesn't exist never fires).
+#[tauri::command]
+fn write_hook(
+    session_id: String,
+    kind: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let k = agentj::hooks::HookKind::parse(&kind).ok_or(format!("unknown hook kind `{kind}`"))?;
+    let entry = find(&state, &session_id).ok_or("unknown session")?;
+    let path = k.script_path(&entry.ctx.root);
+    if content.trim().is_empty() {
+        return match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.to_string()),
+        };
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HookRunLite {
+    ok: bool,
+    summary: String,
+}
+
+/// Run one hook on demand (the panel's "Run now"). Stamped kinds respect their stamp: an
+/// unchanged, already-run worktree_new returns None ("nothing to do") — edit it to re-run.
+#[tauri::command]
+async fn run_hook_now(
+    session_id: String,
+    kind: String,
+    state: State<'_, AppState>,
+) -> Result<Option<HookRunLite>, String> {
+    let k = agentj::hooks::HookKind::parse(&kind).ok_or(format!("unknown hook kind `{kind}`"))?;
+    let root = find(&state, &session_id).ok_or("unknown session")?.ctx.root.clone();
+    Ok(agentj::hooks::run_hook(&root, k)
+        .await
+        .map(|h| HookRunLite { ok: h.ok, summary: h.summary }))
+}
+
 // ---- model selection ------------------------------------------------------
 
 #[derive(serde::Serialize)]
@@ -829,6 +996,40 @@ fn build_state() -> AppState {
     AppState { sessions: Mutex::new(sessions), active: Mutex::new(active) }
 }
 
+#[cfg(test)]
+mod config_tests {
+    use super::write_config;
+
+    #[test]
+    fn write_config_enforces_allowlist_and_json_validity() {
+        let dir = std::env::temp_dir().join(format!("agentj-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Only allowlisted paths are writable — no traversal, no arbitrary files.
+        assert!(write_config(&dir, "src/main.rs", "gotcha").is_err());
+        assert!(write_config(&dir, "../outside", "gotcha").is_err());
+
+        // Broken JSON is rejected BEFORE disk is touched.
+        let err = write_config(&dir, ".aj/aj.json", "{ nope").unwrap_err();
+        assert!(err.contains("not valid JSON"), "{err}");
+        assert!(!dir.join(".aj/aj.json").exists());
+
+        // Valid writes create parent dirs.
+        write_config(&dir, ".aj/aj.json", "{\"models\": {}}").unwrap();
+        assert!(dir.join(".aj/aj.json").exists());
+        // Hooks are NOT reachable through the file API — they have their own typed commands.
+        assert!(write_config(&dir, ".aj/hooks/worktree_new", "pnpm install").is_err());
+
+        // Form semantics: an emptied field removes the file; emptying a missing one is a no-op.
+        write_config(&dir, ".aj/aj.json", "  \n").unwrap();
+        assert!(!dir.join(".aj/aj.json").exists());
+        write_config(&dir, ".aj/aj.json", "").unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -856,6 +1057,11 @@ fn main() {
             list_files,
             open_path,
             tool_status,
+            config_files,
+            write_config_file,
+            hooks_catalog,
+            write_hook,
+            run_hook_now,
             model_settings,
             set_default_model,
             list_models,

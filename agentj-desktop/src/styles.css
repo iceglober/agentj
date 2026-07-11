@@ -2226,3 +2226,205 @@ button,
 .leftrail .node.open > .frow > .tw {
   transform: rotate(90deg);
 }
+
+/* ── settings sidebar + project config table (Settings modal) ────────────── */
+.modal.modal-wide {
+  max-width: 720px;
+}
+.set-modal .set-body {
+  display: flex;
+  gap: 0;
+  min-height: 380px;
+  overflow: hidden;
+}
+.set-side {
+  flex: 0 0 128px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 6px;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+}
+.set-side-item {
+  text-align: left;
+  padding: 5px 8px;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.set-side-item:hover {
+  background: var(--panel);
+}
+.set-side-item.sel {
+  background: var(--field);
+  border-color: var(--line);
+  font-weight: bold;
+}
+.set-pane {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* the Project pane's cards + form controls */
+.cfg-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cfg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--field);
+  border: 1px solid var(--line);
+}
+.cfg-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cfg-card-title {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--ink);
+}
+.cfg-card-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cfg-badge {
+  font-family: var(--sans);
+  font-size: 10px;
+  padding: 0 5px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.cfg-badge.on {
+  color: #0a6b1d;
+  background: #e4f3e6;
+  border-color: #9ec9a4;
+}
+.cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cfg-row-text {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.cfg-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  font-family: var(--sans);
+  font-size: 12px;
+  background: var(--field);
+  color: var(--ink);
+  border: 1px solid;
+  border-color: var(--bevel-dark) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-dark);
+  outline: none;
+}
+.cfg-name {
+  flex: 0 1 160px;
+  font-weight: bold;
+}
+.cfg-kind {
+  flex: 0 0 auto;
+}
+.cfg-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--muted);
+}
+.cfg-script {
+  min-height: 120px;
+}
+.cfg-env {
+  min-height: 44px;
+  flex: 1 1 auto;
+}
+
+/* the Project pane's editor */
+.cfg-label {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--ink);
+}
+.cfg-hint {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--muted);
+}
+.cfg-text {
+  min-height: 60px;
+  resize: vertical;
+  padding: 8px;
+  background: var(--field);
+  color: var(--ink);
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  border: 1px solid;
+  border-color: var(--bevel-dark) var(--bevel-lightest) var(--bevel-lightest)
+    var(--bevel-dark);
+  outline: none;
+  white-space: pre;
+  overflow: auto;
+}
+.cfg-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.cfg-status {
+  font-size: 11px;
+  font-family: var(--sans);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cfg-status.ok {
+  color: #0a6b1d;
+}
+.cfg-status.err {
+  color: #b00020;
+}
+
+/* sidebar group label + nested items (Project > Hooks / Agent / MCP) */
+.set-side-group {
+  margin: 8px 4px 2px;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: bold;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.set-side-item.child {
+  padding-left: 16px;
+}

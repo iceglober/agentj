@@ -35,11 +35,13 @@ function GearMenu({
   onOpenShortcuts,
   onOpenTools,
   onOpenModels,
+  onOpenConfig,
 }: {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenTools: () => void;
   onOpenModels: () => void;
+  onOpenConfig: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -90,6 +92,9 @@ function GearMenu({
           <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenModels)}>
             Models
           </button>
+          <button className="repomenu-item" role="menuitem" onClick={() => pick(onOpenConfig)}>
+            Project config
+          </button>
         </div>
       )}
     </div>
@@ -111,6 +116,7 @@ export function TabBar({
   onOpenShortcuts,
   onOpenTools,
   onOpenModels,
+  onOpenConfig,
   views,
   activeView,
   onSelectView,
@@ -130,6 +136,7 @@ export function TabBar({
   onOpenShortcuts: () => void;
   onOpenTools: () => void;
   onOpenModels: () => void;
+  onOpenConfig: () => void;
   views: OpenView[];
   activeView: string;
   onSelectView: (view: string) => void;
@@ -156,6 +163,7 @@ export function TabBar({
           onOpenShortcuts={onOpenShortcuts}
           onOpenTools={onOpenTools}
           onOpenModels={onOpenModels}
+          onOpenConfig={onOpenConfig}
         />
         <span className="tier-label">Projects</span>
         <div className="tabs">

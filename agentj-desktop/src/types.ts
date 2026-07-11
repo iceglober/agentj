@@ -103,6 +103,26 @@ export interface SessionMeta {
   notice: string | null;
 }
 
+// --- project configuration (invoke("config_files") etc.) --------------------
+export interface ConfigFile {
+  path: string; // repo-relative, from the backend's fixed allowlist
+  label: string;
+  exists: boolean;
+  content: string;
+}
+// One hook point from the harness catalog (invoke("hooks_catalog")). `kind` is the id the
+// write/delete/run commands take — the UI never touches a file path.
+export interface HookInfo {
+  kind: string;
+  description: string;
+  exists: boolean;
+  content: string;
+}
+export interface HookRunLite {
+  ok: boolean;
+  summary: string;
+}
+
 // --- model selection -------------------------------------------------------
 export interface ProviderInfo {
   provider: string; // "azure" | "custom"
