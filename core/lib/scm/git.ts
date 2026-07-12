@@ -62,13 +62,85 @@ export async function ensureRepo(sb: Sandbox, dir: string) {
   }
 }
 
+export async function hasCommits(sb: Sandbox, dir: string): Promise<boolean> {
+  const r = await sb.executeCommand(
+    `git -C ${shq(dir)} rev-parse -q --verify HEAD`,
+  );
+  return r.exitCode === 0;
+}
+
+export async function hasRemote(
+  sb: Sandbox,
+  dir: string,
+  remote = "origin",
+): Promise<boolean> {
+  const r = await sb.executeCommand(
+    `git -C ${shq(dir)} remote get-url ${shq(remote)} 2>/dev/null`,
+  );
+  return r.exitCode === 0;
+}
+
+/**
+ * Name of the remote's default branch (e.g. "main"), or null if it can't be
+ * determined. Tries the local symref first, then asks the remote.
+ */
+export async function remoteDefaultBranch(
+  sb: Sandbox,
+  dir: string,
+  remote = "origin",
+): Promise<string | null> {
+  const sym = await sb.executeCommand(
+    `git -C ${shq(dir)} symbolic-ref -q refs/remotes/${shq(remote)}/HEAD`,
+  );
+  if (sym.exitCode === 0)
+    return sym.stdout.trim().replace(`refs/remotes/${remote}/`, "");
+  const ls = await sb.executeCommand(
+    `git -C ${shq(dir)} ls-remote --symref ${shq(remote)} HEAD 2>/dev/null`,
+  );
+  const m = /^ref:\s+refs\/heads\/(\S+)\s+HEAD/m.exec(ls.stdout);
+  return m ? m[1]! : null;
+}
+
+/** Best-effort fetch; returns false instead of throwing (offline, no creds). */
+export async function tryFetch(
+  sb: Sandbox,
+  dir: string,
+  remote = "origin",
+  ref?: string,
+): Promise<boolean> {
+  const r = await sb.executeCommand(
+    `git -C ${shq(dir)} fetch --no-tags ${shq(remote)}${ref ? ` ${shq(ref)}` : ""} 2>&1`,
+  );
+  return r.exitCode === 0;
+}
+
+export async function refExists(
+  sb: Sandbox,
+  dir: string,
+  ref: string,
+): Promise<boolean> {
+  const r = await sb.executeCommand(
+    `git -C ${shq(dir)} rev-parse -q --verify ${shq(`${ref}^{commit}`)}`,
+  );
+  return r.exitCode === 0;
+}
+
 export async function addWorktree(
   sb: Sandbox,
   repoDir: string,
   path: string,
   branch: string,
+  baseRef = "HEAD",
 ) {
-  await git(sb, repoDir, ["worktree", "add", "-b", branch, path]);
+  await git(sb, repoDir, [
+    "worktree",
+    "add",
+    "--no-track",
+    "-b",
+    branch,
+    path,
+    baseRef,
+  ]);
 }
 
 /** Remove a worktree; the branch (and its commits) survive in the repo. */

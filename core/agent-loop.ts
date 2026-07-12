@@ -18,6 +18,7 @@ await using sandbox = await getSandbox(
   createSandboxProviderMicrosandbox(config.sandbox),
 );
 await using session = await createSession(sandbox, config.session);
+console.error(`[session ${session.id}] ${session.branch} from ${session.base}`);
 
 const { tools: bashTools } = await createBashTool({
   sandbox,
