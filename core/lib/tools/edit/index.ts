@@ -17,7 +17,9 @@ export const editModes = {
 
 export type EditMode = keyof typeof editModes;
 
-export const createEditTools = (mode: EditMode, sandbox: Sandbox) =>
-  editModes[mode](sandbox);
+export const createEditTools = (
+  sandbox: Sandbox,
+  editMode: EditMode = "batch",
+) => editModes[editMode](sandbox);
 
 export { createBatchEditTools, createExactEditTools, createHashEditTools };

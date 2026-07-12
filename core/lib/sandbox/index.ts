@@ -2,12 +2,13 @@ export interface SandboxCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
-  teeFiles?: Array<{
-    command: string;
-    stdoutFile: string;
-  }>;
 }
 
+/**
+ * v1 sandbox port. Intentionally the same shape as bash-tool's `Sandbox`
+ * interface so a port sandbox can be passed straight to `createBashTool` —
+ * the match is a design choice, not an accident.
+ */
 export interface Sandbox {
   executeCommand(command: string): Promise<SandboxCommandResult>;
   readFile(path: string): Promise<string>;
