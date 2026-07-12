@@ -1,6 +1,7 @@
 import z from "zod";
 import { llmConfigSchema } from "../llm";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
+import { sessionConfigSchema } from "../session";
 import { editConfigSchema } from "../tools/edit";
 
 /**
@@ -11,6 +12,7 @@ import { editConfigSchema } from "../tools/edit";
 export const configSchema = z.object({
   llm: llmConfigSchema.prefault({}),
   sandbox: microsandboxOptionsSchema.prefault({}),
+  session: sessionConfigSchema.prefault({}),
   tools: z
     .object({
       edit: editConfigSchema.prefault({}),
