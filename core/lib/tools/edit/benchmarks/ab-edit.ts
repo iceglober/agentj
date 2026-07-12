@@ -1,14 +1,10 @@
-import { env } from "../../../env";
+import { env } from "../../../../env";
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { createAzure } from "@ai-sdk/azure";
 import { createBashTool } from "bash-tool";
-import { getSandbox } from "../../sandbox";
-import { createSandboxProviderMicrosandbox } from "../../sandbox/microsandbox-adapter";
-import {
-  createBatchedEditTools,
-  createDefaultEditTools,
-  createHashlineEditTools,
-} from "./edit-tools";
+import { getSandbox } from "../../../sandbox";
+import { createSandboxProviderMicrosandbox } from "../../../sandbox/microsandbox-adapter";
+import { editModes, type EditMode } from "../index";
 
 // --- fixture: 4-file package, 8 bugs. `return price * (1 - rate)` appears
 // verbatim in three functions (one correct, two buggy) as a string-matching
@@ -288,12 +284,8 @@ const { bash } = await createBashTool({
   destination: "/workspace",
 });
 
-const variants = {
-  default: () => createDefaultEditTools(sandbox),
-  batched: () => createBatchedEditTools(sandbox),
-  hashline: () => createHashlineEditTools(sandbox),
-} as const;
-type VariantName = keyof typeof variants;
+const variants = editModes;
+type VariantName = EditMode;
 
 interface RunResult {
   variant: VariantName;
@@ -352,7 +344,7 @@ async function selfcheck() {
 
 async function runOnce(variant: VariantName, rep: number): Promise<RunResult> {
   await writeFixture(FILES);
-  const { readFile, edit } = variants[variant]();
+  const { readFile, edit } = variants[variant](sandbox);
   const agent = new ToolLoopAgent({
     model,
     instructions: INSTRUCTIONS,

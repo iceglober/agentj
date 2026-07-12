@@ -6,15 +6,18 @@ re-run to green. Grading: harness restores `tests.py` and re-runs it after the
 agent finishes. Token counts and wall times cover the whole `generate()` call,
 including failed edit calls and their retries. Runs interleaved across variants.
 
-## Variants (`edit-tools.ts`)
+## Variants (`../{exact,batch,hash}-edit.ts`; registry: `../index.ts`)
 
-- `default` — exact `old_string`/`new_string` replacement, one edit per call,
+- `exact` — exact `old_string`/`new_string` replacement, one edit per call,
   must match exactly once unless `replace_all`.
-- `batched` — same matching rules; array of edits applied atomically in one
+- `batch` — same matching rules; array of edits applied atomically in one
   call; any failure aborts the call with nothing written.
-- `hashline` — `readFile` prefixes every line with `LINE#HASH|`; edits target
+- `hash` — `readFile` prefixes every line with `LINE#HASH|`; edits target
   anchors (`replace` / `insert_after` / `delete`, ranges via `end_anchor`),
   applied atomically; stale anchors reject the call.
+
+Result JSONs predate the mode names: `default` = `exact`, `batched` = `batch`,
+`hashline` = `hash`.
 
 ## Round 1 — single file, 3 bugs (n=8 per variant)
 
@@ -59,9 +62,9 @@ hashline 16,838–38,708. Redirection-cheat flags: 0 in all 36 runs.
 ## Reproducing
 
 ```sh
-bun core/lib/tools/edit/ab-edit.ts --selfcheck          # validate fixture
-bun core/lib/tools/edit/ab-edit.ts --repeat 6           # all variants, interleaved
-bun core/lib/tools/edit/ab-edit.ts --repeat 8 --variant hashline
+bun core/lib/tools/edit/benchmarks/ab-edit.ts --selfcheck          # validate fixture
+bun core/lib/tools/edit/benchmarks/ab-edit.ts --repeat 6           # all variants, interleaved
+bun core/lib/tools/edit/benchmarks/ab-edit.ts --repeat 8 --variant hash
 ```
 
 Requires `AZURE_FOUNDRY_API_KEY` in the environment (e.g. `core/.env`, sourced
