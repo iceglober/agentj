@@ -1,4 +1,3 @@
-import { env } from "../../../../env";
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { createBashTool } from "bash-tool";
 import { createModel } from "../../../llm";
@@ -269,16 +268,14 @@ const INSTRUCTIONS =
 
 // --- harness ---
 
-const model = createModel(
-  { provider: "azure", model: "gpt-5.6-sol" },
-  {
-    resourceName: "kayn-default-foundry-resource",
-    apiKey: env.AZURE_FOUNDRY_API_KEY,
-  },
-);
+const model = createModel({
+  provider: "azure",
+  model: "gpt-5.6-sol",
+  resourceName: "kayn-default-foundry-resource",
+});
 
 await using sandbox = await getSandbox(
-  createSandboxProviderMicrosandbox("abedit"),
+  createSandboxProviderMicrosandbox({ name: "abedit" }),
 );
 
 const { bash } = await createBashTool({

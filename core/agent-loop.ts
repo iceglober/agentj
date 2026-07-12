@@ -1,19 +1,18 @@
-import { env } from "./env";
 import { ToolLoopAgent } from "ai";
 import { createBashTool } from "bash-tool";
 import { createModel, type LlmConfig } from "./lib/llm";
 import { getSandbox } from "./lib/sandbox";
 import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
 
-const llm: LlmConfig = { provider: "azure", model: "gpt-5.6-sol" };
-
-const model = createModel(llm, {
+const llm: LlmConfig = {
+  provider: "azure",
+  model: "gpt-5.6-sol",
   resourceName: "kayn-default-foundry-resource",
-  apiKey: env.AZURE_FOUNDRY_API_KEY,
-});
+};
+
+const model = createModel(llm);
 
 await using sandbox = await getSandbox(createSandboxProviderMicrosandbox());
-await sandbox.executeCommand("mkdir -p /workspace");
 
 const { tools: bashTools } = await createBashTool({
   sandbox,
