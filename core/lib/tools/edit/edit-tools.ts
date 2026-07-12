@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { createHash } from "node:crypto";
 import z from "zod";
-import type { Sandbox } from "microsandbox";
+import type { Sandbox } from "../../sandbox/index";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -9,7 +9,7 @@ const lineHash = (line: string) =>
   createHash("sha256").update(line).digest("hex").slice(0, 4);
 
 async function readLines(sb: Sandbox, path: string): Promise<string[]> {
-  const text = await sb.fs().readToString(path);
+  const text = await sb.readFile(path);
   return text.split("\n");
 }
 
@@ -41,7 +41,7 @@ export function createDefaultEditTools(sb: Sandbox) {
     }),
     execute: async ({ path, old_string, new_string, replace_all }) => {
       try {
-        const content = await sb.fs().readToString(path);
+        const content = await sb.readFile(path);
         const count = content.split(old_string).length - 1;
         if (count === 0)
           return "ERROR: old_string not found in file. Re-read the file and match its current content exactly.";
@@ -50,7 +50,7 @@ export function createDefaultEditTools(sb: Sandbox) {
         const next = replace_all
           ? content.split(old_string).join(new_string)
           : content.replace(old_string, new_string);
-        await sb.fs().write(path, next);
+        await sb.writeFiles([{ path, content: next }]);
         return `OK: replaced ${replace_all ? count : 1} occurrence(s).`;
       } catch (e) {
         return `ERROR: ${errMsg(e)}`;
@@ -83,7 +83,7 @@ export function createBatchedEditTools(sb: Sandbox) {
     }),
     execute: async ({ path, edits }) => {
       try {
-        let content = await sb.fs().readToString(path);
+        let content = await sb.readFile(path);
         for (const [i, e] of edits.entries()) {
           const count = content.split(e.old_string).length - 1;
           if (count === 0)
@@ -94,7 +94,7 @@ export function createBatchedEditTools(sb: Sandbox) {
             ? content.split(e.old_string).join(e.new_string)
             : content.replace(e.old_string, e.new_string);
         }
-        await sb.fs().write(path, content);
+        await sb.writeFiles([{ path, content }]);
         return `OK: applied ${edits.length} edit(s).`;
       } catch (e) {
         return `ERROR: ${errMsg(e)}`;
@@ -134,7 +134,9 @@ export function createHashlineEditTools(sb: Sandbox) {
           z.object({
             anchor: z
               .string()
-              .describe('Anchor of the target line, "LINE#HASH" as shown by readFile'),
+              .describe(
+                'Anchor of the target line, "LINE#HASH" as shown by readFile',
+              ),
             end_anchor: z
               .string()
               .optional()
@@ -143,7 +145,9 @@ export function createHashlineEditTools(sb: Sandbox) {
             content: z
               .string()
               .optional()
-              .describe("Text to insert / replace with; may span multiple lines"),
+              .describe(
+                "Text to insert / replace with; may span multiple lines",
+              ),
           }),
         )
         .min(1),
@@ -154,7 +158,8 @@ export function createHashlineEditTools(sb: Sandbox) {
 
         const resolve = (anchor: string): number | string => {
           const m = ANCHOR_RE.exec(anchor);
-          if (!m) return `ERROR: malformed anchor "${anchor}" (expected "LINE#HASH").`;
+          if (!m)
+            return `ERROR: malformed anchor "${anchor}" (expected "LINE#HASH").`;
           const n = Number(m[1]);
           if (n < 1 || n > lines.length)
             return `ERROR: anchor "${anchor}" is out of range (file has ${lines.length} lines).`;
@@ -164,7 +169,12 @@ export function createHashlineEditTools(sb: Sandbox) {
           return n;
         };
 
-        const resolved: { start: number; end: number; op: string; content?: string }[] = [];
+        const resolved: {
+          start: number;
+          end: number;
+          op: string;
+          content?: string;
+        }[] = [];
         for (const e of edits) {
           const start = resolve(e.anchor);
           if (typeof start === "string") return start;
@@ -172,7 +182,8 @@ export function createHashlineEditTools(sb: Sandbox) {
           if (e.end_anchor !== undefined) {
             const r = resolve(e.end_anchor);
             if (typeof r === "string") return r;
-            if (r < start) return `ERROR: end_anchor "${e.end_anchor}" is before anchor "${e.anchor}".`;
+            if (r < start)
+              return `ERROR: end_anchor "${e.end_anchor}" is before anchor "${e.anchor}".`;
             end = r;
           }
           if (e.op !== "delete" && e.content === undefined)
@@ -183,12 +194,14 @@ export function createHashlineEditTools(sb: Sandbox) {
         resolved.sort((a, b) => b.start - a.start);
         for (const e of resolved) {
           const newLines = e.content !== undefined ? e.content.split("\n") : [];
-          if (e.op === "replace") lines.splice(e.start - 1, e.end - e.start + 1, ...newLines);
-          else if (e.op === "delete") lines.splice(e.start - 1, e.end - e.start + 1);
+          if (e.op === "replace")
+            lines.splice(e.start - 1, e.end - e.start + 1, ...newLines);
+          else if (e.op === "delete")
+            lines.splice(e.start - 1, e.end - e.start + 1);
           else lines.splice(e.end, 0, ...newLines);
         }
 
-        await sb.fs().write(path, lines.join("\n"));
+        await sb.writeFiles([{ path, content: lines.join("\n") }]);
         return `OK: applied ${resolved.length} edit(s). Anchors from previous reads are now stale.`;
       } catch (e) {
         return `ERROR: ${errMsg(e)}`;

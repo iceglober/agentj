@@ -1,38 +1,19 @@
 import { env } from "./env";
 import { ToolLoopAgent } from "ai";
 import { createAzure } from "@ai-sdk/azure";
-import { createBashTool, type Sandbox as BashToolSandbox } from "bash-tool";
-import { Sandbox } from "microsandbox";
+import { createBashTool } from "bash-tool";
+import { getSandbox } from "./lib/sandbox";
+import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
 
 const azure = createAzure({
   resourceName: "kayn-default-foundry-resource",
   apiKey: env.AZURE_FOUNDRY_API_KEY,
 });
 
-await using sb = await Sandbox.builder("worker")
-  .image("python")
-  .replace()
-  .create();
-
-const bashToolSandbox: BashToolSandbox = {
-  async executeCommand(command) {
-    const r = await sb.shell(command);
-    return { stdout: r.stdout(), stderr: r.stderr(), exitCode: r.code };
-  },
-  async readFile(path) {
-    return sb.fs().readToString(path);
-  },
-  async writeFiles(files) {
-    for (const file of files) {
-      const dir = file.path.split("/").slice(0, -1).join("/");
-      if (dir) await sb.shell(`mkdir -p '${dir.replaceAll("'", "'\\''")}'`);
-      await sb.fs().write(file.path, file.content);
-    }
-  },
-};
+await using sandbox = await getSandbox(createSandboxProviderMicrosandbox());
 
 const { tools: bashTools } = await createBashTool({
-  sandbox: bashToolSandbox,
+  sandbox,
 });
 
 const codingAgent = new ToolLoopAgent({

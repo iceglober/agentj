@@ -1,6 +1,6 @@
 # Edit tool A/B benchmarks
 
-Harness: `core/ab-edit.ts`. Model: `gpt-5.6-sol` (Azure). Sandbox: microsandbox
+Harness: `ab-edit.ts` (this directory). Model: `gpt-5.6-sol` (Azure). Sandbox: microsandbox
 `python` image. One prompt per run: run tests, fix bugs via the edit tool only,
 re-run to green. Grading: harness restores `tests.py` and re-runs it after the
 agent finishes. Token counts and wall times cover the whole `generate()` call,
@@ -19,7 +19,7 @@ including failed edit calls and their retries. Runs interleaved across variants.
 ## Round 1 — single file, 3 bugs (n=8 per variant)
 
 Fixture: ~45-line `calc.py`, 3 bugs, one on a line duplicated verbatim
-elsewhere. Per-run data: `core/ab-edit-results.json` (commit `b21a28d`).
+elsewhere. Per-run data: `ab-edit-results.json` (commit `b21a28d`).
 
 | avg, n=8     | default | hashline |
 | ------------ | ------- | -------- |
@@ -38,7 +38,7 @@ Fixture: 4-file package (`utils/models/pricing/cart.py`, ~180 lines) + tests;
 8 bugs; `return price * (1 - rate)` appears verbatim in three functions (one
 correct, two buggy); cross-file rename (`fmt_money` vs `format_money`); three
 boundary/off-by-one bugs. Fixture validated by `--selfcheck` (buggy fails 9
-checks, reference fix passes). Per-run data: `core/ab-edit-results-v2.json`
+checks, reference fix passes). Per-run data: `ab-edit-results-v2.json`
 (commit `fbbcbd3`).
 
 | avg, n=6            | default | batched | hashline |
@@ -59,9 +59,9 @@ hashline 16,838–38,708. Redirection-cheat flags: 0 in all 36 runs.
 ## Reproducing
 
 ```sh
-bun core/ab-edit.ts --selfcheck          # validate fixture
-bun core/ab-edit.ts --repeat 6           # all variants, interleaved
-bun core/ab-edit.ts --repeat 8 --variant hashline
+bun core/lib/tools/edit/ab-edit.ts --selfcheck          # validate fixture
+bun core/lib/tools/edit/ab-edit.ts --repeat 6           # all variants, interleaved
+bun core/lib/tools/edit/ab-edit.ts --repeat 8 --variant hashline
 ```
 
 Requires `AZURE_FOUNDRY_API_KEY` in the environment (e.g. `core/.env`, sourced

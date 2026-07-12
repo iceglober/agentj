@@ -1,13 +1,14 @@
-import { env } from "./env";
+import { env } from "../../../env";
 import { ToolLoopAgent, stepCountIs } from "ai";
 import { createAzure } from "@ai-sdk/azure";
-import { createBashTool, type Sandbox as BashToolSandbox } from "bash-tool";
-import { Sandbox } from "microsandbox";
+import { createBashTool } from "bash-tool";
+import { getSandbox } from "../../sandbox";
+import { createSandboxProviderMicrosandbox } from "../../sandbox/microsandbox-adapter";
 import {
   createBatchedEditTools,
   createDefaultEditTools,
   createHashlineEditTools,
-} from "./tools/edit/edit-tools";
+} from "./edit-tools";
 
 // --- fixture: 4-file package, 8 bugs. `return price * (1 - rate)` appears
 // verbatim in three functions (one correct, two buggy) as a string-matching
@@ -278,34 +279,19 @@ const azure = createAzure({
 });
 const model = azure("gpt-5.6-sol");
 
-await using sb = await Sandbox.builder("abedit").image("python").replace().create();
-
-const bashToolSandbox: BashToolSandbox = {
-  async executeCommand(command) {
-    const r = await sb.shell(command);
-    return { stdout: r.stdout(), stderr: r.stderr(), exitCode: r.code };
-  },
-  async readFile(path) {
-    return sb.fs().readToString(path);
-  },
-  async writeFiles(files) {
-    for (const file of files) {
-      const dir = file.path.split("/").slice(0, -1).join("/");
-      if (dir) await sb.shell(`mkdir -p '${dir.replaceAll("'", "'\\''")}'`);
-      await sb.fs().write(file.path, file.content);
-    }
-  },
-};
+await using sandbox = await getSandbox(
+  createSandboxProviderMicrosandbox("abedit"),
+);
 
 const { bash } = await createBashTool({
-  sandbox: bashToolSandbox,
+  sandbox,
   destination: "/workspace",
 });
 
 const variants = {
-  default: () => createDefaultEditTools(sb),
-  batched: () => createBatchedEditTools(sb),
-  hashline: () => createHashlineEditTools(sb),
+  default: () => createDefaultEditTools(sandbox),
+  batched: () => createBatchedEditTools(sandbox),
+  hashline: () => createHashlineEditTools(sandbox),
 } as const;
 type VariantName = keyof typeof variants;
 
@@ -327,33 +313,40 @@ interface RunResult {
 }
 
 async function writeFixture(files: Record<string, string>) {
-  await sb.shell("rm -rf /workspace && mkdir -p /workspace");
-  for (const [name, content] of Object.entries(files)) {
-    await sb.fs().write(`/workspace/${name}`, content);
-  }
+  await sandbox.executeCommand("rm -rf /workspace && mkdir -p /workspace");
+  await sandbox.writeFiles(
+    Object.entries(files).map(([name, content]) => ({
+      path: `/workspace/${name}`,
+      content,
+    })),
+  );
 }
 
 async function runTests() {
-  return sb.shell("cd /workspace && python3 tests.py");
+  return sandbox.executeCommand("cd /workspace && python3 tests.py");
 }
 
 async function grade(): Promise<boolean> {
   // restore tests.py first so editing it can't game the grade
-  await sb.fs().write("/workspace/tests.py", TESTS_PY);
-  return (await runTests()).code === 0;
+  await sandbox.writeFiles([{ path: "/workspace/tests.py", content: TESTS_PY }]);
+  return (await runTests()).exitCode === 0;
 }
 
 async function selfcheck() {
   await writeFixture(FILES);
   const buggy = await runTests();
-  if (buggy.code === 0) throw new Error("selfcheck: buggy fixture unexpectedly passes");
-  const failLines = buggy.stdout().trim().split("\n").filter((l) => l.startsWith("FAIL"));
+  if (buggy.exitCode === 0)
+    throw new Error("selfcheck: buggy fixture unexpectedly passes");
+  const failLines = buggy.stdout
+    .trim()
+    .split("\n")
+    .filter((l) => l.startsWith("FAIL"));
   console.error(`selfcheck: buggy fixture fails ${failLines.length} checks:`);
   for (const l of failLines) console.error(`  ${l}`);
   await writeFixture(FIXED);
   const fixed = await runTests();
-  if (fixed.code !== 0)
-    throw new Error(`selfcheck: fixed fixture fails:\n${fixed.stdout()}${fixed.stderr()}`);
+  if (fixed.exitCode !== 0)
+    throw new Error(`selfcheck: fixed fixture fails:\n${fixed.stdout}${fixed.stderr}`);
   console.error("selfcheck: fixed fixture passes. Fixture is consistent.");
 }
 
@@ -472,6 +465,9 @@ const summary = only.map((variant) => {
 });
 
 console.log(JSON.stringify({ summary, results }, null, 2));
-await Bun.write("core/ab-edit-results-v2.json", JSON.stringify({ summary, results }, null, 2));
+await Bun.write(
+  `${import.meta.dir}/ab-edit-results-v2.json`,
+  JSON.stringify({ summary, results }, null, 2),
+);
 console.error("\nsummary:");
 console.error(JSON.stringify(summary, null, 2));
