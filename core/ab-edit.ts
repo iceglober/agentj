@@ -7,7 +7,7 @@ import {
   createBatchedEditTools,
   createDefaultEditTools,
   createHashlineEditTools,
-} from "./tools/edit";
+} from "./tools/edit/edit-tools";
 
 // --- fixture: 4-file package, 8 bugs. `return price * (1 - rate)` appears
 // verbatim in three functions (one correct, two buggy) as a string-matching
