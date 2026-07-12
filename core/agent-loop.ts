@@ -1,31 +1,34 @@
 import { ToolLoopAgent } from "ai";
 import { createBashTool } from "bash-tool";
-import { createModel, type LlmConfig } from "./lib/llm";
+import { loadConfig } from "./lib/config";
+import { createModel } from "./lib/llm";
 import { getSandbox } from "./lib/sandbox";
 import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
+import { createEditTools } from "./lib/tools/edit";
 
-const llm: LlmConfig = {
-  provider: "azure",
-  model: "gpt-5.6-sol",
-  providers: {
-    azure: { resourceName: "kayn-default-foundry-resource" },
-  },
-};
+const config = await loadConfig(
+  new URL("./agentj.json", import.meta.url).pathname,
+);
 
-const model = createModel(llm);
+const model = createModel(config.llm);
 
-await using sandbox = await getSandbox(createSandboxProviderMicrosandbox());
+await using sandbox = await getSandbox(
+  createSandboxProviderMicrosandbox(config.sandbox),
+);
 
 const { tools: bashTools } = await createBashTool({
   sandbox,
-  destination: "/workspace",
+  destination: config.sandbox.workdir,
 });
 
+// editTools last: its mode-specific readFile (line/anchor prefixes) replaces
+// bash-tool's plain one, so reads always carry what the edit tool consumes.
 const codingAgent = new ToolLoopAgent({
   model,
-  temperature: llm.temperature,
+  temperature: config.llm.temperature,
   tools: {
     ...bashTools,
+    ...createEditTools(sandbox, config.tools.edit.mode),
   },
 });
 
