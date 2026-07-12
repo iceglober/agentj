@@ -1,21 +1,25 @@
+import z from "zod";
 import type { Sandbox } from "./index";
 import { Sandbox as Microsandbox } from "microsandbox";
 
-/** Maps to future config keys `sandbox.{image,workdir,...}`. */
-export interface MicrosandboxProviderOptions {
-  name?: string;
+/** The `sandbox.*` section of the agent config. */
+export const microsandboxOptionsSchema = z.object({
+  name: z.string().default("worker"),
   /** OCI image reference, Docker-style (e.g. "python", "ubuntu:24.04"). */
-  image?: string;
+  image: z.string().default("python"),
   /** Created via rootfs patch before boot; commands run here. */
-  workdir?: string;
-}
+  workdir: z.string().default("/workspace"),
+});
 
-export const createSandboxProviderMicrosandbox = ({
-  name = "worker",
-  image = "python",
-  workdir = "/workspace",
-}: MicrosandboxProviderOptions = {}) =>
+export type MicrosandboxProviderOptions = z.input<
+  typeof microsandboxOptionsSchema
+>;
+
+export const createSandboxProviderMicrosandbox = (
+  options: MicrosandboxProviderOptions = {},
+) =>
   async (): Promise<Sandbox & AsyncDisposable> => {
+    const { name, image, workdir } = microsandboxOptionsSchema.parse(options);
     const sb = await Microsandbox.builder(name)
       .image(image)
       .patch((p) => p.mkdir(workdir, { mode: 0o755 }))

@@ -1,3 +1,4 @@
+import z from "zod";
 import type { Sandbox } from "../../sandbox";
 import { createBatchEditTools } from "./batch-edit";
 import { createExactEditTools } from "./exact-edit";
@@ -16,6 +17,15 @@ export const editModes = {
 } satisfies Record<string, (sandbox: Sandbox) => unknown>;
 
 export type EditMode = keyof typeof editModes;
+
+const editModeNames = Object.keys(editModes) as [EditMode, ...EditMode[]];
+
+/** The `tools.edit.*` section of the agent config. */
+export const editConfigSchema = z.object({
+  mode: z.enum(editModeNames).default("batch"),
+});
+
+export type EditConfig = z.infer<typeof editConfigSchema>;
 
 export const createEditTools = (
   sandbox: Sandbox,

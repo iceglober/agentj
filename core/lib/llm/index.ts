@@ -1,5 +1,7 @@
 import type { LanguageModel } from "ai";
+import z from "zod";
 import {
+  azureModelConfigSchema,
   createAzureModelProvider,
   type AzureModelConfig,
 } from "./azure-adapter";
@@ -9,7 +11,7 @@ export type ModelFactory = (modelId: string) => LanguageModel;
 /**
  * Per-provider connection/auth settings. Every provider needs its own props
  * (azure: resourceName; vertex: project/location; bedrock: region; ...), so
- * each gets a block here, added alongside its adapter.
+ * each adapter exports its own schema and gets a block here.
  */
 export interface ProviderConfigs {
   azure: AzureModelConfig;
@@ -17,28 +19,38 @@ export interface ProviderConfigs {
 
 export type ProviderName = keyof ProviderConfigs;
 
-/**
- * Serializable model selection; maps to future config keys
- * `llm.{provider,model,temperature}` and `llm.providers.{name}.*`.
- *
- * Auth and provider props are config-first with env fallback: explicit values
- * in `providers.{name}` win, otherwise each adapter falls back to its
- * documented env vars and throws early if a required one is missing.
- */
-export interface LlmConfig {
-  provider: ProviderName;
-  model: string;
-  /** Call setting; forward to the agent/generate call, not the model. */
-  temperature?: number;
-  providers?: Partial<ProviderConfigs>;
-}
-
 /** Registry keyed by config value (`llm.provider`). */
 export const llmProviders: {
   [K in ProviderName]: (config?: ProviderConfigs[K]) => ModelFactory;
 } = {
   azure: createAzureModelProvider,
 };
+
+const providerNames = Object.keys(llmProviders) as [
+  ProviderName,
+  ...ProviderName[],
+];
+
+/**
+ * Serializable model selection; the `llm.*` section of the agent config.
+ *
+ * Auth and provider props are config-first with env fallback: explicit values
+ * in `providers.{name}` win, otherwise each adapter falls back to its
+ * documented env vars and throws early if a required one is missing.
+ */
+export const llmConfigSchema = z.object({
+  provider: z.enum(providerNames).default("azure"),
+  model: z.string().default("gpt-5.6-sol"),
+  /** Call setting; forward to the agent/generate call, not the model. */
+  temperature: z.number().min(0).max(2).optional(),
+  providers: z
+    .object({
+      azure: azureModelConfigSchema.optional(),
+    })
+    .optional(),
+});
+
+export type LlmConfig = z.infer<typeof llmConfigSchema>;
 
 export const createModel = (config: LlmConfig): LanguageModel => {
   // The mapped registry ties each key to its own config type; indexing with a

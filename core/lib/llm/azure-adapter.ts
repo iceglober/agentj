@@ -1,12 +1,15 @@
 import { createAzure } from "@ai-sdk/azure";
+import z from "zod";
 import type { ModelFactory } from "./index";
 
-export interface AzureModelConfig {
+export const azureModelConfigSchema = z.object({
   /** Falls back to AZURE_FOUNDRY_API_KEY, then AZURE_API_KEY (SDK default). */
-  apiKey?: string;
+  apiKey: z.string().optional(),
   /** Falls back to AZURE_RESOURCE_NAME (SDK default). */
-  resourceName?: string;
-}
+  resourceName: z.string().optional(),
+});
+
+export type AzureModelConfig = z.infer<typeof azureModelConfigSchema>;
 
 export const createAzureModelProvider = (
   config: AzureModelConfig = {},
