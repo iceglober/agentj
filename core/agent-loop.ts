@@ -9,10 +9,11 @@ const azure = createAzure({
   apiKey: env.AZURE_FOUNDRY_API_KEY,
 });
 
-await using sb = await Sandbox.builder("worker").image("python").replace().create();
+await using sb = await Sandbox.builder("worker")
+  .image("python")
+  .replace()
+  .create();
 
-// bash-tool expects { executeCommand, readFile, writeFiles }; microsandbox
-// exposes shell()/fs(), so bridge the two.
 const bashToolSandbox: BashToolSandbox = {
   async executeCommand(command) {
     const r = await sb.shell(command);
@@ -41,13 +42,17 @@ const codingAgent = new ToolLoopAgent({
   },
 });
 
-const prompt = process.argv.slice(2).join(" ") || "Print the OS and python version of the machine you are on.";
+const prompt =
+  process.argv.slice(2).join(" ") ||
+  "Print the OS and python version of the machine you are on.";
 
 const result = await codingAgent.generate({
   prompt,
   onStepFinish: (step) => {
     for (const call of step.toolCalls) {
-      console.error(`[tool] ${call.toolName} ${JSON.stringify(call.input).slice(0, 200)}`);
+      console.error(
+        `[tool] ${call.toolName} ${JSON.stringify(call.input).slice(0, 200)}`,
+      );
     }
   },
 });
