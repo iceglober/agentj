@@ -5,6 +5,7 @@ import { createModel } from "./lib/llm";
 import { getSandbox } from "./lib/sandbox";
 import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
 import { createEditTools } from "./lib/tools/edit";
+import { createSearchTools } from "./lib/tools/search";
 
 const config = await loadConfig(
   new URL("./agentj.json", import.meta.url).pathname,
@@ -28,6 +29,7 @@ const codingAgent = new ToolLoopAgent({
   temperature: config.llm.temperature,
   tools: {
     ...bashTools,
+    ...createSearchTools(sandbox, { root: config.sandbox.workdir }),
     ...createEditTools(sandbox, config.tools.edit.mode),
   },
 });
