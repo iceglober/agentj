@@ -7,7 +7,9 @@ import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-ad
 const llm: LlmConfig = {
   provider: "azure",
   model: "gpt-5.6-sol",
-  resourceName: "kayn-default-foundry-resource",
+  providers: {
+    azure: { resourceName: "kayn-default-foundry-resource" },
+  },
 };
 
 const model = createModel(llm);

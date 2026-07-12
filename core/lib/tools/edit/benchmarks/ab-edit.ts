@@ -271,7 +271,9 @@ const INSTRUCTIONS =
 const model = createModel({
   provider: "azure",
   model: "gpt-5.6-sol",
-  resourceName: "kayn-default-foundry-resource",
+  providers: {
+    azure: { resourceName: "kayn-default-foundry-resource" },
+  },
 });
 
 await using sandbox = await getSandbox(
