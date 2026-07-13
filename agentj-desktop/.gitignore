@@ -1,8 +1,0 @@
-# frontend
-node_modules/
-dist/
-*.tsbuildinfo
-
-# tauri / rust backend
-src-tauri/target/
-src-tauri/gen/
