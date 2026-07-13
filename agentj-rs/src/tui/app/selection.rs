@@ -83,7 +83,13 @@ impl App {
             let x1 = if y == ey { ex as usize } else { chars.len() };
             let x0 = x0.min(chars.len());
             let x1 = x1.min(chars.len()).max(x0);
-            out.push(chars[x0..x1].iter().collect::<String>().trim_end().to_string());
+            out.push(
+                chars[x0..x1]
+                    .iter()
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string(),
+            );
         }
         out.join("\n")
     }

@@ -29,8 +29,12 @@ pub struct SubagentRow {
 /// Drop a trailing " · N tok" (the delegate summary's spend suffix, aimed at the headless/eval
 /// stream) so the TUI, which meters tokens itself, doesn't show the figure twice.
 pub(super) fn strip_tok_suffix(s: &str) -> &str {
-    let Some(rest) = s.strip_suffix(" tok") else { return s };
-    let Some(pos) = rest.rfind(" · ") else { return s };
+    let Some(rest) = s.strip_suffix(" tok") else {
+        return s;
+    };
+    let Some(pos) = rest.rfind(" · ") else {
+        return s;
+    };
     let digits = &rest[pos + " · ".len()..];
     if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
         &s[..pos]
@@ -83,13 +87,22 @@ impl App {
         self.waves += 1;
         let ok_count = finished.iter().filter(|r| r.done == Some(true)).count();
         // Wave wall-clock is the slowest agent; spend is the sum of every agent's input tokens.
-        let wall_ms = finished.iter().filter_map(|r| r.final_ms).max().unwrap_or(0);
+        let wall_ms = finished
+            .iter()
+            .filter_map(|r| r.final_ms)
+            .max()
+            .unwrap_or(0);
         let toks: u64 = finished.iter().map(|r| r.tokens_in).sum();
-        let mut join = format!("├─╯  wave {} · {ok_count}/{n} ok · {}", self.waves, fmt_ms(wall_ms as u128));
+        let mut join = format!(
+            "├─╯  wave {} · {ok_count}/{n} ok · {}",
+            self.waves,
+            fmt_ms(wall_ms as u128)
+        );
         if toks > 0 {
             join.push_str(&format!(" · {} tok", human_tokens(toks)));
         }
-        self.transcript.push(Line::from(Span::styled(join, theme::dim())));
+        self.transcript
+            .push(Line::from(Span::styled(join, theme::dim())));
         self.dirty = true;
     }
 }

@@ -243,75 +243,388 @@ mod tests {
     }
 
     const KEYMAP_CASES: &[KeymapCase] = &[
-        KeymapCase { code: KeyCode::Esc, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::AbortTurn },
-        KeymapCase { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::CtrlC },
-        KeymapCase { code: KeyCode::Char('p'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::CommandMenu },
-        KeymapCase { code: KeyCode::Char('p'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::CommandMenu },
-        KeymapCase { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::Quit },
-        KeymapCase { code: KeyCode::PageUp, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::PageUp },
-        KeymapCase { code: KeyCode::PageDown, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::PageDown },
-        KeymapCase { code: KeyCode::Up, modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::ScrollUp },
-        KeymapCase { code: KeyCode::Down, modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::ScrollDown },
-        KeymapCase { code: KeyCode::Char('b'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordLeft },
-        KeymapCase { code: KeyCode::Char('B'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordLeft },
-        KeymapCase { code: KeyCode::Char('f'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordRight },
-        KeymapCase { code: KeyCode::Char('F'), modifiers: KeyModifiers::ALT, running: true, expected: ActionKind::WordRight },
-        KeymapCase { code: KeyCode::Up, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::ScrollUp },
-        KeymapCase { code: KeyCode::Down, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::ScrollDown },
-        KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
-        KeymapCase { code: KeyCode::Tab, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
-        KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
-        KeymapCase { code: KeyCode::Char('x'), modifiers: KeyModifiers::NONE, running: true, expected: ActionKind::None },
-        KeymapCase { code: KeyCode::Char('u'), modifiers: KeyModifiers::CONTROL, running: true, expected: ActionKind::None },
-        KeymapCase { code: KeyCode::Esc, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::ClearInput },
-        KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::SHIFT, running: false, expected: ActionKind::Newline },
-        KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::Newline },
-        KeymapCase { code: KeyCode::Enter, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Newline },
-        KeymapCase { code: KeyCode::Char('j'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Newline },
-        KeymapCase { code: KeyCode::Tab, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Complete },
-        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::DeleteToLineHome },
-        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToLineHome },
-        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::DeleteWordLeft },
-        KeymapCase { code: KeyCode::Backspace, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Backspace },
-        KeymapCase { code: KeyCode::Delete, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::DeleteToLineEnd },
-        KeymapCase { code: KeyCode::Delete, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::DeleteWordRight },
-        KeymapCase { code: KeyCode::Delete, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Delete },
-        KeymapCase { code: KeyCode::Char('u'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToLineHome },
-        KeymapCase { code: KeyCode::Char('k'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteToLineEnd },
-        KeymapCase { code: KeyCode::Char('w'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::DeleteWordLeft },
-        KeymapCase { code: KeyCode::Char('a'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Home },
-        KeymapCase { code: KeyCode::Char('e'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::End },
-        KeymapCase { code: KeyCode::Char('h'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Backspace },
-        KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::Home },
-        KeymapCase { code: KeyCode::Right, modifiers: KeyModifiers::SUPER, running: false, expected: ActionKind::End },
-        KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordLeft },
-        KeymapCase { code: KeyCode::Right, modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordRight },
-        KeymapCase { code: KeyCode::Left, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Left },
-        KeymapCase { code: KeyCode::Right, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Right },
-        KeymapCase { code: KeyCode::Up, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Up },
-        KeymapCase { code: KeyCode::Down, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Down },
-        KeymapCase { code: KeyCode::Home, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::Home },
-        KeymapCase { code: KeyCode::End, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::End },
-        KeymapCase { code: KeyCode::PageUp, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::PageUp },
-        KeymapCase { code: KeyCode::PageDown, modifiers: KeyModifiers::NONE, running: false, expected: ActionKind::PageDown },
-        KeymapCase { code: KeyCode::Up, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::ScrollUp },
-        KeymapCase { code: KeyCode::Down, modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::ScrollDown },
-        KeymapCase { code: KeyCode::Char('d'), modifiers: KeyModifiers::CONTROL, running: false, expected: ActionKind::Quit },
-        KeymapCase { code: KeyCode::Char('b'), modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordLeft },
-        KeymapCase { code: KeyCode::Char('B'), modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordLeft },
-        KeymapCase { code: KeyCode::Char('f'), modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordRight },
-        KeymapCase { code: KeyCode::Char('F'), modifiers: KeyModifiers::ALT, running: false, expected: ActionKind::WordRight },
-        KeymapCase { code: KeyCode::Char('A'), modifiers: KeyModifiers::SHIFT, running: false, expected: ActionKind::Char },
-        KeymapCase { code: KeyCode::Char(':'), modifiers: KeyModifiers::SHIFT, running: false, expected: ActionKind::Char },
-        KeymapCase { code: KeyCode::Char('!'), modifiers: KeyModifiers::SHIFT, running: false, expected: ActionKind::Char },
-        KeymapCase { code: KeyCode::Char('('), modifiers: KeyModifiers::SHIFT, running: false, expected: ActionKind::Char },
+        KeymapCase {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::AbortTurn,
+        },
+        KeymapCase {
+            code: KeyCode::Char('c'),
+            modifiers: KeyModifiers::CONTROL,
+            running: true,
+            expected: ActionKind::CtrlC,
+        },
+        KeymapCase {
+            code: KeyCode::Char('p'),
+            modifiers: KeyModifiers::CONTROL,
+            running: true,
+            expected: ActionKind::CommandMenu,
+        },
+        KeymapCase {
+            code: KeyCode::Char('p'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::CommandMenu,
+        },
+        KeymapCase {
+            code: KeyCode::Char('d'),
+            modifiers: KeyModifiers::CONTROL,
+            running: true,
+            expected: ActionKind::Quit,
+        },
+        KeymapCase {
+            code: KeyCode::PageUp,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::PageUp,
+        },
+        KeymapCase {
+            code: KeyCode::PageDown,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::PageDown,
+        },
+        KeymapCase {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::CONTROL,
+            running: true,
+            expected: ActionKind::ScrollUp,
+        },
+        KeymapCase {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::CONTROL,
+            running: true,
+            expected: ActionKind::ScrollDown,
+        },
+        KeymapCase {
+            code: KeyCode::Char('b'),
+            modifiers: KeyModifiers::ALT,
+            running: true,
+            expected: ActionKind::WordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Char('B'),
+            modifiers: KeyModifiers::ALT,
+            running: true,
+            expected: ActionKind::WordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Char('f'),
+            modifiers: KeyModifiers::ALT,
+            running: true,
+            expected: ActionKind::WordRight,
+        },
+        KeymapCase {
+            code: KeyCode::Char('F'),
+            modifiers: KeyModifiers::ALT,
+            running: true,
+            expected: ActionKind::WordRight,
+        },
+        KeymapCase {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::ScrollUp,
+        },
+        KeymapCase {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::ScrollDown,
+        },
+        KeymapCase {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::None,
+        },
+        KeymapCase {
+            code: KeyCode::Tab,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::None,
+        },
+        KeymapCase {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::None,
+        },
+        KeymapCase {
+            code: KeyCode::Char('x'),
+            modifiers: KeyModifiers::NONE,
+            running: true,
+            expected: ActionKind::None,
+        },
+        KeymapCase {
+            code: KeyCode::Char('u'),
+            modifiers: KeyModifiers::CONTROL,
+            running: true,
+            expected: ActionKind::None,
+        },
+        KeymapCase {
+            code: KeyCode::Esc,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::ClearInput,
+        },
+        KeymapCase {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::SHIFT,
+            running: false,
+            expected: ActionKind::Newline,
+        },
+        KeymapCase {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::Newline,
+        },
+        KeymapCase {
+            code: KeyCode::Enter,
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::Newline,
+        },
+        KeymapCase {
+            code: KeyCode::Char('j'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::Newline,
+        },
+        KeymapCase {
+            code: KeyCode::Tab,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Complete,
+        },
+        KeymapCase {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::SUPER,
+            running: false,
+            expected: ActionKind::DeleteToLineHome,
+        },
+        KeymapCase {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::DeleteToLineHome,
+        },
+        KeymapCase {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::DeleteWordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Backspace,
+        },
+        KeymapCase {
+            code: KeyCode::Delete,
+            modifiers: KeyModifiers::SUPER,
+            running: false,
+            expected: ActionKind::DeleteToLineEnd,
+        },
+        KeymapCase {
+            code: KeyCode::Delete,
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::DeleteWordRight,
+        },
+        KeymapCase {
+            code: KeyCode::Delete,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Delete,
+        },
+        KeymapCase {
+            code: KeyCode::Char('u'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::DeleteToLineHome,
+        },
+        KeymapCase {
+            code: KeyCode::Char('k'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::DeleteToLineEnd,
+        },
+        KeymapCase {
+            code: KeyCode::Char('w'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::DeleteWordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Char('a'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::Home,
+        },
+        KeymapCase {
+            code: KeyCode::Char('e'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::End,
+        },
+        KeymapCase {
+            code: KeyCode::Char('h'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::Backspace,
+        },
+        KeymapCase {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::SUPER,
+            running: false,
+            expected: ActionKind::Home,
+        },
+        KeymapCase {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::SUPER,
+            running: false,
+            expected: ActionKind::End,
+        },
+        KeymapCase {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::WordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::WordRight,
+        },
+        KeymapCase {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Left,
+        },
+        KeymapCase {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Right,
+        },
+        KeymapCase {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Up,
+        },
+        KeymapCase {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Down,
+        },
+        KeymapCase {
+            code: KeyCode::Home,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::Home,
+        },
+        KeymapCase {
+            code: KeyCode::End,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::End,
+        },
+        KeymapCase {
+            code: KeyCode::PageUp,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::PageUp,
+        },
+        KeymapCase {
+            code: KeyCode::PageDown,
+            modifiers: KeyModifiers::NONE,
+            running: false,
+            expected: ActionKind::PageDown,
+        },
+        KeymapCase {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::ScrollUp,
+        },
+        KeymapCase {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::ScrollDown,
+        },
+        KeymapCase {
+            code: KeyCode::Char('d'),
+            modifiers: KeyModifiers::CONTROL,
+            running: false,
+            expected: ActionKind::Quit,
+        },
+        KeymapCase {
+            code: KeyCode::Char('b'),
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::WordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Char('B'),
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::WordLeft,
+        },
+        KeymapCase {
+            code: KeyCode::Char('f'),
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::WordRight,
+        },
+        KeymapCase {
+            code: KeyCode::Char('F'),
+            modifiers: KeyModifiers::ALT,
+            running: false,
+            expected: ActionKind::WordRight,
+        },
+        KeymapCase {
+            code: KeyCode::Char('A'),
+            modifiers: KeyModifiers::SHIFT,
+            running: false,
+            expected: ActionKind::Char,
+        },
+        KeymapCase {
+            code: KeyCode::Char(':'),
+            modifiers: KeyModifiers::SHIFT,
+            running: false,
+            expected: ActionKind::Char,
+        },
+        KeymapCase {
+            code: KeyCode::Char('!'),
+            modifiers: KeyModifiers::SHIFT,
+            running: false,
+            expected: ActionKind::Char,
+        },
+        KeymapCase {
+            code: KeyCode::Char('('),
+            modifiers: KeyModifiers::SHIFT,
+            running: false,
+            expected: ActionKind::Char,
+        },
     ];
 
     #[test]
     fn keymap_table_covers_all_supported_non_submit_bindings() {
         for case in KEYMAP_CASES {
-            let actual =
-                ActionKind::of(key_to_action(key(case.code, case.modifiers), case.running, " hi "));
+            let actual = ActionKind::of(key_to_action(
+                key(case.code, case.modifiers),
+                case.running,
+                " hi ",
+            ));
             assert_eq!(
                 actual, case.expected,
                 "unexpected action for {:?} with {:?} while running={} ",
@@ -356,21 +669,57 @@ mod tests {
         assert!(matches!(submitted, Action::Submit(s) if s == "a\nb"));
 
         let mut ctrl_j = Editor::default();
-        apply_key(&mut ctrl_j, key(KeyCode::Char('x'), KeyModifiers::NONE), false);
-        apply_key(&mut ctrl_j, key(KeyCode::Char('j'), KeyModifiers::CONTROL), false);
-        apply_key(&mut ctrl_j, key(KeyCode::Char('y'), KeyModifiers::NONE), false);
+        apply_key(
+            &mut ctrl_j,
+            key(KeyCode::Char('x'), KeyModifiers::NONE),
+            false,
+        );
+        apply_key(
+            &mut ctrl_j,
+            key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            false,
+        );
+        apply_key(
+            &mut ctrl_j,
+            key(KeyCode::Char('y'), KeyModifiers::NONE),
+            false,
+        );
         assert_eq!(ctrl_j.text(), "x\ny");
 
         let mut alt_enter = Editor::default();
-        apply_key(&mut alt_enter, key(KeyCode::Char('m'), KeyModifiers::NONE), false);
-        apply_key(&mut alt_enter, key(KeyCode::Enter, KeyModifiers::ALT), false);
-        apply_key(&mut alt_enter, key(KeyCode::Char('n'), KeyModifiers::NONE), false);
+        apply_key(
+            &mut alt_enter,
+            key(KeyCode::Char('m'), KeyModifiers::NONE),
+            false,
+        );
+        apply_key(
+            &mut alt_enter,
+            key(KeyCode::Enter, KeyModifiers::ALT),
+            false,
+        );
+        apply_key(
+            &mut alt_enter,
+            key(KeyCode::Char('n'), KeyModifiers::NONE),
+            false,
+        );
         assert_eq!(alt_enter.text(), "m\nn");
 
         let mut ctrl_enter = Editor::default();
-        apply_key(&mut ctrl_enter, key(KeyCode::Char('p'), KeyModifiers::NONE), false);
-        apply_key(&mut ctrl_enter, key(KeyCode::Enter, KeyModifiers::CONTROL), false);
-        apply_key(&mut ctrl_enter, key(KeyCode::Char('q'), KeyModifiers::NONE), false);
+        apply_key(
+            &mut ctrl_enter,
+            key(KeyCode::Char('p'), KeyModifiers::NONE),
+            false,
+        );
+        apply_key(
+            &mut ctrl_enter,
+            key(KeyCode::Enter, KeyModifiers::CONTROL),
+            false,
+        );
+        apply_key(
+            &mut ctrl_enter,
+            key(KeyCode::Char('q'), KeyModifiers::NONE),
+            false,
+        );
         assert_eq!(ctrl_enter.text(), "p\nq");
     }
 
@@ -472,17 +821,33 @@ mod tests {
     #[test]
     fn readline_chords_edit_the_line() {
         let mut e = ed("alpha beta");
-        apply_key(&mut e, key(KeyCode::Char('u'), KeyModifiers::CONTROL), false);
+        apply_key(
+            &mut e,
+            key(KeyCode::Char('u'), KeyModifiers::CONTROL),
+            false,
+        );
         assert_eq!(e.text(), "");
 
         let mut e = ed("alpha beta");
-        apply_key(&mut e, key(KeyCode::Char('a'), KeyModifiers::CONTROL), false);
+        apply_key(
+            &mut e,
+            key(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            false,
+        );
         assert_eq!(e.cursor, 0);
-        apply_key(&mut e, key(KeyCode::Char('k'), KeyModifiers::CONTROL), false);
+        apply_key(
+            &mut e,
+            key(KeyCode::Char('k'), KeyModifiers::CONTROL),
+            false,
+        );
         assert_eq!(e.text(), "");
 
         let mut e = ed("alpha beta");
-        apply_key(&mut e, key(KeyCode::Char('w'), KeyModifiers::CONTROL), false);
+        apply_key(
+            &mut e,
+            key(KeyCode::Char('w'), KeyModifiers::CONTROL),
+            false,
+        );
         assert_eq!(e.text(), "alpha ");
     }
 

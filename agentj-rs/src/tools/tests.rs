@@ -24,17 +24,30 @@ fn temp_tools() -> (Tools, PathBuf) {
 }
 
 #[tokio::test]
+// HOME_LOCK serializes HOME mutation across async tests; the guard is held across
+// await points intentionally — replacing the global test lock is out of scope.
+#[allow(clippy::await_holding_lock)]
 async fn read_file_reaches_global_skills_but_nothing_else_outside_the_repo() {
-    let _home = crate::util::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _home = crate::util::HOME_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let (t, dir) = temp_tools();
     // Absolute paths outside both the repo and the skills dir stay refused.
     let out = t.call("read_file", &json!({ "path": "/etc/hosts" })).await;
-    assert!(!out.ok, "arbitrary absolute reads must stay confined: {}", out.text);
+    assert!(
+        !out.ok,
+        "arbitrary absolute reads must stay confined: {}",
+        out.text
+    );
     // Relative escapes stay refused.
-    let out = t.call("read_file", &json!({ "path": "../../etc/hosts" })).await;
+    let out = t
+        .call("read_file", &json!({ "path": "../../etc/hosts" }))
+        .await;
     assert!(!out.ok);
     // Writes never get the carve-out, even under the skills dir.
-    let Ok(home) = std::env::var("HOME") else { return };
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
     let skills = PathBuf::from(&home).join(".claude/skills");
     let mine = skills.join(format!("agentj-test-{}", std::process::id()));
     fs::create_dir_all(&mine).unwrap();
@@ -43,7 +56,10 @@ async fn read_file_reaches_global_skills_but_nothing_else_outside_the_repo() {
     let abs = skill_md.to_string_lossy().into_owned();
     let read = t.call("read_file", &json!({ "path": abs })).await;
     let write = t
-        .call("write_file", &json!({ "path": abs, "content": "clobbered" }))
+        .call(
+            "write_file",
+            &json!({ "path": abs, "content": "clobbered" }),
+        )
         .await;
     let cleanup = fs::remove_dir_all(&mine); // clean before asserting so a failure doesn't leak the dir
     assert!(read.ok, "global SKILL.md must be readable: {}", read.text);
@@ -60,14 +76,33 @@ async fn a_scout_scoped_tool_set_refuses_writes_at_dispatch() {
     let scout = base.scoped_to(AgentType::Scout);
     // A scout can read…
     fs::write(dir.join("a.txt"), "x").unwrap();
-    assert!(scout.call("read_file", &json!({ "path": "a.txt" })).await.ok);
+    assert!(
+        scout
+            .call("read_file", &json!({ "path": "a.txt" }))
+            .await
+            .ok
+    );
     // …but writing/editing is refused, naming the type.
-    let o = scout.call("write_file", &json!({ "path": "b.txt", "content": "y" })).await;
+    let o = scout
+        .call("write_file", &json!({ "path": "b.txt", "content": "y" }))
+        .await;
     assert!(!o.ok && o.text.contains("scout"), "{}", o.text);
-    assert!(!scout.call("edit_file", &json!({ "path": "a.txt", "old_string": "x", "new_string": "z" })).await.ok);
+    assert!(
+        !scout
+            .call(
+                "edit_file",
+                &json!({ "path": "a.txt", "old_string": "x", "new_string": "z" })
+            )
+            .await
+            .ok
+    );
     // The executor (default subagent) may write.
     let exec = base.scoped_to(AgentType::Executor);
-    assert!(exec.call("write_file", &json!({ "path": "c.txt", "content": "z" })).await.ok);
+    assert!(
+        exec.call("write_file", &json!({ "path": "c.txt", "content": "z" }))
+            .await
+            .ok
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -75,7 +110,9 @@ async fn a_scout_scoped_tool_set_refuses_writes_at_dispatch() {
 async fn artifact_tools_error_without_a_session_store() {
     // Headless runs have no session; the artifact tools refuse rather than write anywhere.
     let t = tools(); // built with session=None
-    let o = t.call("save_artifact", &json!({ "name": "plan", "content": "x" })).await;
+    let o = t
+        .call("save_artifact", &json!({ "name": "plan", "content": "x" }))
+        .await;
     assert!(!o.ok && o.text.contains("no session"), "{}", o.text);
     let o = t.call("read_artifact", &json!({ "name": "plan" })).await;
     assert!(!o.ok && o.text.contains("no session"), "{}", o.text);
@@ -105,7 +142,9 @@ async fn reading_a_missing_file_reports_not_ok() {
 #[tokio::test]
 async fn reading_an_existing_file_is_ok() {
     // the crate manifest is always present when tests run from the crate root
-    let o = tools().call("read_file", &json!({ "path": "Cargo.toml" })).await;
+    let o = tools()
+        .call("read_file", &json!({ "path": "Cargo.toml" }))
+        .await;
     assert!(o.ok, "expected ok, got: {}", o.text);
 }
 
@@ -116,7 +155,11 @@ async fn list_dir_lists_entries_and_a_missing_path_errors() {
     fs::create_dir_all(dir.join("sub")).unwrap();
     let o = t.call("list_dir", &json!({ "path": "." })).await;
     assert!(o.ok, "expected ok, got: {}", o.text);
-    assert!(o.text.contains("a.txt") && o.text.contains("sub"), "entries listed: {}", o.text);
+    assert!(
+        o.text.contains("a.txt") && o.text.contains("sub"),
+        "entries listed: {}",
+        o.text
+    );
 
     let o = t.call("list_dir", &json!({ "path": "no-such-dir" })).await;
     assert!(!o.ok);
@@ -131,10 +174,18 @@ async fn glob_matches_patterns_and_reports_no_hits() {
     fs::write(dir.join("src/notes.md"), "x").unwrap();
     let o = t.call("glob", &json!({ "pattern": "**/*.rs" })).await;
     assert!(o.ok, "expected ok, got: {}", o.text);
-    assert!(o.text.contains("lib.rs") && !o.text.contains("notes.md"), "rs only: {}", o.text);
+    assert!(
+        o.text.contains("lib.rs") && !o.text.contains("notes.md"),
+        "rs only: {}",
+        o.text
+    );
 
     let o = t.call("glob", &json!({ "pattern": "**/*.zig" })).await;
-    assert!(o.text.to_ascii_lowercase().contains("no"), "no-match message: {}", o.text);
+    assert!(
+        o.text.to_ascii_lowercase().contains("no"),
+        "no-match message: {}",
+        o.text
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -183,7 +234,11 @@ async fn edit_file_replace_all_replaces_every_occurrence() {
         )
         .await;
     assert!(o.ok, "expected ok, got: {}", o.text);
-    assert!(o.text.contains('3'), "expected a count of 3, got: {}", o.text);
+    assert!(
+        o.text.contains('3'),
+        "expected a count of 3, got: {}",
+        o.text
+    );
     assert_eq!(fs::read_to_string(dir.join("f.txt")).unwrap(), "b b b");
 }
 
@@ -208,7 +263,11 @@ async fn edit_file_not_unique_suggests_replace_all() {
 #[tokio::test]
 async fn edit_file_not_found_echoes_the_nearest_match() {
     let (t, dir) = temp_tools();
-    fs::write(dir.join("f.txt"), "fn setup() {\n  let a = 1;\n  let b = 2;\n}\n").unwrap();
+    fs::write(
+        dir.join("f.txt"),
+        "fn setup() {\n  let a = 1;\n  let b = 2;\n}\n",
+    )
+    .unwrap();
     // First line matches the file; the rest has drifted → the error carries the real region,
     // so the fix is one resend instead of a read → retry loop.
     let o = t
@@ -220,7 +279,11 @@ async fn edit_file_not_found_echoes_the_nearest_match() {
     assert!(!o.ok);
     assert!(o.text.contains("not found"), "got: {}", o.text);
     assert!(o.text.contains("Nearest match"), "got: {}", o.text);
-    assert!(o.text.contains("let a = 1;"), "the real region is echoed: {}", o.text);
+    assert!(
+        o.text.contains("let a = 1;"),
+        "the real region is echoed: {}",
+        o.text
+    );
 
     // Nothing anchors → no snippet, plain error.
     let o = t
@@ -243,10 +306,14 @@ async fn writes_under_aj_create_a_self_ignoring_gitignore() {
         )
         .await;
     assert!(o.ok, "{}", o.text);
-    assert_eq!(fs::read_to_string(dir.join(".aj/.gitignore")).unwrap(), "*\n");
+    assert_eq!(
+        fs::read_to_string(dir.join(".aj/.gitignore")).unwrap(),
+        "*\n"
+    );
     // Ordinary writes don't conjure .aj.
     let (t2, dir2) = temp_tools();
-    t2.call("write_file", &json!({ "path": "a.txt", "content": "x" })).await;
+    t2.call("write_file", &json!({ "path": "a.txt", "content": "x" }))
+        .await;
     assert!(!dir2.join(".aj").exists());
 }
 
@@ -265,8 +332,16 @@ async fn batched_edits_apply_in_order_atomically_and_echo_regions() {
         .await;
     assert!(o.ok, "{}", o.text);
     assert!(o.text.contains("2 replacements"), "{}", o.text);
-    assert!(o.text.contains("one();"), "echoes changed region: {}", o.text);
-    assert!(o.text.contains("three();"), "echoes second region: {}", o.text);
+    assert!(
+        o.text.contains("one();"),
+        "echoes changed region: {}",
+        o.text
+    );
+    assert!(
+        o.text.contains("three();"),
+        "echoes second region: {}",
+        o.text
+    );
     let now = fs::read_to_string(dir.join("f.rs")).unwrap();
     assert!(now.contains("one();") && now.contains("three();"));
 
@@ -281,7 +356,11 @@ async fn batched_edits_apply_in_order_atomically_and_echo_regions() {
         )
         .await;
     assert!(!o.ok);
-    assert!(o.text.contains("edit 2/2"), "names the failing op: {}", o.text);
+    assert!(
+        o.text.contains("edit 2/2"),
+        "names the failing op: {}",
+        o.text
+    );
     let now = fs::read_to_string(dir.join("f.rs")).unwrap();
     assert!(!now.contains("two();"), "nothing written on batch failure");
 }
@@ -289,7 +368,11 @@ async fn batched_edits_apply_in_order_atomically_and_echo_regions() {
 #[tokio::test]
 async fn edit_lines_replaces_a_range_and_rejects_a_drifted_anchor() {
     let (t, dir) = temp_tools();
-    fs::write(dir.join("s.ts"), "const a = 1;\nconst b = 2;\nconst c = 3;\n").unwrap();
+    fs::write(
+        dir.join("s.ts"),
+        "const a = 1;\nconst b = 2;\nconst c = 3;\n",
+    )
+    .unwrap();
     let o = t
         .call(
             "edit_lines",
@@ -297,9 +380,16 @@ async fn edit_lines_replaces_a_range_and_rejects_a_drifted_anchor() {
         )
         .await;
     assert!(o.ok, "{}", o.text);
-    assert!(o.text.contains("const b = 22;"), "echoes the new region: {}", o.text);
+    assert!(
+        o.text.contains("const b = 22;"),
+        "echoes the new region: {}",
+        o.text
+    );
     let now = fs::read_to_string(dir.join("s.ts")).unwrap();
-    assert_eq!(now, "const a = 1;\nconst b = 22;\nconst b2 = 23;\nconst c = 3;\n");
+    assert_eq!(
+        now,
+        "const a = 1;\nconst b = 22;\nconst b2 = 23;\nconst c = 3;\n"
+    );
 
     // Drifted anchor: expect doesn't match → error carries the current region to re-anchor from.
     let o = t
@@ -309,7 +399,11 @@ async fn edit_lines_replaces_a_range_and_rejects_a_drifted_anchor() {
         )
         .await;
     assert!(!o.ok);
-    assert!(o.text.contains("const b = 22;"), "shows current region: {}", o.text);
+    assert!(
+        o.text.contains("const b = 22;"),
+        "shows current region: {}",
+        o.text
+    );
 }
 
 #[tokio::test]
@@ -319,14 +413,20 @@ async fn edits_fail_stale_when_the_file_changed_since_the_last_read() {
     let _ = t.call("read_file", &json!({ "path": "w.txt" })).await; // stamps
     fs::write(dir.join("w.txt"), "alpha\nbeta (external change)\n").unwrap();
     let o = t
-        .call("edit_file", &json!({ "path": "w.txt", "old_string": "alpha", "new_string": "gamma" }))
+        .call(
+            "edit_file",
+            &json!({ "path": "w.txt", "old_string": "alpha", "new_string": "gamma" }),
+        )
         .await;
     assert!(!o.ok);
     assert!(o.text.contains("changed on disk"), "{}", o.text);
     // Re-reading refreshes the stamp; the edit then succeeds.
     let _ = t.call("read_file", &json!({ "path": "w.txt" })).await;
     let o = t
-        .call("edit_file", &json!({ "path": "w.txt", "old_string": "alpha", "new_string": "gamma" }))
+        .call(
+            "edit_file",
+            &json!({ "path": "w.txt", "old_string": "alpha", "new_string": "gamma" }),
+        )
         .await;
     assert!(o.ok, "{}", o.text);
 }
@@ -335,8 +435,17 @@ async fn edits_fail_stale_when_the_file_changed_since_the_last_read() {
 fn ask_user_is_advertised_only_to_the_interactive_primary() {
     use crate::agent::AgentType;
     let has = |specs: &[crate::provider::ToolSpec]| specs.iter().any(|s| s.name == "ask_user");
-    assert!(has(&tool_specs(true, true, None)), "primary with a session store asks");
-    assert!(!has(&tool_specs(true, false, None)), "headless --once cannot ask");
+    assert!(
+        has(&tool_specs(true, true, None)),
+        "primary with a session store asks"
+    );
+    assert!(
+        !has(&tool_specs(true, false, None)),
+        "headless --once cannot ask"
+    );
     assert!(!has(&tool_specs(false, true, None)), "subagents cannot ask");
-    assert!(!has(&tool_specs(false, true, Some(AgentType::Scout))), "typed subagents cannot ask");
+    assert!(
+        !has(&tool_specs(false, true, Some(AgentType::Scout))),
+        "typed subagents cannot ask"
+    );
 }

@@ -39,7 +39,10 @@ pub(super) fn cap_result(s: &str, cap: usize) -> String {
         let t: Vec<char> = s.chars().collect();
         t[t.len() - cap / 4..].iter().collect()
     };
-    format!("{head}\n… [subagent result truncated — {} chars omitted] …\n{tail}", s.chars().count() - cap)
+    format!(
+        "{head}\n… [subagent result truncated — {} chars omitted] …\n{tail}",
+        s.chars().count() - cap
+    )
 }
 
 /// The label a subagent shows in the tray: the model-supplied `title` when present, else the first
@@ -142,16 +145,27 @@ pub(super) async fn run_delegate(
                     let after = t
                         .get("after")
                         .and_then(|x| x.as_array())
-                        .map(|a| a.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                                .collect()
+                        })
                         .unwrap_or_default();
-                    Some(TaskDef { task, context, label, kind, after })
+                    Some(TaskDef {
+                        task,
+                        context,
+                        label,
+                        kind,
+                        after,
+                    })
                 })
                 .collect()
         })
         .unwrap_or_default();
     if tasks.is_empty() {
         return (
-            "error: run_subagents needs a non-empty `tasks` array of { task, context?, after? }".to_string(),
+            "error: run_subagents needs a non-empty `tasks` array of { task, context?, after? }"
+                .to_string(),
             false,
         );
     }
@@ -223,8 +237,7 @@ pub(super) async fn run_delegate(
                     Some(c) => format!("{task}\n\nContext:\n{c}"),
                     None => task,
                 };
-                let mut sub_msgs =
-                    vec![ChatMessage::system(sub_system), ChatMessage::user(prompt)];
+                let mut sub_msgs = vec![ChatMessage::system(sub_system), ChatMessage::user(prompt)];
                 let (atx, mut arx) = unbounded_channel::<AgentEvent>();
 
                 let fwd = parent.clone();
@@ -275,7 +288,11 @@ pub(super) async fn run_delegate(
                     summary,
                     elapsed_ms: started.elapsed().as_millis() as u64,
                 });
-                SubResult { index: i, result, ok }
+                SubResult {
+                    index: i,
+                    result,
+                    ok,
+                }
             });
             task_index.insert(handle.id(), i);
         }
@@ -285,7 +302,10 @@ pub(super) async fn run_delegate(
             match joined {
                 Ok((_, sub)) => results[sub.index] = Some((sub.result, sub.ok)),
                 Err(join_err) => {
-                    let index = task_index.get(&join_err.id()).copied().unwrap_or(usize::MAX);
+                    let index = task_index
+                        .get(&join_err.id())
+                        .copied()
+                        .unwrap_or(usize::MAX);
                     let _ = tx.send(AgentEvent::SubagentEnd {
                         id: index,
                         ok: false,
@@ -300,7 +320,9 @@ pub(super) async fn run_delegate(
         }
     }
 
-    let all_ok = results.iter().all(|r| r.as_ref().is_some_and(|(_, ok)| *ok));
+    let all_ok = results
+        .iter()
+        .all(|r| r.as_ref().is_some_and(|(_, ok)| *ok));
     let joined = (0..n)
         .map(|i| {
             let body = match &results[i] {
@@ -333,15 +355,24 @@ mod tests {
 
     #[test]
     fn independent_tasks_are_all_stage_zero() {
-        assert_eq!(stage_levels(&defs(&[&[], &[], &[]])).unwrap(), vec![0, 0, 0]);
+        assert_eq!(
+            stage_levels(&defs(&[&[], &[], &[]])).unwrap(),
+            vec![0, 0, 0]
+        );
     }
 
     #[test]
     fn a_dependent_task_runs_after_its_prerequisites() {
         // scouts 0 and 1 at stage 0; planner 2 depends on both → stage 1.
-        assert_eq!(stage_levels(&defs(&[&[], &[], &[0, 1]])).unwrap(), vec![0, 0, 1]);
+        assert_eq!(
+            stage_levels(&defs(&[&[], &[], &[0, 1]])).unwrap(),
+            vec![0, 0, 1]
+        );
         // a chain 0 → 1 → 2 stages each one deeper.
-        assert_eq!(stage_levels(&defs(&[&[], &[0], &[1]])).unwrap(), vec![0, 1, 2]);
+        assert_eq!(
+            stage_levels(&defs(&[&[], &[0], &[1]])).unwrap(),
+            vec![0, 1, 2]
+        );
     }
 
     #[test]

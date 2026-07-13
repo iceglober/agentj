@@ -28,7 +28,14 @@ pub(super) fn jobs_panel(app: &App, now: Instant) -> Vec<Line<'static>> {
     let jobs = &app.jobs;
     let show = jobs.len().min(JOBS_PANEL_MAX);
     for job in jobs.iter().take(show) {
-        let cmd: String = job.command.lines().next().unwrap_or_default().chars().take(44).collect();
+        let cmd: String = job
+            .command
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(44)
+            .collect();
         let elapsed = fmt_mmss(now.saturating_duration_since(job.started).as_secs());
         let mut spans = vec![
             Span::styled(" ⚙ ", theme::accent()),
@@ -37,7 +44,10 @@ pub(super) fn jobs_panel(app: &App, now: Instant) -> Vec<Line<'static>> {
             Span::styled(format!(" · {elapsed}"), theme::dim()),
         ];
         if let Some(t) = job.timeout {
-            spans.push(Span::styled(format!(" · ⏱{}", fmt_mmss(t.as_secs())), theme::dim()));
+            spans.push(Span::styled(
+                format!(" · ⏱{}", fmt_mmss(t.as_secs())),
+                theme::dim(),
+            ));
         }
         lines.push(Line::from(spans));
     }
@@ -118,7 +128,11 @@ pub(super) fn subagent_panel(app: &App, now: Instant, width: u16) -> Vec<Line<'s
     }
 
     let overflow = total > SUBAGENT_TRAY_MAX;
-    let show = if overflow { SUBAGENT_TRAY_MAX - 1 } else { total };
+    let show = if overflow {
+        SUBAGENT_TRAY_MAX - 1
+    } else {
+        total
+    };
     // With an overflow line the fan must not close on the last visible row — the "… and N more"
     // line is the one that ends the block.
     let fan = if overflow { show + 1 } else { total };
@@ -137,8 +151,8 @@ pub(super) fn subagent_panel(app: &App, now: Instant, width: u16) -> Vec<Line<'s
 
         // Glyph after the connector: staggered spinner while running (bold during the activity
         // flash), ✓/✗ done.
-        let flashing = row.done.is_none()
-            && now.saturating_duration_since(row.last_activity) < ACTIVITY_FLASH;
+        let flashing =
+            row.done.is_none() && now.saturating_duration_since(row.last_activity) < ACTIVITY_FLASH;
         let glyph = match row.done {
             Some(true) => Span::styled(" ✓ ", theme::ok()),
             Some(false) => Span::styled(" ✗ ", theme::err()),

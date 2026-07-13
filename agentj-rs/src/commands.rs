@@ -15,7 +15,8 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/task",
         takes_arg: true,
-        summary: "wipe + re-key the worktree onto a PR/branch (or a fresh branch), then start the task",
+        summary:
+            "wipe + re-key the worktree onto a PR/branch (or a fresh branch), then start the task",
     },
     SlashCommand {
         name: "/init",
@@ -152,9 +153,15 @@ mod tests {
         // case-insensitive
         assert!(fuzzy_score("/TA", "/task").is_some());
         // empty pattern matches everything
-        assert_eq!(fuzzy_commands("", SLASH_COMMANDS).len(), SLASH_COMMANDS.len());
+        assert_eq!(
+            fuzzy_commands("", SLASH_COMMANDS).len(),
+            SLASH_COMMANDS.len()
+        );
         // "/" matches all commands (they all start with /)
-        assert_eq!(fuzzy_commands("/", SLASH_COMMANDS).len(), SLASH_COMMANDS.len());
+        assert_eq!(
+            fuzzy_commands("/", SLASH_COMMANDS).len(),
+            SLASH_COMMANDS.len()
+        );
         // "/t" ranks /task first
         assert_eq!(fuzzy_commands("/t", SLASH_COMMANDS)[0].name, "/task");
         // garbage filters everything out

@@ -35,13 +35,19 @@ pub fn wrap_cells(cells: &[(char, Style)], width: usize) -> Vec<PhysRow> {
     let width = width.max(1);
     let n = cells.len();
     if n == 0 {
-        return vec![PhysRow { cells: Vec::new(), char_start: 0 }];
+        return vec![PhysRow {
+            cells: Vec::new(),
+            char_start: 0,
+        }];
     }
     let mut rows = Vec::new();
     let mut i = 0;
     while i < n {
         if n - i <= width {
-            rows.push(PhysRow { cells: cells[i..n].to_vec(), char_start: i });
+            rows.push(PhysRow {
+                cells: cells[i..n].to_vec(),
+                char_start: i,
+            });
             break;
         }
         // Must break within [i, i+width]. Prefer the last space at or before the row cap so the space
@@ -50,11 +56,17 @@ pub fn wrap_cells(cells: &[(char, Style)], width: usize) -> Vec<PhysRow> {
         let brk = (i..=cap).rev().find(|&k| cells[k].0 == ' ');
         match brk {
             Some(sp) if sp > i => {
-                rows.push(PhysRow { cells: cells[i..sp].to_vec(), char_start: i });
+                rows.push(PhysRow {
+                    cells: cells[i..sp].to_vec(),
+                    char_start: i,
+                });
                 i = sp + 1; // consume the break space
             }
             _ => {
-                rows.push(PhysRow { cells: cells[i..cap].to_vec(), char_start: i });
+                rows.push(PhysRow {
+                    cells: cells[i..cap].to_vec(),
+                    char_start: i,
+                });
                 i = cap;
             }
         }
@@ -108,8 +120,14 @@ mod tests {
     fn breaks_at_spaces_and_consumes_them() {
         let rows = wrap_cells(&cells("hello world foo"), 6);
         // "hello " -> "hello"(0..5), "world "(6..11), "foo"(12..15); break spaces consumed.
-        assert_eq!(rows.iter().map(|r| plain(&r.cells)).collect::<Vec<_>>(), ["hello", "world", "foo"]);
-        assert_eq!(rows.iter().map(|r| r.char_start).collect::<Vec<_>>(), [0, 6, 12]);
+        assert_eq!(
+            rows.iter().map(|r| plain(&r.cells)).collect::<Vec<_>>(),
+            ["hello", "world", "foo"]
+        );
+        assert_eq!(
+            rows.iter().map(|r| r.char_start).collect::<Vec<_>>(),
+            [0, 6, 12]
+        );
     }
 
     #[test]
@@ -117,7 +135,11 @@ mod tests {
         let rows = wrap_cells(&cells("supercalifragilistic"), 6);
         assert_eq!(rows[0].char_start, 0);
         assert_eq!(rows[1].char_start, 6);
-        assert_eq!(rows.iter().map(|r| r.cells.len()).sum::<usize>(), 20, "no chars lost");
+        assert_eq!(
+            rows.iter().map(|r| r.cells.len()).sum::<usize>(),
+            20,
+            "no chars lost"
+        );
         assert_eq!(plain(&rows[0].cells), "superc");
     }
 
@@ -132,7 +154,13 @@ mod tests {
 
     #[test]
     fn empty_line_occupies_one_row() {
-        assert_eq!(wrap_cells(&[], 10), vec![PhysRow { cells: vec![], char_start: 0 }]);
+        assert_eq!(
+            wrap_cells(&[], 10),
+            vec![PhysRow {
+                cells: vec![],
+                char_start: 0
+            }]
+        );
     }
 
     #[test]

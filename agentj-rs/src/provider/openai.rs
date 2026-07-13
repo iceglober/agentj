@@ -81,7 +81,10 @@ impl OpenAiProvider {
             }
             return parse_turn(&text);
         }
-        Err(last_err.context(format!("giving up after {} attempts", RETRY_BACKOFF_MS.len())))
+        Err(last_err.context(format!(
+            "giving up after {} attempts",
+            RETRY_BACKOFF_MS.len()
+        )))
     }
 }
 
@@ -116,11 +119,15 @@ pub async fn list_models(
     if let Some(v) = api_version {
         req = req.query(&[("api-version", v)]);
     }
-    let Ok(resp) = req.send().await else { return Vec::new() };
+    let Ok(resp) = req.send().await else {
+        return Vec::new();
+    };
     if !resp.status().is_success() {
         return Vec::new();
     }
-    let Ok(text) = resp.text().await else { return Vec::new() };
+    let Ok(text) = resp.text().await else {
+        return Vec::new();
+    };
     let mut ids: Vec<String> = serde_json::from_str::<ModelList>(&text)
         .map(|l| l.data.into_iter().map(|m| m.id).collect())
         .unwrap_or_default();
@@ -143,7 +150,10 @@ fn parse_turn(text: &str) -> anyhow::Result<AssistantTurn> {
         .ok_or_else(|| anyhow::anyhow!("no choices in response"))?;
     Ok(AssistantTurn {
         content: choice.message.content,
-        reasoning: choice.message.reasoning_content.or(choice.message.reasoning),
+        reasoning: choice
+            .message
+            .reasoning_content
+            .or(choice.message.reasoning),
         tool_calls: choice.message.tool_calls,
         finish_reason: choice.finish_reason.unwrap_or_default(),
         usage,
@@ -262,24 +272,42 @@ mod tests {
     #[tokio::test]
     async fn retries_transient_errors_then_succeeds() {
         let (url, hits) = scripted_server(vec![(503, "{}"), (429, "{}"), (200, OK_BODY)]).await;
-        let turn = provider(&url).chat(&[], &[]).await.expect("retries should recover");
+        let turn = provider(&url)
+            .chat(&[], &[])
+            .await
+            .expect("retries should recover");
         assert_eq!(turn.content.as_deref(), Some("hi"));
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
     async fn does_not_retry_client_errors() {
-        let (url, hits) = scripted_server(vec![(400, r#"{"error":"bad request"}"#), (200, OK_BODY)]).await;
-        let err = provider(&url).chat(&[], &[]).await.expect_err("400 must fail fast");
+        let (url, hits) =
+            scripted_server(vec![(400, r#"{"error":"bad request"}"#), (200, OK_BODY)]).await;
+        let err = provider(&url)
+            .chat(&[], &[])
+            .await
+            .expect_err("400 must fail fast");
         assert!(err.to_string().contains("HTTP 400"));
-        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "no retry on 4xx");
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "no retry on 4xx"
+        );
     }
 
     #[tokio::test]
     async fn gives_up_after_the_backoff_schedule() {
-        let (url, hits) = scripted_server(vec![(503, "{}"), (503, "{}"), (503, "{}"), (200, OK_BODY)]).await;
-        let err = provider(&url).chat(&[], &[]).await.expect_err("persistent 503 fails");
-        assert!(err.to_string().contains("giving up after 3 attempts"), "{err}");
+        let (url, hits) =
+            scripted_server(vec![(503, "{}"), (503, "{}"), (503, "{}"), (200, OK_BODY)]).await;
+        let err = provider(&url)
+            .chat(&[], &[])
+            .await
+            .expect_err("persistent 503 fails");
+        assert!(
+            err.to_string().contains("giving up after 3 attempts"),
+            "{err}"
+        );
         assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
@@ -299,7 +327,9 @@ mod tests {
 
     #[test]
     fn reasoning_content_is_parsed_from_either_key_and_absent_when_missing() {
-        let a = parse(r#"{"choices":[{"message":{"content":"hi","reasoning_content":"let me think"}}]}"#);
+        let a = parse(
+            r#"{"choices":[{"message":{"content":"hi","reasoning_content":"let me think"}}]}"#,
+        );
         assert_eq!(a.reasoning.as_deref(), Some("let me think"));
         // The alternate `reasoning` key also works.
         let b = parse(r#"{"choices":[{"message":{"content":"hi","reasoning":"pondering"}}]}"#);

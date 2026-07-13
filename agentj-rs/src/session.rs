@@ -45,7 +45,10 @@ pub struct Session {
 }
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// `~/.config/aj/sessions`, the global store root (consistent with the app config at `~/.config/aj`).
@@ -65,10 +68,20 @@ fn canonical(path: &str) -> String {
 fn safe_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = cleaned.trim_matches(['.', '-']);
-    if trimmed.is_empty() { "artifact".to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        "artifact".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 impl Session {
@@ -86,7 +99,10 @@ impl Session {
     }
 
     fn write_meta(&self, m: &Meta) -> io::Result<()> {
-        std::fs::write(Self::meta_path(&self.dir), serde_json::to_string_pretty(m).map_err(io::Error::other)?)
+        std::fs::write(
+            Self::meta_path(&self.dir),
+            serde_json::to_string_pretty(m).map_err(io::Error::other)?,
+        )
     }
 
     /// Mint a brand-new session for `worktree`. Fresh: it owns no artifacts.
@@ -121,8 +137,12 @@ impl Session {
         let mut best: Option<(u64, Session)> = None;
         for entry in std::fs::read_dir(&root).ok()?.flatten() {
             let dir = entry.path();
-            let Ok(text) = std::fs::read_to_string(Self::meta_path(&dir)) else { continue };
-            let Ok(m) = serde_json::from_str::<Meta>(&text) else { continue };
+            let Ok(text) = std::fs::read_to_string(Self::meta_path(&dir)) else {
+                continue;
+            };
+            let Ok(m) = serde_json::from_str::<Meta>(&text) else {
+                continue;
+            };
             if m.worktree != want {
                 continue;
             }
@@ -259,7 +279,10 @@ impl Session {
     #[cfg(test)]
     pub(crate) fn at_dir(dir: PathBuf) -> Session {
         std::fs::create_dir_all(dir.join("artifacts")).unwrap();
-        Session { id: "test-session".into(), dir }
+        Session {
+            id: "test-session".into(),
+            dir,
+        }
     }
 }
 
@@ -304,12 +327,17 @@ mod tests {
     impl TempHome {
         fn new(tag: &str) -> Self {
             let guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            let dir = std::env::temp_dir().join(format!("agentj-sess-{tag}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("agentj-sess-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let prev = std::env::var("HOME").ok();
             std::env::set_var("HOME", &dir);
-            TempHome { _dir: dir, prev, _guard: guard }
+            TempHome {
+                _dir: dir,
+                prev,
+                _guard: guard,
+            }
         }
     }
     impl Drop for TempHome {
@@ -328,9 +356,13 @@ mod tests {
         let wt = std::env::temp_dir().to_string_lossy().into_owned();
         let s = Session::mint(&wt, Some("main".into())).unwrap();
         assert!(!s.id.is_empty());
-        assert!(s.read_artifact("plan").is_none(), "a fresh session owns no artifacts");
+        assert!(
+            s.read_artifact("plan").is_none(),
+            "a fresh session owns no artifacts"
+        );
 
-        s.save_artifact("plan", "# do the thing\n- pending: build it").unwrap();
+        s.save_artifact("plan", "# do the thing\n- pending: build it")
+            .unwrap();
         let reloaded = Session::load(&s.id).unwrap();
         assert_eq!(
             reloaded.read_artifact("plan").as_deref(),
@@ -346,7 +378,10 @@ mod tests {
         let s = Session::mint(&wt, None).unwrap();
 
         let path = s.save_artifact("todos", "- [ ] a").unwrap();
-        assert!(path.to_string_lossy().ends_with("todos"), "stored under the bare name");
+        assert!(
+            path.to_string_lossy().ends_with("todos"),
+            "stored under the bare name"
+        );
         assert_eq!(s.read_artifact("todos").as_deref(), Some("- [ ] a"));
 
         // Re-saving the same name overwrites in place.
@@ -357,8 +392,14 @@ mod tests {
     #[test]
     fn most_recent_for_matches_the_worktree_and_picks_the_latest() {
         let _home = TempHome::new("recent");
-        let a = std::env::temp_dir().join("wt-a").to_string_lossy().into_owned();
-        let b = std::env::temp_dir().join("wt-b").to_string_lossy().into_owned();
+        let a = std::env::temp_dir()
+            .join("wt-a")
+            .to_string_lossy()
+            .into_owned();
+        let b = std::env::temp_dir()
+            .join("wt-b")
+            .to_string_lossy()
+            .into_owned();
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
 
@@ -374,7 +415,10 @@ mod tests {
         assert_ne!(found.id, s1.id);
 
         // A worktree with no sessions resolves to nothing (a fresh place stays fresh).
-        let c = std::env::temp_dir().join("wt-c").to_string_lossy().into_owned();
+        let c = std::env::temp_dir()
+            .join("wt-c")
+            .to_string_lossy()
+            .into_owned();
         std::fs::create_dir_all(&c).unwrap();
         assert!(Session::most_recent_for(&c).is_none());
     }
@@ -412,7 +456,10 @@ mod tests {
         let _home = TempHome::new("hist");
         let wt = std::env::temp_dir().to_string_lossy().into_owned();
         let s = Session::mint(&wt, None).unwrap();
-        assert!(s.load_history().is_empty(), "a fresh session has no conversation");
+        assert!(
+            s.load_history().is_empty(),
+            "a fresh session has no conversation"
+        );
 
         s.append_history(&[ChatMessage::user("hello")]).unwrap();
         s.append_history(&[
@@ -438,13 +485,18 @@ mod tests {
         let _home = TempHome::new("corrupt");
         let wt = std::env::temp_dir().to_string_lossy().into_owned();
         let s = Session::mint(&wt, None).unwrap();
-        s.append_history(&[ChatMessage::user("a"), ChatMessage::user("b")]).unwrap();
+        s.append_history(&[ChatMessage::user("a"), ChatMessage::user("b")])
+            .unwrap();
         // Simulate a crash mid-append: a partial line, then a line that would otherwise parse.
         let path = s.history_path();
-        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         f.write_all(b"{\"role\":\"user\",\"cont").unwrap();
         drop(f);
-        s.append_history(&[ChatMessage::user("after-crash")]).unwrap();
+        s.append_history(&[ChatMessage::user("after-crash")])
+            .unwrap();
 
         let loaded = s.load_history();
         // The partial line and everything after it are dropped — an intact prefix only.
@@ -459,7 +511,8 @@ mod tests {
         let s = Session::mint(&wt, None).unwrap();
         s.append_history(&[ChatMessage::user("go")]).unwrap();
         // An assistant asking for two tools but only one reply persisted (torn commit).
-        s.append_history(&[assistant_with_calls(&["c1", "c2"]), tool_reply("c1")]).unwrap();
+        s.append_history(&[assistant_with_calls(&["c1", "c2"]), tool_reply("c1")])
+            .unwrap();
 
         let loaded = s.load_history();
         assert_eq!(loaded.len(), 1, "the incomplete tool-call group is cut");
@@ -471,8 +524,10 @@ mod tests {
         let _home = TempHome::new("rewrite");
         let wt = std::env::temp_dir().to_string_lossy().into_owned();
         let s = Session::mint(&wt, None).unwrap();
-        s.append_history(&[ChatMessage::user("old conversation")]).unwrap();
-        s.rewrite_history(&[ChatMessage::user("fresh start")]).unwrap();
+        s.append_history(&[ChatMessage::user("old conversation")])
+            .unwrap();
+        s.rewrite_history(&[ChatMessage::user("fresh start")])
+            .unwrap();
         let loaded = s.load_history();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].content.as_deref(), Some("fresh start"));
@@ -488,7 +543,11 @@ mod tests {
             assistant_with_calls(&["a", "b"]),
             tool_reply("a"),
             tool_reply("b"),
-            ChatMessage { role: "assistant".into(), content: Some("r".into()), ..Default::default() },
+            ChatMessage {
+                role: "assistant".into(),
+                content: Some("r".into()),
+                ..Default::default()
+            },
         ];
         assert_eq!(well_formed_prefix(&msgs), msgs.len());
     }

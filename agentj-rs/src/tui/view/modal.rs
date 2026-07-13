@@ -61,10 +61,19 @@ pub(super) fn render_menu_modal(f: &mut Frame, app: &App, area: ratatui::layout:
         ]));
     }
     lines.push(Line::default());
-    lines.push(Line::from(Span::styled("Session tokens", theme::accent_bold())));
+    lines.push(Line::from(Span::styled(
+        "Session tokens",
+        theme::accent_bold(),
+    )));
     let t = &app.tokens;
     lines.push(Line::from(Span::styled(
-        token_row("primary", t.primary_in, t.primary_cached, t.primary_out, t.primary_calls),
+        token_row(
+            "primary",
+            t.primary_in,
+            t.primary_cached,
+            t.primary_out,
+            t.primary_calls,
+        ),
         theme::muted(),
     )));
     lines.push(Line::from(Span::styled(
@@ -119,12 +128,18 @@ pub(super) fn render_mcp_modal(f: &mut Frame, app: &App, area: ratatui::layout::
             McpOutcome::Ok(n) => Line::from(vec![
                 Span::styled("✓ ", theme::ok()),
                 Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
-                Span::styled(format!("{n} tool{}", if *n == 1 { "" } else { "s" }), theme::dim()),
+                Span::styled(
+                    format!("{n} tool{}", if *n == 1 { "" } else { "s" }),
+                    theme::dim(),
+                ),
             ]),
             McpOutcome::NeedsAuth => Line::from(vec![
                 Span::styled("✎ ", theme::accent()),
                 Span::styled(format!("{:<16}", trunc(&s.name, 16)), theme::muted()),
-                Span::styled(format!("needs authorization — /mcp login {}", s.name), theme::dim()),
+                Span::styled(
+                    format!("needs authorization — /mcp login {}", s.name),
+                    theme::dim(),
+                ),
             ]),
             McpOutcome::Err(e) => Line::from(vec![
                 Span::styled("✗ ", theme::err()),
@@ -172,7 +187,11 @@ pub(super) fn render_setup_modal(f: &mut Frame, app: &App, area: ratatui::layout
     let cur = step_index(w.step);
     let masked_key = "•".repeat(w.api_key.chars().count());
     let fields = [
-        (SetupStep::Provider, "Provider", w.provider.map(provider_label).unwrap_or_default()),
+        (
+            SetupStep::Provider,
+            "Provider",
+            w.provider.map(provider_label).unwrap_or_default(),
+        ),
         (SetupStep::BaseUrl, "Base URL", w.base_url.clone()),
         (SetupStep::ApiKey, "API key", masked_key),
         (SetupStep::Model, "Model", String::new()),
@@ -198,24 +217,37 @@ pub(super) fn render_setup_modal(f: &mut Frame, app: &App, area: ratatui::layout
             String::new()
         };
         let marker = if active { "› " } else { "  " };
-        let label_style = if active { theme::accent() } else { theme::dim() };
+        let label_style = if active {
+            theme::accent()
+        } else {
+            theme::dim()
+        };
         let prefix = format!("{marker}{label:<9} "); // 2 + 9 + 1 = 12 cols before the value
         if active {
-            cursor = Some((lines.len() as u16, prefix.chars().count() as u16 + value.chars().count() as u16));
+            cursor = Some((
+                lines.len() as u16,
+                prefix.chars().count() as u16 + value.chars().count() as u16,
+            ));
         }
         lines.push(Line::from(vec![
             Span::styled(prefix, label_style),
             Span::raw(value),
         ]));
         if active && *step == SetupStep::Provider {
-            lines.push(Line::from(Span::styled("            1) azure    2) custom", theme::dim())));
+            lines.push(Line::from(Span::styled(
+                "            1) azure    2) custom",
+                theme::dim(),
+            )));
         }
     }
     lines.push(Line::default());
     if let Some(err) = &w.error {
         lines.push(Line::from(Span::styled(format!("✗ {err}"), theme::err())));
     }
-    lines.push(Line::from(Span::styled("Enter: continue    Esc: cancel", theme::dim())));
+    lines.push(Line::from(Span::styled(
+        "Enter: continue    Esc: cancel",
+        theme::dim(),
+    )));
 
     let mw = 66.min(area.width.saturating_sub(4)).max(20);
     let mh = (lines.len() as u16 + 3).min(area.height); // + top/bottom border + 1 top padding row

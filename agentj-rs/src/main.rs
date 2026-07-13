@@ -6,6 +6,7 @@ mod commands;
 mod config;
 mod events;
 mod exec;
+mod hooks;
 mod jobs;
 mod mcp;
 mod model;
@@ -15,7 +16,6 @@ mod rekey;
 mod session;
 mod tools;
 mod tui;
-mod hooks;
 mod util;
 mod worktree;
 
@@ -149,7 +149,10 @@ async fn run_mcp(sub: &[String]) {
                 match s.outcome {
                     mcp::client::McpOutcome::Ok(n) => println!("  ✓ {:20} {n} tool(s)", s.name),
                     mcp::client::McpOutcome::NeedsAuth => {
-                        println!("  ✎ {:20} needs authorization — `agentj mcp login {}`", s.name, s.name)
+                        println!(
+                            "  ✎ {:20} needs authorization — `agentj mcp login {}`",
+                            s.name, s.name
+                        )
                     }
                     mcp::client::McpOutcome::Err(e) => println!("  ✗ {:20} {e}", s.name),
                 }
@@ -170,7 +173,9 @@ async fn run_mcp(sub: &[String]) {
                 return;
             };
             match mcp::oauth::login(&url, |m| println!("  {m}")).await {
-                Ok(()) => println!("✓ {name} authorized — it will connect automatically from now on"),
+                Ok(()) => {
+                    println!("✓ {name} authorized — it will connect automatically from now on")
+                }
                 Err(e) => println!("✗ authorization failed: {e}"),
             }
         }
@@ -179,7 +184,11 @@ async fn run_mcp(sub: &[String]) {
                 println!("usage: agentj mcp logout <server-name>");
                 return;
             };
-            match configs.iter().find(|c| &c.name == name).and_then(|c| c.url.clone()) {
+            match configs
+                .iter()
+                .find(|c| &c.name == name)
+                .and_then(|c| c.url.clone())
+            {
                 Some(url) => {
                     mcp::oauth::forget(&url);
                     println!("✓ {name}: cached credentials removed");
@@ -216,7 +225,9 @@ async fn main() {
     let hook_runs = hooks::run_startup(&root).await;
     let app_cfg = config::AppConfig::load(&root);
 
-    let provider = args.provider.unwrap_or_else(|| resolve_provider(None, &app_cfg));
+    let provider = args
+        .provider
+        .unwrap_or_else(|| resolve_provider(None, &app_cfg));
     let sel = Selector {
         provider,
         model: args.model.as_deref(),
@@ -228,12 +239,18 @@ async fn main() {
     // of exiting — the user configures a provider in-app. Headless (`--once`) still hard-errors.
     let (llm, provider_name, model_id, needs_setup) = match preflight(&sel, &app_cfg)
         .and_then(|_| resolve_model(&sel, &app_cfg))
-        .and_then(|cfg| Llm::from_config(&cfg).map(|l| (cfg, l)).map_err(|e| e.to_string()))
-    {
+        .and_then(|cfg| {
+            Llm::from_config(&cfg)
+                .map(|l| (cfg, l))
+                .map_err(|e| e.to_string())
+        }) {
         Ok((cfg, llm)) => (llm, cfg.provider.as_str().to_string(), cfg.model_id, false),
-        Err(_) if interactive => {
-            (Llm::Unconfigured, provider.as_str().to_string(), "(none)".to_string(), true)
-        }
+        Err(_) if interactive => (
+            Llm::Unconfigured,
+            provider.as_str().to_string(),
+            "(none)".to_string(),
+            true,
+        ),
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
@@ -300,7 +317,10 @@ async fn main() {
     };
     // The persisted conversation of a resumed session (empty for a fresh one). Loaded once here;
     // the TUI seeds its model history from it and replays it into the transcript.
-    let restored = session.as_ref().map(|s| s.load_history()).unwrap_or_default();
+    let restored = session
+        .as_ref()
+        .map(|s| s.load_history())
+        .unwrap_or_default();
 
     let jobs = jobs::JobManager::new(root.clone());
     // Kept so every exit path below can kill MCP child-process trees (else an orphaned mcp-remote

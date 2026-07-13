@@ -18,9 +18,15 @@ pub enum UiMsg {
     /// The turn task finished (natural completion or clean stop).
     TurnDone,
     /// A `/task` re-key finished off-thread; carries its result and the task directive to start.
-    RekeyDone { rk: RekeyResult, desc: String },
+    RekeyDone {
+        rk: RekeyResult,
+        desc: String,
+    },
     /// An `/mcp login` flow finished; on success the loop reconnects MCP and rebuilds the session.
-    McpAuthDone { name: String, result: Result<(), String> },
+    McpAuthDone {
+        name: String,
+        result: Result<(), String>,
+    },
     /// A background MCP reconnect finished — the loop swaps these into a fresh `Session`.
     McpReconnected {
         clients: crate::mcp::client::McpClients,
@@ -48,7 +54,10 @@ pub enum AppEffect {
     /// Spawn a turn from the current committed history; the loop stores the handle in `App::turn`.
     SpawnTurn,
     /// Run a `/task` re-key, then feed the result back via `apply_rekey_result`.
-    Rekey { reference: String, desc: String },
+    Rekey {
+        reference: String,
+        desc: String,
+    },
     /// SIGKILL background jobs started at or after this watermark (an interrupted turn's jobs).
     KillJobsAfter(u64),
     /// `/init`: write boilerplate config, then start the orchestrated mapping turn.

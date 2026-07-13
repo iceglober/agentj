@@ -3,13 +3,13 @@
 //! from the turn task). State and transitions live in `app`; rendering in `view`.
 
 mod app;
-mod wrap;
 mod editor;
 mod keymap;
 mod knowledge;
 mod markdown;
 mod theme;
 mod view;
+mod wrap;
 
 use crate::agent::{run_turn, Session};
 use crate::config::AppConfig;
@@ -470,8 +470,16 @@ fn base64_encode(data: &[u8]) -> String {
         let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
         out.push(T[(n >> 18 & 63) as usize] as char);
         out.push(T[(n >> 12 & 63) as usize] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6 & 63) as usize] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     out
 }

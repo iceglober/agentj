@@ -73,9 +73,23 @@ pub struct Tools {
 /// Every built-in tool name — used to tell a disallowed built-in (blocked for a scoped subagent)
 /// from an MCP tool (always passes through).
 const BUILTINS: &[&str] = &[
-    "read_file", "write_file", "edit_file", "edit_lines", "list_dir", "glob", "grep", "bash",
-    "save_artifact", "edit_artifact", "read_artifact", "ask_user", "job_start", "job_check",
-    "job_stop", "mcp_find_tools", "run_subagents",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "edit_lines",
+    "list_dir",
+    "glob",
+    "grep",
+    "bash",
+    "save_artifact",
+    "edit_artifact",
+    "read_artifact",
+    "ask_user",
+    "job_start",
+    "job_check",
+    "job_stop",
+    "mcp_find_tools",
+    "run_subagents",
 ];
 
 /// The value of `args[key]` when it's a string — the common shape of tool arguments.
@@ -85,11 +99,7 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 impl Tools {
     #[cfg(test)]
-    pub fn new(
-        root: PathBuf,
-        jobs: Arc<JobManager>,
-        mcp: Option<Arc<McpClients>>,
-    ) -> Self {
+    pub fn new(root: PathBuf, jobs: Arc<JobManager>, mcp: Option<Arc<McpClients>>) -> Self {
         Self::with_session(root, jobs, mcp, None)
     }
 
@@ -260,7 +270,11 @@ impl Tools {
             },
             "mcp_find_tools" => match &self.mcp {
                 Some(mcp) => ToolOutcome::ok(
-                    mcp.find_tools(args.get("query").and_then(|v| v.as_str()).unwrap_or_default()),
+                    mcp.find_tools(
+                        args.get("query")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default(),
+                    ),
                 ),
                 None => ToolOutcome::err("error: no MCP servers connected"),
             },

@@ -136,9 +136,12 @@ impl App {
             AgentEvent::Message(t) => {
                 // agentj's reply as a card: a blank band row above and below pads it.
                 use crate::tui::view::LineKind;
-                self.transcript.push_kind(Line::default(), LineKind::Assistant);
-                self.transcript.extend_kind(assistant_block(&t), LineKind::Assistant);
-                self.transcript.push_kind(Line::default(), LineKind::Assistant);
+                self.transcript
+                    .push_kind(Line::default(), LineKind::Assistant);
+                self.transcript
+                    .extend_kind(assistant_block(&t), LineKind::Assistant);
+                self.transcript
+                    .push_kind(Line::default(), LineKind::Assistant);
                 self.set_effect("new reply");
             }
             AgentEvent::ToolStart { name, args, step } => {
@@ -168,7 +171,13 @@ impl App {
                 }
                 let shown = if is_delegate { "" } else { summary.as_str() };
                 self.transcript.push_kind(
-                    tool_end_line(&self.current_tool, ok, elapsed_ms, shown, self.current_tool_batched),
+                    tool_end_line(
+                        &self.current_tool,
+                        ok,
+                        elapsed_ms,
+                        shown,
+                        self.current_tool_batched,
+                    ),
                     crate::tui::view::LineKind::Tool,
                 );
                 self.status = "thinking".to_string();
@@ -240,7 +249,8 @@ impl App {
                 // glyph); the transcript wraps long lines and the type label marks the block.
                 use crate::tui::view::LineKind;
                 for line in t.lines() {
-                    self.transcript.push_kind(dim_line(line.to_string()), LineKind::Thinking);
+                    self.transcript
+                        .push_kind(dim_line(line.to_string()), LineKind::Thinking);
                 }
                 self.set_effect("thinking");
                 self.dirty = true;
@@ -256,8 +266,10 @@ impl App {
                         Some(h) => format!("? [{h}] {}", q.question),
                         None => format!("? {}", q.question),
                     };
-                    self.transcript
-                        .push_kind(Line::from(Span::styled(head, theme::accent())), LineKind::Note);
+                    self.transcript.push_kind(
+                        Line::from(Span::styled(head, theme::accent())),
+                        LineKind::Note,
+                    );
                     for (i, o) in q.options.iter().enumerate() {
                         let desc = o
                             .description
@@ -270,8 +282,10 @@ impl App {
                         );
                     }
                     if q.multi_select {
-                        self.transcript
-                            .push_kind(dim_line("    (several may apply)".to_string()), LineKind::Note);
+                        self.transcript.push_kind(
+                            dim_line("    (several may apply)".to_string()),
+                            LineKind::Note,
+                        );
                     }
                 }
                 self.transcript.push_kind(
@@ -284,7 +298,8 @@ impl App {
             }
             AgentEvent::Note(t) => {
                 let line = dim_line(format!("» {t}"));
-                self.transcript.push_kind(line, crate::tui::view::LineKind::Note);
+                self.transcript
+                    .push_kind(line, crate::tui::view::LineKind::Note);
                 self.dirty = true;
             }
             // The save already shows as a tool line in the TUI; the Artifact signal is for the

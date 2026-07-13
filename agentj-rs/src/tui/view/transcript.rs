@@ -143,7 +143,13 @@ pub fn assistant_block(text: &str) -> Vec<Line<'static>> {
 /// A finished tool call: dim `·` when it succeeded, red `✗` when it failed. `batched` marks a call
 /// the model returned in the SAME response as the previous one (one round-trip, several calls) —
 /// drawn `+` so batching is visible in the transcript.
-pub fn tool_end_line(tool: &str, ok: bool, elapsed_ms: u128, summary: &str, batched: bool) -> Line<'static> {
+pub fn tool_end_line(
+    tool: &str,
+    ok: bool,
+    elapsed_ms: u128,
+    summary: &str,
+    batched: bool,
+) -> Line<'static> {
     let (glyph, glyph_style) = if !ok {
         ("✗", theme::err())
     } else if batched {
@@ -189,7 +195,11 @@ pub(super) fn visible_transcript_rows(
         // A block = a maximal run of same-kind logical lines. The type label is drawn once, on the
         // first physical row of the block's first line (carried to the first NON-skipped row so it
         // survives a partial scroll into the block).
-        let block_start = if j == 0 { first_is_block_start } else { kind != kinds[j - 1] };
+        let block_start = if j == 0 {
+            first_is_block_start
+        } else {
+            kind != kinds[j - 1]
+        };
         let mut label_pending = if block_start { kind.label() } else { None };
         for row in wrap::wrap_line(line, width) {
             if skip > 0 {
@@ -387,7 +397,13 @@ impl TranscriptView {
         }
         let first_is_block_start =
             first == 0 || self.kinds.get(first) != self.kinds.get(first.wrapping_sub(1));
-        (first, &self.lines[first..end], &self.kinds[first..end], intra, first_is_block_start)
+        (
+            first,
+            &self.lines[first..end],
+            &self.kinds[first..end],
+            intra,
+            first_is_block_start,
+        )
     }
 
     pub fn push(&mut self, line: Line<'static>) {
@@ -424,7 +440,12 @@ impl TranscriptView {
     pub fn plain(&self) -> String {
         self.lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }

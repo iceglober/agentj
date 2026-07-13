@@ -64,7 +64,9 @@ fn frontmatter(raw: &str) -> std::collections::BTreeMap<String, String> {
         if line.trim() == "---" {
             break;
         }
-        let Some((k, v)) = line.split_once(':') else { continue };
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
         if line.starts_with([' ', '\t']) {
             continue; // nested mapping — not a top-level key
         }
@@ -102,7 +104,9 @@ fn collect_skills(
     seen: &mut std::collections::BTreeSet<String>,
     entries: &mut Vec<String>,
 ) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let raw = match std::fs::read_to_string(e.path().join("SKILL.md")) {
             Ok(r) => r,
@@ -144,9 +148,19 @@ fn skills_index_from(
 ) -> Option<String> {
     let mut seen = std::collections::BTreeSet::new();
     let mut entries: Vec<String> = Vec::new();
-    collect_skills(repo_dir, &|d| format!(".claude/skills/{d}/SKILL.md"), &mut seen, &mut entries);
+    collect_skills(
+        repo_dir,
+        &|d| format!(".claude/skills/{d}/SKILL.md"),
+        &mut seen,
+        &mut entries,
+    );
     if let Some(g) = global_dir {
-        collect_skills(g, &|d| g.join(d).join("SKILL.md").display().to_string(), &mut seen, &mut entries);
+        collect_skills(
+            g,
+            &|d| g.join(d).join("SKILL.md").display().to_string(),
+            &mut seen,
+            &mut entries,
+        );
     }
     if entries.is_empty() {
         return None;
@@ -276,7 +290,6 @@ fn instructions(has_artifacts: bool) -> String {
     .join("\n\n")
 }
 
-
 /// Build the system prompt for a session rooted at `cwd`. `has_artifacts` = a session artifact
 /// store is attached (interactive runs); headless `--once` passes false and gets checklist-in-reply
 /// tracking instead of artifact tooling it doesn't have.
@@ -331,7 +344,15 @@ mod tests {
     fn prime_prompt_is_the_spear_loop() {
         let p = system_prompt("/repo", None, true);
         // The SPEAR frame plus one tagged section per phase.
-        for tag in ["spear", "scope", "plan", "execute", "assess", "resolve", "environment"] {
+        for tag in [
+            "spear",
+            "scope",
+            "plan",
+            "execute",
+            "assess",
+            "resolve",
+            "environment",
+        ] {
             assert!(
                 p.contains(&format!("<{tag}>")) && p.contains(&format!("</{tag}>")),
                 "missing section <{tag}>"
@@ -406,7 +427,10 @@ mod tests {
         let headless = system_prompt("/repo", None, false);
         assert!(!headless.contains("`todos` artifact"));
         assert!(!headless.contains("edit_artifact"));
-        assert!(headless.contains("checklist"), "still tracks progress, inline");
+        assert!(
+            headless.contains("checklist"),
+            "still tracks progress, inline"
+        );
         // Interactive runs keep the artifact workflow.
         let interactive = system_prompt("/repo", None, true);
         assert!(interactive.contains("`todos` artifact"));
@@ -428,8 +452,14 @@ mod tests {
         std::fs::write(dir.join("AGENTS.md"), "# Map\nRun `make check`.").unwrap();
 
         let p = subagent_system_prompt(crate::agent::AgentType::Executor, root);
-        assert!(p.contains("EXECUTOR subagent"), "carries the type's specialized identity");
-        assert!(p.contains("Do EXACTLY the one sub-task"), "keeps the shared worker contract");
+        assert!(
+            p.contains("EXECUTOR subagent"),
+            "carries the type's specialized identity"
+        );
+        assert!(
+            p.contains("Do EXACTLY the one sub-task"),
+            "keeps the shared worker contract"
+        );
         assert!(p.contains(root), "knows its working directory");
         assert!(p.contains("Run `make check`."), "gets the project docs");
 
@@ -466,16 +496,23 @@ mod tests {
 
         let p = skills_index_from(&repo_skills, None).unwrap();
         assert!(p.contains("<skills>"));
-        assert!(p.contains("addressing-pr-feedback — Fetch review threads, fix, push, THEN resolve."));
+        assert!(
+            p.contains("addressing-pr-feedback — Fetch review threads, fix, push, THEN resolve.")
+        );
         assert!(p.contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
-        assert!(p.contains("- deploy — (no description — read the file)"), "{p}");
+        assert!(
+            p.contains("- deploy — (no description — read the file)"),
+            "{p}"
+        );
         assert!(p.contains("READ its SKILL.md FIRST"));
         // The full prompt embeds the index (via the real global dir, which may add more entries).
         let full = system_prompt(dir.to_str().unwrap(), None, true);
         assert!(full.contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
         // Subagents get the same index.
-        assert!(subagent_system_prompt(crate::agent::AgentType::Executor, dir.to_str().unwrap())
-            .contains("(.claude/skills/addressing-pr-feedback/SKILL.md)"));
+        assert!(
+            subagent_system_prompt(crate::agent::AgentType::Executor, dir.to_str().unwrap())
+                .contains("(.claude/skills/addressing-pr-feedback/SKILL.md)")
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -494,7 +531,13 @@ mod tests {
         let global = dir.join("home/.claude/skills");
         for (root, skills) in [
             (&repo, vec![("linear", "Repo linear playbook.")]),
-            (&global, vec![("linear", "GLOBAL linear playbook."), ("deploy-notes", "Global deploy notes.")]),
+            (
+                &global,
+                vec![
+                    ("linear", "GLOBAL linear playbook."),
+                    ("deploy-notes", "Global deploy notes."),
+                ],
+            ),
         ] {
             for (name, desc) in skills {
                 let d = root.join(name);
@@ -511,7 +554,13 @@ mod tests {
         assert!(p.contains("linear — Repo linear playbook."));
         assert!(!p.contains("GLOBAL linear playbook."));
         assert!(p.contains("deploy-notes — Global deploy notes."));
-        assert!(p.contains(&global.join("deploy-notes").join("SKILL.md").display().to_string()));
+        assert!(p.contains(
+            &global
+                .join("deploy-notes")
+                .join("SKILL.md")
+                .display()
+                .to_string()
+        ));
         // Global-only skills still index when the repo has none.
         let p = skills_index_from(&dir.join("repo-without-skills"), Some(&global)).unwrap();
         assert!(p.contains("GLOBAL linear playbook."));

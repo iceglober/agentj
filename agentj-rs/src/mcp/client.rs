@@ -60,7 +60,11 @@ fn drain_stderr(stderr: Option<tokio::process::ChildStderr>) -> Arc<Mutex<String
 /// Pull the most informative line out of captured stderr: the last line mentioning an error, else the
 /// last non-empty line (skipping the bare Node.js version footer).
 fn error_hint(stderr: &str) -> Option<String> {
-    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     lines
         .iter()
         .rev()
@@ -104,19 +108,23 @@ impl McpCatalog {
     pub fn new(entries: Vec<(String, String, String, Value)>) -> Self {
         let entries: Vec<CatalogEntry> = entries
             .into_iter()
-            .map(|(full_name, server, description, input_schema)| CatalogEntry {
-                full_name,
-                server,
-                description,
-                input_schema,
-            })
+            .map(
+                |(full_name, server, description, input_schema)| CatalogEntry {
+                    full_name,
+                    server,
+                    description,
+                    input_schema,
+                },
+            )
             .collect();
         let est_tokens: usize = entries
             .iter()
             .map(|e| {
                 (e.full_name.len()
                     + e.description.len().min(250)
-                    + serde_json::to_string(&e.input_schema).map(|s| s.len()).unwrap_or(0))
+                    + serde_json::to_string(&e.input_schema)
+                        .map(|s| s.len())
+                        .unwrap_or(0))
                     / 4
             })
             .sum();
@@ -216,11 +224,19 @@ impl McpCatalog {
         let mut lines = vec![format!(
             "{} match(es){} — now callable:",
             scored.len(),
-            if scored.len() > take { format!(" (top {take} activated)") } else { String::new() }
+            if scored.len() > take {
+                format!(" (top {take} activated)")
+            } else {
+                String::new()
+            }
         )];
         for (_, e) in scored.iter().take(take) {
             activated.insert(e.full_name.clone());
-            lines.push(format!("  {} — {}", e.full_name, clip_chars(&e.description, 140)));
+            lines.push(format!(
+                "  {} — {}",
+                e.full_name,
+                clip_chars(&e.description, 140)
+            ));
         }
         lines.join("\n")
     }
@@ -328,7 +344,10 @@ fn kill_group(pid: u32) {
 /// even when this future fails or is cancelled by a timeout — a cancelled connect otherwise reaps
 /// only the direct child (rmcp's drop) and orphans `npm → node` descendants, which keep holding
 /// ports (the mcp-remote EADDRINUSE zombie).
-async fn connect_one(cfg: &McpServerConfig, spawned: &Mutex<Option<u32>>) -> anyhow::Result<Server> {
+async fn connect_one(
+    cfg: &McpServerConfig,
+    spawned: &Mutex<Option<u32>>,
+) -> anyhow::Result<Server> {
     let (service, pid) = match cfg.transport {
         Transport::Stdio => {
             let mut command = tokio::process::Command::new(cfg.command.clone().unwrap_or_default());
@@ -425,7 +444,11 @@ async fn connect_one(cfg: &McpServerConfig, spawned: &Mutex<Option<u32>>) -> any
                 .unwrap_or_else(|_| json!({ "type": "object" })),
         })
         .collect();
-    Ok(Server { service, tools, pid })
+    Ok(Server {
+        service,
+        tools,
+        pid,
+    })
 }
 
 /// Connect to every configured server, each bounded by a timeout so one hung server can't freeze
@@ -467,7 +490,10 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
                 McpOutcome::Err(format!("timed out connecting (>{}s)", timeout.as_secs()))
             }
         };
-        statuses.push(McpStatus { name: cfg.name.clone(), outcome });
+        statuses.push(McpStatus {
+            name: cfg.name.clone(),
+            outcome,
+        });
     }
     let catalog = McpCatalog::new(
         servers
@@ -475,12 +501,29 @@ pub async fn connect_all(configs: &[McpServerConfig]) -> (McpClients, Vec<McpSta
             .flat_map(|srv| &srv.tools)
             .map(|t| {
                 // full_name is `{server}__{tool}` — recover the server for the catalog summary.
-                let server = t.full_name.split("__").next().unwrap_or_default().to_string();
-                (t.full_name.clone(), server, t.description.clone(), t.input_schema.clone())
+                let server = t
+                    .full_name
+                    .split("__")
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                (
+                    t.full_name.clone(),
+                    server,
+                    t.description.clone(),
+                    t.input_schema.clone(),
+                )
             })
             .collect(),
     );
-    (McpClients { servers, by_tool, catalog }, statuses)
+    (
+        McpClients {
+            servers,
+            by_tool,
+            catalog,
+        },
+        statuses,
+    )
 }
 
 impl McpClients {
@@ -565,9 +608,15 @@ mod tests {
     #[test]
     fn error_hint_picks_the_error_line_over_the_node_footer() {
         let stderr = "npm warn config\nError: RPA_FILES_S3_BUCKET not configured.\n    at getRpaFilesBucket\n\nNode.js v24.14.1\n";
-        assert_eq!(error_hint(stderr).as_deref(), Some("Error: RPA_FILES_S3_BUCKET not configured."));
+        assert_eq!(
+            error_hint(stderr).as_deref(),
+            Some("Error: RPA_FILES_S3_BUCKET not configured.")
+        );
         // no "error" line → last non-footer line
-        assert_eq!(error_hint("just a warning\nNode.js v24\n").as_deref(), Some("just a warning"));
+        assert_eq!(
+            error_hint("just a warning\nNode.js v24\n").as_deref(),
+            Some("just a warning")
+        );
         assert_eq!(error_hint("   \n  \n"), None);
     }
 
@@ -598,7 +647,11 @@ mod tests {
         let specs = big.specs();
         assert_eq!(specs.len(), 1, "only the meta-tool advertises");
         assert_eq!(specs[0].name, "mcp_find_tools");
-        assert!(specs[0].description.contains("linear (60)"), "{}", specs[0].description);
+        assert!(
+            specs[0].description.contains("linear (60)"),
+            "{}",
+            specs[0].description
+        );
     }
 
     #[test]
@@ -606,7 +659,11 @@ mod tests {
         let mut entries: Vec<_> = (0..60)
             .map(|i| entry("linear", &format!("tool_{i}"), &"x".repeat(1200)))
             .collect();
-        entries.push(entry("linear", "create_issue", "Create a new Linear issue in a team"));
+        entries.push(entry(
+            "linear",
+            "create_issue",
+            "Create a new Linear issue in a team",
+        ));
         let cat = McpCatalog::new(entries);
         assert!(!cat.eager);
 
@@ -615,8 +672,14 @@ mod tests {
         assert!(cat.is_activated("linear__create_issue"));
 
         let specs = cat.specs();
-        assert!(specs.iter().any(|s| s.name == "linear__create_issue"), "activated schema advertises");
-        assert!(specs.iter().any(|s| s.name == "mcp_find_tools"), "meta-tool stays");
+        assert!(
+            specs.iter().any(|s| s.name == "linear__create_issue"),
+            "activated schema advertises"
+        );
+        assert!(
+            specs.iter().any(|s| s.name == "mcp_find_tools"),
+            "meta-tool stays"
+        );
 
         // No match → helpful message, nothing activated.
         let miss = cat.find_tools("zzzznope");
@@ -642,7 +705,9 @@ mod tests {
         assert!(spec.description.chars().count() <= 250);
         assert!(spec.parameters.get("title").is_none());
         assert!(spec.parameters.get("examples").is_none());
-        let pdesc = spec.parameters["properties"]["id"]["description"].as_str().unwrap();
+        let pdesc = spec.parameters["properties"]["id"]["description"]
+            .as_str()
+            .unwrap();
         assert!(pdesc.chars().count() <= 120);
         // structure the model needs survives
         assert_eq!(spec.parameters["properties"]["id"]["type"], "string");

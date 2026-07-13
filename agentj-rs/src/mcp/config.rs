@@ -248,7 +248,10 @@ mod tests {
             "linear": { "command": "npx", "args": ["-y", "mcp-remote@latest", "https://mcp.linear.app/mcp"] }
         }});
         let out = resolve_mcp_servers(&global, &repo, &json!({}), &get(&[]));
-        assert!(out.iter().all(|s| s.name != "atlassian"), "globally disabled server never runs");
+        assert!(
+            out.iter().all(|s| s.name != "atlassian"),
+            "globally disabled server never runs"
+        );
         assert!(out.iter().any(|s| s.name == "linear"));
     }
 
@@ -260,7 +263,10 @@ mod tests {
         }});
         let local = json!({ "mcpServers": { "atlassian": { "disabled": true } } });
         let out = resolve_mcp_servers(&json!({}), &repo, &local, &get(&[]));
-        assert!(out.iter().all(|s| s.name != "atlassian"), "disabled server is skipped");
+        assert!(
+            out.iter().all(|s| s.name != "atlassian"),
+            "disabled server is skipped"
+        );
         assert!(out.iter().any(|s| s.name == "linear"), "others untouched");
     }
 
@@ -274,7 +280,11 @@ mod tests {
         }});
         let out = resolve_mcp_servers(&json!({}), &repo, &local, &get(&[]));
         let linear = out.iter().find(|s| s.name == "linear").unwrap();
-        assert_eq!(linear.transport, Transport::Stdio, "local override wins over the shared repo entry");
+        assert_eq!(
+            linear.transport,
+            Transport::Stdio,
+            "local override wins over the shared repo entry"
+        );
         assert_eq!(linear.command.as_deref(), Some("npx"));
         assert_eq!(linear.url, None);
     }

@@ -72,7 +72,9 @@ pub fn has_cached_credentials(url: &str) -> bool {
 /// server has no cached grant or its auth metadata can't be discovered.
 pub async fn cached_auth_client(url: &str) -> Option<AuthClient<reqwest::Client>> {
     let mut mgr = AuthorizationManager::new(url).await.ok()?;
-    mgr.set_credential_store(DiskCredentialStore { path: cache_path(url) });
+    mgr.set_credential_store(DiskCredentialStore {
+        path: cache_path(url),
+    });
     match mgr.initialize_from_store().await {
         Ok(true) => Some(AuthClient::new(reqwest::Client::default(), mgr)),
         _ => None,
@@ -91,7 +93,9 @@ pub async fn login(url: &str, notice: impl Fn(String)) -> anyhow::Result<()> {
     let mut mgr = AuthorizationManager::new(url)
         .await
         .map_err(|e| anyhow::anyhow!("auth setup failed: {e}"))?;
-    mgr.set_credential_store(DiskCredentialStore { path: cache_path(url) });
+    mgr.set_credential_store(DiskCredentialStore {
+        path: cache_path(url),
+    });
     let metadata = mgr
         .discover_metadata()
         .await
@@ -100,7 +104,10 @@ pub async fn login(url: &str, notice: impl Fn(String)) -> anyhow::Result<()> {
 
     // Loopback redirect target on an ephemeral port — no fixed ports, no collisions.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let redirect = format!("http://127.0.0.1:{}/callback", listener.local_addr()?.port());
+    let redirect = format!(
+        "http://127.0.0.1:{}/callback",
+        listener.local_addr()?.port()
+    );
 
     mgr.register_client("agentj", &redirect, &[])
         .await

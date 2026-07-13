@@ -84,7 +84,8 @@ impl Md {
         if self.link_url.is_some() {
             self.link_text.push_str(t);
         }
-        self.cur.push(Span::styled(t.to_string(), self.inline_style()));
+        self.cur
+            .push(Span::styled(t.to_string(), self.inline_style()));
     }
 
     fn event(&mut self, event: Event<'_>) {
@@ -240,7 +241,10 @@ mod tests {
         assert!(text.iter().any(|l| l == "Title"));
         assert!(text.iter().any(|l| l == "Hello world"));
         // heading is accent + bold
-        let title = lines.iter().find(|l| l.spans.iter().any(|s| s.content == "Title")).unwrap();
+        let title = lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content == "Title"))
+            .unwrap();
         assert!(title.spans[0].style.add_modifier.contains(Modifier::BOLD));
     }
 

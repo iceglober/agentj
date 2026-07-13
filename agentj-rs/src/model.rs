@@ -155,7 +155,9 @@ pub fn preflight(sel: &Selector, app: &AppConfig) -> Result<(), String> {
                 return Err("Azure provider needs AZURE_BASE_URL set (or providers.azure.base_url in aj.json) (your Foundry OpenAI-compatible endpoint, e.g. https://<resource>.openai.azure.com/openai/v1).".into());
             }
             if azure_api_key(app).is_none() {
-                return Err("Azure provider needs AZURE_API_KEY set in the developer environment.".into());
+                return Err(
+                    "Azure provider needs AZURE_API_KEY set in the developer environment.".into(),
+                );
             }
             if model_id.is_none() {
                 return Err("Azure provider has no default model — set AGENTJ_MODEL, pass --model, or add providers.azure.model in aj.json (the Foundry deployment name).".into());
@@ -213,8 +215,16 @@ pub fn resolve_model(sel: &Selector, app: &AppConfig) -> Result<ModelConfig, Str
         })?;
 
     let (base_url, api_key, api_version) = match sel.provider {
-        Provider::Azure => (azure_base_url(app), azure_api_key(app), azure_api_version(app)),
-        Provider::Custom => (custom_base_url(sel.base_url, app), custom_api_key(app), None),
+        Provider::Azure => (
+            azure_base_url(app),
+            azure_api_key(app),
+            azure_api_version(app),
+        ),
+        Provider::Custom => (
+            custom_base_url(sel.base_url, app),
+            custom_api_key(app),
+            None,
+        ),
         Provider::Vertex => (String::new(), None, None),
         Provider::Anthropic => (String::new(), anthropic_api_key(app), None),
     };
@@ -234,7 +244,10 @@ mod tests {
     #[test]
     fn provider_resolution() {
         let empty = AppConfig::default();
-        assert_eq!(resolve_provider(Some("anthropic"), &empty), Provider::Anthropic);
+        assert_eq!(
+            resolve_provider(Some("anthropic"), &empty),
+            Provider::Anthropic
+        );
         assert_eq!(resolve_provider(Some("azure"), &empty), Provider::Azure);
         assert_eq!(resolve_provider(Some("custom"), &empty), Provider::Custom);
         assert_eq!(resolve_provider(Some("openai"), &empty), Provider::Vertex);
@@ -268,7 +281,9 @@ mod tests {
             model: None,
             base_url: None,
         };
-        assert!(preflight(&s, &AppConfig::default()).unwrap_err().contains("base URL"));
+        assert!(preflight(&s, &AppConfig::default())
+            .unwrap_err()
+            .contains("base URL"));
         let s = Selector {
             provider: Provider::Custom,
             model: Some("m"),

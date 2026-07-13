@@ -238,7 +238,8 @@ impl App {
     }
 
     pub fn effect_active(&self) -> bool {
-        self.effect_until.is_some_and(|until| until > Instant::now())
+        self.effect_until
+            .is_some_and(|until| until > Instant::now())
     }
 
     /// Write the full transcript to a timestamped markdown file in the working dir; returns the
@@ -277,8 +278,10 @@ impl App {
                 "user" => {
                     let text = m.content.as_deref().unwrap_or("");
                     if is_injected_user_text(text) {
-                        self.transcript
-                            .push_kind(dim_line(format!("» {}", first_line(text, 100))), LineKind::Note);
+                        self.transcript.push_kind(
+                            dim_line(format!("» {}", first_line(text, 100))),
+                            LineKind::Note,
+                        );
                     } else {
                         self.push_user_line(text);
                     }
@@ -297,9 +300,12 @@ impl App {
                         );
                     }
                     if let Some(t) = m.content.as_deref().filter(|t| !t.trim().is_empty()) {
-                        self.transcript.push_kind(Line::default(), LineKind::Assistant);
-                        self.transcript.extend_kind(assistant_block(t), LineKind::Assistant);
-                        self.transcript.push_kind(Line::default(), LineKind::Assistant);
+                        self.transcript
+                            .push_kind(Line::default(), LineKind::Assistant);
+                        self.transcript
+                            .extend_kind(assistant_block(t), LineKind::Assistant);
+                        self.transcript
+                            .push_kind(Line::default(), LineKind::Assistant);
                     }
                 }
                 _ => {} // tool replies surface on their call's line; system never persists
@@ -313,7 +319,8 @@ impl App {
 
     /// A dim `»` note line in the transcript (lifecycle chatter, not conversation content).
     pub fn notice(&mut self, s: impl Into<String>) {
-        self.transcript.push_kind(dim_line(format!("» {}", s.into())), LineKind::Note);
+        self.transcript
+            .push_kind(dim_line(format!("» {}", s.into())), LineKind::Note);
         self.dirty = true;
     }
 
@@ -355,7 +362,10 @@ impl App {
         self.transcript.push_kind(
             Line::from(vec![
                 Span::styled("› ", theme::accent()),
-                Span::styled(text.to_string(), Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    text.to_string(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
             ]),
             LineKind::User,
         );

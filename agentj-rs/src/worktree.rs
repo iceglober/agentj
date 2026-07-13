@@ -30,9 +30,17 @@ pub async fn ensure(root: &str, branch: &str, base: &str) -> Result<PathBuf, Str
         };
     }
 
-    let local_exists = git(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], root)
-        .await
-        .is_ok();
+    let local_exists = git(
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+        root,
+    )
+    .await
+    .is_ok();
     // A branch that's already In Progress may have its work on a REMOTE branch, not locally — check
     // origin too, so a re-entry resumes that work instead of branching a fresh copy from base and
     // silently discarding it.
@@ -46,7 +54,19 @@ pub async fn ensure(root: &str, branch: &str, base: &str) -> Result<PathBuf, Str
         git(&["worktree", "add", &path_str, branch], root).await
     } else if remote_exists {
         // Create a local branch tracking the existing remote work.
-        git(&["worktree", "add", "--track", "-b", branch, &path_str, &format!("origin/{branch}")], root).await
+        git(
+            &[
+                "worktree",
+                "add",
+                "--track",
+                "-b",
+                branch,
+                &path_str,
+                &format!("origin/{branch}"),
+            ],
+            root,
+        )
+        .await
     } else {
         git(&["worktree", "add", "-b", branch, &path_str, base], root).await
     };
@@ -83,7 +103,13 @@ async fn git(args: &[&str], dir: &str) -> Result<String, String> {
 /// `s` reduced to a filesystem-safe slug: ascii alphanumerics kept, everything else `-`, capped.
 fn slugify(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .take(48)
         .collect()
 }
@@ -111,7 +137,18 @@ mod tests {
         let root = dir.to_string_lossy().into_owned();
         for cmd in [
             vec!["git", "init", "-q", "-b", "main"],
-            vec!["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "fixture"],
+            vec![
+                "git",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
         ] {
             let o = run(&cmd, &root, None).await.unwrap();
             assert_eq!(o.exit_code, 0, "{cmd:?}: {}", o.stderr);
@@ -125,13 +162,29 @@ mod tests {
         let wt = ensure(&root, "eng/issue-1", "main").await.unwrap();
         assert!(wt.join(".git").exists(), "worktree checked out");
         assert_eq!(
-            git(&["rev-parse", "--abbrev-ref", "HEAD"], &wt.to_string_lossy()).await.unwrap(),
+            git(
+                &["rev-parse", "--abbrev-ref", "HEAD"],
+                &wt.to_string_lossy()
+            )
+            .await
+            .unwrap(),
             "eng/issue-1"
         );
         // Restart: same repo+branch resolves to the SAME worktree, state intact.
         let again = ensure(&root, "eng/issue-1", "main").await.unwrap();
         assert_eq!(wt, again);
-        let _ = run(&["git", "worktree", "remove", "--force", &wt.to_string_lossy()], &root, None).await;
+        let _ = run(
+            &[
+                "git",
+                "worktree",
+                "remove",
+                "--force",
+                &wt.to_string_lossy(),
+            ],
+            &root,
+            None,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -140,10 +193,26 @@ mod tests {
         git(&["branch", "eng/done-before"], &root).await.unwrap();
         let wt = ensure(&root, "eng/done-before", "main").await.unwrap();
         assert_eq!(
-            git(&["rev-parse", "--abbrev-ref", "HEAD"], &wt.to_string_lossy()).await.unwrap(),
+            git(
+                &["rev-parse", "--abbrev-ref", "HEAD"],
+                &wt.to_string_lossy()
+            )
+            .await
+            .unwrap(),
             "eng/done-before"
         );
-        let _ = run(&["git", "worktree", "remove", "--force", &wt.to_string_lossy()], &root, None).await;
+        let _ = run(
+            &[
+                "git",
+                "worktree",
+                "remove",
+                "--force",
+                &wt.to_string_lossy(),
+            ],
+            &root,
+            None,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -152,29 +221,95 @@ mod tests {
         // must check it out tracking the remote — not create a fresh branch off base and lose it.
         let (_origin_dir, origin) = temp_repo("remote-origin").await;
         // Put distinctive work on a branch in the "remote".
-        git(&["checkout", "-q", "-b", "eng/inprogress"], &origin).await.unwrap();
+        git(&["checkout", "-q", "-b", "eng/inprogress"], &origin)
+            .await
+            .unwrap();
         std::fs::write(std::path::Path::new(&origin).join("child-work.txt"), "wip").unwrap();
-        run(&["git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"], &origin, None).await.unwrap();
-        run(&["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "child wip"], &origin, None).await.unwrap();
+        run(
+            &[
+                "git",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "add",
+                "-A",
+            ],
+            &origin,
+            None,
+        )
+        .await
+        .unwrap();
+        run(
+            &[
+                "git",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "-m",
+                "child wip",
+            ],
+            &origin,
+            None,
+        )
+        .await
+        .unwrap();
         git(&["checkout", "-q", "main"], &origin).await.unwrap();
 
         // A fresh clone: the branch exists only as origin/eng/inprogress.
-        let clone_dir = std::env::temp_dir().join(format!("agentj-wt-clone-{}", std::process::id()));
+        let clone_dir =
+            std::env::temp_dir().join(format!("agentj-wt-clone-{}", std::process::id()));
         let clone = clone_dir.to_string_lossy().into_owned();
-        run(&["git", "clone", "-q", &origin, &clone], ".", None).await.unwrap();
+        run(&["git", "clone", "-q", &origin, &clone], ".", None)
+            .await
+            .unwrap();
         assert!(
-            git(&["rev-parse", "--verify", "--quiet", "refs/heads/eng/inprogress"], &clone).await.is_err(),
+            git(
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    "refs/heads/eng/inprogress"
+                ],
+                &clone
+            )
+            .await
+            .is_err(),
             "branch is not local yet"
         );
 
-        let wt = ensure(&clone, "eng/inprogress", "origin/main").await.unwrap();
+        let wt = ensure(&clone, "eng/inprogress", "origin/main")
+            .await
+            .unwrap();
         // The worktree carries the remote branch's work, not a fresh copy of base.
-        assert!(wt.join("child-work.txt").exists(), "resumed the remote branch's commit");
+        assert!(
+            wt.join("child-work.txt").exists(),
+            "resumed the remote branch's commit"
+        );
         assert_eq!(
-            git(&["rev-parse", "--abbrev-ref", "HEAD"], &wt.to_string_lossy()).await.unwrap(),
+            git(
+                &["rev-parse", "--abbrev-ref", "HEAD"],
+                &wt.to_string_lossy()
+            )
+            .await
+            .unwrap(),
             "eng/inprogress"
         );
-        let _ = run(&["git", "worktree", "remove", "--force", &wt.to_string_lossy()], &clone, None).await;
+        let _ = run(
+            &[
+                "git",
+                "worktree",
+                "remove",
+                "--force",
+                &wt.to_string_lossy(),
+            ],
+            &clone,
+            None,
+        )
+        .await;
         let _ = std::fs::remove_dir_all(&clone_dir);
     }
 
@@ -182,7 +317,10 @@ mod tests {
     async fn ensure_surfaces_git_errors_verbatim() {
         let (_dir, root) = temp_repo("badbase").await;
         let err = ensure(&root, "eng/new", "no-such-base").await.unwrap_err();
-        assert!(err.contains("no-such-base"), "git's own message survives: {err}");
+        assert!(
+            err.contains("no-such-base"),
+            "git's own message survives: {err}"
+        );
     }
 
     #[tokio::test]

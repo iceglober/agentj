@@ -145,7 +145,9 @@ impl Tools {
                     (Some(o), Some(n)) => ops.push((
                         o.to_string(),
                         n.to_string(),
-                        e.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false),
+                        e.get("replace_all")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
                     )),
                     _ => {
                         return ToolOutcome::err(format!(
@@ -154,11 +156,15 @@ impl Tools {
                     }
                 }
             }
-        } else if let (Some(o), Some(n)) = (arg_str(args, "old_string"), arg_str(args, "new_string")) {
+        } else if let (Some(o), Some(n)) =
+            (arg_str(args, "old_string"), arg_str(args, "new_string"))
+        {
             ops.push((
                 o.to_string(),
                 n.to_string(),
-                args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false),
+                args.get("replace_all")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
             ));
         }
         if ops.is_empty() {
@@ -296,9 +302,7 @@ impl Tools {
             .map(|n| format!("{n}\t{}", ulines[n - 1]))
             .collect::<Vec<_>>()
             .join("\n");
-        ToolOutcome::ok(format!(
-            "edited {path} lines {start}–{end}; now:\n{echo}"
-        ))
+        ToolOutcome::ok(format!("edited {path} lines {start}–{end}; now:\n{echo}"))
     }
 
     pub(super) fn list_dir(&self, args: &Value) -> ToolOutcome {

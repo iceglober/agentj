@@ -34,9 +34,13 @@ fn artifact_specs_require_a_session_and_the_primary_loop() {
     assert!(with_session.iter().any(|s| s.name == "save_artifact"));
     assert!(with_session.iter().any(|s| s.name == "read_artifact"));
     // No session (headless) → no artifact tools.
-    assert!(!tool_specs(true, false, None).iter().any(|s| s.name == "save_artifact"));
+    assert!(!tool_specs(true, false, None)
+        .iter()
+        .any(|s| s.name == "save_artifact"));
     // Subagents never get them even with a session attached.
-    assert!(!tool_specs(false, true, None).iter().any(|s| s.name == "save_artifact"));
+    assert!(!tool_specs(false, true, None)
+        .iter()
+        .any(|s| s.name == "save_artifact"));
 }
 
 fn test_cfg() -> Config {
@@ -77,7 +81,10 @@ fn turn_text(s: &str) -> AssistantTurn {
 }
 
 fn turn_delegate(tasks: &[&str]) -> AssistantTurn {
-    let items: Vec<_> = tasks.iter().map(|t| serde_json::json!({ "task": t })).collect();
+    let items: Vec<_> = tasks
+        .iter()
+        .map(|t| serde_json::json!({ "task": t }))
+        .collect();
     let args = serde_json::json!({ "tasks": items }).to_string();
     AssistantTurn {
         content: None,
@@ -158,9 +165,14 @@ async fn delegate_emits_structured_lifecycle_events() {
             .any(|e| matches!(e, AgentEvent::SubagentStart { id: 0, .. })),
         "expected a SubagentStart, got: {events:?}"
     );
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::SubagentEnd { id: 0, ok: true, .. })));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::SubagentEnd {
+            id: 0,
+            ok: true,
+            ..
+        }
+    )));
     // the delegate call itself reports success
     assert!(events
         .iter()
@@ -232,14 +244,18 @@ async fn panicked_subagent_surfaces_as_failed_end() {
 #[tokio::test]
 async fn commit_deltas_preserve_toolcall_reply_pairing() {
     let sess = session(vec![
-        ScriptStep::Turn(turn_tool("read_file", serde_json::json!({ "path": "Cargo.toml" }))),
+        ScriptStep::Turn(turn_tool(
+            "read_file",
+            serde_json::json!({ "path": "Cargo.toml" }),
+        )),
         ScriptStep::Turn(turn_text("done reading")),
     ]);
     let (_events, deltas) = run_with_commit(&sess).await;
 
     // The assistant message carrying tool_calls and its tool reply land in the SAME delta.
     let paired = deltas.iter().any(|d| {
-        d.iter().any(|m| m.role == "assistant" && !m.tool_calls.is_empty())
+        d.iter()
+            .any(|m| m.role == "assistant" && !m.tool_calls.is_empty())
             && d.iter().any(|m| m.role == "tool")
     });
     assert!(
@@ -254,7 +270,10 @@ async fn commit_deltas_preserve_toolcall_reply_pairing() {
 
 #[test]
 fn task_label_prefers_title_then_first_sentence() {
-    assert_eq!(task_label("whatever", Some("Map the crate")), "Map the crate");
+    assert_eq!(
+        task_label("whatever", Some("Map the crate")),
+        "Map the crate"
+    );
     assert_eq!(
         task_label(
             "Map the Rust product in agentj-rs/. Return a tight factual summary with paths.",
@@ -263,7 +282,10 @@ fn task_label_prefers_title_then_first_sentence() {
         "Map the Rust product in agentj-rs/."
     );
     // whitespace-only title falls back
-    assert_eq!(task_label("Do the thing. And more.", Some("  ")), "Do the thing.");
+    assert_eq!(
+        task_label("Do the thing. And more.", Some("  ")),
+        "Do the thing."
+    );
     // no sentence boundary → capped
     let long = "x".repeat(150);
     assert_eq!(task_label(&long, None).chars().count(), 100);
@@ -278,7 +300,7 @@ async fn delegate_title_becomes_the_tray_label() {
     let sess = session(vec![
         ScriptStep::Turn(AssistantTurn {
             content: None,
-        reasoning: None,
+            reasoning: None,
             tool_calls: vec![ToolCall {
                 id: "c1".into(),
                 kind: "function".into(),
@@ -294,9 +316,9 @@ async fn delegate_title_becomes_the_tray_label() {
         ScriptStep::Turn(turn_text("done")),
     ]);
     let events = run_and_collect(&sess).await;
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::SubagentStart { desc, .. } if desc == "Map the Rust crate")));
+    assert!(events.iter().any(
+        |e| matches!(e, AgentEvent::SubagentStart { desc, .. } if desc == "Map the Rust crate")
+    ));
 }
 
 fn session_in(root: &str, steps: Vec<ScriptStep>) -> Session {
@@ -311,7 +333,11 @@ fn session_in(root: &str, steps: Vec<ScriptStep>) -> Session {
 
 /// An interactive session with an attached artifact store (rooted at an explicit dir, no HOME).
 /// If `plan` is set, it's pre-saved as the `plan` artifact so the frontier can resume from it.
-fn session_with_store(steps: Vec<ScriptStep>, store_dir: &std::path::Path, plan: Option<&str>) -> Session {
+fn session_with_store(
+    steps: Vec<ScriptStep>,
+    store_dir: &std::path::Path,
+    plan: Option<&str>,
+) -> Session {
     let store = crate::session::Session::at_dir(store_dir.to_path_buf());
     if let Some(p) = plan {
         store.save_artifact("plan", p).unwrap();
@@ -351,16 +377,34 @@ async fn a_surviving_frontier_is_injected_on_the_first_turn_only() {
     // call, so the model resumes the plan instead of re-scoping.
     let dir = temp_root("frontier");
     std::fs::create_dir_all(dir.join(".aj/task")).unwrap();
-    std::fs::write(dir.join(".aj/task/plan.md"), "## pending\n- port the parser").unwrap();
-    let sess = session_in(dir.to_str().unwrap(), vec![ScriptStep::Turn(turn_text("resuming"))]);
+    std::fs::write(
+        dir.join(".aj/task/plan.md"),
+        "## pending\n- port the parser",
+    )
+    .unwrap();
+    let sess = session_in(
+        dir.to_str().unwrap(),
+        vec![ScriptStep::Turn(turn_text("resuming"))],
+    );
     let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "re-deriving scope"), 1, "{events:?}");
+    assert_eq!(
+        notes_containing(&events, "re-deriving scope"),
+        1,
+        "{events:?}"
+    );
 
     // No frontier on disk → no injection.
     let dir2 = temp_root("frontier-none");
-    let sess = session_in(dir2.to_str().unwrap(), vec![ScriptStep::Turn(turn_text("hi"))]);
+    let sess = session_in(
+        dir2.to_str().unwrap(),
+        vec![ScriptStep::Turn(turn_text("hi"))],
+    );
     let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "re-deriving scope"), 0, "{events:?}");
+    assert_eq!(
+        notes_containing(&events, "re-deriving scope"),
+        0,
+        "{events:?}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&dir2);
 }
@@ -369,8 +413,12 @@ async fn a_surviving_frontier_is_injected_on_the_first_turn_only() {
 fn resume_leads_with_todos_then_plan() {
     let dir = temp_root("resume-order");
     let store = crate::session::Session::at_dir(dir.clone());
-    store.save_artifact("plan", "APPROACH: rewrite the parser").unwrap();
-    store.save_artifact("todos", "- [ ] port lexer\n- [x] scaffold").unwrap();
+    store
+        .save_artifact("plan", "APPROACH: rewrite the parser")
+        .unwrap();
+    store
+        .save_artifact("todos", "- [ ] port lexer\n- [x] scaffold")
+        .unwrap();
     let jobs = JobManager::new(".".to_string());
     let tools = Tools::with_session(PathBuf::from("."), jobs, None, Some(Arc::new(store)));
     let sess = Session {
@@ -380,8 +428,13 @@ fn resume_leads_with_todos_then_plan() {
     };
     let msg = super::frontier_resume(&sess).expect("a resume payload when work survives");
     let todos_at = msg.find("port lexer").expect("todos content present");
-    let plan_at = msg.find("rewrite the parser").expect("plan content present");
-    assert!(todos_at < plan_at, "todos (what's left) leads the approach: {msg}");
+    let plan_at = msg
+        .find("rewrite the parser")
+        .expect("plan content present");
+    assert!(
+        todos_at < plan_at,
+        "todos (what's left) leads the approach: {msg}"
+    );
     assert!(msg.contains("`todos` (what's left)"));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -396,14 +449,26 @@ async fn interactive_frontier_comes_from_the_session_plan_artifact_not_the_repo(
         Some("## pending\n- finish the migration"),
     );
     let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "re-deriving scope"), 1, "resumed from the artifact: {events:?}");
+    assert_eq!(
+        notes_containing(&events, "re-deriving scope"),
+        1,
+        "resumed from the artifact: {events:?}"
+    );
 
     // Fresh: an attached session with NO plan artifact injects nothing — a new session never
     // inherits an old task, which is the whole point.
     let store2 = temp_root("store-fresh");
-    let sess = session_with_store(vec![ScriptStep::Turn(turn_text("brand new task"))], &store2, None);
+    let sess = session_with_store(
+        vec![ScriptStep::Turn(turn_text("brand new task"))],
+        &store2,
+        None,
+    );
     let events = run_and_collect(&sess).await;
-    assert_eq!(notes_containing(&events, "re-deriving scope"), 0, "a fresh session inherits nothing: {events:?}");
+    assert_eq!(
+        notes_containing(&events, "re-deriving scope"),
+        0,
+        "a fresh session inherits nothing: {events:?}"
+    );
     let _ = std::fs::remove_dir_all(&store);
     let _ = std::fs::remove_dir_all(&store2);
 }
@@ -427,7 +492,10 @@ fn compaction_elides_old_tool_bodies_and_is_idempotent() {
     let n = msgs.len();
     assert_eq!(compact_history(&mut msgs, 8, n), 4);
     assert!(msgs[2].content.as_deref().unwrap().starts_with("[elided"));
-    assert!(!msgs[6].content.as_deref().unwrap().starts_with("[elided"), "recent kept");
+    assert!(
+        !msgs[6].content.as_deref().unwrap().starts_with("[elided"),
+        "recent kept"
+    );
     assert_eq!(compact_history(&mut msgs, 8, n), 0, "idempotent");
     // small results and non-tool roles are untouched
     assert_eq!(msgs[0].content.as_deref(), Some("sys"));
@@ -456,7 +524,9 @@ fn exploration_steps() -> Vec<ScriptStep> {
 }
 
 fn note_seen(events: &[AgentEvent], needle: &str) -> bool {
-    events.iter().any(|e| matches!(e, AgentEvent::Note(t) if t.contains(needle)))
+    events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Note(t) if t.contains(needle)))
 }
 
 #[tokio::test]
@@ -467,7 +537,10 @@ async fn compaction_fires_near_the_window_even_while_exploring() {
     let mut cfg = test_cfg();
     cfg.context_window = Some(24_000);
     let events = run_and_collect(&session_cfg(exploration_steps(), cfg)).await;
-    assert!(note_seen(&events, "context compacted"), "near-window backstop must fire; {events:?}");
+    assert!(
+        note_seen(&events, "context compacted"),
+        "near-window backstop must fire; {events:?}"
+    );
 }
 
 #[tokio::test]
@@ -496,8 +569,14 @@ fn compaction_never_elides_a_result_the_model_has_not_seen() {
     msgs.push(tool_msg(&big, 101));
     let elided = compact_history(&mut msgs, 0, seen_before);
     assert_eq!(elided, 10, "all seen results elide");
-    assert!(msgs[11].content.as_deref().unwrap().starts_with('y'), "unseen result 1 intact");
-    assert!(msgs[12].content.as_deref().unwrap().starts_with('y'), "unseen result 2 intact");
+    assert!(
+        msgs[11].content.as_deref().unwrap().starts_with('y'),
+        "unseen result 1 intact"
+    );
+    assert!(
+        msgs[12].content.as_deref().unwrap().starts_with('y'),
+        "unseen result 2 intact"
+    );
 }
 
 #[test]
@@ -607,12 +686,19 @@ async fn ask_user_posts_questions_and_ends_the_turn_wire_complete() {
     assert_eq!(asked.len(), 2);
     assert_eq!(asked[0].header.as_deref(), Some("Storage"));
     assert_eq!(asked[0].options[0].label, "sqlite (recommended)");
-    assert!(!events.iter().any(|e| matches!(e, AgentEvent::Error(_))), "{events:?}");
+    assert!(
+        !events.iter().any(|e| matches!(e, AgentEvent::Error(_))),
+        "{events:?}"
+    );
     assert!(events.iter().any(|e| matches!(e, AgentEvent::Done)));
     // Wire-complete: the ask_user tool_call got its reply as the LAST message.
     let last = msgs.last().unwrap();
     assert_eq!(last.role, "tool");
-    assert!(last.content.as_deref().unwrap_or("").contains("questions posted"));
+    assert!(last
+        .content
+        .as_deref()
+        .unwrap_or("")
+        .contains("questions posted"));
 }
 
 #[tokio::test]
@@ -622,9 +708,15 @@ async fn ask_user_with_malformed_args_errors_and_the_turn_continues() {
         ScriptStep::Turn(turn_text("recovered")),
     ]);
     let events = run_and_collect_from(&sess).await;
-    assert!(!events.iter().any(|e| matches!(e, AgentEvent::AskUser { .. })));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, .. })));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Message(t) if t == "recovered")));
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::AskUser { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Message(t) if t == "recovered")));
 }
 
 /// `run_and_collect` for an arbitrary session (the original helper builds its own).
@@ -652,9 +744,13 @@ async fn ask_user_without_a_session_store_is_refused_not_intercepted() {
         ScriptStep::Turn(turn_text("proceeding on defaults")),
     ]);
     let events = run_and_collect(&sess).await;
-    assert!(!events.iter().any(|e| matches!(e, AgentEvent::AskUser { .. })));
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::AskUser { .. })));
     assert!(events
         .iter()
         .any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, result, .. } if result.contains("state your assumption"))));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Message(t) if t == "proceeding on defaults")));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Message(t) if t == "proceeding on defaults")));
 }

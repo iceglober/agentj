@@ -108,7 +108,9 @@ impl App {
     }
 
     fn menu_accept(&mut self) -> AppEffect {
-        let Some(sel) = self.menu else { return AppEffect::None };
+        let Some(sel) = self.menu else {
+            return AppEffect::None;
+        };
         self.dirty = true;
         match sel {
             0 => {
@@ -177,7 +179,10 @@ impl App {
                         // Anchor a selection at the clicked screen cell. Works over ANY content —
                         // transcript, modals, panels. A bare click (no drag) clears on release.
                         let cell = (m.column, m.row);
-                        self.selection = Some(Selection { anchor: cell, cursor: cell });
+                        self.selection = Some(Selection {
+                            anchor: cell,
+                            cursor: cell,
+                        });
                         self.selecting = true;
                         self.dirty = true;
                     }
@@ -223,7 +228,11 @@ impl App {
                 KeyCode::Up => return self.menu_move(-1),
                 KeyCode::Down => return self.menu_move(1),
                 KeyCode::Enter => return self.menu_accept(),
-                KeyCode::Esc | KeyCode::Char('p') if k.code == KeyCode::Esc || k.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                KeyCode::Esc | KeyCode::Char('p')
+                    if k.code == KeyCode::Esc
+                        || k.modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
                     self.menu = None;
                     self.dirty = true;
                     return AppEffect::None;
@@ -411,7 +420,10 @@ impl App {
 
     fn ctrl_c(&mut self) -> AppEffect {
         let now = Instant::now();
-        if self.last_ctrl_c.is_some_and(|t| now.duration_since(t) < DOUBLE_TAP) {
+        if self
+            .last_ctrl_c
+            .is_some_and(|t| now.duration_since(t) < DOUBLE_TAP)
+        {
             AppEffect::Quit // second Ctrl-C within the window → quit
         } else {
             self.last_ctrl_c = Some(now);
@@ -516,7 +528,8 @@ impl App {
                 // Bare `/mcp` (or bad args): reopen the status modal + usage.
                 self.show_mcp_modal = !self.mcp_status.is_empty();
                 if self.mcp_status.is_empty() {
-                    self.transcript.push(dim_line("no MCP servers configured (.mcp.json)"));
+                    self.transcript
+                        .push(dim_line("no MCP servers configured (.mcp.json)"));
                 }
                 self.transcript
                     .push(dim_line("usage: /mcp login <name> · /mcp logout <name>"));

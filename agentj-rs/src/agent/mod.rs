@@ -52,10 +52,18 @@ fn frontier_resume(sess: &Session) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     match &sess.tools.session {
         Some(session) => {
-            if let Some(t) = session.read_artifact("todos").map(cap).filter(|s| !s.is_empty()) {
+            if let Some(t) = session
+                .read_artifact("todos")
+                .map(cap)
+                .filter(|s| !s.is_empty())
+            {
                 parts.push(format!("Your `todos` (what's left):\n{t}"));
             }
-            if let Some(p) = session.read_artifact("plan").map(cap).filter(|s| !s.is_empty()) {
+            if let Some(p) = session
+                .read_artifact("plan")
+                .map(cap)
+                .filter(|s| !s.is_empty())
+            {
                 parts.push(format!("Your `plan` (the approach):\n{p}"));
             }
         }
@@ -264,7 +272,8 @@ pub async fn run_turn(
             // loops; `ask_user` likewise (it emits an event and ends the turn — the plain dispatch
             // path only carries its "unavailable here" error for subagents/headless).
             let is_delegate = allow_delegate && tc.function.name == "run_subagents";
-            let is_ask = allow_delegate && sess.tools.has_session() && tc.function.name == "ask_user";
+            let is_ask =
+                allow_delegate && sess.tools.has_session() && tc.function.name == "ask_user";
             let _ = tx.send(AgentEvent::ToolStart {
                 name: tc.function.name.clone(),
                 args: first_line(&tc.function.arguments, 100),
@@ -312,7 +321,9 @@ pub async fn run_turn(
             // view). Display-only; no effect on the loop.
             if ok && matches!(tc.function.name.as_str(), "save_artifact" | "edit_artifact") {
                 if let Some(name) = args.get("name").and_then(|v| v.as_str()) {
-                    let _ = tx.send(AgentEvent::Artifact { name: name.to_string() });
+                    let _ = tx.send(AgentEvent::Artifact {
+                        name: name.to_string(),
+                    });
                 }
             }
             let tool_msg = ChatMessage {

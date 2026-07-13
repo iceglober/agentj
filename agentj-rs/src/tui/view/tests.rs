@@ -137,7 +137,10 @@ fn tool_end_glyph_reflects_success_and_batching() {
     let batched = tool_end_line("edit_file(y)", true, 5, "edited", true);
     assert_eq!(batched.spans[0].content, "+ ");
     let bad = tool_end_line("edit_file(x)", false, 20, "old_string not found", true);
-    assert_eq!(bad.spans[0].content, "✗ ", "failure outranks the batch marker");
+    assert_eq!(
+        bad.spans[0].content, "✗ ",
+        "failure outranks the batch marker"
+    );
     assert_eq!(bad.spans[0].style.fg, Some(theme::ERROR));
 }
 
@@ -151,11 +154,20 @@ fn clip_adds_ellipsis_only_when_truncating() {
 fn tray_app(rows: &[(&str, &str, Option<bool>)]) -> super::super::app::App {
     use super::super::app::{App, UiMsg};
     use crate::events::AgentEvent;
-    let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "m",
+        ".".to_string(),
+        "sys".to_string(),
+        None,
+        Vec::new(),
+        false,
+    );
     for (i, (desc, status, done)) in rows.iter().enumerate() {
         app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
             id: i,
-            desc: desc.to_string(),        agent_type: "scout".into(),
+            desc: desc.to_string(),
+            agent_type: "scout".into(),
         }));
         app.on_ui(UiMsg::Agent(AgentEvent::SubagentProgress {
             id: i,
@@ -185,11 +197,18 @@ fn tray_gives_the_title_full_width_before_the_status() {
 
     // Plenty of width: full title AND status visible.
     let wide = tray_text(&subagent_panel(&app, now, 110));
-    assert!(wide[0].contains(long_title), "full title must render: {wide:?}");
+    assert!(
+        wide[0].contains(long_title),
+        "full title must render: {wide:?}"
+    );
     assert!(wide[0].contains("bash(cargo test)"));
 
     // Tight width: the title survives untruncated; the status is what gives way.
-    let narrow = tray_text(&subagent_panel(&app, now, (7 + long_title.len() + 8) as u16));
+    let narrow = tray_text(&subagent_panel(
+        &app,
+        now,
+        (7 + long_title.len() + 8) as u16,
+    ));
     assert!(
         narrow[0].contains(long_title),
         "title must win the width fight: {narrow:?}"
@@ -257,7 +276,15 @@ fn scrolled_up_badge_shows_and_paging_to_the_bottom_restores_follow() {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    let mut app = App::new("vertex", "m", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "m",
+        ".".to_string(),
+        "sys".to_string(),
+        None,
+        Vec::new(),
+        false,
+    );
     for i in 0..80 {
         app.transcript.push(dim_line(format!("line {i}")));
     }
@@ -267,9 +294,17 @@ fn scrolled_up_badge_shows_and_paging_to_the_bottom_restores_follow() {
     app.refresh_input(60);
     term.draw(|f| draw(f, &mut app)).unwrap();
     let text = |t: &Terminal<TestBackend>| -> String {
-        t.backend().buffer().content().iter().map(|c| c.symbol()).collect()
+        t.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
     };
-    assert!(text(&term).contains("scroll down for latest"), "badge missing");
+    assert!(
+        text(&term).contains("scroll down for latest"),
+        "badge missing"
+    );
     assert!(!app.follow, "reading history must not re-pin");
 
     // Paging past the end clamps to the bottom, restores follow, and drops the badge.
@@ -300,7 +335,15 @@ fn menu_modal_shows_the_session_token_breakdown() {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "gpt-5",
+        ".".to_string(),
+        "/repo".to_string(),
+        Some(200_000),
+        Vec::new(),
+        false,
+    );
     app.on_ui(UiMsg::Agent(AgentEvent::Usage(TokenUsage {
         prompt_tokens: 2500,
         completion_tokens: 100,
@@ -329,10 +372,22 @@ fn menu_modal_shows_the_session_token_breakdown() {
         .map(|c| c.symbol())
         .collect();
 
-    assert!(rendered.contains("Session tokens"), "token section missing: {rendered}");
-    assert!(rendered.contains("2.5k in (600 cache) · 100 out · 1 calls"), "primary row: {rendered}");
-    assert!(rendered.contains("500 in · 15 out · 1 calls"), "subagent row (no cache shown at 0): {rendered}");
-    assert!(rendered.contains("3.0k in · 115 out"), "total row: {rendered}");
+    assert!(
+        rendered.contains("Session tokens"),
+        "token section missing: {rendered}"
+    );
+    assert!(
+        rendered.contains("2.5k in (600 cache) · 100 out · 1 calls"),
+        "primary row: {rendered}"
+    );
+    assert!(
+        rendered.contains("500 in · 15 out · 1 calls"),
+        "subagent row (no cache shown at 0): {rendered}"
+    );
+    assert!(
+        rendered.contains("3.0k in · 115 out"),
+        "total row: {rendered}"
+    );
 }
 
 #[test]
@@ -343,7 +398,15 @@ fn frame_composes_markdown_status_meter_and_subagent_panel() {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), Some(200_000), Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "gpt-5",
+        ".".to_string(),
+        "/repo".to_string(),
+        Some(200_000),
+        Vec::new(),
+        false,
+    );
     app.running = true;
     app.on_ui(UiMsg::Agent(AgentEvent::Message(
         "**bold** and `code`".to_string(),
@@ -356,7 +419,8 @@ fn frame_composes_markdown_status_meter_and_subagent_panel() {
     })));
     app.on_ui(UiMsg::Agent(AgentEvent::SubagentStart {
         id: 0,
-        desc: "port editor tests".to_string(),        agent_type: "scout".into(),
+        desc: "port editor tests".to_string(),
+        agent_type: "scout".into(),
     }));
 
     let mut term = Terminal::new(TestBackend::new(80, 20)).unwrap();
@@ -366,7 +430,10 @@ fn frame_composes_markdown_status_meter_and_subagent_panel() {
     term.draw(|f| draw(f, &mut app)).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(300));
     term.draw(|f| draw(f, &mut app)).unwrap();
-    assert!(app.tray_fx.is_none(), "coalesce effect must finish and clear");
+    assert!(
+        app.tray_fx.is_none(),
+        "coalesce effect must finish and clear"
+    );
     let rendered: String = term
         .backend()
         .buffer()
@@ -378,7 +445,10 @@ fn frame_composes_markdown_status_meter_and_subagent_panel() {
     assert!(rendered.contains("bold"), "assistant markdown missing");
     assert!(rendered.contains("code"));
     assert!(rendered.contains("● "), "assistant bullet missing");
-    assert!(rendered.contains("ctx 34%"), "context meter missing: {rendered}");
+    assert!(
+        rendered.contains("ctx 34%"),
+        "context meter missing: {rendered}"
+    );
     assert!(
         rendered.contains("agentj · vertex/gpt-5 · ."),
         "footer identity line missing"
@@ -392,7 +462,15 @@ fn frame_composes_markdown_status_meter_and_subagent_panel() {
 #[test]
 fn jobs_panel_lists_running_jobs_with_elapsed_and_timeout() {
     use crate::jobs::JobInfo;
-    let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "m",
+        ".".to_string(),
+        "/repo".to_string(),
+        None,
+        Vec::new(),
+        false,
+    );
     let start = Instant::now();
     app.jobs = vec![JobInfo {
         id: 2,
@@ -419,16 +497,36 @@ fn screen_selection_snapshots_and_copies_any_content_incl_a_modal() {
     use ratatui::Terminal;
 
     // A failing server opens the MCP modal; selection must be able to copy its text.
-    let mcp = vec![McpStatus { name: "linear".into(), outcome: crate::mcp::client::McpOutcome::Err("boom".into()) }];
-    let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, mcp, false);
-    app.selection = Some(Selection { anchor: (0, 0), cursor: (89, 23) }); // whole screen
+    let mcp = vec![McpStatus {
+        name: "linear".into(),
+        outcome: crate::mcp::client::McpOutcome::Err("boom".into()),
+    }];
+    let mut app = App::new(
+        "vertex",
+        "m",
+        ".".to_string(),
+        "/repo".to_string(),
+        None,
+        mcp,
+        false,
+    );
+    app.selection = Some(Selection {
+        anchor: (0, 0),
+        cursor: (89, 23),
+    }); // whole screen
     let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
     app.refresh_input(90);
     term.draw(|f| draw(f, &mut app)).unwrap();
 
-    assert!(!app.screen_rows.is_empty(), "frame text snapshotted for copy");
+    assert!(
+        !app.screen_rows.is_empty(),
+        "frame text snapshotted for copy"
+    );
     let copied = app.selected_screen_text(app.selection.unwrap());
-    assert!(copied.contains("MCP servers"), "copy reads the modal text: {copied}");
+    assert!(
+        copied.contains("MCP servers"),
+        "copy reads the modal text: {copied}"
+    );
     assert!(copied.contains("linear"));
 }
 
@@ -439,20 +537,45 @@ fn mcp_modal_lists_server_statuses() {
     use ratatui::Terminal;
 
     let mcp = vec![
-        McpStatus { name: "linear".into(), outcome: crate::mcp::client::McpOutcome::Ok(12) },
-        McpStatus { name: "atlassian".into(), outcome: crate::mcp::client::McpOutcome::Err("address already in use 127.0.0.1:3736".into()) },
+        McpStatus {
+            name: "linear".into(),
+            outcome: crate::mcp::client::McpOutcome::Ok(12),
+        },
+        McpStatus {
+            name: "atlassian".into(),
+            outcome: crate::mcp::client::McpOutcome::Err(
+                "address already in use 127.0.0.1:3736".into(),
+            ),
+        },
     ];
-    let mut app = App::new("vertex", "m", ".".to_string(), "/repo".to_string(), None, mcp, false);
+    let mut app = App::new(
+        "vertex",
+        "m",
+        ".".to_string(),
+        "/repo".to_string(),
+        None,
+        mcp,
+        false,
+    );
     assert!(app.mcp_modal_open(), "a failure opens the modal");
     let mut term = Terminal::new(TestBackend::new(90, 24)).unwrap();
     app.refresh_input(90);
     term.draw(|f| draw(f, &mut app)).unwrap();
-    let rendered: String = term.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+    let rendered: String = term
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
     assert!(rendered.contains("MCP servers"), "title: {rendered}");
     assert!(rendered.contains("linear"));
     assert!(rendered.contains("12 tools"));
     assert!(rendered.contains("atlassian"));
-    assert!(rendered.contains("address already in use"), "error shown: {rendered}");
+    assert!(
+        rendered.contains("address already in use"),
+        "error shown: {rendered}"
+    );
 }
 
 #[test]
@@ -461,7 +584,15 @@ fn setup_modal_renders_the_form_over_the_transcript() {
     use ratatui::Terminal;
 
     // needs_setup opens the wizard on launch.
-    let mut app = App::new("(none)", "(none)", ".".to_string(), "/repo".to_string(), None, Vec::new(), true);
+    let mut app = App::new(
+        "(none)",
+        "(none)",
+        ".".to_string(),
+        "/repo".to_string(),
+        None,
+        Vec::new(),
+        true,
+    );
     assert!(app.setup.is_some());
     let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
     app.refresh_input(80);
@@ -473,7 +604,10 @@ fn setup_modal_renders_the_form_over_the_transcript() {
         .iter()
         .map(|c| c.symbol())
         .collect();
-    assert!(rendered.contains("Set up a provider"), "modal title missing: {rendered}");
+    assert!(
+        rendered.contains("Set up a provider"),
+        "modal title missing: {rendered}"
+    );
     assert!(rendered.contains("Provider"), "provider field missing");
     assert!(rendered.contains("1) azure"), "provider choices missing");
     assert!(rendered.contains("Esc: cancel"), "modal hint missing");
@@ -486,7 +620,15 @@ fn frame_shows_the_slash_popover_above_the_status_row() {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
-    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "/repo".to_string(), None, Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "gpt-5",
+        ".".to_string(),
+        "/repo".to_string(),
+        None,
+        Vec::new(),
+        false,
+    );
     for c in "/t".chars() {
         app.on_input(crossterm::event::Event::Key(KeyEvent::new(
             KeyCode::Char(c),
@@ -505,8 +647,14 @@ fn frame_shows_the_slash_popover_above_the_status_row() {
         .iter()
         .map(|c| c.symbol())
         .collect();
-    assert!(rendered.contains("▸ /task"), "selected popover row missing: {rendered}");
-    assert!(rendered.contains("wipe + re-key"), "popover summary missing");
+    assert!(
+        rendered.contains("▸ /task"),
+        "selected popover row missing: {rendered}"
+    );
+    assert!(
+        rendered.contains("wipe + re-key"),
+        "popover summary missing"
+    );
 }
 
 #[test]
@@ -535,8 +683,16 @@ fn window_slices_the_transcript_without_cloning_all_of_it() {
 
     let (first, window, kinds, intra, _bs) = view.window(10, 6);
     assert_eq!((first, intra), (5, 0));
-    assert!(window.len() <= 5, "clones only the window, not all 20: {}", window.len());
-    assert_eq!(window.len(), kinds.len(), "kinds are index-aligned with the window lines");
+    assert!(
+        window.len() <= 5,
+        "clones only the window, not all 20: {}",
+        window.len()
+    );
+    assert_eq!(
+        window.len(),
+        kinds.len(),
+        "kinds are index-aligned with the window lines"
+    );
 
     let (first2, _w2, _k2, intra2, _bs2) = view.window(11, 6);
     assert_eq!((first2, intra2), (5, 1));
@@ -546,13 +702,37 @@ fn card_app() -> super::super::app::App {
     use super::super::app::{App, UiMsg};
     use crate::events::AgentEvent;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
+    let mut app = App::new(
+        "vertex",
+        "gpt-5",
+        ".".to_string(),
+        "sys".to_string(),
+        None,
+        Vec::new(),
+        false,
+    );
     app.editor.insert_str("Finish GEN-3320");
-    app.on_input(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))); // pushes the user card
-    app.on_ui(UiMsg::Agent(AgentEvent::ToolStart { name:"bash".into(), args:"git status".into(), step:0 }));
-    app.on_ui(UiMsg::Agent(AgentEvent::ToolEnd { ok:true, elapsed_ms:39, summary:"clean".into(), result:String::new() }));
-    app.on_ui(UiMsg::Agent(AgentEvent::Note("context compacted — elided 3 older tool results".into())));
-    app.on_ui(UiMsg::Agent(AgentEvent::Message("Design is locked; implementing now.".into())));
+    app.on_input(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    ))); // pushes the user card
+    app.on_ui(UiMsg::Agent(AgentEvent::ToolStart {
+        name: "bash".into(),
+        args: "git status".into(),
+        step: 0,
+    }));
+    app.on_ui(UiMsg::Agent(AgentEvent::ToolEnd {
+        ok: true,
+        elapsed_ms: 39,
+        summary: "clean".into(),
+        result: String::new(),
+    }));
+    app.on_ui(UiMsg::Agent(AgentEvent::Note(
+        "context compacted — elided 3 older tool results".into(),
+    )));
+    app.on_ui(UiMsg::Agent(AgentEvent::Message(
+        "Design is locked; implementing now.".into(),
+    )));
     app
 }
 
@@ -568,18 +748,33 @@ fn cards_tint_messages_leave_the_machinery_plain_and_focus_hides_it() {
     };
     render(&mut app, &mut term);
     let buf = term.backend().buffer();
-    let row_str = |y: u16| -> String { (0..64).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect() };
+    let row_str = |y: u16| -> String {
+        (0..64)
+            .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+            .collect()
+    };
     let find = |needle: &str| (0..18).find(|&y| row_str(y).contains(needle));
     // A representative cell inside the card body — past the label column (LABEL_W=8) + bar.
     let bg = |y: u16| buf.cell((16, y)).unwrap().style().bg;
 
     let uy = find("Finish GEN-3320").expect("user card row");
-    assert!(row_str(uy).contains('▌'), "user card carries a left bar: {}", row_str(uy));
+    assert!(
+        row_str(uy).contains('▌'),
+        "user card carries a left bar: {}",
+        row_str(uy)
+    );
     assert_eq!(bg(uy), Some(theme::user_bg()), "user card row is tinted");
 
     let ay = find("Design is locked").expect("assistant card row");
-    assert!(row_str(ay).contains('▌'), "assistant card carries a left bar");
-    assert_eq!(bg(ay), Some(theme::assistant_bg()), "assistant card row is tinted");
+    assert!(
+        row_str(ay).contains('▌'),
+        "assistant card carries a left bar"
+    );
+    assert_eq!(
+        bg(ay),
+        Some(theme::assistant_bg()),
+        "assistant card row is tinted"
+    );
 
     // Tool + note render plainly between the cards — no bar, no tint.
     let ty = find("bash(git status)").expect("tool row");
@@ -597,7 +792,10 @@ fn cards_tint_messages_leave_the_machinery_plain_and_focus_hides_it() {
         .map(|(x, y)| buf.cell((x, y)).unwrap().symbol().to_string())
         .collect();
     assert!(!all.contains("bash(git status)"), "Focus hides tool calls");
-    assert!(all.contains("Finish GEN-3320") && all.contains("Design is locked"), "conversation stays");
+    assert!(
+        all.contains("Finish GEN-3320") && all.contains("Design is locked"),
+        "conversation stays"
+    );
 }
 
 #[test]
@@ -606,19 +804,37 @@ fn model_reasoning_renders_as_a_labeled_thinking_block() {
     use crate::events::AgentEvent;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    let mut app = App::new("vertex", "gpt-5", ".".to_string(), "sys".to_string(), None, Vec::new(), false);
-    app.on_ui(UiMsg::Agent(AgentEvent::Thinking("weighing the two approaches".into())));
+    let mut app = App::new(
+        "vertex",
+        "gpt-5",
+        ".".to_string(),
+        "sys".to_string(),
+        None,
+        Vec::new(),
+        false,
+    );
+    app.on_ui(UiMsg::Agent(AgentEvent::Thinking(
+        "weighing the two approaches".into(),
+    )));
     let mut term = Terminal::new(TestBackend::new(72, 12)).unwrap();
     app.refresh_input(72);
     term.draw(|f| draw(f, &mut app)).unwrap();
     let buf = term.backend().buffer();
     let rows: Vec<String> = (0..12)
-        .map(|y| (0..72).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect())
+        .map(|y| {
+            (0..72)
+                .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                .collect()
+        })
         .collect();
     let all = rows.join("\n");
-    assert!(all.contains("weighing the two approaches"), "reasoning text shown: {all}");
     assert!(
-        rows.iter().any(|r| r.get(1..9).map(|s| s.trim() == "thinking").unwrap_or(false)),
+        all.contains("weighing the two approaches"),
+        "reasoning text shown: {all}"
+    );
+    assert!(
+        rows.iter()
+            .any(|r| r.get(1..9).map(|s| s.trim() == "thinking").unwrap_or(false)),
         "a `thinking` label marks the block: {rows:?}"
     );
 }
@@ -635,14 +851,29 @@ fn each_transcript_block_is_labeled_once_by_type() {
     // The type label sits in the left column: PAD_X(1) then LABEL_W(8) → screen cols 1..9.
     let labels: Vec<String> = (0..18)
         .map(|y| {
-            (1..9).map(|x| buf.cell((x, y)).unwrap().symbol().to_string()).collect::<String>().trim().to_string()
+            (1..9)
+                .map(|x| buf.cell((x, y)).unwrap().symbol().to_string())
+                .collect::<String>()
+                .trim()
+                .to_string()
         })
         .filter(|s| !s.is_empty())
         .collect();
     for kind in ["you", "agentj", "tool", "note"] {
-        assert!(labels.iter().any(|l| l == kind), "expected a `{kind}` label, got {labels:?}");
+        assert!(
+            labels.iter().any(|l| l == kind),
+            "expected a `{kind}` label, got {labels:?}"
+        );
     }
     // A block is labeled exactly once — not on every wrapped/padded row of the card.
-    assert_eq!(labels.iter().filter(|l| *l == "you").count(), 1, "{labels:?}");
-    assert_eq!(labels.iter().filter(|l| *l == "agentj").count(), 1, "{labels:?}");
+    assert_eq!(
+        labels.iter().filter(|l| *l == "you").count(),
+        1,
+        "{labels:?}"
+    );
+    assert_eq!(
+        labels.iter().filter(|l| *l == "agentj").count(),
+        1,
+        "{labels:?}"
+    );
 }

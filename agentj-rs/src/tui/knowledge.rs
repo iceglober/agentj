@@ -151,7 +151,11 @@ fn list_bucket(label: &str, paths: &[String]) -> String {
     } else {
         String::new()
     };
-    format!("\n{label} ({}):\n  {}{more}", paths.len(), shown.join("\n  "))
+    format!(
+        "\n{label} ({}):\n  {}{more}",
+        paths.len(),
+        shown.join("\n  ")
+    )
 }
 
 /// The `/init` directive: an orchestrated mapping run, worked as a normal task.
@@ -266,7 +270,10 @@ mod tests {
         let dir = temp_dir("boiler");
         let root = dir.to_str().unwrap();
         assert!(write_boilerplate_config(root, "gpt-5.2").unwrap());
-        assert!(!write_boilerplate_config(root, "other").unwrap(), "never overwrites");
+        assert!(
+            !write_boilerplate_config(root, "other").unwrap(),
+            "never overwrites"
+        );
         let body = std::fs::read_to_string(dir.join(".aj/aj.json")).unwrap();
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["model"], "gpt-5.2");

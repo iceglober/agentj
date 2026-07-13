@@ -12,11 +12,19 @@ fn bin_path() -> PathBuf {
     let mut p = std::env::current_exe().expect("current_exe");
     p.pop(); // deps
     p.pop(); // debug|release
-    p.push(if cfg!(windows) { "agentj.exe" } else { "agentj" });
+    p.push(if cfg!(windows) {
+        "agentj.exe"
+    } else {
+        "agentj"
+    });
     p
 }
 
-fn drain_until_quiet(rx: &mpsc::Receiver<Vec<u8>>, quiet_for: Duration, max_wait: Duration) -> Vec<u8> {
+fn drain_until_quiet(
+    rx: &mpsc::Receiver<Vec<u8>>,
+    quiet_for: Duration,
+    max_wait: Duration,
+) -> Vec<u8> {
     let started = Instant::now();
     let mut last = Instant::now();
     let mut out = Vec::new();
@@ -169,17 +177,29 @@ fn run_with_cwd(
     // Wait for the TUI to be up (the cheat sheet is its first transcript line) before typing, and
     // let it process the keystrokes before the writer drop delivers EOF.
     let mut early = drain_until_contains(&rx, "Enter send", Duration::from_secs(10));
-    early.extend(drain_until_quiet(&rx, Duration::from_millis(200), Duration::from_secs(2)));
+    early.extend(drain_until_quiet(
+        &rx,
+        Duration::from_millis(200),
+        Duration::from_secs(2),
+    ));
     writer.write_all(input).expect("write input");
     writer.flush().expect("flush input");
-    early.extend(drain_until_quiet(&rx, Duration::from_millis(500), Duration::from_secs(3)));
+    early.extend(drain_until_quiet(
+        &rx,
+        Duration::from_millis(500),
+        Duration::from_secs(3),
+    ));
     drop(writer);
 
     let status = child.wait().expect("wait child");
     assert!(status.success(), "agentj exited with {status:?}");
 
     let mut output = early;
-    output.extend_from_slice(&drain_until_quiet(&rx, Duration::from_millis(200), Duration::from_secs(2)));
+    output.extend_from_slice(&drain_until_quiet(
+        &rx,
+        Duration::from_millis(200),
+        Duration::from_secs(2),
+    ));
     reader_thread.join().expect("join reader thread");
     output.extend_from_slice(&drain_until_quiet(
         &rx,

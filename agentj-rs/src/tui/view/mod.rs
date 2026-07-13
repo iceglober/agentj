@@ -179,7 +179,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // During setup the modal owns the input (and the cursor), so the box just shows a hint.
     if app.setup.is_some() {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled("  ⏎ next · Esc cancel", theme::dim()))),
+            Paragraph::new(Line::from(Span::styled(
+                "  ⏎ next · Esc cancel",
+                theme::dim(),
+            ))),
             r_input,
         );
     } else {
@@ -209,7 +212,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let h = popover.len() as u16;
         let w = popover
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.chars().count()).sum::<usize>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.chars().count())
+                    .sum::<usize>()
+            })
             .max()
             .unwrap_or(0)
             .min(area.width as usize) as u16;
@@ -269,7 +277,11 @@ fn snapshot_screen(buf: &ratatui::buffer::Buffer) -> Vec<String> {
     (area.top()..area.bottom())
         .map(|y| {
             (area.left()..area.right())
-                .map(|x| buf.cell(Position::new(x, y)).map(|c| c.symbol()).unwrap_or(" "))
+                .map(|x| {
+                    buf.cell(Position::new(x, y))
+                        .map(|c| c.symbol())
+                        .unwrap_or(" ")
+                })
                 .collect::<String>()
         })
         .collect()

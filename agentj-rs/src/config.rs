@@ -32,7 +32,10 @@ impl ProviderConfig {
     }
 
     fn value(field: &Option<String>) -> Option<String> {
-        field.as_deref().filter(|s| !s.is_empty()).map(|s| s.to_string())
+        field
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
     }
 
     pub fn model(&self) -> Option<String> {
@@ -42,7 +45,6 @@ impl ProviderConfig {
     pub fn base_url(&self) -> Option<String> {
         Self::value(&self.base_url)
     }
-
 
     pub fn api_version(&self) -> Option<String> {
         Self::value(&self.api_version)
@@ -187,13 +189,17 @@ impl Config {
         let num = |k: &str, file_value: Option<u64>| env_num(k).or(file_value);
         let env_flag_default_on =
             |k: &str| get(k).is_none_or(|s| !(s == "0" || s.eq_ignore_ascii_case("false")));
-        let context_window = env_num("AGENTJ_CONTEXT_WINDOW").or_else(|| crate::model::context_window(model_id));
+        let context_window =
+            env_num("AGENTJ_CONTEXT_WINDOW").or_else(|| crate::model::context_window(model_id));
         Config {
             max_steps: num("AGENTJ_MAX_STEPS", file.max_steps)
                 .filter(|n| *n >= 1)
                 .unwrap_or(40) as usize,
-            max_idle_nudges: num("AGENTJ_MAX_IDLE_NUDGES", file.max_idle_nudges).unwrap_or(6) as usize,
-            idle_wait: Duration::from_secs(num("AGENTJ_JOB_IDLE_WAIT_S", file.job_idle_wait_s).unwrap_or(120)),
+            max_idle_nudges: num("AGENTJ_MAX_IDLE_NUDGES", file.max_idle_nudges).unwrap_or(6)
+                as usize,
+            idle_wait: Duration::from_secs(
+                num("AGENTJ_JOB_IDLE_WAIT_S", file.job_idle_wait_s).unwrap_or(120),
+            ),
             max_parallel_subagents: env_num("AGENTJ_MAX_PARALLEL_SUBAGENTS")
                 .filter(|n| *n >= 1)
                 .unwrap_or(4) as usize,
@@ -260,7 +266,10 @@ pub fn write_provider_config(
         b.insert("api_version".into(), json!(v));
     }
 
-    std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".into()))?;
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&root).unwrap_or_else(|_| "{}".into()),
+    )?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -274,7 +283,10 @@ fn read_config(path: &Path) -> AppConfig {
         Ok(s) => match serde_json::from_str(&s) {
             Ok(cfg) => cfg,
             Err(err) => {
-                eprintln!("warning: ignoring invalid config file {}: {err}", path.display());
+                eprintln!(
+                    "warning: ignoring invalid config file {}: {err}",
+                    path.display()
+                );
                 AppConfig::default()
             }
         },
@@ -318,7 +330,10 @@ mod tests {
 
         assert_eq!(from(&[("AGENTJ_MAX_STEPS", "0")]).max_steps, 40);
         assert_eq!(from(&[("AGENTJ_MAX_STEPS", "nope")]).max_steps, 40);
-        assert_eq!(from(&[("AGENTJ_MAX_PARALLEL_SUBAGENTS", "0")]).max_parallel_subagents, 4);
+        assert_eq!(
+            from(&[("AGENTJ_MAX_PARALLEL_SUBAGENTS", "0")]).max_parallel_subagents,
+            4
+        );
 
         let o = from(&[
             ("AGENTJ_MAX_STEPS", "10"),
@@ -354,7 +369,10 @@ mod tests {
     fn continuation_judge_defaults_on_and_only_an_explicit_off_disables_it() {
         assert!(from(&[]).continuation_judge, "on by default");
         assert!(from(&[("AGENTJ_CONTINUATION_JUDGE", "1")]).continuation_judge);
-        assert!(from(&[("AGENTJ_CONTINUATION_JUDGE", "anything")]).continuation_judge, "unknown value stays on");
+        assert!(
+            from(&[("AGENTJ_CONTINUATION_JUDGE", "anything")]).continuation_judge,
+            "unknown value stays on"
+        );
         assert!(!from(&[("AGENTJ_CONTINUATION_JUDGE", "0")]).continuation_judge);
         assert!(!from(&[("AGENTJ_CONTINUATION_JUDGE", "false")]).continuation_judge);
     }
@@ -364,12 +382,24 @@ mod tests {
         // Unknown window → a high absolute fallback (compaction is a rare safety valve, not per-call).
         assert_eq!(from(&[]).compact_threshold, 96_000);
         // Env override wins (floor of 1000; below it, fall back to the window/default).
-        assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "40000")]).compact_threshold, 40_000);
-        assert_eq!(from(&[("AGENTJ_COMPACT_THRESHOLD", "500")]).compact_threshold, 96_000);
+        assert_eq!(
+            from(&[("AGENTJ_COMPACT_THRESHOLD", "40000")]).compact_threshold,
+            40_000
+        );
+        assert_eq!(
+            from(&[("AGENTJ_COMPACT_THRESHOLD", "500")]).compact_threshold,
+            96_000
+        );
         // A known window sets the threshold to 70% of it — so a 400k model compacts near 280k, not on
         // every call of a large task.
-        assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "400000")]).compact_threshold, 280_000);
-        assert_eq!(from(&[("AGENTJ_CONTEXT_WINDOW", "8000")]).compact_threshold, 5_600);
+        assert_eq!(
+            from(&[("AGENTJ_CONTEXT_WINDOW", "400000")]).compact_threshold,
+            280_000
+        );
+        assert_eq!(
+            from(&[("AGENTJ_CONTEXT_WINDOW", "8000")]).compact_threshold,
+            5_600
+        );
     }
 
     #[test]
@@ -453,7 +483,11 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("aj.json");
-        std::fs::write(&path, r#"{"provider":"custom","providers":{"custom":{"not_a_field":"x"}}}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"provider":"custom","providers":{"custom":{"not_a_field":"x"}}}"#,
+        )
+        .unwrap();
         assert_eq!(read_config(&path), AppConfig::default());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
@@ -464,12 +498,25 @@ mod tests {
         // Uniquely-named key so setting it can't race other tests reading process-global env.
         let key = "__AGENTJ_TEST_ENV_WINS__";
         std::env::set_var(key, "from-env");
-        assert_eq!(AppConfig::env_or_file(key, Some("file")), Some("from-env".into()), "env wins over file");
+        assert_eq!(
+            AppConfig::env_or_file(key, Some("file")),
+            Some("from-env".into()),
+            "env wins over file"
+        );
         // An empty env value is treated as unset and falls through to the file.
         std::env::set_var(key, "");
-        assert_eq!(AppConfig::env_or_file(key, Some("file")), Some("file".into()));
+        assert_eq!(
+            AppConfig::env_or_file(key, Some("file")),
+            Some("file".into())
+        );
         std::env::remove_var(key);
-        assert_eq!(AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("file")), Some("file".into()));
-        assert_eq!(AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("")), None);
+        assert_eq!(
+            AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("file")),
+            Some("file".into())
+        );
+        assert_eq!(
+            AppConfig::env_or_file("__AGENTJ_TEST_MISSING__", Some("")),
+            None
+        );
     }
 }

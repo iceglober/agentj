@@ -8,7 +8,11 @@ pub(crate) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// The first non-blank line of `s`, trimmed, capped at `max` characters (not bytes).
 /// Pass `usize::MAX` for no cap.
 pub fn first_line(s: &str, max: usize) -> String {
-    let line = s.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    let line = s
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("")
+        .trim();
     if max == usize::MAX {
         line.to_string()
     } else {

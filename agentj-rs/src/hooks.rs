@@ -43,11 +43,17 @@ impl HookKind {
         }
     }
 
+    /// Intentional compatibility member — kept public so frontends can parse hook names
+    /// from config/CLI without coupling to the enum representation.
+    #[allow(dead_code)]
     pub fn parse(s: &str) -> Option<HookKind> {
         HookKind::all().iter().copied().find(|k| k.name() == s)
     }
 
     /// One line for pickers/status rows.
+    /// Intentional compatibility member — kept public so frontends can render hook
+    /// descriptions without coupling to the enum representation.
+    #[allow(dead_code)]
     pub fn description(self) -> &'static str {
         match self {
             HookKind::WorktreeNew => {
@@ -73,6 +79,9 @@ impl HookKind {
 
 /// What a hook run produced, for the frontend to surface (CLI print / TUI notice / desktop notice).
 pub struct HookRun {
+    /// Intentional compatibility member — kept public so frontends can inspect hook
+    /// success without coupling to the summary string format.
+    #[allow(dead_code)]
     pub ok: bool,
     pub summary: String,
 }
@@ -99,7 +108,13 @@ fn workspace_key(root: &str) -> String {
         .unwrap_or_else(|| "workspace".to_string());
     let safe: String = dirname
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(40)
         .collect();
     format!("{safe}-{:08x}", fnv1a(&canonical) as u32)
@@ -131,7 +146,10 @@ fn tail(text: &str, lines: usize, cap: usize) -> String {
 pub async fn run_hook(root: &str, kind: HookKind) -> Option<HookRun> {
     let script = kind.script_path(root);
     let content = std::fs::read_to_string(&script).ok()?;
-    let stamp = kind.stamped().then(|| stamp_path(root, kind, fnv1a(&content))).flatten();
+    let stamp = kind
+        .stamped()
+        .then(|| stamp_path(root, kind, fnv1a(&content)))
+        .flatten();
     if kind.stamped() && stamp.as_ref().is_none_or(|s| s.exists()) {
         // Already ran for this script version — or no HOME to stamp in, where running every
         // session would violate the run-once contract, so we don't run at all.
@@ -174,7 +192,11 @@ pub async fn run_hook(root: &str, kind: HookKind) -> Option<HookRun> {
                     summary: format!("{name} hook: ok ({})", tail(&combined, 1, 120)),
                 }
             } else {
-                let retry = if kind.stamped() { " — will retry next session" } else { "" };
+                let retry = if kind.stamped() {
+                    " — will retry next session"
+                } else {
+                    ""
+                };
                 HookRun {
                     ok: false,
                     summary: format!(
@@ -227,9 +249,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// HOME_LOCK serializes HOME mutation across async tests; the guard is held across
+    /// await points intentionally — replacing the global test lock is out of scope.
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn worktree_new_runs_once_per_script_version_and_reruns_when_edited() {
-        let _home = crate::util::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = crate::util::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if std::env::var("HOME").is_err() {
             return;
         }
@@ -242,9 +269,15 @@ mod tests {
 
         let script = dir.join(".aj/hooks/worktree_new");
         std::fs::write(&script, "echo provisioning >> hook.log\necho done\n").unwrap();
-        let first = run_hook(&root, HookKind::WorktreeNew).await.expect("first run executes");
+        let first = run_hook(&root, HookKind::WorktreeNew)
+            .await
+            .expect("first run executes");
         assert!(first.ok, "{}", first.summary);
-        assert!(first.summary.contains("done"), "summary carries the output tail: {}", first.summary);
+        assert!(
+            first.summary.contains("done"),
+            "summary carries the output tail: {}",
+            first.summary
+        );
         assert!(
             run_hook(&root, HookKind::WorktreeNew).await.is_none(),
             "same script is stamped — no rerun"
@@ -254,41 +287,69 @@ mod tests {
 
         // Editing the script re-runs it (new content hash, new stamp).
         std::fs::write(&script, "echo provisioning-v2 >> hook.log\n").unwrap();
-        let second = run_hook(&root, HookKind::WorktreeNew).await.expect("edited script runs again");
+        let second = run_hook(&root, HookKind::WorktreeNew)
+            .await
+            .expect("edited script runs again");
         assert!(second.ok);
         let log = std::fs::read_to_string(dir.join("hook.log")).unwrap();
         assert_eq!(log.lines().count(), 2);
         cleanup(&dir);
     }
 
+    /// HOME_LOCK serializes HOME mutation across async tests; the guard is held across
+    /// await points intentionally — replacing the global test lock is out of scope.
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn session_start_runs_every_time_and_startup_orders_both() {
-        let _home = crate::util::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = crate::util::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if std::env::var("HOME").is_err() {
             return;
         }
         let dir = temp_worktree("every");
         let root = dir.to_string_lossy().into_owned();
-        std::fs::write(dir.join(".aj/hooks/worktree_new"), "echo new >> order.log\n").unwrap();
-        std::fs::write(dir.join(".aj/hooks/session_start"), "echo start >> order.log\n").unwrap();
+        std::fs::write(
+            dir.join(".aj/hooks/worktree_new"),
+            "echo new >> order.log\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join(".aj/hooks/session_start"),
+            "echo start >> order.log\n",
+        )
+        .unwrap();
 
         let runs = run_startup(&root).await;
         assert_eq!(runs.len(), 2, "both hooks fire on a fresh worktree");
         let log = std::fs::read_to_string(dir.join("order.log")).unwrap();
-        assert_eq!(log, "new\nstart\n", "worktree_new provisions BEFORE session_start");
+        assert_eq!(
+            log, "new\nstart\n",
+            "worktree_new provisions BEFORE session_start"
+        );
 
         // Second session: worktree_new is stamped, session_start repeats.
         let runs = run_startup(&root).await;
         assert_eq!(runs.len(), 1);
-        assert!(runs[0].summary.starts_with("session_start"), "{}", runs[0].summary);
+        assert!(
+            runs[0].summary.starts_with("session_start"),
+            "{}",
+            runs[0].summary
+        );
         let log = std::fs::read_to_string(dir.join("order.log")).unwrap();
         assert_eq!(log, "new\nstart\nstart\n");
         cleanup(&dir);
     }
 
+    /// HOME_LOCK serializes HOME mutation across async tests; the guard is held across
+    /// await points intentionally so a failed worktree_new hook still retries under
+    /// the same process-global HOME isolation.
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn failed_stamped_hook_is_reported_not_stamped_and_retries() {
-        let _home = crate::util::HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _home = crate::util::HOME_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if std::env::var("HOME").is_err() {
             return;
         }
@@ -299,13 +360,22 @@ mod tests {
             "echo installing\necho 'network unreachable' >&2\nexit 7\n",
         )
         .unwrap();
-        let run = run_hook(&root, HookKind::WorktreeNew).await.expect("hook ran");
+        let run = run_hook(&root, HookKind::WorktreeNew)
+            .await
+            .expect("hook ran");
         assert!(!run.ok);
         assert!(run.summary.contains("exit 7"), "{}", run.summary);
-        assert!(run.summary.contains("network unreachable"), "failure carries stderr: {}", run.summary);
+        assert!(
+            run.summary.contains("network unreachable"),
+            "failure carries stderr: {}",
+            run.summary
+        );
         assert!(run.summary.contains("retry"), "{}", run.summary);
         // Not stamped → a later session tries again.
-        assert!(run_hook(&root, HookKind::WorktreeNew).await.is_some(), "failed hooks retry");
+        assert!(
+            run_hook(&root, HookKind::WorktreeNew).await.is_some(),
+            "failed hooks retry"
+        );
         cleanup(&dir);
     }
 
