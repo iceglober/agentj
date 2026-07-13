@@ -31,3 +31,7 @@ Thumbs.db
 
 .lab/
 run.log
+
+# eval harness run artifacts (traj dumps + result rows)
+core/eval/results/
+core/eval/traj/

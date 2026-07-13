@@ -1,18 +1,13 @@
-import { ToolLoopAgent } from "ai";
-import { createBashTool } from "bash-tool";
+import { createAgent } from "./lib/agent";
 import { loadConfig } from "./lib/config";
-import { createModel } from "./lib/llm";
+import type { PromptContext } from "./lib/prompt";
 import { getSandbox } from "./lib/sandbox";
 import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
 import { createSession } from "./lib/session";
-import { createEditTools } from "./lib/tools/edit";
-import { createSearchTools } from "./lib/tools/search";
 
 const config = await loadConfig(
   new URL("./agentj.json", import.meta.url).pathname,
 );
-
-const model = createModel(config.llm);
 
 await using sandbox = await getSandbox(
   createSandboxProviderMicrosandbox(config.sandbox),
@@ -20,28 +15,42 @@ await using sandbox = await getSandbox(
 await using session = await createSession(sandbox, config.session);
 console.error(`[session ${session.id}] ${session.branch} from ${session.base}`);
 
-const { tools: bashTools } = await createBashTool({
-  sandbox,
-  destination: session.path,
-});
+// A porcelain status is one file per line; empty means a clean tree.
+const summarizeStatus = (porcelain: string): string => {
+  const n = porcelain.split("\n").filter(Boolean).length;
+  return n === 0 ? "clean" : `${n} files changed`;
+};
 
-// editTools last: its mode-specific readFile (line/anchor prefixes) replaces
-// bash-tool's plain one, so reads always carry what the edit tool consumes.
-const codingAgent = new ToolLoopAgent({
-  model,
-  temperature: config.llm.temperature,
-  tools: {
-    ...bashTools,
-    ...createSearchTools(sandbox, { root: session.path }),
-    ...createEditTools(sandbox, config.tools.edit.mode),
-  },
-});
+// Per-turn environment facts the prompt footer stamps in. os comes from the
+// sandbox (not the host) since that's where the agent's tools actually run.
+const ctx: PromptContext = {
+  cwd: session.path,
+  os: (await sandbox.executeCommand("uname -sr")).stdout.trim(),
+  date: new Date().toISOString().slice(0, 10),
+  gitBranch: session.branch,
+  gitStatusSummary: summarizeStatus(await session.status()),
+};
+
+// Best-effort project rules: explicit config wins, else the repo's AGENTS.md,
+// else nothing. Reading a missing file throws in the sandbox port, so guard it.
+let agentsMd = "";
+try {
+  agentsMd = await sandbox.readFile(`${session.path}/AGENTS.md`);
+} catch {}
+const rules = config.agent.rules || agentsMd || "";
+
+const { agent, composed } = await createAgent(
+  sandbox,
+  { ...config.agent, rules },
+  { root: session.path, ctx },
+);
+console.error(`[prompt] profile=${composed.profile} version=${composed.version}`);
 
 const prompt =
   process.argv.slice(2).join(" ") ||
   "Print the OS and python version of the machine you are on.";
 
-const result = await codingAgent.generate({
+const result = await agent.generate({
   prompt,
   onStepFinish: (step) => {
     for (const call of step.toolCalls) {

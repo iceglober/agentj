@@ -1,0 +1,9 @@
+{
+  "id": "nano",
+  "agent": {
+    "llm": {
+      "model": "gpt-5.4-nano",
+      "providers": { "azure": { "resourceName": "kayn-default-foundry-resource" } }
+    }
+  }
+}

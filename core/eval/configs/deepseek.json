@@ -1,0 +1,9 @@
+{
+  "id": "deepseek",
+  "agent": {
+    "llm": {
+      "model": "deepseek-v4-pro",
+      "providers": { "azure": { "resourceName": "kayn-default-foundry-resource" } }
+    }
+  }
+}

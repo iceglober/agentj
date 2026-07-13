@@ -1,0 +1,9 @@
+{
+  "id": "gpt-5.4",
+  "agent": {
+    "llm": {
+      "model": "gpt-5.4",
+      "providers": { "azure": { "resourceName": "kayn-default-foundry-resource" } }
+    }
+  }
+}

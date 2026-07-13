@@ -1,6 +1,11 @@
 # Edit tool A/B benchmarks
 
-Harness: `ab-edit.ts` (this directory). Model: `gpt-5.6-sol` (Azure). Sandbox: microsandbox
+> **Retired.** `ab-edit.ts` was superseded by the general eval harness; its fixture
+> lives on as `core/eval/fixtures/pricing.ts` + `core/eval/tasks/dev/`. Reproduce with:
+> `bun --env-file=core/.env core/eval/run.ts --config sol,sol-exact,sol-hash --seeds 3`
+> then `bun core/eval/report.ts --compare sol sol-exact`. The data below is historical.
+
+Harness: `ab-edit.ts` (this directory, deleted). Model: `gpt-5.6-sol` (Azure). Sandbox: microsandbox
 `python` image. One prompt per run: run tests, fix bugs via the edit tool only,
 re-run to green. Grading: harness restores `tests.py` and re-runs it after the
 agent finishes. Token counts and wall times cover the whole `generate()` call,

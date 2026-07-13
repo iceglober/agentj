@@ -1,0 +1,10 @@
+{
+  "id": "sol-hash",
+  "agent": {
+    "llm": {
+      "model": "gpt-5.6-sol",
+      "providers": { "azure": { "resourceName": "kayn-default-foundry-resource" } }
+    },
+    "tools": { "edit": { "mode": "hash" } }
+  }
+}

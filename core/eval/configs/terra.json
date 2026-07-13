@@ -1,0 +1,9 @@
+{
+  "id": "terra",
+  "agent": {
+    "llm": {
+      "model": "gpt-5.6-terra",
+      "providers": { "azure": { "resourceName": "kayn-default-foundry-resource" } }
+    }
+  }
+}

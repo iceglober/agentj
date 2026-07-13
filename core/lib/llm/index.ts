@@ -43,6 +43,8 @@ export const llmConfigSchema = z.object({
   model: z.string().default("gpt-5.6-sol"),
   /** Call setting; forward to the agent/generate call, not the model. */
   temperature: z.number().min(0).max(2).optional(),
+  /** Call setting; nucleus sampling (0–1). Forwarded like temperature. */
+  topP: z.number().min(0).max(1).optional(),
   providers: z
     .object({
       azure: azureModelConfigSchema.optional(),
