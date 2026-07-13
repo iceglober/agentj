@@ -1,6 +1,6 @@
 import { createAzure } from "@ai-sdk/azure";
 import z from "zod";
-import type { ModelFactory } from "./index";
+import type { ModelFactory } from "./ai-sdk-adapter";
 
 export const azureModelConfigSchema = z.object({
   /** Falls back to AZURE_FOUNDRY_API_KEY, then AZURE_API_KEY (SDK default). */

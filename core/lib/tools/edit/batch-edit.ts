@@ -1,5 +1,5 @@
-import { tool } from "ai";
 import z from "zod";
+import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 import { createLinePrefixedReadTool, errMsg } from "./shared";
 
@@ -7,7 +7,7 @@ import { createLinePrefixedReadTool, errMsg } from "./shared";
 export function createBatchEditTools(sb: Sandbox) {
   const readFile = createLinePrefixedReadTool(sb);
 
-  const edit = tool({
+  const edit = defineTool({
     description:
       "Edit a file by applying multiple exact string replacements atomically in one call. Each old_string must match the file content exactly (whitespace included) and occur exactly once — include enough surrounding lines to make it unique, or set replace_all. Edits apply in order, each against the result of the previous. If any edit fails, nothing is written. Never include the `LINE|` prefixes shown by readFile.",
     inputSchema: z.object({

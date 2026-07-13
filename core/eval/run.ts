@@ -1,11 +1,10 @@
-import { generateText } from "ai";
 import { mkdir } from "node:fs/promises";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInProcessAdapter } from "./adapters/in-process";
 import { createSandboxFixtureFactory } from "./adapters/sandbox-env";
 import { loadConfig } from "../lib/config";
-import { createModel } from "../lib/llm";
+import { createRuntime, type LlmConfig } from "../lib/llm";
 import {
   configHash,
   resultRowSchema,
@@ -71,18 +70,20 @@ async function pool<T>(items: T[], n: number, worker: (item: T) => Promise<void>
 const refFiles = (task: Task) =>
   Object.entries(task.reference?.files ?? {}).map(([path, content]) => ({ path, content }));
 
-function buildJudge(evalCfg: EvalConfig): GradeCtx {
+function buildJudge(evalCfg: EvalConfig, baseLlm: LlmConfig): GradeCtx {
   if (!evalCfg.judge.enabled) return noJudge;
-  const model = createModel({ provider: "azure", model: evalCfg.judge.model });
+  // Reuse the agent's provider/auth, swap in the judge model.
+  const runtime = createRuntime({ ...baseLlm, model: evalCfg.judge.model });
   return {
     judge: async (rubric, diff, report) => {
       try {
-        const { text } = await generateText({
-          model,
-          prompt:
+        const { text } = await runtime.generate({
+          instructions:
             `You are grading a code change against a rubric. Respond ONLY with JSON ` +
-            `{"pass": boolean, "reason": string}.\n\nRubric: ${rubric}\n\n` +
-            `Diff:\n${diff}\n\nAgent report:\n${report}`,
+            `{"pass": boolean, "reason": string}.`,
+          prompt: `Rubric: ${rubric}\n\nDiff:\n${diff}\n\nAgent report:\n${report}`,
+          tools: {},
+          stopSteps: 1,
         });
         const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
         return { pass: Boolean(parsed.pass), reason: String(parsed.reason ?? "") };
@@ -205,7 +206,7 @@ async function main() {
   );
   const factory = createSandboxFixtureFactory(sandbox, { root: "/workspace/eval" });
   const adapter = createInProcessAdapter(sandbox);
-  const judgeCtx = buildJudge(evalCfg);
+  const judgeCtx = buildJudge(evalCfg, cfg.agent.llm);
 
   // Serialize appends so concurrent trials never interleave a JSONL line.
   let writeChain: Promise<void> = Promise.resolve();

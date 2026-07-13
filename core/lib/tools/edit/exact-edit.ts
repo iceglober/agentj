@@ -1,5 +1,5 @@
-import { tool } from "ai";
 import z from "zod";
+import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 import { createLinePrefixedReadTool, errMsg } from "./shared";
 
@@ -7,7 +7,7 @@ import { createLinePrefixedReadTool, errMsg } from "./shared";
 export function createExactEditTools(sb: Sandbox) {
   const readFile = createLinePrefixedReadTool(sb);
 
-  const edit = tool({
+  const edit = defineTool({
     description:
       "Edit a file by exact string replacement. old_string must match the current file content exactly (whitespace included) and must occur exactly once — include enough surrounding lines to make it unique, or set replace_all to replace every occurrence. Never include the `LINE|` prefixes shown by readFile.",
     inputSchema: z.object({

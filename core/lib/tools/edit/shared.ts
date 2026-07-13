@@ -1,5 +1,5 @@
-import { tool } from "ai";
 import z from "zod";
+import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 
 export const errMsg = (e: unknown) =>
@@ -19,7 +19,7 @@ export function createReadTool(
     formatLine: (line: string, index: number) => string;
   },
 ) {
-  return tool({
+  return defineTool({
     description: opts.description,
     inputSchema: z.object({ path: z.string() }),
     execute: async ({ path }) => {

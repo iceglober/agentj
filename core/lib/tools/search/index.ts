@@ -1,5 +1,5 @@
-import { tool } from "ai";
 import z from "zod";
+import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 import { shq } from "../../shell";
 
@@ -16,7 +16,7 @@ export function createSearchTools(sb: Sandbox, { root }: SearchToolsOptions) {
   const resolve = (path?: string) =>
     !path ? root : path.startsWith("/") ? path : `${root}/${path}`;
 
-  const grep = tool({
+  const grep = defineTool({
     description:
       "Search file contents recursively with a regex. Returns matching lines as `path:line:content`, capped at maxResults. .git directories are skipped.",
     inputSchema: z.object({
@@ -58,7 +58,7 @@ export function createSearchTools(sb: Sandbox, { root }: SearchToolsOptions) {
     },
   });
 
-  const glob = tool({
+  const glob = defineTool({
     description:
       "List files matching a glob pattern (`**` supported), sorted by modification time, newest first. Capped at maxResults.",
     inputSchema: z.object({

@@ -1,7 +1,11 @@
-import { ToolLoopAgent, stepCountIs } from "ai";
-import { createBashTool } from "bash-tool";
 import z from "zod";
-import { createModel, llmConfigSchema } from "../llm";
+import {
+  createRuntime,
+  llmConfigSchema,
+  type RunResult,
+  type RunStep,
+  type ToolSet,
+} from "../llm";
 import {
   composePrompt,
   promptConfigSchema,
@@ -9,6 +13,7 @@ import {
   type PromptContext,
 } from "../prompt";
 import type { Sandbox } from "../sandbox";
+import { createBashTools } from "../tools/bash";
 import { createEditTools, editConfigSchema } from "../tools/edit";
 import { createSearchTools } from "../tools/search";
 
@@ -38,30 +43,42 @@ export interface CreateAgentOptions {
   /** Per-turn environment facts stamped into the prompt footer. */
   ctx: PromptContext;
   /**
-   * Cap the tool loop at N steps. `stopWhen` is a ToolLoopAgent *constructor*
-   * setting in ai@7 (not a generate() option), so the eval harness routes its
-   * per-task step budget through here rather than re-assembling the agent.
-   * Omitted → the ai default (isStepCount(20)) stands.
+   * Cap the tool loop at N steps. Routed through the runtime port's `stopSteps`
+   * so the eval harness can set its per-task step budget once, without the
+   * caller knowing how any particular runtime enforces the cap. Omitted → the
+   * runtime's default stands.
    */
   stopSteps?: number;
 }
 
+/** Per-turn hooks for a single generate() call. */
+export interface GenerateOptions {
+  abortSignal?: AbortSignal;
+  onStep?: (step: RunStep) => void;
+}
+
+export interface Agent {
+  /** The composed prompt, so the caller can log which profile/version it got. */
+  composed: ComposedPrompt;
+  /** Run one turn: prompt in, final text + trajectory + usage out. */
+  generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
+}
+
 /**
- * Build a ready-to-run agent from config: pick the model, compose the system
- * prompt for that model, and wire the tools against the sandbox. Returns the
- * agent plus the ComposedPrompt so the caller can log/inspect which profile
- * and version it got.
+ * Build a ready-to-run agent from config: pick the runtime, compose the system
+ * prompt for that model, and wire the tools against the sandbox. Returns a
+ * `generate` closure plus the ComposedPrompt.
  *
- * The ToolLoopAgent constructor (ai@7) extends LanguageModelCallOptions, so
- * `temperature`, `topP`, and `providerOptions` are accepted directly at
- * construction — no need to route them through the generate() call.
+ * Explicit `llm.temperature`/`llm.topP` win over the profile's recommendation;
+ * otherwise the profile's advised params (and providerOptions) flow through to
+ * every generate() call.
  */
 export async function createAgent(
   sb: Sandbox,
   config: AgentConfig,
   opts: CreateAgentOptions,
-): Promise<{ agent: ToolLoopAgent; composed: ComposedPrompt }> {
-  const model = createModel(config.llm);
+): Promise<Agent> {
+  const runtime = createRuntime(config.llm);
 
   const composed = composePrompt(
     config.prompt,
@@ -74,28 +91,27 @@ export async function createAgent(
     opts.ctx,
   );
 
-  const { tools: bashTools } = await createBashTool({
-    sandbox: sb,
-    destination: opts.root,
-  });
-
   // editTools last: its mode-specific readFile (line/anchor prefixes) replaces
   // bash-tool's plain one, so reads always carry what the edit tool consumes.
-  const agent = new ToolLoopAgent({
-    model,
-    instructions: composed.instructions,
-    // Explicit llm config wins over the profile's recommendation; fall back to
-    // whatever the profile advised for this model.
-    temperature: config.llm.temperature ?? composed.params.temperature,
-    topP: config.llm.topP ?? composed.params.topP,
-    providerOptions: composed.params.providerOptions,
-    ...(opts.stopSteps !== undefined ? { stopWhen: stepCountIs(opts.stopSteps) } : {}),
-    tools: {
-      ...bashTools,
-      ...createSearchTools(sb, { root: opts.root }),
-      ...createEditTools(sb, config.tools.edit.mode),
-    },
-  });
+  const tools: ToolSet = {
+    ...(await createBashTools(sb, { root: opts.root })),
+    ...createSearchTools(sb, { root: opts.root }),
+    ...createEditTools(sb, config.tools.edit.mode),
+  };
 
-  return { agent, composed };
+  return {
+    composed,
+    generate: (prompt, generateOpts) =>
+      runtime.generate({
+        instructions: composed.instructions,
+        prompt,
+        tools,
+        temperature: config.llm.temperature ?? composed.params.temperature,
+        topP: config.llm.topP ?? composed.params.topP,
+        providerOptions: composed.params.providerOptions,
+        stopSteps: opts.stopSteps,
+        abortSignal: generateOpts?.abortSignal,
+        onStep: generateOpts?.onStep,
+      }),
+  };
 }

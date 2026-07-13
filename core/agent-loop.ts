@@ -39,7 +39,7 @@ try {
 } catch {}
 const rules = config.agent.rules || agentsMd || "";
 
-const { agent, composed } = await createAgent(
+const { generate, composed } = await createAgent(
   sandbox,
   { ...config.agent, rules },
   { root: session.path, ctx },
@@ -50,12 +50,11 @@ const prompt =
   process.argv.slice(2).join(" ") ||
   "Print the OS and python version of the machine you are on.";
 
-const result = await agent.generate({
-  prompt,
-  onStepFinish: (step) => {
+const result = await generate(prompt, {
+  onStep: (step) => {
     for (const call of step.toolCalls) {
       console.error(
-        `[tool] ${call.toolName} ${JSON.stringify(call.input).slice(0, 200)}`,
+        `[tool] ${call.name} ${JSON.stringify(call.input).slice(0, 200)}`,
       );
     }
   },

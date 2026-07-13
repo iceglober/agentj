@@ -1,6 +1,6 @@
-import { tool } from "ai";
 import { createHash } from "node:crypto";
 import z from "zod";
+import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 import { createReadTool, errMsg, readLines } from "./shared";
 
@@ -18,7 +18,7 @@ export function createHashEditTools(sb: Sandbox) {
     formatLine: (l, i) => `${i + 1}#${lineHash(l)}|${l}`,
   });
 
-  const edit = tool({
+  const edit = defineTool({
     description:
       'Edit a file by line anchors from the latest readFile output. Each edit targets the line at `anchor` ("LINE#HASH", e.g. "12#ab3f"), or the inclusive range anchor..end_anchor. Ops: "replace" replaces the target line(s) with content, "insert_after" inserts content after the anchored line, "delete" removes the target line(s). All anchors are validated against the current file; if the file changed since your read, the whole edit is rejected — re-read and retry. Multiple edits are applied atomically in one call.',
     inputSchema: z.object({

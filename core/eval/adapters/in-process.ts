@@ -47,43 +47,38 @@ export function createInProcessAdapter(sb: Sandbox): AgentAdapter<RunConfig> {
           gitStatusSummary: "clean",
         };
 
-        const { agent, composed } = await createAgent(sb, config.agent, {
+        const { generate, composed } = await createAgent(sb, config.agent, {
           root: env.dir,
           ctx,
           stopSteps: task.budget.steps,
         });
         composedVersion = composed.version;
 
-        const result = await agent.generate({ prompt: task.prompt, abortSignal: signal });
+        const result = await generate(task.prompt, { abortSignal: signal });
 
+        // The runtime port already normalized steps/usage into our shape, so
+        // the trajectory is a flat re-index — no vendor-specific walking.
         const toolCalls: Trajectory["toolCalls"] = [];
         const toolResults: Trajectory["toolResults"] = [];
         result.steps.forEach((step, i) => {
           for (const call of step.toolCalls)
-            toolCalls.push({ step: i, name: call.toolName, input: call.input });
-          for (const tr of step.toolResults) {
-            const output = (tr as { output?: unknown }).output;
+            toolCalls.push({ step: i, name: call.name, input: call.input });
+          for (const tr of step.toolResults)
             toolResults.push({
               step: i,
-              name: tr.toolName,
-              output,
-              isError: typeof output === "string" && output.startsWith("ERROR"),
+              name: tr.name,
+              output: tr.output,
+              isError: tr.isError,
             });
-          }
         });
 
-        const usage = (result as { totalUsage?: typeof result.usage }).totalUsage ?? result.usage;
         return {
           toolCalls,
           toolResults,
           finalText: result.text,
           finalDiff: "",
           filesTouched: [],
-          usage: {
-            inputTokens: usage.inputTokens ?? 0,
-            outputTokens: usage.outputTokens ?? 0,
-            totalTokens: usage.totalTokens ?? 0,
-          },
+          usage: result.usage,
           steps: result.steps.length,
           wallMs: Date.now() - started,
           promptVersion: composedVersion,
