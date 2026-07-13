@@ -5,12 +5,13 @@
 //! on the scouts that feed it. Only final results re-enter the parent context, forwarded live to the
 //! UI as structured `Subagent*` events along the way.
 
-use super::{run_turn, AgentType, Session};
+use super::{run_turn, worktree::WorktreeLease, AgentType, Session};
 use crate::events::AgentEvent;
 use crate::provider::ChatMessage;
 use crate::util::first_line;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -71,7 +72,56 @@ struct TaskDef {
     context: Option<String>,
     label: String,
     kind: AgentType,
+    worktree: bool,
     after: Vec<usize>,
+}
+
+fn parse_tasks(args: &Value) -> Vec<TaskDef> {
+    args.get("tasks")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| {
+                    let task = t.get("task").and_then(|x| x.as_str())?.to_string();
+                    let context = t
+                        .get("context")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string());
+                    let label = task_label(&task, t.get("title").and_then(|x| x.as_str()));
+                    let kind = AgentType::parse(t.get("type").and_then(|x| x.as_str()));
+                    let worktree = t.get("worktree").and_then(|x| x.as_bool()).unwrap_or(false);
+                    let after = t
+                        .get("after")
+                        .and_then(|x| x.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_u64().map(|n| n as usize))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    Some(TaskDef {
+                        task,
+                        context,
+                        label,
+                        kind,
+                        worktree,
+                        after,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn validate_tasks(tasks: &[TaskDef]) -> Result<(), String> {
+    for (i, task) in tasks.iter().enumerate() {
+        if task.worktree && task.kind != AgentType::Executor {
+            return Err(format!(
+                "run_subagents: task {i} sets worktree:true but only executor subagents may request isolated worktrees"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Dependency depth of each task: 0 for independent tasks, else 1 + the max depth of its `after`
@@ -120,6 +170,23 @@ fn stage_levels(tasks: &[TaskDef]) -> Result<Vec<usize>, String> {
     Ok(memo.into_iter().map(|l| l.unwrap()).collect())
 }
 
+async fn await_subagent_run<F>(
+    run: tokio::task::JoinHandle<String>,
+    forward: F,
+) -> (String, bool, u64)
+where
+    F: Future<Output = (bool, u64)>,
+{
+    let (run_result, (saw_error, sub_tokens)) = tokio::join!(run, forward);
+    let run_ok = run_result.is_ok();
+    let result = match run_result {
+        Ok(result) => result,
+        Err(join_err) => format!("error: subagent task failed: {join_err}"),
+    };
+    let ok = run_ok && !saw_error && !result.trim_start().starts_with("error:");
+    (result, ok, sub_tokens)
+}
+
 /// Run the `tasks` in `args.tasks` as subagents. Independent tasks run in PARALLEL (bounded); a task
 /// with `after:[…]` runs in a later STAGE, fed the results of its prerequisites — so a planner can
 /// depend on the scouts that feed it. Progress forwards to `tx` as `Subagent*` events. Returns the
@@ -129,45 +196,16 @@ pub(super) async fn run_delegate(
     args: &Value,
     tx: &UnboundedSender<AgentEvent>,
 ) -> (String, bool) {
-    let tasks: Vec<TaskDef> = args
-        .get("tasks")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|t| {
-                    let task = t.get("task").and_then(|x| x.as_str())?.to_string();
-                    let context = t
-                        .get("context")
-                        .and_then(|x| x.as_str())
-                        .map(|s| s.to_string());
-                    let label = task_label(&task, t.get("title").and_then(|x| x.as_str()));
-                    let kind = AgentType::parse(t.get("type").and_then(|x| x.as_str()));
-                    let after = t
-                        .get("after")
-                        .and_then(|x| x.as_array())
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_u64().map(|n| n as usize))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    Some(TaskDef {
-                        task,
-                        context,
-                        label,
-                        kind,
-                        after,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let tasks = parse_tasks(args);
     if tasks.is_empty() {
         return (
             "error: run_subagents needs a non-empty `tasks` array of { task, context?, after? }"
                 .to_string(),
             false,
         );
+    }
+    if let Err(err) = validate_tasks(&tasks) {
+        return (format!("error: {err}"), false);
     }
     let n = tasks.len();
     let levels = match stage_levels(&tasks) {
@@ -181,8 +219,6 @@ pub(super) async fn run_delegate(
     } else {
         format!("delegating {n} sub-task(s) across {stages} dependency stage(s)")
     }));
-
-    let cwd = sess.tools.root.to_string_lossy().into_owned();
     let sem = Arc::new(Semaphore::new(sess.cfg.max_parallel_subagents));
     // Each task's (result, ok), by index — filled as stages complete so later stages can read deps.
     let mut results: Vec<Option<(String, bool)>> = vec![None; n];
@@ -214,17 +250,13 @@ pub(super) async fn run_delegate(
             let task = def.task.clone();
             let label = def.label.clone();
             let kind = def.kind;
-
-            // Each subagent runs in a Session scoped to its TYPE: a tool set the type allows, and the
-            // type's role prompt (both keep its context lean and its behavior on-rails).
-            let sub_sess = Session {
-                llm: sess.llm.clone(),
-                tools: Arc::new(sess.tools.scoped_to(kind)),
-                cfg: sess.cfg.clone(),
-            };
-            let sub_system = crate::prompt::subagent_system_prompt(kind, &cwd);
+            let worktree = def.worktree;
             let parent = tx.clone();
             let sem = sem.clone();
+            let llm = sess.llm.clone();
+            let cfg = sess.cfg.clone();
+            let tools = sess.tools.clone();
+            let parent_root = sess.tools.root.clone();
             let handle = set.spawn(async move {
                 let _permit = sem.acquire_owned().await;
                 let _ = parent.send(AgentEvent::SubagentStart {
@@ -233,6 +265,54 @@ pub(super) async fn run_delegate(
                     agent_type: kind.as_str().to_string(),
                 });
                 let started = Instant::now();
+                let lease = if worktree {
+                    let root = parent_root.to_string_lossy().into_owned();
+                    match WorktreeLease::new(&root).await {
+                        Ok(lease) => Some(lease),
+                        Err(err) => {
+                            let result =
+                                format!("error: failed to create isolated worktree: {err}");
+                            let _ = parent.send(AgentEvent::SubagentEnd {
+                                id: i,
+                                ok: false,
+                                summary: first_line(&result, 80),
+                                elapsed_ms: started.elapsed().as_millis() as u64,
+                            });
+                            return SubResult {
+                                index: i,
+                                result,
+                                ok: false,
+                            };
+                        }
+                    }
+                } else {
+                    None
+                };
+                // Each subagent runs in a Session scoped to its TYPE: a tool set the type allows, and the
+                // type's role prompt (both keep its context lean and its behavior on-rails).
+                let (sub_sess, lane_cwd) = if let Some(lease) = &lease {
+                    let root = lease.root.clone();
+                    let cwd = root.to_string_lossy().into_owned();
+                    (
+                        Session {
+                            llm,
+                            tools: Arc::new(tools.scoped_to_root(kind, root)),
+                            cfg,
+                        },
+                        cwd,
+                    )
+                } else {
+                    let cwd = parent_root.to_string_lossy().into_owned();
+                    (
+                        Session {
+                            llm,
+                            tools: Arc::new(tools.scoped_to(kind)),
+                            cfg,
+                        },
+                        cwd,
+                    )
+                };
+                let sub_system = crate::prompt::subagent_system_prompt(kind, &lane_cwd);
                 let prompt = match injected {
                     Some(c) => format!("{task}\n\nContext:\n{c}"),
                     None => task,
@@ -269,14 +349,29 @@ pub(super) async fn run_delegate(
                     }
                     (saw_error, sub_tokens)
                 };
-                let run = async {
+                let jobs = sub_sess.tools.jobs.clone();
+                let run = tokio::spawn(async move {
                     // Subagents don't commit deltas — only their final result re-enters the parent.
-                    let r = run_turn(&sub_sess, &mut sub_msgs, &atx, false, None).await;
-                    drop(atx); // close the channel so the forwarder finishes
-                    r
-                };
-                let (result, (saw_error, sub_tokens)) = tokio::join!(run, forward);
-                let ok = !saw_error && !result.trim_start().starts_with("error:");
+                    let result = run_turn(&sub_sess, &mut sub_msgs, &atx, false, None).await;
+                    drop(atx); // close the channel so the forwarder finishes on normal return
+                    result
+                });
+                let (mut result, ok, sub_tokens) = await_subagent_run(run, forward).await;
+                if let Some(lease) = lease {
+                    let lease_root = lease.root.clone();
+                    let finalization = if jobs.has_running_in(&lease_root).await {
+                        lease.preserve(format!(
+                            "live background job still running in isolated lane `{}`",
+                            lease_root.display()
+                        ))
+                    } else {
+                        lease.finalize().await
+                    };
+                    result.push_str(&format!(
+                        "\n\n--- isolated worktree ---\n{}\n--- end isolated worktree ---",
+                        finalization.parent_note()
+                    ));
+                }
                 let mut summary = first_line(&result, 80);
                 if sub_tokens > 0 {
                     // The " · N tok" suffix is what the TUI tray and eval harness read per subagent.
@@ -339,6 +434,8 @@ pub(super) async fn run_delegate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::TokenUsage;
+    use tokio::sync::mpsc::unbounded_channel;
 
     fn defs(afters: &[&[usize]]) -> Vec<TaskDef> {
         afters
@@ -348,9 +445,43 @@ mod tests {
                 context: None,
                 label: String::new(),
                 kind: AgentType::Executor,
+                worktree: false,
                 after: a.to_vec(),
             })
             .collect()
+    }
+
+    #[test]
+    fn parse_tasks_reads_optional_worktree_flag() {
+        let args = serde_json::json!({
+            "tasks": [
+                { "task": "shared lane" },
+                { "task": "isolated lane", "type": "executor", "worktree": true }
+            ]
+        });
+
+        let tasks = parse_tasks(&args);
+        assert_eq!(tasks.len(), 2);
+        assert!(!tasks[0].worktree);
+        assert_eq!(tasks[0].kind, AgentType::Executor);
+        assert!(tasks[1].worktree);
+        assert_eq!(tasks[1].kind, AgentType::Executor);
+    }
+
+    #[test]
+    fn validate_tasks_rejects_isolated_non_executor_lanes() {
+        let tasks = vec![TaskDef {
+            task: "inspect".to_string(),
+            context: None,
+            label: "inspect".to_string(),
+            kind: AgentType::Scout,
+            worktree: true,
+            after: vec![],
+        }];
+
+        let err = validate_tasks(&tasks).unwrap_err();
+        assert!(err.contains("worktree:true"));
+        assert!(err.contains("executor"));
     }
 
     #[test]
@@ -380,5 +511,76 @@ mod tests {
         assert!(stage_levels(&defs(&[&[1], &[0]])).is_err(), "cycle 0↔1");
         assert!(stage_levels(&defs(&[&[0]])).is_err(), "self-dependency");
         assert!(stage_levels(&defs(&[&[5]])).is_err(), "out-of-range index");
+    }
+
+    #[tokio::test]
+    async fn await_subagent_run_keeps_usage_from_forwarder_on_success() {
+        let (atx, mut arx) = unbounded_channel::<AgentEvent>();
+        let run = tokio::spawn(async move {
+            let _ = atx.send(AgentEvent::Usage(TokenUsage {
+                prompt_tokens: 17,
+                completion_tokens: 3,
+                total_tokens: 20,
+                cached_tokens: None,
+            }));
+            drop(atx);
+            "done".to_string()
+        });
+        let forward = async move {
+            let mut saw_error = false;
+            let mut sub_tokens: u64 = 0;
+            while let Some(ev) = arx.recv().await {
+                if let AgentEvent::Usage(u) = &ev {
+                    sub_tokens += u.prompt_tokens;
+                }
+                if matches!(ev, AgentEvent::Error(_)) {
+                    saw_error = true;
+                }
+            }
+            (saw_error, sub_tokens)
+        };
+
+        let (result, ok, sub_tokens) = await_subagent_run(run, forward).await;
+
+        assert_eq!(result, "done");
+        assert!(ok);
+        assert_eq!(sub_tokens, 17);
+    }
+
+    #[tokio::test]
+    async fn await_subagent_run_converts_nested_panics_into_failed_results() {
+        let (atx, mut arx) = unbounded_channel::<AgentEvent>();
+        let run = tokio::spawn(async move {
+            let _ = atx.send(AgentEvent::Usage(TokenUsage {
+                prompt_tokens: 11,
+                completion_tokens: 0,
+                total_tokens: 11,
+                cached_tokens: None,
+            }));
+            panic!("boom");
+            #[allow(unreachable_code)]
+            {
+                "unreachable".to_string()
+            }
+        });
+        let forward = async move {
+            let mut saw_error = false;
+            let mut sub_tokens: u64 = 0;
+            while let Some(ev) = arx.recv().await {
+                if let AgentEvent::Usage(u) = &ev {
+                    sub_tokens += u.prompt_tokens;
+                }
+                if matches!(ev, AgentEvent::Error(_)) {
+                    saw_error = true;
+                }
+            }
+            (saw_error, sub_tokens)
+        };
+
+        let (result, ok, sub_tokens) = await_subagent_run(run, forward).await;
+
+        assert!(!ok);
+        assert_eq!(sub_tokens, 11);
+        assert!(result.starts_with("error: subagent task failed:"));
     }
 }

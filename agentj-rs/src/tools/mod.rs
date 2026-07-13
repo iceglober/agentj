@@ -119,18 +119,23 @@ impl Tools {
         }
     }
 
-    /// A copy of these tools scoped to a subagent `type`: shares the root/jobs/MCP handles, drops the
-    /// artifact store (subagents don't persist artifacts) and gets fresh read-stamps, and records the
-    /// type so its tool allowlist is enforced.
-    pub fn scoped_to(&self, agent_type: crate::agent::AgentType) -> Tools {
+    /// A copy of these tools scoped to a subagent `type`, bound to the supplied root: shares the
+    /// jobs/MCP handles, drops the artifact store (subagents don't persist artifacts), gets fresh
+    /// read-stamps, and records the type so its tool allowlist is enforced.
+    pub fn scoped_to_root(&self, agent_type: crate::agent::AgentType, root: PathBuf) -> Tools {
         Tools {
-            root: self.root.clone(),
+            root,
             jobs: self.jobs.clone(),
             mcp: self.mcp.clone(),
             stamps: ReadStamps::new(),
             session: None,
             agent_type: Some(agent_type),
         }
+    }
+
+    /// A copy of these tools scoped to a subagent `type`, rooted at this tool set's current root.
+    pub fn scoped_to(&self, agent_type: crate::agent::AgentType) -> Tools {
+        self.scoped_to_root(agent_type, self.root.clone())
     }
 
     /// Whether an interactive artifact store is attached (gates the artifact tools' advertisement).

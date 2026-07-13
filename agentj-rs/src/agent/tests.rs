@@ -4,12 +4,18 @@ use super::{run_turn, Session};
 use crate::config::Config;
 use crate::events::AgentEvent;
 use crate::jobs::JobManager;
+use crate::model::{ModelConfig, Provider};
 use crate::provider::{
-    AssistantTurn, ChatMessage, FunctionCall, Llm, ScriptStep, TokenUsage, ToolCall,
+    openai::OpenAiProvider, AssistantTurn, ChatMessage, FunctionCall, Llm, ScriptStep, TokenUsage,
+    ToolCall,
 };
 use crate::tools::{tool_specs, Tools};
 use std::collections::VecDeque;
+use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::unbounded_channel;
@@ -25,6 +31,33 @@ fn run_subagents_spec_is_gated_by_role() {
     // job tools are present in both.
     assert!(primary.iter().any(|s| s.name == "job_start"));
     assert!(subagent.iter().any(|s| s.name == "job_start"));
+}
+
+#[test]
+fn run_subagents_task_schema_advertises_worktree_field() {
+    let primary = tool_specs(true, false, None);
+    let run_subagents = primary
+        .iter()
+        .find(|s| s.name == "run_subagents")
+        .expect("run_subagents in primary specs");
+    let tasks_items = &run_subagents.parameters["properties"]["tasks"]["items"]["properties"];
+    let worktree = &tasks_items["worktree"];
+    assert_eq!(worktree["type"], "boolean");
+    let desc = worktree["description"]
+        .as_str()
+        .expect("worktree description");
+    assert!(
+        desc.contains("Executor-only") || desc.contains("rejected"),
+        "worktree description must communicate executor-only rejection: {desc}"
+    );
+    assert!(
+        desc.contains("preserved") || desc.contains("changed"),
+        "worktree description must communicate changed-lane preservation: {desc}"
+    );
+    assert!(
+        desc.contains("metadata") || desc.contains("branch"),
+        "worktree description must communicate metadata semantics: {desc}"
+    );
 }
 
 #[test]
@@ -85,7 +118,11 @@ fn turn_delegate(tasks: &[&str]) -> AssistantTurn {
         .iter()
         .map(|t| serde_json::json!({ "task": t }))
         .collect();
-    let args = serde_json::json!({ "tasks": items }).to_string();
+    turn_delegate_args(serde_json::json!({ "tasks": items }))
+}
+
+fn turn_delegate_args(args: serde_json::Value) -> AssistantTurn {
+    let args = args.to_string();
     AssistantTurn {
         content: None,
         reasoning: None,
@@ -331,6 +368,260 @@ fn session_in(root: &str, steps: Vec<ScriptStep>) -> Session {
     }
 }
 
+fn deterministic_delegate_worktree_session(root: &str, barrier_dir: &std::path::Path) -> Session {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let bash_args = serde_json::json!({ "command": isolated_lane_command(barrier_dir) });
+    std::thread::spawn(move || serve_deterministic_delegate_llm(listener, bash_args));
+
+    let jobs = JobManager::new(root.to_string());
+    let tools = Tools::new(PathBuf::from(root), jobs, None);
+    let model = ModelConfig {
+        provider: Provider::Custom,
+        model_id: "test-script".into(),
+        base_url: format!("http://{addr}"),
+        api_key: None,
+        api_version: None,
+    };
+    Session {
+        llm: Arc::new(Llm::OpenAi(OpenAiProvider::new(&model))),
+        tools: Arc::new(tools),
+        cfg: Arc::new(test_cfg()),
+    }
+}
+
+fn deterministic_delegate_mixed_job_session(root: &str) -> Session {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let lane_a_job_args = serde_json::json!({
+        "command": "pwd > live-job-pwd.txt; git branch --show-current > live-job-branch.txt; exec tail -f /dev/null"
+    });
+    let lane_a_wait_args = serde_json::json!({
+        "command": "for _ in $(seq 1 500); do if [ -f live-job-pwd.txt ] && [ -f live-job-branch.txt ]; then exit 0; fi; sleep 0.01; done; echo 'live job did not publish markers' >&2; exit 1"
+    });
+    std::thread::spawn(move || {
+        serve_deterministic_mixed_job_llm(listener, lane_a_job_args, lane_a_wait_args)
+    });
+
+    let jobs = JobManager::new(root.to_string());
+    let tools = Tools::new(PathBuf::from(root), jobs, None);
+    let model = ModelConfig {
+        provider: Provider::Custom,
+        model_id: "test-script".into(),
+        base_url: format!("http://{addr}"),
+        api_key: None,
+        api_version: None,
+    };
+    let mut cfg = test_cfg();
+    cfg.idle_wait = Duration::from_millis(10);
+    Session {
+        llm: Arc::new(Llm::OpenAi(OpenAiProvider::new(&model))),
+        tools: Arc::new(tools),
+        cfg: Arc::new(cfg),
+    }
+}
+
+fn scripted_delegate_panic_session(root: &str) -> Session {
+    session_in(
+        root,
+        vec![
+            ScriptStep::Turn(turn_delegate_args(serde_json::json!({
+                "tasks": [{ "task": "panic lane", "worktree": true }]
+            }))),
+            ScriptStep::Turn(turn_tool(
+                "bash",
+                serde_json::json!({
+                    "command": isolated_lane_panic_command(),
+                }),
+            )),
+            ScriptStep::Panic,
+            ScriptStep::Turn(turn_text("parent recovered and carried on")),
+        ],
+    )
+}
+
+fn serve_deterministic_delegate_llm(listener: TcpListener, bash_args: serde_json::Value) {
+    for _ in 0..6 {
+        let (mut stream, _) = listener.accept().unwrap();
+        let request = read_http_json(&mut stream);
+        let response = deterministic_delegate_llm_response(&request, &bash_args);
+        write_http_json(&mut stream, &response);
+    }
+}
+
+fn read_http_json(stream: &mut std::net::TcpStream) -> serde_json::Value {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut request_line = String::new();
+    reader.read_line(&mut request_line).unwrap();
+    assert!(
+        request_line.starts_with("POST "),
+        "expected a POST request, got: {request_line:?}"
+    );
+
+    let mut content_length = None;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = Some(value.trim().parse::<usize>().unwrap());
+            }
+        }
+    }
+
+    let mut body = vec![0; content_length.expect("content-length header")];
+    reader.read_exact(&mut body).unwrap();
+    serde_json::from_slice(&body).unwrap()
+}
+
+fn write_http_json(stream: &mut std::net::TcpStream, body: &serde_json::Value) {
+    let payload = serde_json::to_vec(body).unwrap();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        payload.len()
+    )
+    .unwrap();
+    stream.write_all(&payload).unwrap();
+    stream.flush().unwrap();
+}
+
+fn deterministic_delegate_llm_response(
+    request: &serde_json::Value,
+    bash_args: &serde_json::Value,
+) -> serde_json::Value {
+    let messages = request["messages"]
+        .as_array()
+        .expect("chat request should include messages");
+
+    if let Some(last_tool) = messages.iter().rev().find(|msg| msg["role"] == "tool") {
+        let content = last_tool["content"].as_str().unwrap_or("");
+        return if content.contains("[subagent 0]") {
+            openai_chat_response(turn_text("parent done"))
+        } else {
+            openai_chat_response(turn_text("lane preserved"))
+        };
+    }
+
+    let last_user = messages
+        .iter()
+        .rev()
+        .find(|msg| msg["role"] == "user")
+        .and_then(|msg| msg["content"].as_str())
+        .unwrap_or("");
+    if last_user == "go" {
+        return openai_chat_response(turn_delegate_args(serde_json::json!({
+            "tasks": [
+                { "task": "lane a", "worktree": true },
+                { "task": "lane b", "worktree": true }
+            ]
+        })));
+    }
+    if last_user.contains("lane a") || last_user.contains("lane b") {
+        return openai_chat_response(turn_tool("bash", bash_args.clone()));
+    }
+
+    panic!("unexpected deterministic LLM request: {request}");
+}
+
+fn serve_deterministic_mixed_job_llm(
+    listener: TcpListener,
+    lane_a_job_args: serde_json::Value,
+    lane_a_wait_args: serde_json::Value,
+) {
+    for _ in 0..6 {
+        let (mut stream, _) = listener.accept().unwrap();
+        let request = read_http_json(&mut stream);
+        let response =
+            deterministic_mixed_job_llm_response(&request, &lane_a_job_args, &lane_a_wait_args);
+        write_http_json(&mut stream, &response);
+    }
+}
+
+fn deterministic_mixed_job_llm_response(
+    request: &serde_json::Value,
+    lane_a_job_args: &serde_json::Value,
+    lane_a_wait_args: &serde_json::Value,
+) -> serde_json::Value {
+    let messages = request["messages"]
+        .as_array()
+        .expect("chat request should include messages");
+    let last_user = messages
+        .iter()
+        .rev()
+        .find(|msg| msg["role"] == "user")
+        .and_then(|msg| msg["content"].as_str())
+        .unwrap_or("");
+    let last_tool_name = messages
+        .iter()
+        .rev()
+        .find(|msg| msg["role"] == "tool")
+        .and_then(|msg| msg["tool_call_id"].as_str())
+        .and_then(|id| {
+            messages.iter().rev().find_map(|msg| {
+                let tool_calls = msg["tool_calls"].as_array()?;
+                tool_calls.iter().find_map(|call| {
+                    (call["id"].as_str() == Some(id))
+                        .then(|| call["function"]["name"].as_str())
+                        .flatten()
+                })
+            })
+        });
+
+    if messages.iter().any(|msg| {
+        msg["role"] == "tool"
+            && msg["content"]
+                .as_str()
+                .unwrap_or("")
+                .contains("[subagent 0]")
+    }) {
+        return openai_chat_response(turn_text("parent done"));
+    }
+
+    if last_user == "go" {
+        return openai_chat_response(turn_delegate_args(serde_json::json!({
+            "tasks": [
+                { "task": "lane a", "worktree": true },
+                { "task": "lane b", "worktree": true }
+            ]
+        })));
+    }
+
+    if last_user.contains("lane a") {
+        return match last_tool_name {
+            None => openai_chat_response(turn_tool("job_start", lane_a_job_args.clone())),
+            Some("job_start") => openai_chat_response(turn_tool("bash", lane_a_wait_args.clone())),
+            Some("bash") => openai_chat_response(turn_text("lane a returned with a live job")),
+            _ => panic!("unexpected lane-a request: {request}"),
+        };
+    }
+
+    if last_user.contains("lane b") {
+        return match last_tool_name {
+            None => openai_chat_response(turn_text("lane b stayed clean")),
+            _ => panic!("lane b should not make tool calls: {request}"),
+        };
+    }
+
+    panic!("unexpected deterministic mixed-job request: {request}");
+}
+
+fn openai_chat_response(turn: AssistantTurn) -> serde_json::Value {
+    serde_json::json!({
+        "choices": [{
+            "message": {
+                "content": turn.content,
+                "tool_calls": turn.tool_calls,
+            },
+            "finish_reason": turn.finish_reason,
+        }],
+        "usage": turn.usage,
+    })
+}
+
 /// An interactive session with an attached artifact store (rooted at an explicit dir, no HOME).
 /// If `plan` is set, it's pre-saved as the `plan` artifact so the frontier can resume from it.
 fn session_with_store(
@@ -362,6 +653,230 @@ fn temp_root(tag: &str) -> std::path::PathBuf {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+fn run_cmd(root: &std::path::Path, program: &str, args: &[&str]) {
+    let status = Command::new(program)
+        .args(args)
+        .current_dir(root)
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "command failed: {program} {args:?} in {}",
+        root.display()
+    );
+}
+
+fn cmd_stdout(root: &std::path::Path, program: &str, args: &[&str]) -> String {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "command failed: {program} {args:?} in {}: {}",
+        root.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+fn temp_git_repo(tag: &str) -> PathBuf {
+    let dir = temp_root(tag);
+    run_cmd(&dir, "git", &["init", "-q", "-b", "main"]);
+    run_cmd(
+        &dir,
+        "git",
+        &["config", "user.email", "agentj-tests@example.com"],
+    );
+    run_cmd(&dir, "git", &["config", "user.name", "AgentJ Tests"]);
+    fs::write(dir.join("tracked.txt"), "seed\n").unwrap();
+    run_cmd(&dir, "git", &["add", "tracked.txt"]);
+    run_cmd(&dir, "git", &["commit", "-q", "-m", "fixture"]);
+    dir
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IsolatedLaneStatus {
+    Preserved,
+    Cleaned,
+}
+
+#[derive(Debug, Clone)]
+struct IsolatedLaneMeta {
+    status: IsolatedLaneStatus,
+    branch: String,
+    root: PathBuf,
+}
+
+struct PreservedLaneCleanup {
+    repo_root: PathBuf,
+    lanes: Vec<IsolatedLaneMeta>,
+    jobs: Option<Arc<JobManager>>,
+    job_ids: Vec<u64>,
+}
+
+impl PreservedLaneCleanup {
+    fn new(repo_root: PathBuf) -> Self {
+        Self {
+            repo_root,
+            lanes: Vec::new(),
+            jobs: None,
+            job_ids: Vec::new(),
+        }
+    }
+
+    fn with_jobs(repo_root: PathBuf, jobs: Arc<JobManager>) -> Self {
+        Self {
+            repo_root,
+            lanes: Vec::new(),
+            jobs: Some(jobs),
+            job_ids: Vec::new(),
+        }
+    }
+
+    fn extend<I>(&mut self, lanes: I)
+    where
+        I: IntoIterator<Item = IsolatedLaneMeta>,
+    {
+        self.lanes.extend(lanes);
+    }
+
+    async fn stop_tracked_jobs(&self) {
+        if let Some(jobs) = &self.jobs {
+            for id in &self.job_ids {
+                let _ = jobs.stop(*id).await;
+            }
+            for _ in 0..200 {
+                if jobs.running_snapshot().await.is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+    }
+
+    async fn stop_jobs_and_cleanup(&mut self) {
+        self.stop_tracked_jobs().await;
+        self.jobs = None;
+        self.job_ids.clear();
+    }
+
+    fn track_job(&mut self, id: u64) {
+        self.job_ids.push(id);
+    }
+}
+
+impl Drop for PreservedLaneCleanup {
+    fn drop(&mut self) {
+        if !self.job_ids.is_empty() {
+            if let Some(jobs) = self.jobs.clone() {
+                let job_ids = self.job_ids.clone();
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                runtime.block_on(async move {
+                    for id in job_ids {
+                        let _ = jobs.stop(id).await;
+                    }
+                    for _ in 0..200 {
+                        if jobs.running_snapshot().await.is_empty() {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                });
+            }
+        }
+        for lane in &self.lanes {
+            if lane.root.exists() {
+                let _ = Command::new("git")
+                    .args([
+                        "worktree",
+                        "remove",
+                        "--force",
+                        lane.root.to_string_lossy().as_ref(),
+                    ])
+                    .current_dir(&self.repo_root)
+                    .output();
+            }
+            let _ = Command::new("git")
+                .args(["branch", "-D", lane.branch.as_str()])
+                .current_dir(&self.repo_root)
+                .output();
+        }
+        let _ = fs::remove_dir_all(&self.repo_root);
+    }
+}
+
+fn delegate_tool_end(events: &[AgentEvent]) -> (bool, &str) {
+    events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::ToolEnd { ok, result, .. } if result.contains("[subagent 0]") => {
+                Some((*ok, result.as_str()))
+            }
+            _ => None,
+        })
+        .expect("delegate ToolEnd result")
+}
+
+fn delegate_tool_result(events: &[AgentEvent]) -> &str {
+    delegate_tool_end(events).1
+}
+
+fn parse_isolated_lanes(result: &str) -> Vec<IsolatedLaneMeta> {
+    result
+        .lines()
+        .filter_map(|line| {
+            let (status, rest) =
+                if let Some(rest) = line.strip_prefix("isolated worktree preserved: `") {
+                    (IsolatedLaneStatus::Preserved, rest)
+                } else if let Some(rest) = line.strip_prefix("isolated worktree cleaned: `") {
+                    (IsolatedLaneStatus::Cleaned, rest)
+                } else {
+                    return None;
+                };
+            let (branch, rest) = rest.split_once("` at `")?;
+            let path = rest.split('`').next()?;
+            Some(IsolatedLaneMeta {
+                status,
+                branch: branch.to_string(),
+                root: PathBuf::from(path),
+            })
+        })
+        .collect()
+}
+
+fn branch_exists(root: &std::path::Path, branch: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
+        .current_dir(root)
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn read_trimmed(path: &std::path::Path) -> String {
+    fs::read_to_string(path).unwrap().trim().to_string()
+}
+
+fn canonical(path: &std::path::Path) -> PathBuf {
+    fs::canonicalize(path).unwrap()
+}
+
+fn isolated_lane_command(barrier_dir: &std::path::Path) -> String {
+    let barrier = barrier_dir.to_string_lossy();
+    format!(
+        "shared=\"{barrier}\"; mkdir -p \"$shared\" nested; lane=\"$shared/${{PPID}}-$$.ready\"; touch \"$lane\"; for _ in $(seq 1 300); do shopt -s nullglob; ready=(\"$shared\"/*.ready); if [ \"${{#ready[@]}}\" -ge 2 ]; then break; fi; sleep 0.01; done; pwd > lane-pwd.txt; git rev-parse --show-toplevel > lane-top.txt; git branch --show-current > lane-branch.txt; printf 'changed from %s\n' \"$PWD\" > lane-change.txt; printf 'outside-primary-check\n' > nested/lane-nested.txt",
+    )
+}
+
+fn isolated_lane_panic_command() -> &'static str {
+    "pwd > panic-lane-pwd.txt; git rev-parse --show-toplevel > panic-lane-top.txt; git branch --show-current > panic-lane-branch.txt; printf 'panic lane write\n' > panic-lane-file.txt"
 }
 
 fn notes_containing(events: &[AgentEvent], needle: &str) -> usize {
@@ -641,6 +1156,353 @@ async fn delegate_reports_failure_when_a_subagent_returns_an_error_result() {
     assert!(events
         .iter()
         .any(|e| matches!(e, AgentEvent::ToolEnd { ok: false, .. })));
+}
+
+#[tokio::test]
+async fn delegate_worktree_lanes_preserve_distinct_roots_and_metadata() {
+    let repo = temp_git_repo("delegate-worktree-lanes");
+    let mut cleanup = PreservedLaneCleanup::new(repo.clone());
+    let barrier = temp_root("delegate-worktree-barrier");
+    let sess = deterministic_delegate_worktree_session(repo.to_str().unwrap(), &barrier);
+
+    let events = run_and_collect_from(&sess).await;
+    let result = delegate_tool_result(&events).to_string();
+    let lanes = parse_isolated_lanes(&result);
+    assert_eq!(lanes.len(), 2, "expected two preserved lanes: {result}");
+    assert!(lanes
+        .iter()
+        .all(|lane| lane.status == IsolatedLaneStatus::Preserved));
+    cleanup.extend(lanes.clone());
+
+    let primary_root = canonical(&repo);
+    let lane_roots: Vec<_> = lanes.iter().map(|lane| canonical(&lane.root)).collect();
+    assert_ne!(
+        lane_roots[0], lane_roots[1],
+        "lanes must use distinct roots"
+    );
+    assert_ne!(
+        lanes[0].branch, lanes[1].branch,
+        "lanes must use distinct branches"
+    );
+    for lane_root in &lane_roots {
+        assert_ne!(
+            lane_root, &primary_root,
+            "lane root must differ from primary root"
+        );
+        assert!(
+            !lane_root.starts_with(&primary_root),
+            "lane root must sit outside the primary root: {} vs {}",
+            lane_root.display(),
+            primary_root.display()
+        );
+    }
+
+    for lane in &lanes {
+        let lane_root = canonical(&lane.root);
+        assert!(
+            result.contains(&format!("`{}` at `{}`", lane.branch, lane.root.display())),
+            "delegate result should report lane metadata: {result}"
+        );
+        assert_eq!(
+            canonical(std::path::Path::new(&read_trimmed(
+                &lane.root.join("lane-pwd.txt")
+            ))),
+            lane_root,
+            "pwd should resolve to the isolated worktree root"
+        );
+        assert_eq!(
+            canonical(std::path::Path::new(&read_trimmed(
+                &lane.root.join("lane-top.txt")
+            ))),
+            lane_root,
+            "git top-level should be the isolated worktree root"
+        );
+        assert_eq!(
+            read_trimmed(&lane.root.join("lane-branch.txt")),
+            lane.branch,
+            "bash should see the isolated branch"
+        );
+        let changed_from = read_trimmed(&lane.root.join("lane-change.txt"));
+        let changed_root = changed_from
+            .strip_prefix("changed from ")
+            .expect("lane-change.txt should record its cwd");
+        assert_eq!(canonical(std::path::Path::new(changed_root)), lane_root);
+        assert_eq!(
+            read_trimmed(&lane.root.join("nested/lane-nested.txt")),
+            "outside-primary-check"
+        );
+        assert!(
+            branch_exists(&repo, &lane.branch),
+            "preserved branch should still exist in the source repo"
+        );
+    }
+
+    for path in [
+        "lane-pwd.txt",
+        "lane-top.txt",
+        "lane-branch.txt",
+        "lane-change.txt",
+        "nested/lane-nested.txt",
+    ] {
+        assert!(
+            !repo.join(path).exists(),
+            "isolated lane write leaked into the primary root: {path}"
+        );
+    }
+
+    let _ = fs::remove_dir_all(&barrier);
+}
+
+#[tokio::test]
+async fn delegate_worktree_live_job_preserves_only_the_job_lane() {
+    let repo = temp_git_repo("delegate-worktree-live-job");
+    let sess = deterministic_delegate_mixed_job_session(repo.to_str().unwrap());
+    let mut cleanup = PreservedLaneCleanup::with_jobs(repo.clone(), sess.tools.jobs.clone());
+
+    let events = run_and_collect_from(&sess).await;
+    let result = delegate_tool_result(&events).to_string();
+    let lanes = parse_isolated_lanes(&result);
+    assert_eq!(
+        lanes.len(),
+        2,
+        "expected preserved + cleaned metadata: {result}"
+    );
+
+    let preserved = lanes
+        .iter()
+        .find(|lane| lane.status == IsolatedLaneStatus::Preserved)
+        .cloned()
+        .expect("one preserved lane for the live job");
+    let cleaned = lanes
+        .iter()
+        .find(|lane| lane.status == IsolatedLaneStatus::Cleaned)
+        .cloned()
+        .expect("one cleaned lane for the no-op lane");
+    cleanup.extend([preserved.clone()]);
+
+    let snapshots = sess.tools.jobs.running_snapshot().await;
+    let snapshot_ids: Vec<_> = snapshots.iter().map(|job| job.id).collect();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "expected exactly one live job, got ids: {snapshot_ids:?}"
+    );
+    cleanup.track_job(snapshots[0].id);
+
+    let preserved_root = canonical(&preserved.root);
+    assert!(
+        preserved.root.exists(),
+        "live-job lane root should remain on disk"
+    );
+    assert!(
+        branch_exists(&repo, &preserved.branch),
+        "live-job branch should remain"
+    );
+    assert_eq!(
+        canonical(std::path::Path::new(&read_trimmed(
+            &preserved.root.join("live-job-pwd.txt")
+        ))),
+        preserved_root,
+        "job_start should run from the preserved lane root"
+    );
+    assert_eq!(
+        read_trimmed(&preserved.root.join("live-job-branch.txt")),
+        preserved.branch,
+        "job_start should run on the preserved lane branch"
+    );
+    assert!(
+        sess.tools.jobs.has_running_in(&preserved.root).await,
+        "live job should be attributed to the preserved lane root"
+    );
+    assert!(
+        !sess.tools.jobs.has_running_in(&cleaned.root).await,
+        "clean lane must not retain job ownership"
+    );
+
+    assert!(
+        result.contains(&format!(
+            "isolated worktree preserved: `{}` at `{}`",
+            preserved.branch,
+            preserved.root.display()
+        )),
+        "delegate result should report the preserved live-job lane: {result}"
+    );
+    assert!(
+        result.contains(&format!(
+            "isolated worktree cleaned: `{}` at `{}`",
+            cleaned.branch,
+            cleaned.root.display()
+        )),
+        "delegate result should report the cleaned no-op lane: {result}"
+    );
+    assert!(
+        !cleaned.root.exists(),
+        "no-op lane root should be removed after cleanup"
+    );
+    assert!(
+        !branch_exists(&repo, &cleaned.branch),
+        "no-op lane branch should be deleted after cleanup"
+    );
+
+    cleanup.stop_jobs_and_cleanup().await;
+}
+
+#[tokio::test]
+async fn delegate_worktree_panic_preserves_metadata_and_parent_recovery() {
+    let repo = temp_git_repo("delegate-worktree-panic");
+    let mut cleanup = PreservedLaneCleanup::new(repo.clone());
+    let sess = scripted_delegate_panic_session(repo.to_str().unwrap());
+
+    let events = run_and_collect_from(&sess).await;
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, AgentEvent::SubagentEnd { ok: false, .. })));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::Message(text) if text == "parent recovered and carried on"
+    )));
+
+    let (tool_ok, result) = delegate_tool_end(&events);
+    assert!(
+        !tool_ok,
+        "delegate ToolEnd should report failure: {events:?}"
+    );
+    assert!(
+        result.contains("error: subagent task failed:"),
+        "contained panic error should surface in the failed delegate result: {result}"
+    );
+    assert!(
+        result.contains("isolated worktree preserved:"),
+        "failed delegate result must keep preserved-lane metadata instead of collapsing to a generic outer failure: {result}"
+    );
+    assert!(
+        !result.contains("JoinSet"),
+        "outer JoinSet failure text must not replace the lane metadata: {result}"
+    );
+    assert!(
+        !result.contains("JoinError"),
+        "outer JoinError text must not replace the lane metadata: {result}"
+    );
+
+    let lanes = parse_isolated_lanes(result);
+    assert_eq!(
+        lanes.len(),
+        1,
+        "expected one preserved panic lane: {result}"
+    );
+    let lane = lanes[0].clone();
+    assert_eq!(lane.status, IsolatedLaneStatus::Preserved);
+    cleanup.extend([lane.clone()]);
+
+    let primary_root = canonical(&repo);
+    let lane_root = canonical(&lane.root);
+    assert_ne!(
+        lane_root, primary_root,
+        "panic lane must keep an isolated root"
+    );
+    assert!(
+        lane.root.exists(),
+        "preserved panic lane root should remain on disk"
+    );
+    assert!(
+        branch_exists(&repo, &lane.branch),
+        "preserved panic lane branch should remain discoverable"
+    );
+    assert_eq!(
+        canonical(std::path::Path::new(&read_trimmed(
+            &lane.root.join("panic-lane-pwd.txt")
+        ))),
+        lane_root,
+        "panic lane pwd should point at the isolated worktree root"
+    );
+    assert_eq!(
+        canonical(std::path::Path::new(&read_trimmed(
+            &lane.root.join("panic-lane-top.txt")
+        ))),
+        lane_root,
+        "panic lane git top-level should stay in the isolated worktree root"
+    );
+    assert_eq!(
+        read_trimmed(&lane.root.join("panic-lane-branch.txt")),
+        lane.branch,
+        "panic lane should report its preserved branch"
+    );
+    assert_eq!(
+        read_trimmed(&lane.root.join("panic-lane-file.txt")),
+        "panic lane write",
+        "panic lane write should remain in the preserved worktree"
+    );
+    for path in [
+        "panic-lane-pwd.txt",
+        "panic-lane-top.txt",
+        "panic-lane-branch.txt",
+        "panic-lane-file.txt",
+    ] {
+        assert!(
+            !repo.join(path).exists(),
+            "panic lane write leaked into the primary root: {path}"
+        );
+    }
+
+    cleanup.stop_jobs_and_cleanup().await;
+    drop(cleanup);
+    assert!(
+        !lane.root.exists(),
+        "test teardown should remove the preserved panic worktree"
+    );
+    assert!(
+        !branch_exists(&repo, &lane.branch),
+        "test teardown should remove the preserved panic branch"
+    );
+}
+
+#[tokio::test]
+async fn delegate_without_worktree_keeps_the_primary_root() {
+    let repo = temp_git_repo("delegate-primary-root");
+    let _cleanup = PreservedLaneCleanup::new(repo.clone());
+    let primary_root = canonical(&repo);
+    let primary_branch = cmd_stdout(&repo, "git", &["branch", "--show-current"]);
+    let bash_command = "mkdir -p nested; pwd > ordinary-pwd.txt; git rev-parse --show-toplevel > ordinary-top.txt; git branch --show-current > ordinary-branch.txt; printf 'primary-lane\n' > nested/ordinary-note.txt";
+    let sess = session_in(
+        repo.to_str().unwrap(),
+        vec![
+            ScriptStep::Turn(turn_delegate_args(serde_json::json!({
+                "tasks": [{ "task": "ordinary lane" }]
+            }))),
+            ScriptStep::Turn(turn_tool(
+                "bash",
+                serde_json::json!({ "command": bash_command }),
+            )),
+            ScriptStep::Turn(turn_text("ordinary lane preserved")),
+            ScriptStep::Turn(turn_text("parent done")),
+        ],
+    );
+
+    let events = run_and_collect_from(&sess).await;
+    let result = delegate_tool_result(&events);
+    assert!(
+        !result.contains("isolated worktree"),
+        "ordinary lanes must not append isolated-worktree metadata: {result}"
+    );
+    assert_eq!(
+        read_trimmed(&repo.join("ordinary-pwd.txt")),
+        primary_root.to_string_lossy(),
+        "ordinary bash should keep the primary cwd"
+    );
+    assert_eq!(
+        read_trimmed(&repo.join("ordinary-top.txt")),
+        primary_root.to_string_lossy(),
+        "ordinary lane should keep the primary git root"
+    );
+    assert_eq!(
+        read_trimmed(&repo.join("ordinary-branch.txt")),
+        primary_branch,
+        "ordinary lane should stay on the primary branch"
+    );
+    assert_eq!(
+        read_trimmed(&repo.join("nested/ordinary-note.txt")),
+        "primary-lane"
+    );
 }
 
 /// A session whose Tools carry an artifact store, so `ask_user` interception is armed

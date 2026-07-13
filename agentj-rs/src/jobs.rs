@@ -6,6 +6,7 @@
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -24,6 +25,7 @@ enum JobStatus {
 
 struct JobHandle {
     command: String,
+    cwd: PathBuf,
     started: Instant,
     timeout: Option<Duration>,
     state: Mutex<JobState>,
@@ -65,6 +67,9 @@ fn trim_to_cap(s: &mut String, cap: usize) {
 }
 
 pub struct JobManager {
+    /// Retained for compatibility: existing callers may construct with a session root,
+    /// though in-crate shell now uses `start_in`. See `start`.
+    #[allow(dead_code)]
     root: String,
     jobs: Mutex<HashMap<u64, Arc<JobHandle>>>,
     next_id: AtomicU64,
@@ -97,12 +102,38 @@ impl JobManager {
 
     /// Start `command` in the background; returns its id immediately. `timeout` (if set) fires a
     /// single "still running" nudge after that long.
+    ///
+    /// Retained for compatibility: in-crate shell now uses `start_in` directly, but external
+    /// callers may still use this convenience wrapper that delegates to `start_in` with the
+    /// session root.
+    #[allow(dead_code)]
     pub async fn start(&self, command: &str, timeout: Option<Duration>) -> anyhow::Result<u64> {
+        self.start_in(command, timeout, &self.root).await
+    }
+
+    /// Start `command` in the background using `root` as the process cwd; returns its id
+    /// immediately. `timeout` (if set) fires a single "still running" nudge after that long.
+    pub async fn start_in(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+        root: impl AsRef<Path>,
+    ) -> anyhow::Result<u64> {
+        let root = std::fs::canonicalize(root.as_ref())?;
+        self.start_in_root(command, timeout, root).await
+    }
+
+    async fn start_in_root(
+        &self,
+        command: &str,
+        timeout: Option<Duration>,
+        root: PathBuf,
+    ) -> anyhow::Result<u64> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut child = Command::new("bash")
             .arg("-lc")
             .arg(command)
-            .current_dir(&self.root)
+            .current_dir(&root)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -111,6 +142,7 @@ impl JobManager {
         let pid = child.id().map(|p| p as i32);
         let handle = Arc::new(JobHandle {
             command: command.to_string(),
+            cwd: root.clone(),
             started: Instant::now(),
             timeout,
             state: Mutex::new(JobState {
@@ -193,6 +225,22 @@ impl JobManager {
     /// Whether any job hasn't exited yet. O(1) — called on every idle loop iteration.
     pub fn has_running(&self) -> bool {
         self.running.load(Ordering::Relaxed) > 0
+    }
+
+    /// Whether any running job was started in `root`.
+    pub async fn has_running_in(&self, root: &Path) -> bool {
+        let Ok(root) = std::fs::canonicalize(root) else {
+            return false;
+        };
+
+        let jobs = self.jobs.lock().await;
+        for handle in jobs.values() {
+            if handle.cwd == root && matches!(handle.state.lock().await.status, JobStatus::Running)
+            {
+                return true;
+            }
+        }
+        false
     }
 
     /// Ready nudges (finished jobs / fired timeouts), non-blocking.
@@ -347,6 +395,19 @@ impl Pipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(1);
+
+        let dir = std::env::temp_dir().join(format!(
+            "agentj-jobs-{tag}-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn trim_to_cap_never_splits_a_multibyte_char() {
@@ -407,5 +468,66 @@ mod tests {
         // the older job is still running
         assert!(mgr.has_running());
         mgr.stop(old).await;
+    }
+
+    #[tokio::test]
+    async fn start_in_uses_the_supplied_root() {
+        let manager_root = temp_dir("manager-root");
+        let job_root = temp_dir("job-root");
+        let mgr = JobManager::new(manager_root.to_string_lossy().into_owned());
+
+        let id = mgr.start_in("pwd -P", None, &job_root).await.unwrap();
+        let nudge = mgr.next_nudge().await;
+        let job_root = std::fs::canonicalize(job_root).unwrap();
+
+        assert!(nudge.contains(&format!("job {id}")));
+        assert!(nudge.contains(&job_root.display().to_string()));
+        assert!(!nudge.contains(&manager_root.display().to_string()));
+
+        std::fs::remove_dir_all(manager_root).unwrap();
+        std::fs::remove_dir_all(job_root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn start_in_rejects_a_missing_root_before_consuming_an_id() {
+        let mgr = JobManager::new(".".to_string());
+        let missing = std::env::temp_dir().join(format!(
+            "agentj-jobs-missing-root-{}-{}",
+            std::process::id(),
+            mgr.id_watermark()
+        ));
+
+        let err = mgr.start_in("pwd -P", None, &missing).await.unwrap_err();
+
+        assert!(err.downcast_ref::<std::io::Error>().is_some());
+        assert_eq!(mgr.id_watermark(), 1);
+        assert!(!mgr.has_running());
+    }
+
+    #[tokio::test]
+    async fn has_running_in_matches_canonical_roots_only_while_running() {
+        let manager_root = temp_dir("manager-root");
+        let root_a = temp_dir("root-a");
+        let root_b = temp_dir("root-b");
+        let alias_parent = temp_dir("root-a-alias-parent");
+        let alias_a = alias_parent.join("alias-a");
+        symlink(&root_a, &alias_a).unwrap();
+
+        let mgr = JobManager::new(manager_root.to_string_lossy().into_owned());
+        let id = mgr.start_in("sleep 5", None, &root_a).await.unwrap();
+
+        assert!(mgr.has_running_in(&root_a).await);
+        assert!(!mgr.has_running_in(&root_b).await);
+        assert!(mgr.has_running_in(&alias_a).await);
+
+        assert_eq!(mgr.stop(id).await, format!("stopped job {id}"));
+        let nudge = mgr.next_nudge().await;
+        assert!(nudge.contains(&format!("job {id}")));
+        assert!(!mgr.has_running_in(&root_a).await);
+
+        std::fs::remove_dir_all(manager_root).unwrap();
+        std::fs::remove_dir_all(root_a).unwrap();
+        std::fs::remove_dir_all(root_b).unwrap();
+        std::fs::remove_dir_all(alias_parent).unwrap();
     }
 }

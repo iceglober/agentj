@@ -13,6 +13,7 @@
 mod agent_type;
 mod compact;
 mod delegate;
+mod worktree;
 
 pub use agent_type::AgentType;
 

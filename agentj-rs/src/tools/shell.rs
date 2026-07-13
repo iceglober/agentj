@@ -59,7 +59,7 @@ impl Tools {
             .get("timeout_s")
             .and_then(|v| v.as_u64())
             .map(Duration::from_secs);
-        match self.jobs.start(command, timeout).await {
+        match self.jobs.start_in(command, timeout, &self.root).await {
             Ok(id) => ToolOutcome::ok(format!(
                 "started job {id} in the background — keep working; you'll be nudged when it finishes{}.",
                 timeout.map(|t| format!(" or after {}s", t.as_secs())).unwrap_or_default()
