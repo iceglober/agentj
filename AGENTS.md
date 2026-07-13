@@ -77,6 +77,6 @@ bun run eval:selfcheck
 ```
 
 ## Verification evidence
-- `bun test core` — passed: 103 tests across 8 files.
+- `bun test core` — passed: 108 tests across 9 files.
 - `bun run typecheck` — passed.
 - `bun core/eval/run.ts --selfcheck` — passed: proves each grader fails unsolved and passes on the reference solution.

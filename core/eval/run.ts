@@ -17,6 +17,7 @@ import {
 import { composeGrade } from "../lib/eval/grade";
 import { taskKey, type GradeCtx, type Task, type Trajectory } from "../lib/eval/types";
 import { getSandbox } from "../lib/sandbox";
+import { createSandboxProviderLocal } from "../lib/sandbox/local-adapter";
 import { createSandboxProviderMicrosandbox } from "../lib/sandbox/microsandbox-adapter";
 
 // Resolve paths against the repo root (two levels up from core/eval/run.ts) so
@@ -133,10 +134,8 @@ async function main() {
 
   // --- selfcheck: solvable + falsifiable, no model ------------------------
   if (has("selfcheck")) {
-    await using sandbox = await getSandbox(
-      createSandboxProviderMicrosandbox({ ...cfg.sandbox, name: "eval" }),
-    );
-    const factory = createSandboxFixtureFactory(sandbox, { root: "/workspace/eval" });
+    await using sandbox = await getSandbox(createSandboxProviderLocal());
+    const factory = createSandboxFixtureFactory(sandbox, { root: join(sandbox.root, "eval") });
 
     const synthTraj = async (env: { diff(): Promise<string>; changedFiles(): Promise<string[]> }): Promise<Trajectory> => ({
       toolCalls: [],
