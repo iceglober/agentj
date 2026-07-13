@@ -3,11 +3,39 @@ import { loadConfig } from "./lib/config";
 import type { PromptContext } from "./lib/prompt";
 import { getSandbox } from "./lib/sandbox";
 import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
-import { createSession } from "./lib/session";
+import { createChildSession, createSession } from "./lib/session";
 
 const config = await loadConfig(
   new URL("./agentj.json", import.meta.url).pathname,
 );
+
+const DEFAULT_SUBAGENT_MAX_CONCURRENCY = 2;
+
+const safeChildIdSegment = (value: string): string => {
+  const safe = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return safe || "task";
+};
+
+const configuredSubagentConcurrency = DEFAULT_SUBAGENT_MAX_CONCURRENCY;
+
+const childSessionIds = new Set<string>();
+let childSessionCounter = 0;
+const nextChildSessionId = (taskId: string): string => {
+  const stem = safeChildIdSegment(taskId);
+  while (true) {
+    childSessionCounter += 1;
+    const candidate = `subagent-${childSessionCounter.toString().padStart(4, "0")}-${stem}`;
+    if (childSessionIds.has(candidate)) {
+      continue;
+    }
+    childSessionIds.add(candidate);
+    return candidate;
+  }
+};
 
 await using sandbox = await getSandbox(
   createSandboxProviderMicrosandbox(config.sandbox),
@@ -42,12 +70,26 @@ const rules = config.agent.rules || agentsMd || "";
 const { generate, composed } = await createAgent(
   sandbox,
   { ...config.agent, rules },
-  { root: session.path, ctx },
+  {
+    root: session.path,
+    ctx,
+    delegation: {
+      parentRef: session.branch,
+      maxConcurrency: configuredSubagentConcurrency,
+      createChildSession: ({ id, parentRef }) =>
+        createChildSession(sandbox, config.session, {
+          id: nextChildSessionId(id),
+          parentRef,
+        }),
+    },
+  },
 );
 console.error(`[prompt] profile=${composed.profile} version=${composed.version}`);
 
+const argv =
+  (globalThis as { process?: { argv?: string[] } }).process?.argv ?? [];
 const prompt =
-  process.argv.slice(2).join(" ") ||
+  argv.slice(2).join(" ") ||
   "Print the OS and python version of the machine you are on.";
 
 const result = await generate(prompt, {
@@ -55,6 +97,14 @@ const result = await generate(prompt, {
     for (const call of step.toolCalls) {
       console.error(
         `[tool] ${call.name} ${JSON.stringify(call.input).slice(0, 200)}`,
+      );
+    }
+    for (const toolResult of step.toolResults) {
+      if (toolResult.name !== "run_subagents") {
+        continue;
+      }
+      console.error(
+        `[tool-result] ${toolResult.name} ${JSON.stringify(toolResult.output).slice(0, 200)}`,
       );
     }
   },

@@ -125,6 +125,134 @@ export async function refExists(
   return r.exitCode === 0;
 }
 
+function assertLocalBranchName(branch: string): string {
+  if (branch.length === 0) throw new Error("Local branch name must not be empty");
+  if (branch.trim() !== branch) {
+    throw new Error("Local branch name must not have leading or trailing whitespace");
+  }
+  if (branch === "HEAD") throw new Error("Refusing to operate on symbolic HEAD as a branch");
+  if (branch.startsWith("refs/")) {
+    throw new Error("Local branch name must use short branch syntax, not a full ref");
+  }
+  return branch;
+}
+
+function assertExpectedCommitInput(expectedCommit: string): string {
+  if (expectedCommit.length === 0) {
+    throw new Error("Expected commit must not be empty");
+  }
+  if (expectedCommit.trim() !== expectedCommit) {
+    throw new Error("Expected commit must not have leading or trailing whitespace");
+  }
+  return expectedCommit;
+}
+
+interface WorktreeInfo {
+  path: string;
+  head: string;
+  branch: string | null;
+}
+
+async function listWorktrees(
+  sb: Sandbox,
+  repoDir: string,
+): Promise<WorktreeInfo[]> {
+  const stdout = await git(sb, repoDir, ["worktree", "list", "--porcelain"]);
+  const worktrees: WorktreeInfo[] = [];
+
+  let path: string | null = null;
+  let head: string | null = null;
+  let branch: string | null = null;
+
+  const flush = () => {
+    if (!path || !head) return;
+    worktrees.push({ path, head, branch });
+    path = null;
+    head = null;
+    branch = null;
+  };
+
+  for (const line of stdout.split("\n")) {
+    if (line === "") {
+      flush();
+      continue;
+    }
+    if (line.startsWith("worktree ")) {
+      path = line.slice("worktree ".length);
+      continue;
+    }
+    if (line.startsWith("HEAD ")) {
+      head = line.slice("HEAD ".length);
+      continue;
+    }
+    if (line.startsWith("branch refs/heads/")) {
+      branch = line.slice("branch refs/heads/".length);
+      continue;
+    }
+    if (line === "detached") {
+      branch = null;
+    }
+  }
+  flush();
+  return worktrees;
+}
+
+/** Resolve a ref like HEAD or main to an immutable commit SHA. */
+export async function resolveCommit(
+  sb: Sandbox,
+  dir: string,
+  ref = "HEAD",
+): Promise<string> {
+  return (await git(sb, dir, ["rev-parse", "-q", "--verify", `${ref}^{commit}`])).trim();
+}
+
+async function resolveExpectedCommit(
+  sb: Sandbox,
+  repoDir: string,
+  expectedCommit: string,
+): Promise<string> {
+  return resolveCommit(sb, repoDir, assertExpectedCommitInput(expectedCommit));
+}
+
+/** Inspect a specific registered worktree without touching it. */
+export async function inspectWorktree(
+  sb: Sandbox,
+  repoDir: string,
+  path: string,
+): Promise<{ path: string; head: string; branch: string | null } | null> {
+  const worktrees = await listWorktrees(sb, repoDir);
+  return worktrees.find((worktree) => worktree.path === path) ?? null;
+}
+
+/**
+ * Delete a disposable local branch only after proving its tip still matches the
+ * expected immutable commit.
+ */
+export async function deleteProofCheckedDisposableBranch(
+  sb: Sandbox,
+  repoDir: string,
+  branch: string,
+  expectedTipCommit: string,
+): Promise<void> {
+  const name = assertLocalBranchName(branch);
+  await git(sb, repoDir, ["check-ref-format", "--branch", name]);
+
+  const branchTip = await resolveCommit(sb, repoDir, name);
+  const normalizedExpectedCommit = await resolveExpectedCommit(
+    sb,
+    repoDir,
+    expectedTipCommit,
+  );
+
+  if (branchTip !== normalizedExpectedCommit) {
+    throw new Error(
+      `Refusing to delete disposable branch ${name}: expected ${normalizedExpectedCommit}, found ${branchTip}`,
+    );
+  }
+
+  await git(sb, repoDir, ["branch", "-D", name]);
+}
+
 export async function addWorktree(
   sb: Sandbox,
   repoDir: string,

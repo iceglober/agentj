@@ -1,130 +1,103 @@
 # agentj
 
-A simple, effective terminal coding agent — same category as Claude Code and Opencode. It reads and
-writes files in your repo, runs shell commands, and calls a model in a loop until the task is done. It
-works directly in your current checkout (or a dedicated worktree via `/task`), and **you** own git as
-the safety net.
+A terminal coding agent — same category as Claude Code and Opencode. It reads and writes files in
+your repo, runs shell commands, and calls a model in a loop until the task is done. It works in an
+isolated git worktree, and **you** own git as the safety net.
 
-The product is a **Rust crate with a full-screen [ratatui](https://ratatui.rs) UI**, in
-[`agentj-rs/`](agentj-rs/). (An earlier TypeScript implementation was retired in favor of this one.)
+The implementation lives in [`core/`](core/) — a Bun TypeScript agent with a sandboxed tool runtime.
 
 ## Requirements
 
-- **Rust** (stable, 2021 edition) — `cargo` on your PATH. There's no separate install step; the
-  `bin/agentj` launcher builds the release binary on first run.
-- **A model provider.** Wired today: **Azure AI Foundry** and any **OpenAI-compatible** endpoint
-  (`custom`). Vertex (Gemini) and Anthropic are **staged** (see [Providers](#providers)).
-- **git** — used by `/task`, and to scope `glob`/`grep` to non-ignored files.
-- **[Bun](https://bun.sh)** *(optional)* — only for the eval harness in `test-projects/`.
+- **[Bun](https://bun.sh)** — the runtime. Install once; no separate build step.
+- **A model provider.** Wired: **Azure AI Foundry** and any **OpenAI-compatible** endpoint (`custom`).
+- **git** — used for worktree isolation and to scope `glob`/`grep` to non-ignored files.
 
 ## Run it
 
 ```sh
-git clone https://github.com/iceglober/coder && cd coder     # repo dir is still `coder`
-bin/agentj                                   # interactive chat (builds on first run), current repo
-bin/agentj --once "add a --json flag and run the tests"      # one task, headless, then exit
-bin/aj                                        # short alias
+git clone git@github.com:iceglober/agentj.git && cd agentj
+bun run agentj -- "add a --json flag and run the tests"
 ```
 
-- **Full-screen TUI:** streaming transcript + tool lines, a spinner/status line, slash-command
-  highlight + Tab completion, multi-line input (Enter submits; Shift/Ctrl+Enter or Ctrl-J = newline;
-  arrows move the cursor). **Esc** interrupts a turn; **Ctrl-C** twice, **Ctrl-D**, or `/exit` quits.
-- **Permissions are auto** — it edits and runs commands without prompting; you own git.
+`agent-loop.ts` is a one-shot entry point: it takes a task as a single argument, runs the agent loop
+in an isolated worktree, prints the result, commits, and exits. There is no interactive chat mode.
 
-## Providers
+**Permissions are auto** — it edits and runs commands without prompting; you own git.
 
-```sh
-# Azure AI Foundry (OpenAI-compatible). Name the deployment with --model.
-AZURE_BASE_URL=https://<resource>.openai.azure.com/openai/v1 AZURE_API_KEY=… \
-  bin/agentj --provider azure --model <deployment>
+## Configuration
 
-# Any OpenAI-compatible endpoint (Bifrost, a local server, …).
-bin/agentj --provider custom --base-url http://localhost:8080/v1 --model <id>   # + optional AGENTJ_API_KEY
-```
-
-Or put non-secret provider defaults in `~/.config/aj/aj.json` once and reuse them:
+Provider and model are configured in `core/agentj.json`:
 
 ```json
 {
-  "provider": "azure",
-  "providers": {
-    "azure": {
-      "base_url": "https://<resource>.openai.azure.com/openai/v1",
-      "model": "my-deployment",
-      "api_version": "2025-05-01-preview"
-    },
-    "custom": {
-      "base_url": "http://localhost:8080/v1",
-      "model": "gpt-4.1"
+  "agent": {
+    "llm": {
+      "model": "gpt-5.6-sol",
+      "providers": {
+        "azure": {
+          "resourceName": "kayn-default-foundry-resource"
+        }
+      }
     }
   }
 }
 ```
 
-Keep secrets out of config files. Set provider keys per developer via environment / secure local setup:
+Set the API key via environment:
 
 ```sh
+export AZURE_FOUNDRY_API_KEY=...
+# or
 export AZURE_API_KEY=...
-export ANTHROPIC_API_KEY=...
-export AGENTJ_API_KEY=...
 ```
-
-| Flag | Values | Env |
-|---|---|---|
-| `--provider` | `azure` `custom` (wired) · `vertex` `anthropic` (staged) | `AGENTJ_PROVIDER` |
-| `--model` | model / deployment id (required for azure & custom) | `AGENTJ_MODEL` |
-| `--base-url` | endpoint for `--provider custom` | `AGENTJ_BASE_URL` |
-
-> **Vertex (Gemini) and Anthropic aren't wired in the Rust edition yet** — `--provider vertex` reports
-> that it's staged. If those are your daily driver, wiring them is the top follow-up.
-
-Tuning env: `AGENTJ_MAX_STEPS` (step window, default 40), `AGENTJ_MAX_IDLE_NUDGES`,
-`AGENTJ_MAX_PARALLEL_SUBAGENTS`, `AGENTJ_CONTEXT_WINDOW`, `AGENTJ_COMPANY`.
 
 ## What it can do
 
-- **Built-in tools:** `read_file`, `write_file`, `edit_file`, `list_dir`, `glob`, `grep`, `bash`
-  (confined to the repo root; `bash` runs in its own process group so Ctrl-C/timeout kills the tree).
-- **`/task <pr|branch>`** — long-running-worktree re-key: wipe the worktree, fetch, and re-point it at a
-  clean base from origin (PR checkout / existing branch / new branch off origin/main). Gated to a
-  dedicated worktree so it can't wipe your primary checkout.
-- **Subagents** — `delegate` runs sub-tasks in **parallel** (DAG execution); only each result re-enters
-  the main context, so the primary loop stays small.
-- **Background jobs** — `job_start`/`job_check`/`job_stop` run long commands non-blocking; the agent is
-  nudged when they finish or after a fallback timeout, and keeps working meanwhile.
-- **MCP** — reads Claude Code's `.mcp.json` (repo over `~/.agentj/.mcp.json`, `${VAR}` expansion) and
-  merges each server's tools as `<server>__<tool>`. Works for **stdio** + **no-auth streamable-http**
-  today; static-`Authorization`-header and OAuth are staged. `bin/agentj mcp list` shows what's
-  configured.
+- **Built-in tools:** `bash`, `readFile`, `writeFile`, `edit`, `grep`, `glob`, `run_subagents`.
+  Structured file, edit, and search paths are confined to the session worktree root; `bash` starts
+  there but is a powerful shell — it is not a security boundary.
+- **Autonomous subagents** — `run_subagents` delegates tasks to parallel child agents, each in its own
+  isolated git worktree branched from the parent session's current commit. Every child runs with tools
+  bound only to its worktree root.
+  - **Changed lanes** commit their changes, remove the temporary worktree, preserve the branch, and
+    return branch + commit + result metadata.
+  - **Clean lanes** (no changes) remove their worktree and disposable branch.
+  - **Failed, panicked, or aborted lanes** preserve their worktree and branch, and report recovery
+    metadata (path, branch, head commit, reason) so no work is lost.
+  - Child agents cannot delegate recursively.
+  - Concurrency is bounded at 2.
 - **SPEAR prompt** — Scope → Plan → Execute → Assess → Resolve, with branch-first safety and
   "prove it with hard evidence" completion.
 
-## Layout
+## Architecture
 
 ```
-agentj/                     # (repo dir is `coder`)
-  bin/agentj, bin/aj        # bash launchers → the Rust release binary (build on first run)
-  agentj-rs/                # THE PRODUCT — Rust crate (see agentj-rs/README.md for the module map)
-    src/{main,tui,agent,tools,exec,rekey,model,prompt,commands,events,jobs,subagent}.rs
-    src/provider/*, src/mcp/*
-  test-projects/            # eval harness (bun): fixed projects + tasks, objectively graded
-  docs/                     # historical design notes (a prior architecture),
-                            # EXCEPT docs/heuristics.md — the current SPEAR decision tree
+core/
+  agent-loop.ts              # CLI entry: one-shot headless mode
+  lib/
+    agent/                   # agent loop, tool assembly, subagent delegation
+      delegate.ts            # run_subagents tool: parallel isolated-worktree child agents
+    config/                  # config loading and validation
+    llm/                     # model client and tool-calling runtime
+    prompt/                  # SPEAR prompt assembly
+    sandbox/                 # microsandbox adapter for confined command execution
+    scm/                     # git primitives (branch, worktree, commit, safe cleanup)
+    session/                 # session lifecycle: branch/worktree creation and child-lane finalization
+    tools/                   # built-in tool definitions (files, search, bash)
+  eval/                      # eval harness: fixture projects + task runner, objectively graded
+    run.ts                   # eval entry point
+    fixtures/                # fixed test projects
+    tasks/                   # task definitions and grading config
 ```
 
 ## Develop
 
 ```sh
-cargo build --release --manifest-path agentj-rs/Cargo.toml   # or: bun run build
-cargo test  --manifest-path agentj-rs/Cargo.toml             # or: bun run test
-bun test-projects/run.ts                                     # or: bun run eval  (needs Vertex creds)
+bun run test                                # all core tests
+bun run typecheck                           # strict TypeScript check (noEmit)
+bun run eval:selfcheck                      # eval harness self-check (no paid model calls)
 ```
-
-The eval harness copies each fixture to a throwaway dir, runs `bin/agentj --once`, and grades on
-`verify` (a command exits 0), `expect` (substrings), or `expectNoChange`. The open-ended LLM `judge`
-grader is temporarily disabled (it depended on the removed TS judge); architect tasks grade on
-`verify` alone until a Rust judge lands.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Self-contained; multi-provider via hand-rolled HTTP (reqwest) + `rmcp`.
+MIT — see [LICENSE](LICENSE).

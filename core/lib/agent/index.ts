@@ -13,9 +13,14 @@ import {
   type PromptContext,
 } from "../prompt";
 import type { Sandbox } from "../sandbox";
+import {
+  createSubagentTool,
+  type CreateSubagentToolOptions,
+} from "./delegate";
 import { createBashTools } from "../tools/bash";
 import { createEditTools, editConfigSchema } from "../tools/edit";
 import { createSearchTools } from "../tools/search";
+import { confineSandboxFiles } from "../tools/paths";
 
 /**
  * The agent owns identity/role/rules and composes the three domain modules the
@@ -37,11 +42,22 @@ export const agentConfigSchema = z.object({
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
+export interface CreateAgentDelegationOptions
+  extends Pick<
+    CreateSubagentToolOptions,
+    "createChildSession" | "maxConcurrency" | "parentRef"
+  > {}
+
 export interface CreateAgentOptions {
   /** The session worktree the agent's tools operate in. */
   root: string;
   /** Per-turn environment facts stamped into the prompt footer. */
   ctx: PromptContext;
+  /**
+   * Optional parent-only wiring for `run_subagents`. Ordinary callers omit this
+   * and get the historical tool set with no delegation support.
+   */
+  delegation?: CreateAgentDelegationOptions;
   /**
    * Cap the tool loop at N steps. Routed through the runtime port's `stopSteps`
    * so the eval harness can set its per-task step budget once, without the
@@ -91,12 +107,50 @@ export async function createAgent(
     opts.ctx,
   );
 
-  // editTools last: its mode-specific readFile (line/anchor prefixes) replaces
-  // bash-tool's plain one, so reads always carry what the edit tool consumes.
+  const fileSandbox = confineSandboxFiles(sb, opts.root);
+
+  const delegationTool: ToolSet = opts.delegation
+    ? {
+        run_subagents: createSubagentTool({
+          parentRef: opts.delegation.parentRef,
+          maxConcurrency: opts.delegation.maxConcurrency,
+          createChildSession: opts.delegation.createChildSession,
+          createChildAgent: async ({ root, session, role }) => {
+            const child = await createAgent(sb, { ...config, role }, {
+              root,
+              ctx: {
+                ...opts.ctx,
+                cwd: root,
+                gitBranch: session.branch,
+                gitStatusSummary: await session.status(),
+              },
+              stopSteps: opts.stopSteps,
+            });
+
+            return {
+              generate: (prompt, generateOpts) =>
+                child.generate(prompt, {
+                  abortSignal: generateOpts?.abortSignal,
+                }),
+            };
+          },
+        }),
+      }
+    : {};
+
+  // Search keeps its explicit root resolver on the original sandbox, while both
+  // bash-adapter structured file tools and edit tools use a sandbox view whose
+  // file reads/writes are lexically confined to opts.root. That preserves the
+  // existing tool precedence — editTools still replaces bash-tool's plain readFile
+  // with mode-specific line/anchor prefixes — and the same createAgent wiring
+  // automatically confines both parent and child agents. Delegation stays last
+  // because only the parent opts into it, and no later spread can accidentally
+  // overwrite `run_subagents` and silently disable it.
   const tools: ToolSet = {
-    ...(await createBashTools(sb, { root: opts.root })),
+    ...(await createBashTools(fileSandbox, { root: opts.root })),
     ...createSearchTools(sb, { root: opts.root }),
-    ...createEditTools(sb, config.tools.edit.mode),
+    ...createEditTools(fileSandbox, config.tools.edit.mode),
+    ...delegationTool,
   };
 
   return {

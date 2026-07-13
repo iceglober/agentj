@@ -1,24 +1,27 @@
 {
   "name": "agentj",
   "private": true,
-  "description": "agentj: a simple, effective terminal coding agent. The product is the Rust/ratatui crate in agentj-rs/; this file just carries convenience scripts + the bun eval harness.",
+  "description": "agentj: a simple, effective terminal coding agent. The sole product lives in core/; this file carries the root Bun entrypoints.",
   "license": "MIT",
   "packageManager": "bun@1.2.0",
   "scripts": {
-    "agentj": "./bin/agentj",
-    "build": "cargo build --release --manifest-path agentj-rs/Cargo.toml",
-    "test": "cargo test --manifest-path agentj-rs/Cargo.toml",
-    "eval": "bun test-projects/run.ts"
+    "agentj": "bun core/agent-loop.ts",
+    "test": "bun test core",
+    "typecheck": "tsc --noEmit",
+    "eval": "bun core/eval/run.ts",
+    "eval:report": "bun core/eval/report.ts",
+    "eval:selfcheck": "bun core/eval/run.ts --selfcheck"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.24",
+    "@types/node": "^24.0.15",
+    "typescript": "^5.9.2"
   },
   "dependencies": {
     "@ai-sdk/azure": "^4.0.11",
     "ai": "^7.0.22",
     "bash-tool": "^1.3.17",
-    "just-bash": "^3.1.0",
     "microsandbox": "^0.6.6",
     "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "tsx": "^4.23.0"
   }
 }
