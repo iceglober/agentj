@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInProcessAdapter } from "./adapters/in-process";
-import { createSandboxFixtureFactory } from "./fixture/sandbox-env";
+import { createSandboxFixtureFactory } from "./adapters/sandbox-env";
 import { loadConfig } from "../lib/config";
 import { createModel } from "../lib/llm";
 import {
