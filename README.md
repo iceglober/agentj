@@ -14,15 +14,42 @@ The implementation lives in [`core/`](core/) — a Bun TypeScript agent with a s
 
 ## Run it
 
+AgentJ is a one-shot entry point: it takes a task as a single argument, runs the agent loop in an
+isolated worktree, prints the result, commits, and exits. There is no interactive chat mode.
+
+**Permissions are auto** — it edits and runs commands without prompting; you own git.
+
+### From the AgentJ repo
+
 ```sh
 git clone git@github.com:iceglober/agentj.git && cd agentj
 bun run agentj -- "add a --json flag and run the tests"
 ```
 
-`agent-loop.ts` is a one-shot entry point: it takes a task as a single argument, runs the agent loop
-in an isolated worktree, prints the result, commits, and exits. There is no interactive chat mode.
+### From your own project
 
-**Permissions are auto** — it edits and runs commands without prompting; you own git.
+Run AgentJ from any Git project directory by passing the absolute path to `agent-loop.ts`:
+
+```sh
+cd /path/to/your-project
+bun /absolute/path/to/agentj/core/agent-loop.ts "your task here"
+```
+
+**Requirements for external invocation:**
+
+- **The project must be a Git repository.** AgentJ validates this before creating a sandbox or
+  calling a model. A non-Git directory fails immediately with a clear error — it will not run
+  `git init` in your project.
+- **The project directory is bind-mounted** into the sandbox as the source repository. AgentJ
+  branches from your project's current Git state and creates an isolated session worktree inside
+  the sandbox. All file edits and tool operations happen in that guest worktree — your host
+  checkout files are never the normal tool root.
+- **Session commits create branches in your project's Git database.** Each run produces a
+  `session/<id>` branch in your repo. If the session succeeds, the branch is preserved so you can
+  inspect, diff, merge, or discard the changes. Clean sessions (no changes) remove their branch
+  automatically.
+- **There is no global binary or package installation.** AgentJ runs directly via `bun` with an
+  absolute script path. A shell alias or function is the recommended convenience wrapper.
 
 ## Configuration
 

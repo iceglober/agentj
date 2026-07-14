@@ -2,12 +2,33 @@ import { createAgent } from "./lib/agent";
 import { loadConfig } from "./lib/config";
 import type { PromptContext } from "./lib/prompt";
 import { getSandbox } from "./lib/sandbox";
-import { createSandboxProviderMicrosandbox } from "./lib/sandbox/microsandbox-adapter";
+import {
+  createSandboxProviderMicrosandbox,
+  resolveProjectDir,
+} from "./lib/sandbox/microsandbox-adapter";
 import { createChildSession, createSession } from "./lib/session";
+
+const argv = process.argv.slice(2);
+
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(`Usage: bun core/agent-loop.ts "<task>"
+       bun /absolute/path/to/agentj/core/agent-loop.ts "<task>"`);
+  process.exit(0);
+}
+
+let projectDir: string;
+try {
+  projectDir = await resolveProjectDir(process.cwd());
+} catch (error) {
+  const message = error instanceof Error ? error.message : "Unknown setup error.";
+  console.error(`[setup] ${message}`);
+  process.exit(1);
+}
 
 const config = await loadConfig(
   new URL("./agentj.json", import.meta.url).pathname,
 );
+const sessionConfig = { ...config.session, repoDir: projectDir };
 
 const DEFAULT_SUBAGENT_MAX_CONCURRENCY = 2;
 
@@ -37,10 +58,22 @@ const nextChildSessionId = (taskId: string): string => {
   }
 };
 
-await using sandbox = await getSandbox(
-  createSandboxProviderMicrosandbox(config.sandbox),
-);
-await using session = await createSession(sandbox, config.session);
+const sandbox = await (async () => {
+  try {
+    return await getSandbox(
+      createSandboxProviderMicrosandbox({ ...config.sandbox, projectDir }),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown setup error.";
+    console.error(`[setup] ${message}`);
+    process.exitCode = 1;
+    return undefined;
+  }
+})();
+
+if (sandbox) {
+  await using disposableSandbox = sandbox;
+  await using session = await createSession(sandbox, sessionConfig);
 console.error(`[session ${session.id}] ${session.branch} from ${session.base}`);
 
 // A porcelain status is one file per line; empty means a clean tree.
@@ -77,7 +110,7 @@ const { generate, composed } = await createAgent(
       parentRef: session.branch,
       maxConcurrency: configuredSubagentConcurrency,
       createChildSession: ({ id, parentRef }) =>
-        createChildSession(sandbox, config.session, {
+        createChildSession(sandbox, sessionConfig, {
           id: nextChildSessionId(id),
           parentRef,
         }),
@@ -86,11 +119,8 @@ const { generate, composed } = await createAgent(
 );
 console.error(`[prompt] profile=${composed.profile} version=${composed.version}`);
 
-const argv =
-  (globalThis as { process?: { argv?: string[] } }).process?.argv ?? [];
 const prompt =
-  argv.slice(2).join(" ") ||
-  "Print the OS and python version of the machine you are on.";
+  argv.join(" ") || "Print the OS and python version of the machine you are on.";
 
 const result = await generate(prompt, {
   onStep: (step) => {
@@ -118,3 +148,4 @@ console.error(
     ? `[session ${session.id}] committed ${sha} on ${session.branch}`
     : `[session ${session.id}] no changes`,
 );
+}
