@@ -111,6 +111,77 @@ describe("createConfigCliHandlers", () => {
     expect(stderr.text()).toBe("");
   });
 
+  test("validates schema paths and mutates scalar and array values generically", async () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const { stdout, stderr, writers } = createWriters();
+    const handlers = createConfigCliHandlers({
+      ...createDependencies(config, fake.store, undefined, writers),
+      readConfig: async () => ({}),
+    });
+
+    await expect(handlers.set({ key: "agent.llm.temperature", value: "0.7" })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    await expect(handlers.add({ key: "sandbox.bootstrap", value: "apt-get update" })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    await expect(handlers.set({ key: "sandbox.bootstrap", value: "[]" })).resolves.toMatchObject({
+      ok: false,
+      code: "operation_not_supported",
+    });
+    await expect(handlers.add({ key: "sandbox.image", value: "image" })).resolves.toMatchObject({
+      ok: false,
+      code: "operation_not_supported",
+    });
+    await expect(handlers.set({ key: "agent.unknown", value: "value" })).resolves.toMatchObject({
+      ok: false,
+      code: "unknown_key",
+    });
+
+    expect(config.calls).toEqual([
+      [{ type: "set", path: ["agent", "llm", "temperature"], value: 0.7 }],
+      [{ type: "set", path: ["sandbox", "bootstrap"], value: ["apt-get update"] }],
+    ]);
+    expect(stdout.text()).toContain("Saved sandbox.bootstrap in global configuration.\n");
+    expect(stderr.text()).toContain("This operation is not supported for the configuration key.\n");
+  });
+
+  test("gets effective values and removes array entries without accepting secret reads", async () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const { stdout, stderr, writers } = createWriters();
+    const handlers = createConfigCliHandlers({
+      ...createDependencies(config, fake.store, undefined, writers),
+      readConfig: async () => ({ sandbox: { bootstrap: ["first", "second"] } }),
+    });
+
+    await expect(handlers.get({ key: "sandbox.bootstrap" })).resolves.toMatchObject({
+      ok: true,
+      value: ["first", "second"],
+    });
+    await expect(handlers.remove({ key: "sandbox.bootstrap", value: "first" })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+    });
+    await expect(handlers.remove({ key: "sandbox.bootstrap", value: "missing" })).resolves.toMatchObject({
+      ok: true,
+      changed: false,
+    });
+    await expect(handlers.get({ key: AZURE_API_KEY_KEY })).resolves.toMatchObject({
+      ok: false,
+      code: "secret_read_not_allowed",
+    });
+
+    expect(config.calls).toEqual([
+      [{ type: "set", path: ["sandbox", "bootstrap"], value: ["second"] }],
+    ]);
+    expect(stdout.text()).toContain('[\n  "first",\n  "second"\n]\n');
+    expect(stderr.text()).toBe("Secret configuration values cannot be read.\n");
+  });
+
   test("rejects invalid or missing llm.model values without mutating config", async () => {
     for (const value of [undefined, "azure", "/gpt-5.6-sol", "azure/", "azure/gpt/extra"]) {
       const config = createConfigPort();

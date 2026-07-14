@@ -155,6 +155,30 @@ const createConfigDeleteCommand = (handlers: ConfigCliHandlers) =>
     handler: ({ key, secret }) => handlers.delete({ key, secret }),
   });
 
+const createConfigGetCommand = (handlers: ConfigCliHandlers) =>
+  command({
+    name: "agentj config get",
+    description: "Read an AgentJ configuration value.",
+    args: {
+      key: positional({ type: string, displayName: "key", description: "Configuration key to read." }),
+    },
+    handler: ({ key }) => handlers.get({ key }),
+  });
+
+const createConfigListMutationCommand = (
+  handlers: ConfigCliHandlers,
+  operation: "add" | "remove",
+) =>
+  command({
+    name: `agentj config ${operation}`,
+    description: `${operation === "add" ? "Append to" : "Remove from"} an array configuration value.`,
+    args: {
+      key: positional({ type: string, displayName: "key", description: "Array configuration key." }),
+      value: positional({ type: string, displayName: "value", description: "Array value to mutate." }),
+    },
+    handler: ({ key, value }) => handlers[operation]({ key, value }),
+  });
+
 const writeResult = (
   result: Awaited<ReturnType<typeof runSafely>>,
   writers: Required<AgentjCliIo>,
@@ -170,7 +194,7 @@ const writeResult = (
 
 const isConfigRoute = (argv: string[]): boolean =>
   (argv[0] === "config" && argv[1] === "set") ||
-  (argv[0] === "config" && argv[1] === "delete");
+  (argv[0] === "config" && ["get", "add", "remove", "delete"].includes(argv[1] ?? ""));
 
 const isEvalRoute = (argv: string[]): boolean => argv[0] === "eval";
 
@@ -193,7 +217,13 @@ const dispatchConfig = async (
     return EXIT_FAILURE;
   }
 
-  const commandForRoute = argv[1] === "set" ? createConfigSetCommand(handlers) : createConfigDeleteCommand(handlers);
+  const commandForRoute = argv[1] === "set"
+    ? createConfigSetCommand(handlers)
+    : argv[1] === "delete"
+      ? createConfigDeleteCommand(handlers)
+      : argv[1] === "get"
+        ? createConfigGetCommand(handlers)
+        : createConfigListMutationCommand(handlers, argv[1] as "add" | "remove");
   const result = await runSafely(commandForRoute, argv.slice(2));
   if (result._tag === "error") {
     return writeResult(result, writers) ?? EXIT_FAILURE;

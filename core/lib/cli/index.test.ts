@@ -336,6 +336,7 @@ describe("runAgentjCli", () => {
     const normal = createDependencies();
     const normalCalls: unknown[] = [];
     normal.deps.configHandlers = {
+      async get() { throw new Error("get should not run"); },
       async set(input) {
         normalCalls.push(input);
         return { ok: true, key: "llm.model", storage: "global_config", changed: true };
@@ -343,6 +344,8 @@ describe("runAgentjCli", () => {
       async delete() {
         throw new Error("delete should not run");
       },
+      async add() { throw new Error("add should not run"); },
+      async remove() { throw new Error("remove should not run"); },
     };
 
     await expect(
@@ -355,6 +358,7 @@ describe("runAgentjCli", () => {
     const secret = createDependencies();
     const secretCalls: unknown[] = [];
     secret.deps.configHandlers = {
+      async get() { throw new Error("get should not run"); },
       async set(input) {
         secretCalls.push(input);
         return { ok: true, key: "providers.azure.api_key", storage: "keychain", changed: true };
@@ -362,6 +366,8 @@ describe("runAgentjCli", () => {
       async delete() {
         throw new Error("delete should not run");
       },
+      async add() { throw new Error("add should not run"); },
+      async remove() { throw new Error("remove should not run"); },
     };
 
     await expect(
@@ -376,6 +382,7 @@ describe("runAgentjCli", () => {
     const { deps } = createDependencies();
     const calls: unknown[] = [];
     deps.configHandlers = {
+      async get() { throw new Error("get should not run"); },
       async set() {
         throw new Error("set should not run");
       },
@@ -383,6 +390,8 @@ describe("runAgentjCli", () => {
         calls.push(input);
         return { ok: true, key: "llm.model", storage: "global_config", changed: true };
       },
+      async add() { throw new Error("add should not run"); },
+      async remove() { throw new Error("remove should not run"); },
     };
 
     await expect(runAgentjCli(["config", "delete", "llm.model"], deps)).resolves.toBe(EXIT_SUCCESS);
@@ -393,6 +402,41 @@ describe("runAgentjCli", () => {
     expect(calls).toEqual([
       { key: "llm.model", secret: false },
       { key: "providers.azure.api_key", secret: true },
+    ]);
+  });
+
+  test("config get, add, and remove route generic key paths to their handlers", async () => {
+    const { deps } = createDependencies();
+    const calls: Array<{ operation: string; input: unknown }> = [];
+    deps.configHandlers = {
+      async get(input) {
+        calls.push({ operation: "get", input });
+        return { ok: true, key: input.key, storage: "global_config", value: [] };
+      },
+      async set() { throw new Error("set should not run"); },
+      async add(input) {
+        calls.push({ operation: "add", input });
+        return { ok: true, key: input.key, storage: "global_config", changed: true };
+      },
+      async remove(input) {
+        calls.push({ operation: "remove", input });
+        return { ok: true, key: input.key, storage: "global_config", changed: true };
+      },
+      async delete() { throw new Error("delete should not run"); },
+    };
+
+    await expect(runAgentjCli(["config", "get", "sandbox.bootstrap"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(
+      runAgentjCli(["config", "add", "sandbox.bootstrap", "apt-get update"], deps),
+    ).resolves.toBe(EXIT_SUCCESS);
+    await expect(
+      runAgentjCli(["config", "remove", "sandbox.bootstrap", "apt-get update"], deps),
+    ).resolves.toBe(EXIT_SUCCESS);
+
+    expect(calls).toEqual([
+      { operation: "get", input: { key: "sandbox.bootstrap" } },
+      { operation: "add", input: { key: "sandbox.bootstrap", value: "apt-get update" } },
+      { operation: "remove", input: { key: "sandbox.bootstrap", value: "apt-get update" } },
     ]);
   });
 
@@ -482,12 +526,15 @@ describe("runAgentjCli", () => {
     const stderr = createMemoryWriter();
     const incomplete = createDependencies();
     incomplete.deps.configHandlers = {
+      async get() { throw new Error("get should not run"); },
       async set() {
         throw new Error("set should not run");
       },
       async delete() {
         throw new Error("delete should not run");
       },
+      async add() { throw new Error("add should not run"); },
+      async remove() { throw new Error("remove should not run"); },
     };
 
     await expect(

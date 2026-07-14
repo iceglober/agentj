@@ -23,7 +23,8 @@ The unified command surface is `agentj` (or `aj` after linking/installing the pa
 ```sh
 bun run agentj                                  # prompts once for a task, then runs
 bun run agentj -- "add a --json flag"           # runs the task directly (one-shot)
-./bin/agentj config set llm.model azure/gpt-5.6-sol
+./bin/agentj config set agent.llm.model gpt-5.6-sol
+./bin/agentj config add sandbox.bootstrap "apt-get install -y gh"
 ./bin/aj config set --secret providers.azure.api_key
 ./bin/agentj config delete providers.azure.api_key
 ./bin/agentj eval
@@ -53,12 +54,21 @@ commit failures exit with code 1 and print recovery details (session path and br
 ## Configuration
 
 Normal user settings are stored in `~/.config/agentj/config.json`; AgentJ merges defaults, then
-that global config, then the supplied project/bundled config. Set the model through the CLI:
+that global config, then the supplied project/bundled config. `config get`, `set`, and `delete`
+accept every schema-valid non-secret key path; `add` and `remove` operate on array-valued paths.
 
 ```sh
-./bin/agentj config set llm.model azure/gpt-5.6-sol
-./bin/agentj config delete llm.model
+./bin/agentj config set agent.llm.model gpt-5.6-sol
+./bin/agentj config set sandbox.image ghcr.io/iceglober/agentj-sandbox-base:1
+./bin/agentj config add sandbox.bootstrap "apt-get install -y --no-install-recommends gh"
+./bin/agentj config get sandbox.bootstrap
+./bin/agentj config remove sandbox.bootstrap "apt-get install -y --no-install-recommends gh"
+./bin/agentj config delete sandbox.bootstrap
 ```
+
+`sandbox.bootstrap` commands run in order after the sandbox starts and before AgentJ creates a
+session worktree. They are persisted configuration, so never put credentials in them.
+`llm.model` remains a compatibility alias that also selects its provider.
 
 `core/agentj.json` remains a project/bundled override layer and never needs a secret:
 

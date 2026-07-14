@@ -2,13 +2,15 @@ import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { Sandbox as Microsandbox } from "microsandbox";
 import z from "zod";
-import type { Sandbox } from "./index";
+import type { Sandbox, SandboxCommandResult } from "./index";
 
 /** The `sandbox.*` section of the agent config. */
 export const microsandboxOptionsSchema = z.object({
   name: z.string().default("worker"),
-  /** OCI image reference, Docker-style (e.g. "python", "ubuntu:24.04"). */
-  image: z.string().default("python"),
+  /** Generic AgentJ base image; users may override it with any OCI image. */
+  image: z.string().default("ghcr.io/iceglober/agentj-sandbox-base:1"),
+  /** Commands run once after the sandbox starts and before AgentJ creates a session worktree. */
+  bootstrap: z.array(z.string().min(1)).default([]),
   /** Created via rootfs patch before boot; commands run here. */
   workdir: z.string().default("/workspace"),
   /** Host directory containing the Git worktree to expose to the guest. */
@@ -128,6 +130,20 @@ export const configureMicrosandboxBuilder = (
   return configured.replace();
 };
 
+/** Run user-approved environment provisioning before any session or model work begins. */
+export const runSandboxBootstrap = async (
+  sandbox: Pick<Sandbox, "executeCommand">,
+  commands: readonly string[],
+): Promise<void> => {
+  for (const [index, command] of commands.entries()) {
+    const result = await sandbox.executeCommand(command);
+    if (result.exitCode !== 0) {
+      // Commands and output may contain secrets; report only safe execution metadata.
+      throw new Error(`Sandbox bootstrap command ${index + 1} failed with exit code ${result.exitCode}.`);
+    }
+  }
+};
+
 export const createSandboxProviderMicrosandbox = (
   options: MicrosandboxProviderOptions = {},
 ) =>
@@ -144,11 +160,18 @@ export const createSandboxProviderMicrosandbox = (
       parsedOptions,
       projectSource,
     ).create();
+    const executeCommand = async (command: string): Promise<SandboxCommandResult> => {
+      const r = await sb.shell(command);
+      return { stdout: r.stdout(), stderr: r.stderr(), exitCode: r.code };
+    };
+    try {
+      await runSandboxBootstrap({ executeCommand }, parsedOptions.bootstrap);
+    } catch (error) {
+      await sb[Symbol.asyncDispose]().catch(() => undefined);
+      throw error;
+    }
     return {
-      async executeCommand(command) {
-        const r = await sb.shell(command);
-        return { stdout: r.stdout(), stderr: r.stderr(), exitCode: r.code };
-      },
+      executeCommand,
       async readFile(path) {
         return sb.fs().readToString(path);
       },
