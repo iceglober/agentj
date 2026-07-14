@@ -6,6 +6,7 @@ import {
   configureMicrosandboxBuilder,
   microsandboxOptionsSchema,
   resolveProjectSource,
+  runSandboxBootstrap,
 } from "./microsandbox-adapter";
 
 type Builder = Parameters<typeof configureMicrosandboxBuilder>[0];
@@ -117,7 +118,12 @@ describe("Microsandbox project-directory configuration", () => {
     configureMicrosandboxBuilder(builder as unknown as Builder, options);
 
     expect(builder.mounts).toEqual([]);
-    expect(builder.calls).toEqual(["image:python", "patch", "workdir:/workspace", "replace"]);
+    expect(builder.calls).toEqual([
+      "image:ghcr.io/iceglober/agentj-sandbox-base:1",
+      "patch",
+      "workdir:/workspace",
+      "replace",
+    ]);
     expect(builder.directories).toEqual([{ path: "/workspace", mode: 0o755 }]);
   });
 
@@ -185,5 +191,33 @@ describe("Microsandbox project-directory configuration", () => {
       expect(builder.mounts).toEqual([]);
       expect(await fileSnapshot(repo)).toEqual(before);
     });
+  });
+});
+
+describe("runSandboxBootstrap", () => {
+  test("runs configured commands in order", async () => {
+    const commands: string[] = [];
+
+    await runSandboxBootstrap({
+      async executeCommand(command) {
+        commands.push(command);
+        return { stdout: "", stderr: "", exitCode: 0 };
+      },
+    }, ["first", "second"]);
+
+    expect(commands).toEqual(["first", "second"]);
+  });
+
+  test("stops after the first failed command without exposing command output", async () => {
+    const commands: string[] = [];
+
+    await expect(runSandboxBootstrap({
+      async executeCommand(command) {
+        commands.push(command);
+        return { stdout: "secret output", stderr: "secret error", exitCode: command === "bad" ? 7 : 0 };
+      },
+    }, ["good", "bad", "never"])).rejects.toThrow("command 2 failed with exit code 7");
+
+    expect(commands).toEqual(["good", "bad"]);
   });
 });

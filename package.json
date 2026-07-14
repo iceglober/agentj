@@ -1,9 +1,35 @@
 {
-  "name": "agentj",
-  "private": true,
+  "name": "@glrs-dev/aj",
+  "version": "0.1.0-next.0",
+  "private": false,
   "description": "agentj: a simple, effective terminal coding agent. The sole product lives in core/; this file carries the root Bun entrypoints.",
   "license": "MIT",
-  "packageManager": "bun@1.2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iceglober/agentj.git"
+  },
+  "bugs": "https://github.com/iceglober/agentj/issues",
+  "homepage": "https://github.com/iceglober/agentj#readme",
+  "files": [
+    "bin",
+    "core",
+    "README.md",
+    "LICENSE",
+    "!core/**/*.test.ts",
+    "!core/eval/results",
+    "!core/eval/traj",
+    "!core/lib/tools/edit/benchmarks"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org",
+    "tag": "next"
+  },
+  "bin": {
+    "agentj": "bin/agentj",
+    "aj": "bin/aj"
+  },
+  "packageManager": "bun@1.3.14",
   "scripts": {
     "agentj": "bun core/agent-loop.ts",
     "test": "bun test core",
@@ -11,9 +37,13 @@
     "eval": "bun core/eval/run.ts",
     "eval:report": "bun core/eval/report.ts",
     "eval:selfcheck": "bun core/eval/run.ts --selfcheck",
-    "agentj:secrets": "bun core/secrets-cli.ts"
+    "agentj:secrets": "bun core/secrets-cli.ts",
+    "changeset": "changeset",
+    "version:packages": "changeset version",
+    "release:next": "bun publish --access public --tag next"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@types/bun": "^1.2.24",
     "@types/node": "^24.0.15",
     "@types/prompts": "^2.4.9",
