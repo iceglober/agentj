@@ -3,6 +3,10 @@
   "private": true,
   "description": "agentj: a simple, effective terminal coding agent. The sole product lives in core/; this file carries the root Bun entrypoints.",
   "license": "MIT",
+  "bin": {
+    "agentj": "bin/agentj",
+    "aj": "bin/aj"
+  },
   "packageManager": "bun@1.2.0",
   "scripts": {
     "agentj": "bun core/agent-loop.ts",

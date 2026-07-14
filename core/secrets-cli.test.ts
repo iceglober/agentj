@@ -154,7 +154,9 @@ describe("runSecretsCli", () => {
       ),
     ).resolves.toBe(1);
 
-    expect(stderr.text()).toBe("Only azure-api-key is supported.\n");
+    expect(stderr.text()).toBe(
+      "agentj:secrets is deprecated; use agentj config ...\nOnly azure-api-key is supported.\n",
+    );
     expect(promptCalls).toBe(0);
     expect(fake.sets).toEqual([]);
   });
@@ -169,7 +171,9 @@ describe("runSecretsCli", () => {
 
     await expect(runSecretsCli(["status"], createDependencies(fake.store), writers)).resolves.toBe(1);
 
-    expect(stderr.text()).toBe("Unable to manage AgentJ secrets.\n");
+    expect(stderr.text()).toBe(
+      "agentj:secrets is deprecated; use agentj config ...\nUnable to manage AgentJ secrets.\n",
+    );
     expect(`${stdout.text()}${stderr.text()}`).not.toContain(BACKEND_FIXTURE);
     expect(`${stdout.text()}${stderr.text()}`).not.toContain(SECRET_FIXTURE);
   });

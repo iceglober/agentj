@@ -55,6 +55,10 @@ const writeError = (writers: SecretCliWriters, error: unknown): void => {
   writers.stderr.write("Unable to manage AgentJ secrets.\n");
 };
 
+const writeMigrationNotice = (writers: SecretCliWriters): void => {
+  writers.stderr.write("agentj:secrets is deprecated; use agentj config ...\n");
+};
+
 export const createPromptsSecretPrompt = (): SecretPrompt => ({
   async askAzureApiKey(): Promise<string | null> {
     let cancelled = false;
@@ -88,6 +92,7 @@ export const createSecretsCommand = (
       account: positional({ type: string }),
     },
     async handler(args): Promise<number> {
+      writeMigrationNotice(writers);
       if (azureAccount(args) !== EXIT_SUCCESS) {
         writers.stderr.write("Only azure-api-key is supported.\n");
         return EXIT_FAILURE;
@@ -113,6 +118,7 @@ export const createSecretsCommand = (
     description: "Show whether the Azure API key is stored.",
     args: {},
     async handler(): Promise<number> {
+      writeMigrationNotice(writers);
       try {
         const value = await deps.store.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT);
         writers.stdout.write(value === undefined ? "Azure API key: not stored\n" : "Azure API key: stored\n");
@@ -131,6 +137,7 @@ export const createSecretsCommand = (
       account: positional({ type: string }),
     },
     async handler(args): Promise<number> {
+      writeMigrationNotice(writers);
       if (azureAccount(args) !== EXIT_SUCCESS) {
         writers.stderr.write("Only azure-api-key is supported.\n");
         return EXIT_FAILURE;

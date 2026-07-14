@@ -11,7 +11,9 @@
   - Key areas:
     - `core/agent-loop.ts` — thin `import.meta.main` entrypoint. Constructs production dependencies (prompt UI, terminal writers, transcript renderer, task-run dependencies) and delegates to `runAgentjCli`. Owns SIGINT handler lifecycle. No orchestration logic.
     - `core/lib/app/` — task orchestration. `run.ts` exports `runAgentTask`, an injectable application service that sequences sandbox → session → agent → generation → commit, emitting structured `TaskRunEvent` callbacks and returning a discriminated `TaskRunOutcome`. `createProductionTaskRunDependencies` wires real sandbox/session/agent factories. Domain modules (agent, session, sandbox) are unchanged by this extraction.
-    - `core/lib/cli/` — `cmd-ts` command construction and dispatch. `index.ts` builds the CLI command with an optional positional task argument; bare invocation delegates to `PromptUi.askTask()`. The handler invokes the shared `runAgentTask` runner and maps `TaskRunOutcome` to exit codes (0 success, 1 failure, 130 aborted). `runAgentjCli` wraps `cmd-ts` `runSafely` for testable error routing.
+    - `core/lib/cli/` — `cmd-ts` command construction and dispatch. Direct task input remains the default; exact `config set`/`config delete` and `eval` paths route to administration handlers. `runAgentjCli` owns parse/help/error exit behavior.
+    - `core/lib/config-cli.ts` — public setting mapping: `llm.model` writes global config atomically; `providers.azure.api_key` requires `--secret` and uses the keychain.
+    - `core/lib/eval-cli.ts` — lazy handlers for eval, report, and selfcheck.
     - `core/lib/tui/` — terminal interaction and rendering. `index.ts` defines injectable `PromptUi` (wrapping `prompts` for one-shot task collection; cancellation returns `null`), `TerminalWriters` (stdout/stderr adapters), and `TranscriptRenderer` (line-oriented ANSI renderer with semantic sections: Prompt, Session, Tool, Result, Commit, and error/abort outcomes). Tool payloads are safely truncated via `safeRenderJson`. No fullscreen state machine.
     - `core/lib/agent/` — agent assembly (`index.ts`) and subagent delegation (`delegate.ts`). Composes llm + prompt + tools into a runnable agent. Delegation creates depth-capped child agents in isolated git worktrees via `run_subagents`.
     - `core/lib/session/` — worktree lifecycle. Creates branches/worktrees from a parent ref, commits on success, preserves on failure, deletes clean branches. Child lanes never force-delete uncertain work.
@@ -20,20 +22,20 @@
     - `core/lib/tools/` — agent tools: `bash/`, `edit/`, `search/`. Defined against the sandbox port; no vendor SDK imports.
     - `core/lib/llm/` — port (`index.ts`) + adapters (`ai-sdk-adapter.ts`, `azure-adapter.ts`). The model and its generation loop behind a vendor-free `AgentRuntime` interface. Token usage preserves Azure prompt-cache detail (no-cache, cache-read, cache-write input tokens). Tool names are sorted deterministically before passing to the AI SDK `toolOrder` to maximize provider automatic caching.
     - `core/lib/prompt/` — pure prompt composition from config + context.
-    - `core/lib/config/` — composes domain schemas; defines no shapes of its own.
+    - `core/lib/config/` — composes schemas and stores normal user config in `~/.config/agentj/config.json`; defaults → global config → project/bundled config precedence.
     - `core/lib/secrets/` — port (`index.ts`) + adapter (`keyring-adapter.ts`). Vendor-neutral `SecretStore` interface for host-global credential storage via the OS keychain. Credential resolution follows strict precedence: `AZURE_FOUNDRY_API_KEY` env → `AZURE_API_KEY` env → OS keychain. Unavailable stores fail with `SecretStoreUnavailableError`; there is no plaintext file fallback. Secret values are never printed, logged, or placed in command arguments.
     - `core/lib/metrics/` — port (`index.ts`) + adapter (`otel-adapter.ts`). Content-free aggregate metrics sink for token/cache/duration/outcome counters and histograms. Enabled only when `AGENTJ_OTEL_METRICS=1`; otherwise a no-op with zero network dependency. Attributes are restricted to `provider`, `model`, and `outcome` — no prompts, outputs, tool inputs, keys, or project paths are exported. Metrics failures are silently swallowed and never affect task success.
-    - `core/secrets-cli.ts` — `cmd-ts` subcommand entrypoint (`agentj:secrets`) for managing Azure credentials in the OS keychain. `set` uses a masked password prompt; `status` reports presence only; `delete` removes the entry. Secret values are never echoed to stdout/stderr.
+    - `core/secrets-cli.ts` — deprecated compatibility shim for `agentj:secrets`; new secret management lives under `agentj config --secret`.
     - `core/eval/` — eval runner (`run.ts`), task definitions, graders, fixtures, and adapters.
 - `package.json`
-  - Convenience scripts only: `agentj`, `test`, `typecheck`, `eval`, `eval:report`, `eval:selfcheck`.
+  - Convenience scripts and `bin/agentj` / `bin/aj` aliases.
 - `README.md`
   - User-facing overview and run/develop commands.
 
 ## How the pieces fit together
 - `core/agent-loop.ts` is the composition root: it constructs production dependencies (prompt UI, terminal writers, transcript renderer, task-run dependencies) and delegates to `runAgentjCli`. Owns SIGINT handler lifecycle. No orchestration logic.
 - `core/lib/app/run.ts` exports `runAgentTask`, an injectable application service that sequences sandbox → session → agent → generation → commit, emitting structured `TaskRunEvent` callbacks and returning a discriminated `TaskRunOutcome`. `createProductionTaskRunDependencies` wires real sandbox/session/agent factories. Domain modules (agent, session, sandbox) are unchanged by this extraction.
-- `core/lib/cli/index.ts` builds the `cmd-ts` command with an optional positional task argument; bare invocation delegates to `PromptUi.askTask()`. The handler invokes the shared `runAgentTask` runner and maps `TaskRunOutcome` to exit codes (0 success, 1 failure, 130 aborted). `runAgentjCli` wraps `cmd-ts` `runSafely` for testable error routing.
+  - `core/lib/cli/index.ts` keeps direct task input as the default and dispatches exact config/eval command paths through injected handlers; bare invocation delegates to `PromptUi.askTask()`.
 - `core/lib/tui/index.ts` defines injectable `PromptUi` (wrapping `prompts` for one-shot task collection; cancellation returns `null`), `TerminalWriters` (stdout/stderr adapters), and `TranscriptRenderer` (line-oriented ANSI renderer with semantic sections: Prompt, Session, Tool, Result, Commit, and error/abort outcomes). Tool payloads are safely truncated via `safeRenderJson`. No fullscreen state machine.
 - `core/lib/agent/index.ts` composes the three domain modules the loop needs: `llm` (which model), `prompt` (how it behaves), and `tools` (what it can do).
 - `core/lib/session/index.ts` owns branch/worktree identity. Child sessions branch from the parent's current commit and follow a data-loss-safe lifecycle: commit + preserve branch on success, delete branch + worktree on clean no-op, preserve everything on failure/abort.
@@ -118,6 +120,9 @@ Convenience equivalents defined in `package.json`:
 bun run agentj
 bun run agentj -- "task"
 bun run agentj -- --help
+./bin/agentj config set llm.model azure/gpt-5.6-sol
+./bin/aj config set --secret providers.azure.api_key
+./bin/agentj eval selfcheck
 bun run agentj:secrets -- --help
 bun run test
 bun run typecheck
@@ -127,7 +132,7 @@ bun run eval:selfcheck
 ```
 
 ## Verification evidence
-- `bun test core` — passed: 170 tests across 18 files.
+- `bun test core` — passed: 206 tests across 22 files.
 - `bun run typecheck` — passed.
 - `bun core/eval/run.ts --selfcheck` — passed: proves each grader fails unsolved and passes on the reference solution.
 - `bun run agentj -- --help` — prints usage with positional task argument and version flag.

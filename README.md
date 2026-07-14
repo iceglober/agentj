@@ -18,12 +18,18 @@ The implementation lives in [`core/`](core/) — a Bun TypeScript agent with a s
 git clone git@github.com:iceglober/agentj.git && cd agentj
 ```
 
-Three ways to start a task:
+The unified command surface is `agentj` (or `aj` after linking/installing the package):
 
 ```sh
-bun run agentj                          # prompts once for a task, then runs
-bun run agentj -- "add a --json flag"   # runs the task directly (one-shot)
-bun run agentj -- --help                # prints help and exits
+bun run agentj                                  # prompts once for a task, then runs
+bun run agentj -- "add a --json flag"           # runs the task directly (one-shot)
+./bin/agentj config set llm.model azure/gpt-5.6-sol
+./bin/aj config set --secret providers.azure.api_key
+./bin/agentj config delete providers.azure.api_key
+./bin/agentj eval
+./bin/agentj eval report
+./bin/agentj eval selfcheck
+./bin/agentj --help
 ```
 
 The task is a single positional argument — shell-quote multi-word tasks. Bare invocation asks once
@@ -46,7 +52,15 @@ commit failures exit with code 1 and print recovery details (session path and br
 
 ## Configuration
 
-Provider and model are configured in `core/agentj.json`:
+Normal user settings are stored in `~/.config/agentj/config.json`; AgentJ merges defaults, then
+that global config, then the supplied project/bundled config. Set the model through the CLI:
+
+```sh
+./bin/agentj config set llm.model azure/gpt-5.6-sol
+./bin/agentj config delete llm.model
+```
+
+`core/agentj.json` remains a project/bundled override layer and never needs a secret:
 
 ```json
 {
@@ -75,10 +89,11 @@ convenient path for interactive use — store once, never type again.
 ### Storing credentials in the OS keychain
 
 ```sh
-bun run agentj:secrets -- set azure-api-key     # masked prompt, stores in OS keychain
-bun run agentj:secrets -- status                 # prints "stored" or "not stored"
-bun run agentj:secrets -- delete azure-api-key   # removes from keychain
+./bin/agentj config set --secret providers.azure.api_key
+./bin/agentj config delete providers.azure.api_key
 ```
+
+`bun run agentj:secrets -- …` remains a deprecated compatibility shim for one release.
 
 The key is stored globally in the host OS keychain (macOS Keychain, Windows Credential
 Manager, Linux `libsecret`). Secret values are never printed, logged, or passed as

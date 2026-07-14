@@ -6,6 +6,7 @@ import type {
   TaskRunSessionIdentity,
 } from "../app/run";
 import type { PromptUi, TranscriptRenderer } from "../tui";
+import { createConfigCliHandlers } from "../config-cli";
 import {
   EXIT_ABORTED,
   EXIT_FAILURE,
@@ -329,5 +330,171 @@ describe("runAgentjCli", () => {
         "      ^ Unknown arguments\n\n\n" +
         "hint: for more information, try 'agentj --help'",
     );
+  });
+
+  test("config set parses normal and secret inputs before calling injected handlers", async () => {
+    const normal = createDependencies();
+    const normalCalls: unknown[] = [];
+    normal.deps.configHandlers = {
+      async set(input) {
+        normalCalls.push(input);
+        return { ok: true, key: "llm.model", storage: "global_config", changed: true };
+      },
+      async delete() {
+        throw new Error("delete should not run");
+      },
+    };
+
+    await expect(
+      runAgentjCli(["config", "set", "llm.model", "azure/gpt-5.6-sol"], normal.deps),
+    ).resolves.toBe(EXIT_SUCCESS);
+    expect(normalCalls).toEqual([
+      { key: "llm.model", secret: false, value: "azure/gpt-5.6-sol" },
+    ]);
+
+    const secret = createDependencies();
+    const secretCalls: unknown[] = [];
+    secret.deps.configHandlers = {
+      async set(input) {
+        secretCalls.push(input);
+        return { ok: true, key: "providers.azure.api_key", storage: "keychain", changed: true };
+      },
+      async delete() {
+        throw new Error("delete should not run");
+      },
+    };
+
+    await expect(
+      runAgentjCli(["config", "set", "--secret", "providers.azure.api_key"], secret.deps),
+    ).resolves.toBe(EXIT_SUCCESS);
+    expect(secretCalls).toEqual([
+      { key: "providers.azure.api_key", secret: true, value: undefined },
+    ]);
+  });
+
+  test("config delete routes the public key and secret flag to injected handlers", async () => {
+    const { deps } = createDependencies();
+    const calls: unknown[] = [];
+    deps.configHandlers = {
+      async set() {
+        throw new Error("set should not run");
+      },
+      async delete(input) {
+        calls.push(input);
+        return { ok: true, key: "llm.model", storage: "global_config", changed: true };
+      },
+    };
+
+    await expect(runAgentjCli(["config", "delete", "llm.model"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(
+      runAgentjCli(["config", "delete", "--secret", "providers.azure.api_key"], deps),
+    ).resolves.toBe(EXIT_SUCCESS);
+
+    expect(calls).toEqual([
+      { key: "llm.model", secret: false },
+      { key: "providers.azure.api_key", secret: true },
+    ]);
+  });
+
+  test("config set rejects a secret value without prompting, storing, or writing success output", async () => {
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+    let promptCalls = 0;
+    let storeCalls = 0;
+    const handlers = createConfigCliHandlers({
+      prompt: {
+        async askSecret() {
+          promptCalls += 1;
+          return "secret";
+        },
+      },
+      secretStore: {
+        async set() {
+          storeCalls += 1;
+        },
+        async get() {
+          return undefined;
+        },
+        async delete() {
+          return false;
+        },
+      },
+      writers: { stdout, stderr },
+      mutateConfig: async () => {
+        throw new Error("normal config mutation should not run");
+      },
+    });
+    const { deps } = createDependencies();
+    deps.configHandlers = handlers;
+
+    await expect(
+      runAgentjCli(
+        ["config", "set", "--secret", "providers.azure.api_key", "must-not-store"],
+        deps,
+        { stdout, stderr },
+      ),
+    ).resolves.toBe(EXIT_FAILURE);
+
+    expect(promptCalls).toBe(0);
+    expect(storeCalls).toBe(0);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toBe("--secret is only valid for secret configuration keys.\n");
+  });
+
+  test("eval routes preserve injected exit codes, while help and unknown routes do not invoke handlers", async () => {
+    const { deps } = createDependencies();
+    const calls: string[] = [];
+    deps.evalHandlers = {
+      async run() {
+        calls.push("run");
+        return 7;
+      },
+      async report() {
+        calls.push("report");
+        return 8;
+      },
+      async selfcheck() {
+        calls.push("selfcheck");
+        return 9;
+      },
+    };
+
+    await expect(runAgentjCli(["eval"], deps)).resolves.toBe(7);
+    await expect(runAgentjCli(["eval", "report"], deps)).resolves.toBe(8);
+    await expect(runAgentjCli(["eval", "selfcheck"], deps)).resolves.toBe(9);
+    expect(calls).toEqual(["run", "report", "selfcheck"]);
+
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+    await expect(runAgentjCli(["eval", "--help"], deps, { stdout, stderr })).resolves.toBe(EXIT_SUCCESS);
+    await expect(runAgentjCli(["eval", "unknown"], deps, { stdout, stderr })).resolves.toBe(2);
+    expect(calls).toEqual(["run", "report", "selfcheck"]);
+    expect(stdout.text()).toContain("Run AgentJ evaluation commands.");
+    expect(stderr.text()).toBe("error: unknown eval command. Try 'agentj eval --help'.\n");
+  });
+
+  test("bare config remains task input while incomplete config subcommands use the parser error path", async () => {
+    const bare = createDependencies();
+    await expect(runAgentjCli(["config"], bare.deps)).resolves.toBe(EXIT_SUCCESS);
+    expect(bare.runTaskCalls).toEqual(["config"]);
+
+    const stdout = createMemoryWriter();
+    const stderr = createMemoryWriter();
+    const incomplete = createDependencies();
+    incomplete.deps.configHandlers = {
+      async set() {
+        throw new Error("set should not run");
+      },
+      async delete() {
+        throw new Error("delete should not run");
+      },
+    };
+
+    await expect(
+      runAgentjCli(["config", "set"], incomplete.deps, { stdout, stderr }),
+    ).resolves.toBe(EXIT_FAILURE);
+    expect(incomplete.runTaskCalls).toHaveLength(0);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("No value provided for key");
   });
 });

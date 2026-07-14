@@ -5,6 +5,10 @@ import {
   runAgentTask,
 } from "./lib/app/run";
 import { runAgentjCli } from "./lib/cli";
+import { createConfigCliHandlers } from "./lib/config-cli";
+import { createProductionEvalCliHandlers } from "./lib/eval-cli";
+import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
+import { createPromptsSecretPrompt } from "./secrets-cli";
 import {
   createNodeTerminalWriters,
   createPromptsPromptUi,
@@ -30,6 +34,16 @@ const main = async (): Promise<void> => {
     isInteractive: Boolean(process.stdin.isTTY),
   });
   const writers = createNodeTerminalWriters(processStdout, processStderr);
+  const configHandlers = createConfigCliHandlers({
+    secretStore: createKeyringSecretStore({}),
+    prompt: {
+      async askSecret() {
+        return createPromptsSecretPrompt().askAzureApiKey();
+      },
+    },
+    writers,
+  });
+  let evalHandlers: ReturnType<typeof createProductionEvalCliHandlers> | undefined;
   let productionDependencies:
     | ReturnType<typeof createProductionTaskRunDependencies>
     | undefined;
@@ -45,6 +59,8 @@ const main = async (): Promise<void> => {
       argv,
       {
         version: COMMAND_VERSION,
+        configHandlers,
+        createEvalHandlers: () => (evalHandlers ??= createProductionEvalCliHandlers()),
         promptUi,
         createAbortSignal: () => abortController.signal,
         createRenderer(task) {
