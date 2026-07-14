@@ -1,5 +1,15 @@
 #!/bin/sh
 set -eu
 
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+script=$0
+while [ -L "$script" ]; do
+  script_dir=$(CDPATH= cd "$(dirname "$script")" && pwd)
+  target=$(readlink "$script")
+  case $target in
+    /*) script=$target ;;
+    *) script=$script_dir/$target ;;
+  esac
+done
+
+script_dir=$(CDPATH= cd "$(dirname "$script")" && pwd)
 exec bun "$script_dir/../core/agent-loop.ts" "$@"
