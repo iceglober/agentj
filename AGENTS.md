@@ -9,7 +9,10 @@
 - `core/`
   - Bun TypeScript agent and only shipped product.
   - Key areas:
-    - `core/agent-loop.ts` — CLI entry and top-level agent loop; wires sandbox, runtime, session, and tools together.
+    - `core/agent-loop.ts` — thin `import.meta.main` entrypoint. Constructs production dependencies (prompt UI, terminal writers, transcript renderer, task-run dependencies) and delegates to `runAgentjCli`. Owns SIGINT handler lifecycle. No orchestration logic.
+    - `core/lib/app/` — task orchestration. `run.ts` exports `runAgentTask`, an injectable application service that sequences sandbox → session → agent → generation → commit, emitting structured `TaskRunEvent` callbacks and returning a discriminated `TaskRunOutcome`. `createProductionTaskRunDependencies` wires real sandbox/session/agent factories. Domain modules (agent, session, sandbox) are unchanged by this extraction.
+    - `core/lib/cli/` — `cmd-ts` command construction and dispatch. `index.ts` builds the CLI command with an optional positional task argument; bare invocation delegates to `PromptUi.askTask()`. The handler invokes the shared `runAgentTask` runner and maps `TaskRunOutcome` to exit codes (0 success, 1 failure, 130 aborted). `runAgentjCli` wraps `cmd-ts` `runSafely` for testable error routing.
+    - `core/lib/tui/` — terminal interaction and rendering. `index.ts` defines injectable `PromptUi` (wrapping `prompts` for one-shot task collection; cancellation returns `null`), `TerminalWriters` (stdout/stderr adapters), and `TranscriptRenderer` (line-oriented ANSI renderer with semantic sections: Prompt, Session, Tool, Result, Commit, and error/abort outcomes). Tool payloads are safely truncated via `safeRenderJson`. No fullscreen state machine.
     - `core/lib/agent/` — agent assembly (`index.ts`) and subagent delegation (`delegate.ts`). Composes llm + prompt + tools into a runnable agent. Delegation creates depth-capped child agents in isolated git worktrees via `run_subagents`.
     - `core/lib/session/` — worktree lifecycle. Creates branches/worktrees from a parent ref, commits on success, preserves on failure, deletes clean branches. Child lanes never force-delete uncertain work.
     - `core/lib/scm/` — git primitives expressed as sandbox commands. Branch creation, worktree management, commit, branch deletion, safe inspection. No port of its own — git runs inside the sandbox boundary.
@@ -25,7 +28,10 @@
   - User-facing overview and run/develop commands.
 
 ## How the pieces fit together
-- `core/agent-loop.ts` is the composition root: it picks adapters, creates a session, assembles an agent, and runs the model/tool loop.
+- `core/agent-loop.ts` is the composition root: it constructs production dependencies (prompt UI, terminal writers, transcript renderer, task-run dependencies) and delegates to `runAgentjCli`. Owns SIGINT handler lifecycle. No orchestration logic.
+- `core/lib/app/run.ts` exports `runAgentTask`, an injectable application service that sequences sandbox → session → agent → generation → commit, emitting structured `TaskRunEvent` callbacks and returning a discriminated `TaskRunOutcome`. `createProductionTaskRunDependencies` wires real sandbox/session/agent factories. Domain modules (agent, session, sandbox) are unchanged by this extraction.
+- `core/lib/cli/index.ts` builds the `cmd-ts` command with an optional positional task argument; bare invocation delegates to `PromptUi.askTask()`. The handler invokes the shared `runAgentTask` runner and maps `TaskRunOutcome` to exit codes (0 success, 1 failure, 130 aborted). `runAgentjCli` wraps `cmd-ts` `runSafely` for testable error routing.
+- `core/lib/tui/index.ts` defines injectable `PromptUi` (wrapping `prompts` for one-shot task collection; cancellation returns `null`), `TerminalWriters` (stdout/stderr adapters), and `TranscriptRenderer` (line-oriented ANSI renderer with semantic sections: Prompt, Session, Tool, Result, Commit, and error/abort outcomes). Tool payloads are safely truncated via `safeRenderJson`. No fullscreen state machine.
 - `core/lib/agent/index.ts` composes the three domain modules the loop needs: `llm` (which model), `prompt` (how it behaves), and `tools` (what it can do).
 - `core/lib/session/index.ts` owns branch/worktree identity. Child sessions branch from the parent's current commit and follow a data-loss-safe lifecycle: commit + preserve branch on success, delete branch + worktree on clean no-op, preserve everything on failure/abort.
 - `core/lib/scm/git.ts` runs git inside the sandbox. All scm, session, and tool code follows unchanged when the sandbox adapter is swapped.
@@ -37,6 +43,9 @@
 - Work in the real product: `core/` is the app. There is no other implementation.
 - Keep changes small and local.
 - Match existing module boundaries in `core/lib/`:
+  - task orchestration in `app/`
+  - CLI command construction and dispatch in `cli/`
+  - terminal interaction and rendering in `tui/`
   - agent assembly and delegation in `agent/`
   - worktree lifecycle in `session/`
   - git primitives in `scm/`
@@ -46,6 +55,9 @@
   - prompt composition in `prompt/`
   - config schema composition in `config/`
 - Ports and domain services depend on zod and other lib modules only — never on vendor SDKs. Vendor imports (`ai`, `@ai-sdk/*`, `bash-tool`) live only in `*-adapter.ts` files.
+- Prompt libraries (`prompts`, `cmd-ts`) are confined to `tui/` and `cli/` respectively. Domain modules (`app/`, `agent/`, `session/`, `sandbox/`, `tools/`, `llm/`, `prompt/`, `config/`) never import prompt or CLI libraries.
+- Imports are side-effect free: importing CLI, TUI, or domain code in tests never starts a sandbox, model call, or TTY interaction. `core/agent-loop.ts` is the only module that constructs production dependencies and runs the CLI.
+- The TUI is line-oriented and one-run: no fullscreen state machine, no cursor-addressed rendering, no progress bars, no multi-turn chat loop. The transcript renders semantic sections (Prompt, Session, Tool, Result, Commit) with optional ANSI styling.
 - Swapping the generation stack is a new `llm/<name>-adapter.ts` registered under the runtime registry — no domain code changes.
 - For eval work, document and preserve objective graders; do not replace strict checks with prose.
 
@@ -69,6 +81,8 @@ bun install --frozen-lockfile
 Convenience equivalents defined in `package.json`:
 ```sh
 bun run agentj
+bun run agentj -- "task"
+bun run agentj -- --help
 bun run test
 bun run typecheck
 bun run eval
@@ -77,6 +91,7 @@ bun run eval:selfcheck
 ```
 
 ## Verification evidence
-- `bun test core` — passed: 108 tests across 9 files.
+- `bun test core` — passed: 136 tests across 12 files.
 - `bun run typecheck` — passed.
 - `bun core/eval/run.ts --selfcheck` — passed: proves each grader fails unsolved and passes on the reference solution.
+- `bun run agentj -- --help` — prints usage with positional task argument and version flag.

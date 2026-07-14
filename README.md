@@ -16,11 +16,31 @@ The implementation lives in [`core/`](core/) — a Bun TypeScript agent with a s
 
 ```sh
 git clone git@github.com:iceglober/agentj.git && cd agentj
-bun run agentj -- "add a --json flag and run the tests"
 ```
 
-`agent-loop.ts` is a one-shot entry point: it takes a task as a single argument, runs the agent loop
-in an isolated worktree, prints the result, commits, and exits. There is no interactive chat mode.
+Three ways to start a task:
+
+```sh
+bun run agentj                          # prompts once for a task, then runs
+bun run agentj -- "add a --json flag"   # runs the task directly (one-shot)
+bun run agentj -- --help                # prints help and exits
+```
+
+The task is a single positional argument — shell-quote multi-word tasks. Bare invocation asks once
+through a text prompt; Ctrl+C at the prompt exits cleanly before any sandbox or model work starts.
+
+AgentJ runs one task, then exits. It is not a multi-turn chat or fullscreen application. The output
+is a line-oriented transcript:
+
+- **Prompt** — the task as received.
+- **Session** — worktree id, branch, and base commit.
+- **Tool** — every tool call, with payloads safely truncated.
+- **Tool result** — shown only when the runner forwards a relevant result (e.g. `run_subagents`).
+- **Result** — the agent's final answer.
+- **Commit** — the commit SHA and message, or "no changes" if nothing was produced.
+
+Ctrl+C during generation aborts the run, skips the commit, and exits with code 130. Generation and
+commit failures exit with code 1 and print recovery details (session path and branch).
 
 **Permissions are auto** — it edits and runs commands without prompting; you own git.
 
@@ -73,10 +93,12 @@ export AZURE_API_KEY=...
 
 ```
 core/
-  agent-loop.ts              # CLI entry: one-shot headless mode
+  agent-loop.ts              # thin entrypoint: wires production deps, runs cmd-ts CLI
   lib/
+    app/                     # one-task orchestration and structured outcomes
     agent/                   # agent loop, tool assembly, subagent delegation
       delegate.ts            # run_subagents tool: parallel isolated-worktree child agents
+    cli/                     # cmd-ts command parsing and exit-code mapping
     config/                  # config loading and validation
     llm/                     # model client and tool-calling runtime
     prompt/                  # SPEAR prompt assembly
@@ -84,6 +106,7 @@ core/
     scm/                     # git primitives (branch, worktree, commit, safe cleanup)
     session/                 # session lifecycle: branch/worktree creation and child-lane finalization
     tools/                   # built-in tool definitions (files, search, bash)
+    tui/                     # prompts input adapter and line-oriented transcript renderer
   eval/                      # eval harness: fixture projects + task runner, objectively graded
     run.ts                   # eval entry point
     fixtures/                # fixed test projects
