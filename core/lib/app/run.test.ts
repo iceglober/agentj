@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { Agent } from "../agent";
 import type { RunResult, RunStep } from "../llm";
+import type { MetricsSink } from "../metrics";
+import { SecretStoreUnavailableError, type SecretStore } from "../secrets";
 import type { Sandbox } from "../sandbox";
 import type { ChildSession, Session } from "../session";
 import {
   createProductionTaskRunDependencies,
   runAgentTask,
+  type ProductionTaskRunDependencyOverrides,
   type TaskRunDependencies,
   type TaskRunEvent,
 } from "./run";
@@ -545,6 +548,7 @@ describe("runAgentTask", () => {
 
     const dependencies = await createProductionTaskRunDependencies(undefined, {
       projectDir: "/launch/project",
+      env: { AZURE_API_KEY: "test-api-key" },
       resolveProjectSource: async (projectDir) => {
         resolvedProjectDirs.push(projectDir);
         return projectSource;
@@ -599,6 +603,7 @@ describe("runAgentTask", () => {
     let resolverCalls = 0;
 
     const dependencies = await createProductionTaskRunDependencies(undefined, {
+      env: { AZURE_API_KEY: "test-api-key" },
       resolveProjectSource: async () => {
         resolverCalls += 1;
         throw new Error("resolver should not run without a project directory");
@@ -619,7 +624,10 @@ describe("runAgentTask", () => {
   });
 
   test("maps launch-project preparation failures before sandbox, session, agent, or model work", async () => {
-    const preflightFailure = new Error("not a Git project");
+    const fixtureProjectPath = "/private/project/path";
+    const preflightFailure = new Error(
+      `fixture project backend failure ${fixtureProjectPath}`,
+    );
     let sandboxCalls = 0;
     let sessionCalls = 0;
     let agentCalls = 0;
@@ -648,6 +656,7 @@ describe("runAgentTask", () => {
     });
 
     const { events, outcome } = await executeRun("invalid project", dependencies);
+    const serialized = JSON.stringify({ events, outcome });
 
     expect(events).toEqual([]);
     expect(outcome).toEqual({
@@ -659,5 +668,237 @@ describe("runAgentTask", () => {
     expect(sessionCalls).toBe(0);
     expect(agentCalls).toBe(0);
     expect(modelCalls).toBe(0);
+    expect(serialized).not.toContain(preflightFailure.message);
+    expect(serialized).not.toContain(fixtureProjectPath);
+  });
+});
+
+describe("createProductionTaskRunDependencies", () => {
+  const fixtureKey = "fixture-azure-api-key";
+  const fixtureSource = "fixture-secret-store";
+  const backendErrorText = "fixture secret backend unavailable";
+
+  function makeConfig(): NonNullable<
+    ProductionTaskRunDependencyOverrides["config"]
+  > {
+    return {
+      agent: {
+        rules: "fixture rules",
+        llm: {
+          providers: {
+            azure: { apiKey: "config-api-key" },
+          },
+        },
+      },
+      sandbox: {},
+      session: {},
+    } as NonNullable<ProductionTaskRunDependencyOverrides["config"]>;
+  }
+
+  function makeSecretStore(get: SecretStore["get"]): SecretStore {
+    return {
+      get,
+      async set() {},
+      async delete() {
+        return false;
+      },
+    };
+  }
+
+  test("uses Foundry env, Azure env, then the secure store without mutating config or env", async () => {
+    const cases = [
+      {
+        env: {
+          AZURE_FOUNDRY_API_KEY: "foundry-env-key",
+          AZURE_API_KEY: "azure-env-key",
+        },
+        expectedKey: "foundry-env-key",
+      },
+      {
+        env: { AZURE_API_KEY: "azure-env-key" },
+        expectedKey: "azure-env-key",
+      },
+      { env: {}, expectedKey: fixtureKey },
+    ];
+
+    for (const { env, expectedKey } of cases) {
+      const config = makeConfig();
+      const envSnapshot = { ...env };
+      let receivedConfig: unknown;
+      const dependencies = await createProductionTaskRunDependencies("fixture-config", {
+        config,
+        env,
+        secretStore: makeSecretStore(async () => fixtureKey),
+        createSandbox: async () => makeSandbox(),
+        createSession: async () => makeSession({ commitResult: null }),
+        createAgent: async (_sandbox, agentConfig) => {
+          receivedConfig = agentConfig;
+          return makeAgent(async () => makeRunResult("done"));
+        },
+      });
+
+      const { events, outcome } = await executeRun("fixture task", dependencies);
+      const serialized = JSON.stringify({ events, outcome });
+
+      expect(receivedConfig).toMatchObject({
+        llm: { providers: { azure: { apiKey: expectedKey } } },
+      });
+      expect(receivedConfig).not.toMatchObject({
+        llm: { providers: { azure: { apiKey: "config-api-key" } } },
+      });
+      expect(
+        (receivedConfig as { llm: { providers: { azure: unknown } } }).llm.providers.azure,
+      ).toEqual({ apiKey: expectedKey });
+      expect(config.agent.llm.providers?.azure?.apiKey).toBe("config-api-key");
+      expect(env).toEqual(envSnapshot);
+      expect(serialized).not.toContain(fixtureKey);
+      expect(serialized).not.toContain(fixtureSource);
+      expect(serialized).not.toContain(backendErrorText);
+    }
+  });
+
+  test("returns a redacted credential error before any lifecycle factory runs when the secure store has no key", async () => {
+    let sandboxCreates = 0;
+    let sessionCreates = 0;
+    let agentCreates = 0;
+    let agentCreateHooks = 0;
+    const dependencies = await createProductionTaskRunDependencies("fixture-config", {
+      config: makeConfig(),
+      env: {},
+      secretStore: makeSecretStore(async () => undefined),
+      createSandbox: async () => {
+        sandboxCreates += 1;
+        return makeSandbox();
+      },
+      createSession: async () => {
+        sessionCreates += 1;
+        return makeSession();
+      },
+      onAgentCreate() {
+        agentCreateHooks += 1;
+      },
+      createAgent: async () => {
+        agentCreates += 1;
+        return makeAgent(async () => makeRunResult("unexpected"));
+      },
+    });
+
+    const { events, outcome } = await executeRun("fixture task", dependencies);
+    const serialized = JSON.stringify({ events, outcome });
+
+    expect(events).toEqual([]);
+    expect(outcome).toEqual({
+      kind: "generation-error",
+      session: undefined,
+      error: expect.objectContaining({
+        message: "Azure API key missing; run agentj:secrets ... or set env",
+      }),
+    });
+    expect(sandboxCreates).toBe(0);
+    expect(sessionCreates).toBe(0);
+    expect(agentCreates).toBe(0);
+    expect(agentCreateHooks).toBe(0);
+    expect(serialized).not.toContain(fixtureKey);
+    expect(serialized).not.toContain(fixtureSource);
+    expect(serialized).not.toContain(backendErrorText);
+  });
+
+  test("returns a redacted credential error before any lifecycle factory runs when the store is unavailable", async () => {
+    let sandboxCreates = 0;
+    let sessionCreates = 0;
+    let agentCreates = 0;
+    let agentCreateHooks = 0;
+    const dependencies = await createProductionTaskRunDependencies("fixture-config", {
+      config: makeConfig(),
+      env: {},
+      secretStore: makeSecretStore(async () => {
+        const unavailableError = new SecretStoreUnavailableError();
+        unavailableError.message = backendErrorText;
+        throw unavailableError;
+      }),
+      createSandbox: async () => {
+        sandboxCreates += 1;
+        return makeSandbox();
+      },
+      createSession: async () => {
+        sessionCreates += 1;
+        return makeSession();
+      },
+      onAgentCreate() {
+        agentCreateHooks += 1;
+      },
+      createAgent: async () => {
+        agentCreates += 1;
+        return makeAgent(async () => makeRunResult("unexpected"));
+      },
+    });
+
+    const { events, outcome } = await executeRun("fixture task", dependencies);
+    const serialized = JSON.stringify({ events, outcome });
+
+    expect(events).toEqual([]);
+    expect(outcome).toEqual({
+      kind: "generation-error",
+      session: undefined,
+      error: expect.objectContaining({
+        message:
+          "Secure secret store unavailable; set AZURE_FOUNDRY_API_KEY/AZURE_API_KEY for automation or configure the OS keychain.",
+      }),
+    });
+    expect(sandboxCreates).toBe(0);
+    expect(sessionCreates).toBe(0);
+    expect(agentCreates).toBe(0);
+    expect(agentCreateHooks).toBe(0);
+    expect(serialized).not.toContain(fixtureKey);
+    expect(serialized).not.toContain(fixtureSource);
+    expect(serialized).not.toContain(backendErrorText);
+  });
+
+  test("passes only an explicit or enabled content-free metrics sink to agent creation", async () => {
+    const explicitSink: MetricsSink = { record() {} };
+    const enabledSink: MetricsSink = { record() {} };
+    const capturedMetrics: unknown[] = [];
+    const factoryOptions: unknown[] = [];
+
+    for (const overrides of [
+      { metricsSink: explicitSink, env: {} },
+      {
+        env: { AGENTJ_OTEL_METRICS: "1" },
+        createMetricsSink(options: { enabled: boolean }) {
+          factoryOptions.push(options);
+          return enabledSink;
+        },
+      },
+      {
+        env: {},
+        createMetricsSink(options: { enabled: boolean }) {
+          factoryOptions.push(options);
+          return { record() {} };
+        },
+      },
+    ]) {
+      const dependencies = await createProductionTaskRunDependencies("fixture-config", {
+        config: makeConfig(),
+        secretStore: makeSecretStore(async () => fixtureKey),
+        createSandbox: async () => makeSandbox(),
+        createSession: async () => makeSession({ commitResult: null }),
+        createAgent: async (_sandbox, _config, options) => {
+          capturedMetrics.push(options.metricsSink);
+          return makeAgent(async () => makeRunResult("done"));
+        },
+        ...overrides,
+      });
+
+      await executeRun("secret prompt /private/project/path", dependencies);
+    }
+
+    expect(capturedMetrics).toEqual([
+      explicitSink,
+      enabledSink,
+      expect.any(Object),
+    ]);
+    expect(factoryOptions).toEqual([{ enabled: true }, { enabled: false }]);
+    expect(JSON.stringify(factoryOptions)).not.toContain("secret prompt");
+    expect(JSON.stringify(factoryOptions)).not.toContain("/private/project/path");
   });
 });

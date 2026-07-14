@@ -18,9 +18,12 @@
     - `core/lib/scm/` — git primitives expressed as sandbox commands. Branch creation, worktree management, commit, branch deletion, safe inspection. No port of its own — git runs inside the sandbox boundary.
     - `core/lib/sandbox/` — port (`index.ts`) + adapter (`microsandbox-adapter.ts`). Command execution and file IO in an isolated environment. Swapping execution backends means writing a new sandbox adapter.
     - `core/lib/tools/` — agent tools: `bash/`, `edit/`, `search/`. Defined against the sandbox port; no vendor SDK imports.
-    - `core/lib/llm/` — port (`index.ts`) + adapters (`ai-sdk-adapter.ts`, `azure-adapter.ts`). The model and its generation loop behind a vendor-free `AgentRuntime` interface.
+    - `core/lib/llm/` — port (`index.ts`) + adapters (`ai-sdk-adapter.ts`, `azure-adapter.ts`). The model and its generation loop behind a vendor-free `AgentRuntime` interface. Token usage preserves Azure prompt-cache detail (no-cache, cache-read, cache-write input tokens). Tool names are sorted deterministically before passing to the AI SDK `toolOrder` to maximize provider automatic caching.
     - `core/lib/prompt/` — pure prompt composition from config + context.
     - `core/lib/config/` — composes domain schemas; defines no shapes of its own.
+    - `core/lib/secrets/` — port (`index.ts`) + adapter (`keyring-adapter.ts`). Vendor-neutral `SecretStore` interface for host-global credential storage via the OS keychain. Credential resolution follows strict precedence: `AZURE_FOUNDRY_API_KEY` env → `AZURE_API_KEY` env → OS keychain. Unavailable stores fail with `SecretStoreUnavailableError`; there is no plaintext file fallback. Secret values are never printed, logged, or placed in command arguments.
+    - `core/lib/metrics/` — port (`index.ts`) + adapter (`otel-adapter.ts`). Content-free aggregate metrics sink for token/cache/duration/outcome counters and histograms. Enabled only when `AGENTJ_OTEL_METRICS=1`; otherwise a no-op with zero network dependency. Attributes are restricted to `provider`, `model`, and `outcome` — no prompts, outputs, tool inputs, keys, or project paths are exported. Metrics failures are silently swallowed and never affect task success.
+    - `core/secrets-cli.ts` — `cmd-ts` subcommand entrypoint (`agentj:secrets`) for managing Azure credentials in the OS keychain. `set` uses a masked password prompt; `status` reports presence only; `delete` removes the entry. Secret values are never echoed to stdout/stderr.
     - `core/eval/` — eval runner (`run.ts`), task definitions, graders, fixtures, and adapters.
 - `package.json`
   - Convenience scripts only: `agentj`, `test`, `typecheck`, `eval`, `eval:report`, `eval:selfcheck`.
@@ -36,6 +39,9 @@
 - `core/lib/session/index.ts` owns branch/worktree identity. Child sessions branch from the parent's current commit and follow a data-loss-safe lifecycle: commit + preserve branch on success, delete branch + worktree on clean no-op, preserve everything on failure/abort.
 - `core/lib/scm/git.ts` runs git inside the sandbox. All scm, session, and tool code follows unchanged when the sandbox adapter is swapped.
 - `core/lib/sandbox/` is the only boundary to the host. Ports and domain services depend on zod and other lib modules only — never on vendor SDKs. Vendor imports live only in `*-adapter.ts` files.
+- `core/lib/secrets/index.ts` defines the `SecretStore` port and `resolveAzureApiKey` resolver with strict env→keychain precedence. `core/lib/secrets/keyring-adapter.ts` wraps `@napi-rs/keyring` behind the port; the real keychain is never touched in tests.
+- `core/lib/metrics/index.ts` defines the `MetricsSink` port and `recordModelUsage` helper that records token/cache/duration counters with sanitized low-cardinality attributes. `core/lib/metrics/otel-adapter.ts` creates an OTel meter sink only when `AGENTJ_OTEL_METRICS=1`; otherwise returns `noopMetricsSink`.
+- `core/secrets-cli.ts` is a standalone `cmd-ts` entrypoint (`agentj:secrets`) with `set`/`status`/`delete` subcommands. Secret values are collected via masked prompt and never written to stdout/stderr.
 - `core/eval/run.ts` copies a fixture to a temp dir, initializes git, runs setup, runs the agent, then grades with structured graders.
 - Current behavior is defined by the core TypeScript code above.
 
@@ -54,6 +60,8 @@
   - model runtime port + adapters in `llm/`
   - prompt composition in `prompt/`
   - config schema composition in `config/`
+  - secret storage port + adapters in `secrets/`
+  - metrics port + adapters in `metrics/`
 - Ports and domain services depend on zod and other lib modules only — never on vendor SDKs. Vendor imports (`ai`, `@ai-sdk/*`, `bash-tool`) live only in `*-adapter.ts` files.
 - Prompt libraries (`prompts`, `cmd-ts`) are confined to `tui/` and `cli/` respectively. Domain modules (`app/`, `agent/`, `session/`, `sandbox/`, `tools/`, `llm/`, `prompt/`, `config/`) never import prompt or CLI libraries.
 - Imports are side-effect free: importing CLI, TUI, or domain code in tests never starts a sandbox, model call, or TTY interaction. `core/agent-loop.ts` is the only module that constructs production dependencies and runs the CLI.
@@ -110,6 +118,7 @@ Convenience equivalents defined in `package.json`:
 bun run agentj
 bun run agentj -- "task"
 bun run agentj -- --help
+bun run agentj:secrets -- --help
 bun run test
 bun run typecheck
 bun run eval
@@ -118,7 +127,7 @@ bun run eval:selfcheck
 ```
 
 ## Verification evidence
-- `bun test core` — passed: 136 tests across 12 files.
+- `bun test core` — passed: 170 tests across 18 files.
 - `bun run typecheck` — passed.
 - `bun core/eval/run.ts --selfcheck` — passed: proves each grader fails unsolved and passes on the reference solution.
 - `bun run agentj -- --help` — prints usage with positional task argument and version flag.
