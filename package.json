@@ -34,6 +34,10 @@
     "agentj": "bun core/agent-loop.ts",
     "test": "bun test core",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check .",
     "eval": "bun core/eval/run.ts",
     "eval:report": "bun core/eval/report.ts",
     "eval:selfcheck": "bun core/eval/run.ts --selfcheck",
@@ -43,6 +47,7 @@
     "release:next": "bun publish --access public --tag next"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.3",
     "@changesets/cli": "^2.31.0",
     "@types/bun": "^1.2.24",
     "@types/node": "^24.0.15",

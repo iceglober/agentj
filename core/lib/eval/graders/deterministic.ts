@@ -12,7 +12,9 @@ function tail(text: string, n = 6, max = 500): string {
 function fixtureFiles(fixture: unknown): Record<string, string> {
   const f = fixture as { kind: string; files?: Record<string, string> };
   if (f.kind !== "inline")
-    throw new Error("resetPaths requires an inline fixture (dir fixtures are read by the composition root)");
+    throw new Error(
+      "resetPaths requires an inline fixture (dir fixtures are read by the composition root)",
+    );
   return f.files ?? {};
 }
 
@@ -26,8 +28,7 @@ export const gradeTestCommand: CheckGrader = async (env, task, _traj, check) => 
     const writes: { path: string; content: string }[] = [];
     for (const p of check.resetPaths) {
       const content = files[p];
-      if (content === undefined)
-        throw new Error(`resetPaths: "${p}" is not in the task fixture`);
+      if (content === undefined) throw new Error(`resetPaths: "${p}" is not in the task fixture`);
       writes.push({ path: p, content });
     }
     await env.writeFiles(writes);

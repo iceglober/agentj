@@ -1,7 +1,7 @@
+import { expect, test } from "bun:test";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test } from "bun:test";
 
 test("rejects a non-Git launch directory before sandbox, session, or model setup", async () => {
   const hostDir = await mkdtemp(path.join(tmpdir(), "agentj-agent-loop-test-"));

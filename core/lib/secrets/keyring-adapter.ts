@@ -1,4 +1,4 @@
-import { SecretStoreUnavailableError, type SecretStore } from "./index";
+import { type SecretStore, SecretStoreUnavailableError } from "./index";
 
 export interface KeyringEntry {
   getPassword(): Promise<string | undefined>;

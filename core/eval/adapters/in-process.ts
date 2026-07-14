@@ -85,8 +85,7 @@ export function createInProcessAdapter(sb: Sandbox): AgentAdapter<RunConfig> {
         };
       } catch (err) {
         // AbortSignal.timeout firing → a timeout, not a harness error.
-        if (signal.aborted)
-          return empty({ timedOut: true, promptVersion: composedVersion });
+        if (signal.aborted) return empty({ timedOut: true, promptVersion: composedVersion });
         return empty({ error: String(err), promptVersion: composedVersion });
       }
     },

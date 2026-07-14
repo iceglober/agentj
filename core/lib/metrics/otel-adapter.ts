@@ -1,11 +1,11 @@
-import { metrics } from "@opentelemetry/api";
 import type { Counter, Histogram, Meter } from "@opentelemetry/api";
+import { metrics } from "@opentelemetry/api";
 
 import {
-  noopMetricsSink,
-  sanitizeMetricAttributes,
   type MetricMeasurement,
   type MetricsSink,
+  noopMetricsSink,
+  sanitizeMetricAttributes,
 } from "./index";
 
 type OtelMeter = Pick<Meter, "createCounter" | "createHistogram">;
@@ -42,8 +42,14 @@ export function createOtelMetricsSink(options: OtelMetricsSinkOptions = {}): Met
       duration: meter.createHistogram("agentj.llm.duration", instrumentOptions.duration),
       inputTokens: meter.createCounter("agentj.llm.tokens.input", instrumentOptions.tokens),
       noCacheTokens: meter.createCounter("agentj.llm.tokens.no_cache", instrumentOptions.tokens),
-      cacheReadTokens: meter.createCounter("agentj.llm.tokens.cache_read", instrumentOptions.tokens),
-      cacheWriteTokens: meter.createCounter("agentj.llm.tokens.cache_write", instrumentOptions.tokens),
+      cacheReadTokens: meter.createCounter(
+        "agentj.llm.tokens.cache_read",
+        instrumentOptions.tokens,
+      ),
+      cacheWriteTokens: meter.createCounter(
+        "agentj.llm.tokens.cache_write",
+        instrumentOptions.tokens,
+      ),
       outputTokens: meter.createCounter("agentj.llm.tokens.output", instrumentOptions.tokens),
       totalTokens: meter.createCounter("agentj.llm.tokens.total", instrumentOptions.tokens),
       cacheReadRatio: meter.createHistogram("agentj.llm.cache_read_ratio", instrumentOptions.ratio),

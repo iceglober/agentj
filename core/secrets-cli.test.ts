@@ -1,14 +1,11 @@
 import { describe, expect, test } from "bun:test";
-
+import type { SecretStore } from "./lib/secrets";
 import {
   runSecretsCli,
   type SecretCliWriters,
   type SecretPrompt,
   type SecretsCliDependencies,
 } from "./secrets-cli";
-import {
-  type SecretStore,
-} from "./lib/secrets";
 
 const SECRET_FIXTURE = "azure-secret-fixture-never-rendered";
 const BACKEND_FIXTURE = "fake-keyring-backend-never-rendered";
@@ -113,7 +110,9 @@ describe("runSecretsCli", () => {
       const fake = createStore({ get: async () => value });
       const { stdout, stderr, writers } = createWriters();
 
-      await expect(runSecretsCli(["status"], createDependencies(fake.store), writers)).resolves.toBe(0);
+      await expect(
+        runSecretsCli(["status"], createDependencies(fake.store), writers),
+      ).resolves.toBe(0);
 
       expect(stdout.text()).toBe(
         value === undefined ? "Azure API key: not stored\n" : "Azure API key: stored\n",
@@ -169,7 +168,9 @@ describe("runSecretsCli", () => {
     });
     const { stdout, stderr, writers } = createWriters();
 
-    await expect(runSecretsCli(["status"], createDependencies(fake.store), writers)).resolves.toBe(1);
+    await expect(runSecretsCli(["status"], createDependencies(fake.store), writers)).resolves.toBe(
+      1,
+    );
 
     expect(stderr.text()).toBe(
       "agentj:secrets is deprecated; use agentj config ...\nUnable to manage AgentJ secrets.\n",

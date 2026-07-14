@@ -32,9 +32,7 @@ export const resolveWithinRoot = (root: string, candidate?: string): string => {
     : path.resolve(normalizedRoot, candidate);
 
   if (!isWithinRoot(normalizedRoot, normalizedCandidate)) {
-    throw new Error(
-      `Path escapes sandbox root: ${candidate} is outside ${normalizedRoot}`,
-    );
+    throw new Error(`Path escapes sandbox root: ${candidate} is outside ${normalizedRoot}`);
   }
 
   return normalizedCandidate;

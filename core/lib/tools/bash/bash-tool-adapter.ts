@@ -25,10 +25,7 @@ const wrap = (t: Tool) =>
  * Adapter for the `bash-tool` vendor package: stand up its sandbox-backed
  * bash/readFile/writeFile tools and translate each ai `tool()` into a ToolDef.
  */
-export async function createBashToolAdapter(
-  sb: Sandbox,
-  opts: { root: string },
-): Promise<ToolSet> {
+export async function createBashToolAdapter(sb: Sandbox, opts: { root: string }): Promise<ToolSet> {
   const { tools } = await createBashTool({
     sandbox: sb,
     destination: opts.root,

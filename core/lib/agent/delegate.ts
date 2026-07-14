@@ -1,6 +1,6 @@
 import z from "zod";
-import { defineTool } from "../llm";
 import type { RunResult } from "../llm";
+import { defineTool } from "../llm";
 import type { ChildSession, ChildSessionFinalizeResult } from "../session";
 
 /** One autonomous child lane: prompt, commit message, optional stable id. */
@@ -83,9 +83,7 @@ export interface CreateSubagentToolOptions {
   readonly parentRef: string;
   /** Hard ceiling for one tool invocation. Default: 4 lanes. */
   readonly maxConcurrency?: number;
-  readonly createChildSession: (
-    args: CreateChildSessionArgs,
-  ) => Promise<ChildSession>;
+  readonly createChildSession: (args: CreateChildSessionArgs) => Promise<ChildSession>;
   readonly createChildAgent: (args: CreateChildAgentArgs) => Promise<SubagentRunner>;
 }
 
@@ -116,18 +114,14 @@ const toIndexedTasks = (tasks: SubagentTask[]): IndexedSubagentTask[] =>
     id: task.id ?? `subagent-${index + 1}`,
   }));
 
-const clampConcurrency = (
-  requested: number,
-  taskCount: number,
-  maxConcurrency: number,
-): number => Math.max(1, Math.min(requested, taskCount, maxConcurrency));
+const clampConcurrency = (requested: number, taskCount: number, maxConcurrency: number): number =>
+  Math.max(1, Math.min(requested, taskCount, maxConcurrency));
 
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 const isAbort = (error: unknown, abortSignal?: AbortSignal): boolean =>
-  abortSignal?.aborted === true ||
-  (error instanceof Error && /abort/i.test(error.name));
+  abortSignal?.aborted === true || (error instanceof Error && /abort/i.test(error.name));
 
 const buildSuccessResult = (
   task: IndexedSubagentTask,
@@ -159,9 +153,7 @@ const buildPreservedResult = (
   outcome: "failure" | "aborted",
   text: string | null,
   error: string,
-  finalize:
-    | Extract<ChildSessionFinalizeResult, { outcome: "preserved" }>
-    | null,
+  finalize: Extract<ChildSessionFinalizeResult, { outcome: "preserved" }> | null,
   session: Pick<ChildSession, "path" | "branch" | "base" | "parentRef"> | null,
 ): SubagentTaskResult => ({
   index: task.index,
@@ -229,10 +221,7 @@ async function runLane(
       allowDelegation: false,
     });
 
-    run = await child.generate(
-      task.prompt,
-      abortSignal ? { abortSignal } : undefined,
-    );
+    run = await child.generate(task.prompt, abortSignal ? { abortSignal } : undefined);
 
     let finalized: ChildSessionFinalizeResult;
     try {
@@ -308,10 +297,7 @@ export function createSubagentTool(options: CreateSubagentToolOptions) {
     description:
       "Run multiple child agents in isolated worktrees and return ordered changeset metadata.",
     inputSchema: subagentToolInputSchema,
-    async execute(
-      input: SubagentToolInput,
-      toolOptions?: unknown,
-    ): Promise<SubagentToolResult> {
+    async execute(input: SubagentToolInput, toolOptions?: unknown): Promise<SubagentToolResult> {
       const indexed = toIndexedTasks(input.tasks);
       const abortSignal = (toolOptions as ToolExecuteOptions | undefined)?.abortSignal;
       const results = new Array<SubagentTaskResult>(indexed.length);

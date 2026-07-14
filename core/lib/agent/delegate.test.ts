@@ -254,11 +254,7 @@ describe("createSubagentTool", () => {
     await allThreeStarted.wait();
     expect(sessionCalls.map((call) => call.id)).toEqual(["one", "two", "three"]);
     expect(childCalls.map((call) => call.task.id)).toEqual(["one", "two", "three"]);
-    expect(childCalls.map((call) => call.role)).toEqual([
-      "delegate",
-      "delegate",
-      "delegate",
-    ]);
+    expect(childCalls.map((call) => call.role)).toEqual(["delegate", "delegate", "delegate"]);
     expect(maxActive).toBe(2);
 
     releases.three.resolve();
@@ -266,11 +262,7 @@ describe("createSubagentTool", () => {
 
     const { results } = await run;
     expect(results.map((result) => result.id)).toEqual(["one", "two", "three"]);
-    expect(results.map((result) => result.text)).toEqual([
-      "done one",
-      "done two",
-      "done three",
-    ]);
+    expect(results.map((result) => result.text)).toEqual(["done one", "done two", "done three"]);
     expect(results.map((result) => result.branch)).toEqual([
       "agent/one",
       "agent/two",
@@ -313,9 +305,7 @@ describe("createSubagentTool", () => {
       await executeSubagentTool(tool, { tasks: [makeTask("alpha")], concurrency: 1 })
     ).results;
 
-    expect(session.finalizeCalls).toEqual([
-      { outcome: "success", commitMessage: "commit alpha" },
-    ]);
+    expect(session.finalizeCalls).toEqual([{ outcome: "success", commitMessage: "commit alpha" }]);
     expect(results).toEqual([
       {
         index: 0,
@@ -364,9 +354,7 @@ describe("createSubagentTool", () => {
       await executeSubagentTool(tool, { tasks: [makeTask("clean")], concurrency: 1 })
     ).results;
 
-    expect(session.finalizeCalls).toEqual([
-      { outcome: "success", commitMessage: "commit clean" },
-    ]);
+    expect(session.finalizeCalls).toEqual([{ outcome: "success", commitMessage: "commit clean" }]);
     expect(results).toEqual([
       {
         index: 0,
@@ -812,14 +800,12 @@ describe("createSubagentTool", () => {
       },
     });
 
-    expect(tool.inputSchema.safeParse({ tasks: [], concurrency: 1 }).success).toBe(
+    expect(tool.inputSchema.safeParse({ tasks: [], concurrency: 1 }).success).toBe(false);
+    expect(tool.inputSchema.safeParse({ tasks: [makeTask("x")], concurrency: 0 }).success).toBe(
       false,
     );
-    expect(
-      tool.inputSchema.safeParse({ tasks: [makeTask("x")], concurrency: 0 }).success,
-    ).toBe(false);
-    expect(
-      tool.inputSchema.safeParse({ tasks: [makeTask("x")], concurrency: 1.5 }).success,
-    ).toBe(false);
+    expect(tool.inputSchema.safeParse({ tasks: [makeTask("x")], concurrency: 1.5 }).success).toBe(
+      false,
+    );
   });
 });

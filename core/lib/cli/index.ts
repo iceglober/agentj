@@ -12,20 +12,17 @@ export const EXIT_FAILURE = 1;
 export const EXIT_ABORTED = 130;
 
 export const DEFAULT_COMMAND_NAME = "agentj";
-export const DEFAULT_COMMAND_DESCRIPTION =
-  "Run one AgentJ task from the terminal.";
+export const DEFAULT_COMMAND_DESCRIPTION = "Run one AgentJ task from the terminal.";
 
 export interface AgentjTaskRunnerOptions {
   signal: AbortSignal;
   onEvent?: (event: TaskRunEvent) => void | Promise<void>;
 }
 
-export interface AgentjTaskRunner {
-  (
-    task: string,
-    options: AgentjTaskRunnerOptions,
-  ): Promise<TaskRunOutcome>;
-}
+export type AgentjTaskRunner = (
+  task: string,
+  options: AgentjTaskRunnerOptions,
+) => Promise<TaskRunOutcome>;
 
 export interface AgentjCommandDependencies {
   version: string;
@@ -160,7 +157,11 @@ const createConfigGetCommand = (handlers: ConfigCliHandlers) =>
     name: "agentj config get",
     description: "Read an AgentJ configuration value.",
     args: {
-      key: positional({ type: string, displayName: "key", description: "Configuration key to read." }),
+      key: positional({
+        type: string,
+        displayName: "key",
+        description: "Configuration key to read.",
+      }),
     },
     handler: ({ key }) => handlers.get({ key }),
   });
@@ -173,8 +174,16 @@ const createConfigListMutationCommand = (
     name: `agentj config ${operation}`,
     description: `${operation === "add" ? "Append to" : "Remove from"} an array configuration value.`,
     args: {
-      key: positional({ type: string, displayName: "key", description: "Array configuration key." }),
-      value: positional({ type: string, displayName: "value", description: "Array value to mutate." }),
+      key: positional({
+        type: string,
+        displayName: "key",
+        description: "Array configuration key.",
+      }),
+      value: positional({
+        type: string,
+        displayName: "value",
+        description: "Array value to mutate.",
+      }),
     },
     handler: ({ key, value }) => handlers[operation]({ key, value }),
   });
@@ -217,13 +226,14 @@ const dispatchConfig = async (
     return EXIT_FAILURE;
   }
 
-  const commandForRoute = argv[1] === "set"
-    ? createConfigSetCommand(handlers)
-    : argv[1] === "delete"
-      ? createConfigDeleteCommand(handlers)
-      : argv[1] === "get"
-        ? createConfigGetCommand(handlers)
-        : createConfigListMutationCommand(handlers, argv[1] as "add" | "remove");
+  const commandForRoute =
+    argv[1] === "set"
+      ? createConfigSetCommand(handlers)
+      : argv[1] === "delete"
+        ? createConfigDeleteCommand(handlers)
+        : argv[1] === "get"
+          ? createConfigGetCommand(handlers)
+          : createConfigListMutationCommand(handlers, argv[1] as "add" | "remove");
   const result = await runSafely(commandForRoute, argv.slice(2));
   if (result._tag === "error") {
     return writeResult(result, writers) ?? EXIT_FAILURE;
@@ -243,11 +253,12 @@ const dispatchEval = async (
     return EXIT_SUCCESS;
   }
 
-  const route = args.length === 0
-    ? "run"
-    : args.length === 1 && (args[0] === "report" || args[0] === "selfcheck")
-      ? args[0]
-      : undefined;
+  const route =
+    args.length === 0
+      ? "run"
+      : args.length === 1 && (args[0] === "report" || args[0] === "selfcheck")
+        ? args[0]
+        : undefined;
   if (route === undefined) {
     writers.stderr.write("error: unknown eval command. Try 'agentj eval --help'.\n");
     return 2;

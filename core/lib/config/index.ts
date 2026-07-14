@@ -80,11 +80,12 @@ export function mergeConfig(...sources: ConfigObject[]): ConfigObject {
   for (const source of sources) {
     for (const [key, value] of Object.entries(source)) {
       const current = result[key];
-      result[key] = isObject(current) && isObject(value)
-        ? mergeConfig(current, value)
-        : isObject(value)
-          ? cloneObject(value)
-          : value;
+      result[key] =
+        isObject(current) && isObject(value)
+          ? mergeConfig(current, value)
+          : isObject(value)
+            ? cloneObject(value)
+            : value;
     }
   }
 
@@ -119,14 +120,18 @@ async function readJsonObject(
     contents = await fileSystem.readFile(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw new Error(`Unable to read ${label} config at ${path}: ${String(error)}`, { cause: error });
+    throw new Error(`Unable to read ${label} config at ${path}: ${String(error)}`, {
+      cause: error,
+    });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(contents);
   } catch (error) {
-    throw new Error(`Malformed ${label} config at ${path}: expected JSON object.`, { cause: error });
+    throw new Error(`Malformed ${label} config at ${path}: expected JSON object.`, {
+      cause: error,
+    });
   }
 
   if (!isObject(parsed)) {
@@ -208,9 +213,10 @@ export async function mutateGlobalConfig(
   let changed = false;
 
   for (const mutation of mutations) {
-    changed = (mutation.type === "set"
-      ? setAtPath(config, mutation.path, mutation.value)
-      : deleteAtPath(config, mutation.path)) || changed;
+    changed =
+      (mutation.type === "set"
+        ? setAtPath(config, mutation.path, mutation.value)
+        : deleteAtPath(config, mutation.path)) || changed;
   }
 
   if (!changed) return false;

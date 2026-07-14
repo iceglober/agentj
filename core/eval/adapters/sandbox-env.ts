@@ -1,6 +1,6 @@
 import type { Env, FixtureFactory, FixtureRef } from "../../lib/eval/types";
-import * as scm from "../../lib/scm/git";
 import type { Sandbox } from "../../lib/sandbox";
+import * as scm from "../../lib/scm/git";
 import { shq } from "../../lib/shell";
 
 const FIXTURE_IDENTITY = { name: "agentj-eval", email: "eval@sandbox.local" };
@@ -34,10 +34,7 @@ async function collectFiles(ref: FixtureRef): Promise<{ path: string; content: s
  * `diff()`/`changedFiles()` measure exactly what the agent changed. Envs are
  * disposable — `destroy()` (and asyncDispose) just remove the directory.
  */
-export function createSandboxFixtureFactory(
-  sb: Sandbox,
-  opts: { root: string },
-): FixtureFactory {
+export function createSandboxFixtureFactory(sb: Sandbox, opts: { root: string }): FixtureFactory {
   return {
     async make(ref: FixtureRef): Promise<Env> {
       const id = randomId();
@@ -74,7 +71,10 @@ export function createSandboxFixtureFactory(
         async changedFiles() {
           await scm.git(sb, dir, ["add", "-A"]);
           const out = await scm.git(sb, dir, ["diff", "--cached", "--name-only", "HEAD"]);
-          return out.split("\n").map((s) => s.trim()).filter(Boolean);
+          return out
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
         },
         destroy,
         [Symbol.asyncDispose]: destroy,

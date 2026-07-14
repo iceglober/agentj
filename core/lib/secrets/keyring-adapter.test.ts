@@ -27,7 +27,7 @@ describe("createKeyringSecretStore", () => {
     const enumerateCredentials = mock(() => {
       throw new Error("Enumeration must not be used");
     });
-    const createEntry = mock((service: string, account: string) => ({
+    const createEntry = mock((_service: string, _account: string) => ({
       getPassword,
       setPassword: async () => {},
       deleteCredential: async () => false,
@@ -102,9 +102,21 @@ describe("createKeyringSecretStore", () => {
       },
     };
 
-    await expectUnavailable(() => createKeyringSecretStore({ createEntry: failingFactory }).get("service", "account"));
-    await expectUnavailable(() => createKeyringSecretStore({ createEntry: () => failingEntry }).get("service", "account"));
-    await expectUnavailable(() => createKeyringSecretStore({ createEntry: () => failingEntry }).set("service", "account", fixtureSecret));
-    await expectUnavailable(() => createKeyringSecretStore({ createEntry: () => failingEntry }).delete("service", "account"));
+    await expectUnavailable(() =>
+      createKeyringSecretStore({ createEntry: failingFactory }).get("service", "account"),
+    );
+    await expectUnavailable(() =>
+      createKeyringSecretStore({ createEntry: () => failingEntry }).get("service", "account"),
+    );
+    await expectUnavailable(() =>
+      createKeyringSecretStore({ createEntry: () => failingEntry }).set(
+        "service",
+        "account",
+        fixtureSecret,
+      ),
+    );
+    await expectUnavailable(() =>
+      createKeyringSecretStore({ createEntry: () => failingEntry }).delete("service", "account"),
+    );
   });
 });

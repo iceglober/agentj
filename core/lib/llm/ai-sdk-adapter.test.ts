@@ -90,11 +90,7 @@ describe("createAiSdkRuntime", () => {
 
     expect(constructedAgents).toHaveLength(1);
     expect(constructedAgents[0].toolOrder).toEqual(["alpha", "middle", "zebra"]);
-    expect(Object.keys(constructedAgents[0].tools as object)).toEqual([
-      "alpha",
-      "middle",
-      "zebra",
-    ]);
+    expect(Object.keys(constructedAgents[0].tools as object)).toEqual(["alpha", "middle", "zebra"]);
   });
 
   test("records only aggregate metrics and contains a throwing sink", async () => {
@@ -124,19 +120,31 @@ describe("createAiSdkRuntime", () => {
       "model.tokens.output",
       "model.tokens.total",
     ]);
-    expect(measurements.every(({ attributes }) =>
-      Object.keys(attributes).every((key) => ["provider", "model", "outcome"].includes(key)),
-    )).toBe(true);
-    expect(measurements.every(({ attributes }) =>
-      JSON.stringify(attributes) === JSON.stringify({ provider: "azure", model: "test-model", outcome: "success" }),
-    )).toBe(true);
+    expect(
+      measurements.every(({ attributes }) =>
+        Object.keys(attributes).every((key) => ["provider", "model", "outcome"].includes(key)),
+      ),
+    ).toBe(true);
+    expect(
+      measurements.every(
+        ({ attributes }) =>
+          JSON.stringify(attributes) ===
+          JSON.stringify({ provider: "azure", model: "test-model", outcome: "success" }),
+      ),
+    ).toBe(true);
     const exported = JSON.stringify(measurements);
     for (const value of [prompt, output, toolError, path, secret]) {
       expect(exported).not.toContain(value);
     }
 
-    const throwingSink: MetricsSink = { record: () => { throw new Error(toolError); } };
-    await expect(createAiSdkRuntime(config, throwingSink).generate(request())).resolves.toMatchObject({
+    const throwingSink: MetricsSink = {
+      record: () => {
+        throw new Error(toolError);
+      },
+    };
+    await expect(
+      createAiSdkRuntime(config, throwingSink).generate(request()),
+    ).resolves.toMatchObject({
       text: output,
     });
   });

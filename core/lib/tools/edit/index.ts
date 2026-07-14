@@ -27,9 +27,7 @@ export const editConfigSchema = z.object({
 
 export type EditConfig = z.infer<typeof editConfigSchema>;
 
-export const createEditTools = (
-  sandbox: Sandbox,
-  editMode: EditMode = "batch",
-) => editModes[editMode](sandbox);
+export const createEditTools = (sandbox: Sandbox, editMode: EditMode = "batch") =>
+  editModes[editMode](sandbox);
 
 export { createBatchEditTools, createExactEditTools, createHashEditTools };

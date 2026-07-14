@@ -66,7 +66,8 @@ class FakeSandbox implements Sandbox {
     this.root = options.root ?? "/workspace";
     this.branchPrefix = options.branchPrefix ?? "session/";
     this.parentRef = options.parentRef ?? "refs/remotes/origin/main";
-    this.resolvedParentSha = options.resolvedParentSha ?? "1111111111111111111111111111111111111111";
+    this.resolvedParentSha =
+      options.resolvedParentSha ?? "1111111111111111111111111111111111111111";
     this.repoHeadSha = options.repoHeadSha ?? this.resolvedParentSha;
     this.initialBranchTipSha = options.branchTipSha ?? this.resolvedParentSha;
     this.committedSha = options.committedSha ?? "2222222222222222222222222222222222222222";
@@ -159,7 +160,9 @@ class FakeSandbox implements Sandbox {
 
     if (subcommand === "worktree" && rest[0] === "add") {
       expect(cwd).toBe(this.repoDir);
-      expect(rest).toEqual(expect.arrayContaining(["add", "--no-track", "-b", this.childBranch, this.childPath]));
+      expect(rest).toEqual(
+        expect.arrayContaining(["add", "--no-track", "-b", this.childBranch, this.childPath]),
+      );
       expect(rest).toHaveLength(6);
       const baseRef = rest[5];
       expect(baseRef === this.resolvedParentSha || baseRef === "HEAD").toBe(true);
@@ -234,9 +237,11 @@ class FakeSandbox implements Sandbox {
   private headFor(cwd: string, ref: string): string {
     if (cwd === this.repoDir && ref === this.parentRef) return this.resolvedParentSha;
     if (cwd === this.repoDir && ref === "HEAD") return this.repoHeadSha;
-    if (cwd === this.repoDir && ref === this.childBranch) return this.branchHeads.get(this.childBranch) ?? this.resolvedParentSha;
+    if (cwd === this.repoDir && ref === this.childBranch)
+      return this.branchHeads.get(this.childBranch) ?? this.resolvedParentSha;
     if (cwd === this.repoDir && /^[0-9a-f]{40}$/i.test(ref)) return ref;
-    if (cwd === this.childPath && ref === "HEAD") return this.worktrees.get(this.childPath)?.head ?? this.committedSha;
+    if (cwd === this.childPath && ref === "HEAD")
+      return this.worktrees.get(this.childPath)?.head ?? this.committedSha;
     throw new Error(`Unhandled rev-parse target: cwd=${cwd} ref=${ref}`);
   }
 }
@@ -443,10 +448,9 @@ describe("createChildSession", () => {
         (call.args[0] === "worktree" && call.args[1] === "remove") ||
         call.args[0] === "check-ref-format" ||
         (call.args[0] === "rev-parse" &&
-          [
-            `${sb.childBranch}^{commit}`,
-            `${sb.resolvedParentSha}^{commit}`,
-          ].includes(call.args[call.args.length - 1] ?? "")) ||
+          [`${sb.childBranch}^{commit}`, `${sb.resolvedParentSha}^{commit}`].includes(
+            call.args[call.args.length - 1] ?? "",
+          )) ||
         call.args[0] === "branch",
     );
     expect(destructive.map((call) => call.args)).toEqual([
@@ -504,7 +508,9 @@ describe("createChildSession", () => {
   });
 
   test("changed success captures dirty status, commits, verifies clean, removes worktree, keeps branch, and returns commit metadata", async () => {
-    const { sb, session } = await makeChildSession({ initialStatus: " M src/index.ts\n?? new.txt" });
+    const { sb, session } = await makeChildSession({
+      initialStatus: " M src/index.ts\n?? new.txt",
+    });
 
     const result = await session.finalize({ outcome: "success", commitMessage: "child commit" });
 
@@ -524,7 +530,9 @@ describe("createChildSession", () => {
     });
 
     expect(
-      sb.calls.map((call) => ({ cwd: call.cwd, args: call.args })).filter((call) => call.cwd === sb.childPath || call.cwd === sb.repoDir),
+      sb.calls
+        .map((call) => ({ cwd: call.cwd, args: call.args }))
+        .filter((call) => call.cwd === sb.childPath || call.cwd === sb.repoDir),
     ).toContainEqual({ cwd: sb.childPath, args: ["add", "-A"] });
     expect(sb.calls).toContainEqual({
       raw: expect.any(String),
@@ -534,11 +542,15 @@ describe("createChildSession", () => {
 
     const statusCalls = matchingCalls(
       sb,
-      (call) => call.cwd === sb.childPath && call.args[0] === "status" && call.args[1] === "--porcelain",
+      (call) =>
+        call.cwd === sb.childPath && call.args[0] === "status" && call.args[1] === "--porcelain",
     );
     expect(statusCalls).toHaveLength(3);
 
-    const branchDeleteCalls = matchingCalls(sb, (call) => call.cwd === sb.repoDir && call.args[0] === "branch");
+    const branchDeleteCalls = matchingCalls(
+      sb,
+      (call) => call.cwd === sb.repoDir && call.args[0] === "branch",
+    );
     expect(branchDeleteCalls).toHaveLength(0);
     const removeCalls = matchingCalls(
       sb,
@@ -683,7 +695,9 @@ describe("createChildSession", () => {
 
     const branchDeleteCalls = matchingCalls(
       sb,
-      (call) => call.cwd === sb.repoDir && (call.args[0] === "check-ref-format" || call.args[0] === "branch"),
+      (call) =>
+        call.cwd === sb.repoDir &&
+        (call.args[0] === "check-ref-format" || call.args[0] === "branch"),
     );
     expect(branchDeleteCalls).toHaveLength(0);
   });
@@ -715,7 +729,9 @@ describe("createChildSession", () => {
 
     const branchDeleteCalls = matchingCalls(
       sb,
-      (call) => call.cwd === sb.repoDir && (call.args[0] === "check-ref-format" || call.args[0] === "branch"),
+      (call) =>
+        call.cwd === sb.repoDir &&
+        (call.args[0] === "check-ref-format" || call.args[0] === "branch"),
     );
     expect(branchDeleteCalls).toHaveLength(0);
   });
@@ -723,37 +739,40 @@ describe("createChildSession", () => {
   test.each([
     { outcome: "failure", detail: "test failed" },
     { outcome: "aborted", detail: "user cancelled" },
-  ] as const)(
-    "$outcome preserves path and branch and issues no remove/delete commands",
-    async ({ outcome, detail }) => {
-      const { sb, session } = await makeChildSession({ initialStatus: " M kept.txt" });
+  ] as const)("$outcome preserves path and branch and issues no remove/delete commands", async ({
+    outcome,
+    detail,
+  }) => {
+    const { sb, session } = await makeChildSession({ initialStatus: " M kept.txt" });
 
-      const result = await session.finalize({ outcome, detail });
+    const result = await session.finalize({ outcome, detail });
 
-      expect(result).toEqual({
-        outcome: "preserved",
-        reason: outcome,
-        id: sb.childId,
-        path: sb.childPath,
-        branch: sb.childBranch,
-        base: sb.resolvedParentSha,
-        parentRef: sb.parentRef,
-        head: sb.resolvedParentSha,
-        status: " M kept.txt",
-        commit: null,
-        worktreeRemoved: false,
-        branchDeleted: false,
-        preserved: true,
-        detail,
-      });
+    expect(result).toEqual({
+      outcome: "preserved",
+      reason: outcome,
+      id: sb.childId,
+      path: sb.childPath,
+      branch: sb.childBranch,
+      base: sb.resolvedParentSha,
+      parentRef: sb.parentRef,
+      head: sb.resolvedParentSha,
+      status: " M kept.txt",
+      commit: null,
+      worktreeRemoved: false,
+      branchDeleted: false,
+      preserved: true,
+      detail,
+    });
 
-      const destructive = matchingCalls(
-        sb,
-        (call) => call.args[0] === "worktree" || call.args[0] === "branch" || call.args[0] === "check-ref-format",
-      ).filter((call) => call.args[1] !== "add" && call.args[1] !== "list");
-      expect(destructive).toHaveLength(0);
-    },
-  );
+    const destructive = matchingCalls(
+      sb,
+      (call) =>
+        call.args[0] === "worktree" ||
+        call.args[0] === "branch" ||
+        call.args[0] === "check-ref-format",
+    ).filter((call) => call.args[1] !== "add" && call.args[1] !== "list");
+    expect(destructive).toHaveLength(0);
+  });
 
   test("commit/post-commit uncertainty preserves instead of deleting", async () => {
     const { sb, session } = await makeChildSession({
@@ -782,7 +801,10 @@ describe("createChildSession", () => {
 
     const destructive = matchingCalls(
       sb,
-      (call) => call.args[0] === "worktree" || call.args[0] === "branch" || call.args[0] === "check-ref-format",
+      (call) =>
+        call.args[0] === "worktree" ||
+        call.args[0] === "branch" ||
+        call.args[0] === "check-ref-format",
     ).filter((call) => call.args[1] !== "add" && call.args[1] !== "list");
     expect(destructive).toHaveLength(0);
   });
@@ -878,16 +900,23 @@ describe("createChildSession", () => {
     expect(branchDeleteCalls).toHaveLength(1);
   });
 
-  test.each(["child-1", "Child_2", "3.4", "z", "A_B-c.9", "task.1", "v1.2.3", "a.b", "my.task.name"])(
-    "accepts valid child id %s before creating the worktree",
-    async (childId) => {
-      const { sb, session } = await makeChildSession({ childId });
+  test.each([
+    "child-1",
+    "Child_2",
+    "3.4",
+    "z",
+    "A_B-c.9",
+    "task.1",
+    "v1.2.3",
+    "a.b",
+    "my.task.name",
+  ])("accepts valid child id %s before creating the worktree", async (childId) => {
+    const { sb, session } = await makeChildSession({ childId });
 
-      expect(session.id).toBe(childId);
-      expect(session.branch).toBe(`${sb.branchPrefix}${childId}`);
-      expect(session.path).toBe(`${sb.root}/${childId}`);
-    },
-  );
+    expect(session.id).toBe(childId);
+    expect(session.branch).toBe(`${sb.branchPrefix}${childId}`);
+    expect(session.path).toBe(`${sb.root}/${childId}`);
+  });
 
   test.each([
     "../sibling",
@@ -926,7 +955,10 @@ describe("createChildSession", () => {
     );
     const destructive = matchingCalls(
       sb,
-      (call) => call.args[0] === "worktree" || call.args[0] === "branch" || call.args[0] === "check-ref-format",
+      (call) =>
+        call.args[0] === "worktree" ||
+        call.args[0] === "branch" ||
+        call.args[0] === "check-ref-format",
     ).filter((call) => call.args[1] !== "add");
     expect(addCalls).toHaveLength(1);
     expect(destructive).toHaveLength(0);

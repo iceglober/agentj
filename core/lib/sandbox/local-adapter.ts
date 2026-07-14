@@ -1,7 +1,7 @@
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import z from "zod";
 import { resolveWithinRoot } from "../tools/paths";
 import type { Sandbox } from "./index";
@@ -15,9 +15,8 @@ export type LocalSandboxProviderOptions = z.input<typeof localSandboxOptionsSche
 
 export type LocalSandbox = Sandbox & AsyncDisposable & { readonly root: string };
 
-export const createSandboxProviderLocal = (
-  options: LocalSandboxProviderOptions = {},
-) =>
+export const createSandboxProviderLocal =
+  (options: LocalSandboxProviderOptions = {}) =>
   async (): Promise<LocalSandbox> => {
     const { base, prefix } = localSandboxOptionsSchema.parse(options);
     const parent = path.resolve(base ?? tmpdir());

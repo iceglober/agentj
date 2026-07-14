@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import z from "zod";
 import { BASE_TEMPLATE } from "./base";
 import {
-  profileNames,
-  profiles,
-  resolveProfile,
   type ModelParams,
   type Profile,
   type ProfileName,
+  profileNames,
+  profiles,
+  resolveProfile,
 } from "./profiles";
 import { renderTemplate } from "./render";
 

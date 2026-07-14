@@ -2,22 +2,16 @@ import { createRequire } from "node:module";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 import type { Readable, Writable } from "node:stream";
 
-import type {
-  TaskRunEvent,
-  TaskRunOutcome,
-  TaskRunSessionIdentity,
-} from "../app/run";
+import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
 
 type PromptQuestion<T extends string = string> = import("prompts").PromptObject<T>;
 type PromptAnswers<T extends string = string> = import("prompts").Answers<T>;
 type PromptOptions = import("prompts").Options;
 
-export interface PromptRunner {
-  <T extends string = string>(
-    questions: PromptQuestion<T> | PromptQuestion<T>[],
-    options?: PromptOptions,
-  ): Promise<PromptAnswers<T>>;
-}
+export type PromptRunner = <T extends string = string>(
+  questions: PromptQuestion<T> | PromptQuestion<T>[],
+  options?: PromptOptions,
+) => Promise<PromptAnswers<T>>;
 
 export interface PromptUi {
   askTask(options?: PromptIo): Promise<string | null>;
@@ -171,10 +165,7 @@ const toJsonValue = (value: unknown, seen: WeakSet<object>): unknown => {
     const renderedKey = typeof key === "string" ? key : key.toString();
 
     try {
-      out[renderedKey] = toJsonValue(
-        (value as Record<PropertyKey, unknown>)[key],
-        seen,
-      );
+      out[renderedKey] = toJsonValue((value as Record<PropertyKey, unknown>)[key], seen);
     } catch (error) {
       out[renderedKey] = `[Thrown ${describeThrownValue(error)}]`;
     }
@@ -188,10 +179,7 @@ const toJsonValue = (value: unknown, seen: WeakSet<object>): unknown => {
   return out;
 };
 
-export const safeRenderJson = (
-  value: unknown,
-  maxLength = DEFAULT_MAX_RENDER_LENGTH,
-): string => {
+export const safeRenderJson = (value: unknown, maxLength = DEFAULT_MAX_RENDER_LENGTH): string => {
   try {
     const rendered = JSON.stringify(toJsonValue(value, new WeakSet<object>()));
     if (rendered !== undefined) {
@@ -241,9 +229,7 @@ const resolveInteractiveInput = (
   return gate ?? true;
 };
 
-export const createPromptsPromptUi = (
-  options: CreatePromptsPromptUiOptions = {},
-): PromptUi => {
+export const createPromptsPromptUi = (options: CreatePromptsPromptUiOptions = {}): PromptUi => {
   const promptRunner = options.prompts ?? prompts;
 
   return {
@@ -265,8 +251,7 @@ export const createPromptsPromptUi = (
         stdin,
         stdout: override.stdout ?? options.stdout,
         validate: (value) =>
-          normalizeTask(value) !== null ||
-          "Enter a task, or press Ctrl+C to cancel.",
+          normalizeTask(value) !== null || "Enter a task, or press Ctrl+C to cancel.",
       };
 
       const answers = await promptRunner<"task">(question, {
@@ -394,29 +379,17 @@ export const createTranscriptRenderer = ({
         }
 
         case "generation-error": {
-          writeStatus(
-            "Generation failed",
-            formatError(outcome.error, maxPayloadLength),
-            "error",
-          );
+          writeStatus("Generation failed", formatError(outcome.error, maxPayloadLength), "error");
           break;
         }
 
         case "commit-error": {
-          writeStatus(
-            "Commit failed",
-            formatError(outcome.error, maxPayloadLength),
-            "error",
-          );
+          writeStatus("Commit failed", formatError(outcome.error, maxPayloadLength), "error");
           break;
         }
 
         case "aborted": {
-          writeStatus(
-            "Aborted",
-            "generation stopped before commit",
-            "warning",
-          );
+          writeStatus("Aborted", "generation stopped before commit", "warning");
           break;
         }
       }

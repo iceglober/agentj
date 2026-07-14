@@ -1,6 +1,6 @@
 import type { Task } from "../../../lib/eval/types";
 import { CORRECT_FILES } from "../../fixtures/pricing";
-import { seededDefects, type Defect } from "../../sources/seeded-defect";
+import { type Defect, seededDefects } from "../../sources/seeded-defect";
 
 /**
  * Single-bug variants of the pricing package: each starts from the fully
@@ -25,8 +25,7 @@ const DEFECTS: Defect[] = [
   {
     id: "surcharge-sign",
     file: "pricing.py",
-    find:
-      '"""Surcharged price: rate 0.2 -> 20% extra."""\n    if rate < 0 or rate > 1:\n        raise ValueError("rate out of range")\n    return price * (1 + rate)',
+    find: '"""Surcharged price: rate 0.2 -> 20% extra."""\n    if rate < 0 or rate > 1:\n        raise ValueError("rate out of range")\n    return price * (1 + rate)',
     replace:
       '"""Surcharged price: rate 0.2 -> 20% extra."""\n    if rate < 0 or rate > 1:\n        raise ValueError("rate out of range")\n    return price * (1 - rate)',
     note: "surcharge subtracts instead of adds",

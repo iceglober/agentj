@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  type MetricMeasurement,
+  type MetricsSink,
   noopMetricsSink,
   recordModelUsage,
   sanitizeMetricAttributes,
-  type MetricMeasurement,
-  type MetricsSink,
 } from "./index";
 
 function createFakeSink(): { sink: MetricsSink; measurements: MetricMeasurement[] } {
@@ -57,9 +57,15 @@ describe("metrics port", () => {
       { name: "model.tokens.total", value: 130 },
       { name: "model.cache_read_ratio", value: 0.4 },
     ]);
-    expect(measurements.every((measurement) => measurement.attributes.provider === "azure")).toBeTrue();
-    expect(measurements.every((measurement) => measurement.attributes.model === "gpt-4o-mini")).toBeTrue();
-    expect(measurements.every((measurement) => measurement.attributes.outcome === "success")).toBeTrue();
+    expect(
+      measurements.every((measurement) => measurement.attributes.provider === "azure"),
+    ).toBeTrue();
+    expect(
+      measurements.every((measurement) => measurement.attributes.model === "gpt-4o-mini"),
+    ).toBeTrue();
+    expect(
+      measurements.every((measurement) => measurement.attributes.outcome === "success"),
+    ).toBeTrue();
   });
 
   test("omits cache-read ratio when its inputs are absent or unsafe", () => {
@@ -67,14 +73,20 @@ describe("metrics port", () => {
 
     recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 0, cacheReadTokens: 0 });
     recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 10 });
-    recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 10, cacheReadTokens: Number.NaN });
+    recordModelUsage(sink, attributes, {
+      durationMs: 1,
+      inputTokens: 10,
+      cacheReadTokens: Number.NaN,
+    });
 
     expect(measurements.filter(({ name }) => name === "model.cache_read_ratio")).toEqual([]);
   });
 
   test("is a no-op without a configured sink", () => {
     expect(() => recordModelUsage(undefined, attributes, { durationMs: 1 })).not.toThrow();
-    expect(() => noopMetricsSink.record({ name: "model.duration_ms", value: 1, attributes })).not.toThrow();
+    expect(() =>
+      noopMetricsSink.record({ name: "model.duration_ms", value: 1, attributes }),
+    ).not.toThrow();
   });
 
   test("omits invalid numeric measurements without blocking valid ones", () => {
@@ -99,8 +111,14 @@ describe("metrics port", () => {
   });
 
   test("swallows sink errors so telemetry cannot fail a task", () => {
-    const sink: MetricsSink = { record: () => { throw new Error("sink failed"); } };
+    const sink: MetricsSink = {
+      record: () => {
+        throw new Error("sink failed");
+      },
+    };
 
-    expect(() => recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 1 })).not.toThrow();
+    expect(() =>
+      recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 1 }),
+    ).not.toThrow();
   });
 });

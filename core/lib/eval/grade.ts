@@ -38,8 +38,7 @@ export async function composeGrade(
   traj: Trajectory,
   ctx: GradeCtx,
 ): Promise<GradeResult> {
-  if (traj.error !== undefined)
-    return { verdict: "error", subscores: {}, checks: [] };
+  if (traj.error !== undefined) return { verdict: "error", subscores: {}, checks: [] };
   if (traj.timedOut) return { verdict: "timeout", subscores: {}, checks: [] };
 
   const checks: CheckResult[] = [];
@@ -64,9 +63,7 @@ export async function composeGrade(
 
   if (harnessError) return { verdict: "error", subscores: {}, checks };
 
-  const requiredOk = checks
-    .filter((c) => c.required && !c.skipped)
-    .every((c) => c.pass);
+  const requiredOk = checks.filter((c) => c.required && !c.skipped).every((c) => c.pass);
 
   const subscores: Record<string, number> = {};
   for (const c of checks) {

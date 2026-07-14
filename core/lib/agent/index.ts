@@ -1,27 +1,18 @@
 import z from "zod";
-import {
-  createRuntime,
-  llmConfigSchema,
-  type RunResult,
-  type RunStep,
-  type ToolSet,
-} from "../llm";
+import { createRuntime, llmConfigSchema, type RunResult, type RunStep, type ToolSet } from "../llm";
 import type { MetricsSink } from "../metrics";
 import {
-  composePrompt,
-  promptConfigSchema,
   type ComposedPrompt,
+  composePrompt,
   type PromptContext,
+  promptConfigSchema,
 } from "../prompt";
 import type { Sandbox } from "../sandbox";
-import {
-  createSubagentTool,
-  type CreateSubagentToolOptions,
-} from "./delegate";
 import { createBashTools } from "../tools/bash";
 import { createEditTools, editConfigSchema } from "../tools/edit";
-import { createSearchTools } from "../tools/search";
 import { confineSandboxFiles } from "../tools/paths";
+import { createSearchTools } from "../tools/search";
+import { type CreateSubagentToolOptions, createSubagentTool } from "./delegate";
 
 /**
  * The agent owns identity/role/rules and composes the three domain modules the
@@ -44,10 +35,7 @@ export const agentConfigSchema = z.object({
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
 export interface CreateAgentDelegationOptions
-  extends Pick<
-    CreateSubagentToolOptions,
-    "createChildSession" | "maxConcurrency" | "parentRef"
-  > {}
+  extends Pick<CreateSubagentToolOptions, "createChildSession" | "maxConcurrency" | "parentRef"> {}
 
 export interface CreateAgentOptions {
   /** The session worktree the agent's tools operate in. */
@@ -119,17 +107,21 @@ export async function createAgent(
           maxConcurrency: opts.delegation.maxConcurrency,
           createChildSession: opts.delegation.createChildSession,
           createChildAgent: async ({ root, session, role }) => {
-            const child = await createAgent(sb, { ...config, role }, {
-              root,
-              ctx: {
-                ...opts.ctx,
-                cwd: root,
-                gitBranch: session.branch,
-                gitStatusSummary: await session.status(),
+            const child = await createAgent(
+              sb,
+              { ...config, role },
+              {
+                root,
+                ctx: {
+                  ...opts.ctx,
+                  cwd: root,
+                  gitBranch: session.branch,
+                  gitStatusSummary: await session.status(),
+                },
+                metricsSink: opts.metricsSink,
+                stopSteps: opts.stopSteps,
               },
-              metricsSink: opts.metricsSink,
-              stopSteps: opts.stopSteps,
-            });
+            );
 
             return {
               generate: (prompt, generateOpts) =>

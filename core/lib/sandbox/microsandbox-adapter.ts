@@ -17,9 +17,7 @@ export const microsandboxOptionsSchema = z.object({
   projectDir: z.string().optional(),
 });
 
-export type MicrosandboxProviderOptions = z.input<
-  typeof microsandboxOptionsSchema
-> & {
+export type MicrosandboxProviderOptions = z.input<typeof microsandboxOptionsSchema> & {
   /** Preflighted host paths from the composition root; intentionally not config-schema input. */
   projectSource?: ProjectSource;
 };
@@ -65,14 +63,10 @@ export const resolveProjectSource = async (projectDir: string): Promise<ProjectS
   }
 
   try {
-    const projectRoot = await realpath(
-      await gitOutput(canonicalDir, ["--show-toplevel"]),
-    );
+    const projectRoot = await realpath(await gitOutput(canonicalDir, ["--show-toplevel"]));
     const commonGitOutput = await gitOutput(projectRoot, ["--git-common-dir"]);
     const commonGitDir = await realpath(
-      isAbsolute(commonGitOutput)
-        ? commonGitOutput
-        : resolve(projectRoot, commonGitOutput),
+      isAbsolute(commonGitOutput) ? commonGitOutput : resolve(projectRoot, commonGitOutput),
     );
     if (!(await stat(commonGitDir)).isDirectory()) throw new Error("not a directory");
     return { projectRoot, commonGitDir };
@@ -139,14 +133,15 @@ export const runSandboxBootstrap = async (
     const result = await sandbox.executeCommand(command);
     if (result.exitCode !== 0) {
       // Commands and output may contain secrets; report only safe execution metadata.
-      throw new Error(`Sandbox bootstrap command ${index + 1} failed with exit code ${result.exitCode}.`);
+      throw new Error(
+        `Sandbox bootstrap command ${index + 1} failed with exit code ${result.exitCode}.`,
+      );
     }
   }
 };
 
-export const createSandboxProviderMicrosandbox = (
-  options: MicrosandboxProviderOptions = {},
-) =>
+export const createSandboxProviderMicrosandbox =
+  (options: MicrosandboxProviderOptions = {}) =>
   async (): Promise<Sandbox & AsyncDisposable> => {
     const { projectSource: injectedProjectSource, ...configOptions } = options;
     const parsedOptions = microsandboxOptionsSchema.parse(configOptions);

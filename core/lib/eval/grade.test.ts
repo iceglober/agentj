@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { SandboxCommandResult } from "../sandbox";
 import { composeGrade } from "./grade";
-import { taskSchema } from "./types";
 import type { Check, Env, GradeCtx, Task, Trajectory } from "./types";
+import { taskSchema } from "./types";
 
 // --- fakes ---------------------------------------------------------------
 
@@ -83,9 +83,7 @@ describe("composeGrade verdicts", () => {
   });
 
   test("one required check fails → fail", async () => {
-    const task = makeTask([
-      { kind: "test_command", id: "tc", command: "run", expectExit: 0 },
-    ]);
+    const task = makeTask([{ kind: "test_command", id: "tc", command: "run", expectExit: 0 }]);
     const env = new FakeEnv({ exec: () => ({ stdout: "boom", stderr: "", exitCode: 1 }) });
     const res = await composeGrade(env, task, makeTraj(), noJudge);
     expect(res.verdict).toBe("fail");
@@ -185,7 +183,9 @@ describe("no_placeholder", () => {
   });
 
   test("passes when no added line has a placeholder", async () => {
-    const diff = ["--- a/x.py", "+++ b/x.py", "@@ -1 +1 @@", "-# TODO removed", "+x = 1"].join("\n");
+    const diff = ["--- a/x.py", "+++ b/x.py", "@@ -1 +1 @@", "-# TODO removed", "+x = 1"].join(
+      "\n",
+    );
     const task = makeTask([{ kind: "no_placeholder", id: "np" }]);
     const env = new FakeEnv();
     const res = await composeGrade(env, task, makeTraj({ finalDiff: diff }), noJudge);

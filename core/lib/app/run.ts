@@ -1,22 +1,18 @@
-import { createAgent as createProductionAgent, type Agent } from "../agent";
+import { type Agent, createAgent as createProductionAgent } from "../agent";
 import { loadConfig } from "../config";
 import type { RunResult, RunStep } from "../llm";
 import type { MetricsSink } from "../metrics";
 import { createOtelMetricsSink } from "../metrics/otel-adapter";
-import { resolveAzureApiKey, type SecretStore } from "../secrets";
-import { createKeyringSecretStore } from "../secrets/keyring-adapter";
 import type { PromptContext } from "../prompt";
 import { getSandbox, type Sandbox } from "../sandbox";
 import {
   createSandboxProviderMicrosandbox,
-  resolveProjectSource,
   type ProjectSource,
+  resolveProjectSource,
 } from "../sandbox/microsandbox-adapter";
-import {
-  createChildSession,
-  createSession,
-  type Session,
-} from "../session";
+import { resolveAzureApiKey, type SecretStore } from "../secrets";
+import { createKeyringSecretStore } from "../secrets/keyring-adapter";
+import { createChildSession, createSession, type Session } from "../session";
 
 const DEFAULT_SUBAGENT_MAX_CONCURRENCY = 2;
 
@@ -119,8 +115,7 @@ const toSessionIdentity = (session: Session): TaskRunSessionIdentity => ({
   path: session.path,
 });
 
-const buildCommitMessage = (task: string): string =>
-  `agentj: ${task.slice(0, 72)}`;
+const buildCommitMessage = (task: string): string => `agentj: ${task.slice(0, 72)}`;
 
 const disposeAsync = async (value: unknown): Promise<void> => {
   if (
@@ -129,9 +124,7 @@ const disposeAsync = async (value: unknown): Promise<void> => {
     Symbol.asyncDispose in value &&
     typeof value[Symbol.asyncDispose] === "function"
   ) {
-    await (value as { [Symbol.asyncDispose]: () => Promise<void> })[
-      Symbol.asyncDispose
-    ]();
+    await (value as { [Symbol.asyncDispose]: () => Promise<void> })[Symbol.asyncDispose]();
     return;
   }
 
@@ -313,29 +306,29 @@ export async function createProductionTaskRunDependencies(
   overrides: ProductionTaskRunDependencyOverrides = {},
 ): Promise<TaskRunDependencies> {
   const env = overrides.env ?? process.env;
-  let preparation: Promise<{
-    config: Awaited<ReturnType<typeof loadConfig>>;
-    azureApiKey: string;
-    metricsSink: MetricsSink;
-    projectSource: ProjectSource | undefined;
-  }> | undefined;
+  let preparation:
+    | Promise<{
+        config: Awaited<ReturnType<typeof loadConfig>>;
+        azureApiKey: string;
+        metricsSink: MetricsSink;
+        projectSource: ProjectSource | undefined;
+      }>
+    | undefined;
 
   const prepare = () =>
     (preparation ??= (async () => {
       let projectSource: ProjectSource | undefined;
       if (overrides.projectDir) {
         try {
-          projectSource = await (
-            overrides.resolveProjectSource ?? resolveProjectSource
-          )(overrides.projectDir);
+          projectSource = await (overrides.resolveProjectSource ?? resolveProjectSource)(
+            overrides.projectDir,
+          );
         } catch {
           throw new Error("Unable to prepare the launch project.");
         }
       }
 
-      const config =
-        overrides.config ??
-        (await (overrides.loadConfig ?? loadConfig)(configPath));
+      const config = overrides.config ?? (await (overrides.loadConfig ?? loadConfig)(configPath));
       const azureApiKey = await resolveAzureApiKey({
         env,
         store: overrides.secretStore ?? createKeyringSecretStore({}),
@@ -444,14 +437,10 @@ export async function createProductionTaskRunDependencies(
             parentRef: session.branch,
             maxConcurrency: DEFAULT_SUBAGENT_MAX_CONCURRENCY,
             createChildSession: async ({ id, parentRef }) =>
-              (overrides.createChildSession ?? createChildSession)(
-                sandbox,
-                await sessionConfig(),
-                {
-                  id: nextChildSessionId(id),
-                  parentRef,
-                },
-              ),
+              (overrides.createChildSession ?? createChildSession)(sandbox, await sessionConfig(), {
+                id: nextChildSessionId(id),
+                parentRef,
+              }),
           },
         },
       );
