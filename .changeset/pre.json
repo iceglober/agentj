@@ -4,8 +4,5 @@
   "initialVersions": {
     "@glrs-dev/aj": "0.0.0"
   },
-  "changesets": [
-    "biome-quality",
-    "initial-v0.1"
-  ]
+  "changesets": ["biome-quality", "initial-v0.1"]
 }
