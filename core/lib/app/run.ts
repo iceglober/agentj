@@ -1,5 +1,9 @@
 import { createAgent as createProductionAgent, type Agent } from "../agent";
 import { loadConfig } from "../config";
+import { createOtelMetricsSink } from "../metrics/otel-adapter";
+import type { MetricsSink } from "../metrics";
+import { resolveAzureApiKey, type SecretStore } from "../secrets";
+import { createKeyringSecretStore } from "../secrets/keyring-adapter";
 import type { RunResult, RunStep } from "../llm";
 import type { PromptContext } from "../prompt";
 import { getSandbox, type Sandbox } from "../sandbox";
@@ -79,6 +83,23 @@ export interface TaskRunDependencies {
   createSession(sandbox: Sandbox): Promise<Session>;
   createAgent(args: { sandbox: Sandbox; session: Session }): Promise<Agent>;
   shouldIncludeToolResult?(toolResult: ToolResult): boolean;
+}
+
+/**
+ * Optional test seams for production task-run wiring. Overrides are used only
+ * to construct dependencies; they are never emitted as task events or outcomes.
+ */
+export interface ProductionTaskRunDependencyOverrides {
+  config?: Awaited<ReturnType<typeof loadConfig>>;
+  loadConfig?: typeof loadConfig;
+  env?: Record<string, string | undefined>;
+  secretStore?: SecretStore;
+  metricsSink?: MetricsSink;
+  createMetricsSink?: (options: { enabled: boolean }) => MetricsSink;
+  createSandbox?: TaskRunDependencies["createSandbox"];
+  createSession?: TaskRunDependencies["createSession"];
+  createAgent?: typeof createProductionAgent;
+  onAgentCreate?: () => void | Promise<void>;
 }
 
 export interface RunAgentTaskOptions {
@@ -278,8 +299,44 @@ export async function runAgentTask(
 
 export async function createProductionTaskRunDependencies(
   configPath: string = new URL("../../agentj.json", import.meta.url).pathname,
+  overrides: ProductionTaskRunDependencyOverrides = {},
 ): Promise<TaskRunDependencies> {
-  const config = await loadConfig(configPath);
+  const env = overrides.env ?? process.env;
+  let preparation: Promise<{
+    config: Awaited<ReturnType<typeof loadConfig>>;
+    azureApiKey: string;
+    metricsSink: MetricsSink;
+  }> | undefined;
+  const prepare = () =>
+    (preparation ??= (async () => {
+      const config =
+        overrides.config ??
+        (await (overrides.loadConfig ?? loadConfig)(configPath));
+      const azureApiKey = await resolveAzureApiKey({
+        env,
+        store: overrides.secretStore ?? createKeyringSecretStore({}),
+      });
+      if (azureApiKey.status === "missing") {
+        throw new Error(
+          "Azure API key missing; run agentj:secrets ... or set env",
+        );
+      }
+      if (azureApiKey.status === "store-unavailable") {
+        throw new Error(
+          "Secure secret store unavailable; set AZURE_FOUNDRY_API_KEY/AZURE_API_KEY for automation or configure the OS keychain.",
+        );
+      }
+
+      return {
+        config,
+        azureApiKey: azureApiKey.apiKey,
+        metricsSink:
+          overrides.metricsSink ??
+          (overrides.createMetricsSink ?? createOtelMetricsSink)({
+            enabled: env.AGENTJ_OTEL_METRICS === "1",
+          }),
+      };
+    })());
   const childSessionIds = new Set<string>();
   let childSessionCounter = 0;
 
@@ -310,10 +367,20 @@ export async function createProductionTaskRunDependencies(
   });
 
   return {
-    createSandbox: () =>
-      getSandbox(createSandboxProviderMicrosandbox(config.sandbox)),
-    createSession: (sandbox) => createSession(sandbox, config.session),
+    createSandbox: async () => {
+      const { config } = await prepare();
+      return overrides.createSandbox
+        ? overrides.createSandbox()
+        : getSandbox(createSandboxProviderMicrosandbox(config.sandbox));
+    },
+    createSession: async (sandbox) => {
+      const { config } = await prepare();
+      return overrides.createSession
+        ? overrides.createSession(sandbox)
+        : createSession(sandbox, config.session);
+    },
     createAgent: async ({ sandbox, session }) => {
+      const { azureApiKey, config, metricsSink } = await prepare();
       let agentsMd = "";
       try {
         agentsMd = await sandbox.readFile(`${session.path}/AGENTS.md`);
@@ -321,12 +388,27 @@ export async function createProductionTaskRunDependencies(
 
       const rules = config.agent.rules || agentsMd || "";
 
-      return createProductionAgent(
+      await overrides.onAgentCreate?.();
+      return (overrides.createAgent ?? createProductionAgent)(
         sandbox,
-        { ...config.agent, rules },
+        {
+          ...config.agent,
+          rules,
+          llm: {
+            ...config.agent.llm,
+            providers: {
+              ...config.agent.llm.providers,
+              azure: {
+                ...config.agent.llm.providers?.azure,
+                apiKey: azureApiKey,
+              },
+            },
+          },
+        },
         {
           root: session.path,
           ctx: await createPromptContext(sandbox, session),
+          metricsSink,
           delegation: {
             parentRef: session.branch,
             maxConcurrency: DEFAULT_SUBAGENT_MAX_CONCURRENCY,

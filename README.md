@@ -63,13 +63,83 @@ Provider and model are configured in `core/agentj.json`:
 }
 ```
 
-Set the API key via environment:
+The config file never contains an API key. Credentials are resolved in this order:
+
+1. `AZURE_FOUNDRY_API_KEY` environment variable
+2. `AZURE_API_KEY` environment variable
+3. OS keychain (see below)
+
+Environment variables are the explicit path for CI and automation. The keychain is the
+convenient path for interactive use — store once, never type again.
+
+### Storing credentials in the OS keychain
 
 ```sh
-export AZURE_FOUNDRY_API_KEY=...
-# or
-export AZURE_API_KEY=...
+bun run agentj:secrets -- set azure-api-key     # masked prompt, stores in OS keychain
+bun run agentj:secrets -- status                 # prints "stored" or "not stored"
+bun run agentj:secrets -- delete azure-api-key   # removes from keychain
 ```
+
+The key is stored globally in the host OS keychain (macOS Keychain, Windows Credential
+Manager, Linux `libsecret`). Secret values are never printed, logged, or passed as
+command-line arguments. If the secure store is unavailable, the command fails with a clear
+message — there is no plaintext fallback file.
+
+### Azure prompt caching
+
+AgentJ constructs requests to maximize Azure's automatic prompt caching:
+
+- The system prompt prefix is stable across runs.
+- Tool definitions are sent in deterministic sorted order.
+
+These choices let Azure's provider-side cache recognize repeated prefixes and tool schemas
+without AgentJ managing cache keys. Caching is provider-managed — AgentJ does not control
+whether a given request hits the cache.
+
+Token usage includes cache detail when the provider reports it:
+
+| Field | Meaning |
+|---|---|
+| `inputTokens` | Total input tokens |
+| `noCacheInputTokens` | Input tokens that missed the cache |
+| `cacheReadInputTokens` | Input tokens served from cache |
+| `cacheWriteInputTokens` | Input tokens written to cache |
+
+These are token counts, not USD. AgentJ does not compute monetary cost — it has no
+deployment pricing catalog.
+
+### Optional OpenTelemetry metrics
+
+Set `AGENTJ_OTEL_METRICS=1` to enable metrics export:
+
+```sh
+AGENTJ_OTEL_METRICS=1 bun run agentj -- "your task"
+```
+
+When enabled, AgentJ records aggregate counters and histograms through the OpenTelemetry
+API. You must configure your own OTel provider and exporter — AgentJ bundles no collector,
+exporter, or network configuration.
+
+Metrics recorded (all per `provider` / `model` / `outcome`):
+
+| Instrument | Type | Unit |
+|---|---|---|
+| `agentj.llm.duration` | Histogram | ms |
+| `agentj.llm.tokens.input` | Counter | tokens |
+| `agentj.llm.tokens.no_cache` | Counter | tokens |
+| `agentj.llm.tokens.cache_read` | Counter | tokens |
+| `agentj.llm.tokens.cache_write` | Counter | tokens |
+| `agentj.llm.tokens.output` | Counter | tokens |
+| `agentj.llm.tokens.total` | Counter | tokens |
+| `agentj.llm.cache_read_ratio` | Histogram | ratio |
+
+**What is never exported:** prompts, model outputs, tool inputs, API keys, file paths,
+project names, or any other content. Attributes are restricted to the three low-cardinality
+labels above. Unknown or free-form attribute keys are rejected. A metrics failure never
+affects task success — the sink fails closed.
+
+When `AGENTJ_OTEL_METRICS` is unset or `0`, the metrics path is a no-op with zero
+overhead.
 
 ## What it can do
 

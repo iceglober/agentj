@@ -6,6 +6,7 @@ import {
   type RunStep,
   type ToolSet,
 } from "../llm";
+import type { MetricsSink } from "../metrics";
 import {
   composePrompt,
   promptConfigSchema,
@@ -58,6 +59,8 @@ export interface CreateAgentOptions {
    * and get the historical tool set with no delegation support.
    */
   delegation?: CreateAgentDelegationOptions;
+  /** Optional content-free telemetry; omitted keeps runtime metrics disabled. */
+  metricsSink?: MetricsSink;
   /**
    * Cap the tool loop at N steps. Routed through the runtime port's `stopSteps`
    * so the eval harness can set its per-task step budget once, without the
@@ -94,7 +97,7 @@ export async function createAgent(
   config: AgentConfig,
   opts: CreateAgentOptions,
 ): Promise<Agent> {
-  const runtime = createRuntime(config.llm);
+  const runtime = createRuntime(config.llm, opts.metricsSink);
 
   const composed = composePrompt(
     config.prompt,
@@ -124,6 +127,7 @@ export async function createAgent(
                 gitBranch: session.branch,
                 gitStatusSummary: await session.status(),
               },
+              metricsSink: opts.metricsSink,
               stopSteps: opts.stopSteps,
             });
 

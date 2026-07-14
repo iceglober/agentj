@@ -1,4 +1,5 @@
 import z from "zod";
+import type { MetricsSink } from "../metrics";
 import { createAiSdkRuntime, providerNames } from "./ai-sdk-adapter";
 import { azureModelConfigSchema } from "./azure-adapter";
 
@@ -28,6 +29,12 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Input tokens sent without a provider prompt-cache hit. */
+  noCacheInputTokens?: number;
+  /** Input tokens served from the provider prompt cache. */
+  cacheReadInputTokens?: number;
+  /** Input tokens written to the provider prompt cache. */
+  cacheWriteInputTokens?: number;
 }
 
 export interface RunStep {
@@ -104,8 +111,13 @@ export type LlmConfig = z.infer<typeof llmConfigSchema>;
  */
 export const runtimes = {
   "ai-sdk": createAiSdkRuntime,
-} satisfies Record<RuntimeName, (config: LlmConfig) => AgentRuntime>;
+} satisfies Record<
+  RuntimeName,
+  (config: LlmConfig, metricsSink?: MetricsSink) => AgentRuntime
+>;
 
 /** The port's factory: pick the runtime by config and hand back the boundary. */
-export const createRuntime = (config: LlmConfig): AgentRuntime =>
-  runtimes[config.runtime](config);
+export const createRuntime = (
+  config: LlmConfig,
+  metricsSink?: MetricsSink,
+): AgentRuntime => runtimes[config.runtime](config, metricsSink);
