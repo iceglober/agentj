@@ -2,8 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { Agent } from "../agent";
 import type { RunResult, RunStep } from "../llm";
 import type { Sandbox } from "../sandbox";
-import type { Session } from "../session";
-import { runAgentTask, type TaskRunDependencies, type TaskRunEvent } from "./run";
+import type { ChildSession, Session } from "../session";
+import {
+  createProductionTaskRunDependencies,
+  runAgentTask,
+  type TaskRunDependencies,
+  type TaskRunEvent,
+} from "./run";
 
 function makeRunResult(text: string, steps: RunStep[] = []): RunResult {
   return {
@@ -521,5 +526,138 @@ describe("runAgentTask", () => {
       },
       error: primaryError,
     });
+  });
+
+  test("prepares an injected launch project once and uses its root for parent and child sessions", async () => {
+    const projectSource = {
+      projectRoot: "/canonical/project",
+      commonGitDir: "/canonical/project/.git",
+    };
+    const sandbox = makeSandbox();
+    const parentSession = makeSession();
+    const childSession = makeSession() as unknown as ChildSession;
+    const resolvedProjectDirs: string[] = [];
+    const sandboxOptions: unknown[] = [];
+    const parentSessionConfigs: Array<{ repoDir?: string }> = [];
+    const childSessionConfigs: Array<{ repoDir?: string }> = [];
+    let agentFactoryCalls = 0;
+    let modelCalls = 0;
+
+    const dependencies = await createProductionTaskRunDependencies(undefined, {
+      projectDir: "/launch/project",
+      resolveProjectSource: async (projectDir) => {
+        resolvedProjectDirs.push(projectDir);
+        return projectSource;
+      },
+      createSandbox: async (options) => {
+        sandboxOptions.push(options);
+        return sandbox;
+      },
+      createSession: async (_sandbox, config) => {
+        parentSessionConfigs.push(config);
+        return parentSession;
+      },
+      createChildSession: async (_sandbox, config, _options) => {
+        childSessionConfigs.push(config);
+        return childSession;
+      },
+      createAgent: async (_sandbox, _config, options) => {
+        agentFactoryCalls += 1;
+        await options.delegation!.createChildSession({
+          id: "delegated task",
+          parentRef: parentSession.branch,
+          task: {} as never,
+        });
+        return makeAgent(async () => {
+          modelCalls += 1;
+          return makeRunResult("done");
+        });
+      },
+    });
+
+    const { outcome } = await executeRun("project task", dependencies);
+
+    expect(outcome.kind).toBe("success");
+    expect(resolvedProjectDirs).toEqual(["/launch/project"]);
+    expect(sandboxOptions).toEqual([
+      expect.objectContaining({ projectSource }),
+    ]);
+    expect(parentSessionConfigs).toEqual([
+      expect.objectContaining({ repoDir: projectSource.projectRoot }),
+    ]);
+    expect(childSessionConfigs).toEqual([
+      expect.objectContaining({ repoDir: projectSource.projectRoot }),
+    ]);
+    expect(agentFactoryCalls).toBe(1);
+    expect(modelCalls).toBe(1);
+  });
+
+  test("keeps the default no-project factory behavior", async () => {
+    const sandbox = makeSandbox();
+    const session = makeSession();
+    const sandboxOptions: unknown[] = [];
+    let resolverCalls = 0;
+
+    const dependencies = await createProductionTaskRunDependencies(undefined, {
+      resolveProjectSource: async () => {
+        resolverCalls += 1;
+        throw new Error("resolver should not run without a project directory");
+      },
+      createSandbox: async (options) => {
+        sandboxOptions.push(options);
+        return sandbox;
+      },
+      createSession: async () => session,
+      createAgent: async () => makeAgent(async () => makeRunResult("done")),
+    });
+
+    const { outcome } = await executeRun("guest-only task", dependencies);
+
+    expect(outcome.kind).toBe("success");
+    expect(resolverCalls).toBe(0);
+    expect(sandboxOptions).toEqual([expect.not.objectContaining({ projectSource: expect.anything() })]);
+  });
+
+  test("maps launch-project preparation failures before sandbox, session, agent, or model work", async () => {
+    const preflightFailure = new Error("not a Git project");
+    let sandboxCalls = 0;
+    let sessionCalls = 0;
+    let agentCalls = 0;
+    let modelCalls = 0;
+
+    const dependencies = await createProductionTaskRunDependencies(undefined, {
+      projectDir: "/not-a-project",
+      resolveProjectSource: async () => {
+        throw preflightFailure;
+      },
+      createSandbox: async () => {
+        sandboxCalls += 1;
+        return makeSandbox();
+      },
+      createSession: async () => {
+        sessionCalls += 1;
+        return makeSession();
+      },
+      createAgent: async () => {
+        agentCalls += 1;
+        return makeAgent(async () => {
+          modelCalls += 1;
+          return makeRunResult("unexpected");
+        });
+      },
+    });
+
+    const { events, outcome } = await executeRun("invalid project", dependencies);
+
+    expect(events).toEqual([]);
+    expect(outcome).toEqual({
+      kind: "generation-error",
+      session: undefined,
+      error: expect.objectContaining({ message: "Unable to prepare the launch project." }),
+    });
+    expect(sandboxCalls).toBe(0);
+    expect(sessionCalls).toBe(0);
+    expect(agentCalls).toBe(0);
+    expect(modelCalls).toBe(0);
   });
 });

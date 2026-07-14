@@ -61,6 +61,33 @@
 - Swapping the generation stack is a new `llm/<name>-adapter.ts` registered under the runtime registry — no domain code changes.
 - For eval work, document and preserve objective graders; do not replace strict checks with prose.
 
+## Host project mount and session worktree boundary
+
+When AgentJ is launched from a host project directory, the sandbox adapter bind-mounts two host paths into the guest at their same canonical paths:
+
+1. **The project root** — the Git worktree containing the host checkout (e.g., `/Users/…/my-project`).
+2. **The common Git directory** — the shared object database (`.git` for a main worktree, or the separate Git dir for a linked worktree). This is mounted only when it lives outside the project root, which is the case for linked worktrees.
+
+The session's `repoDir` is set to the project root path. The session then creates an isolated worktree from the host repository's current Git state. This means:
+
+- **Source is the host repo, edits are in the guest worktree.** The host checkout at the mount point is the Git source — the session branches from it and creates a separate worktree under the session root. Structured tools (`edit`, `write`, `serena_replace_content`, etc.) operate inside that guest session worktree, not on the host checkout.
+- **No direct host checkout edits under normal structured tools.** The host checkout is read-only source material. The agent never writes back to the host checkout through the structured tool layer.
+- **Raw bash can reach the host checkout.** The `bash` tool runs inside the sandbox with full filesystem access. A raw shell command that writes to `repoDir` directly edits the host checkout. This is intentional power, not a sandbox bypass — the agent is trusted with the host repo. Structured tools are the safe default; raw bash is the escape hatch.
+- **Why the common Git directory needs its own mount.** Linked worktrees store `.git` as a plain file containing a path to the common Git directory (e.g., `gitdir: /path/to/main/.git/worktrees/name`). Without bind-mounting that common Git directory into the guest, `git worktree add` inside the sandbox cannot find the shared object database and fails. The adapter detects this case via `git rev-parse --git-common-dir` and mounts the common Git dir at its canonical host path when it differs from the project root.
+- **Host Git branch recovery.** Session commits create branches in the host repository's Git database. If the session succeeds, the branch and its commits are preserved in the host repo. If the session fails or is aborted, the branch and worktree are preserved for manual recovery. The host checkout itself is never auto-committed or auto-modified.
+- **Non-Git launch directories fail before any model call.** The adapter runs a preflight check: `git rev-parse --show-toplevel` on the host project directory. If this fails, the sandbox is never created and the agent never boots. The caller gets a clear error message. No `git init` is ever run in a caller directory.
+- **No-project mode.** When no host project directory is configured, the sandbox boots without any bind mounts. The session's `repoDir` defaults to `/repo` (a schema default, not a mount), and the session initializes a fresh repository there.
+
+### Verification commands
+
+```sh
+bun test core/lib/sandbox
+bun test core/lib/app
+bun test core
+bun run typecheck
+bun core/eval/run.ts --selfcheck
+```
+
 ## Child worktree data-loss rules
 - **Never force-delete a child worktree that might contain uncommitted work.** The child session lifecycle enforces this:
   - **Success with changes:** commit, remove worktree, preserve branch. Branch + commit metadata returned to parent.
