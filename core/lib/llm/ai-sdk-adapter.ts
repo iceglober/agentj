@@ -1,12 +1,12 @@
 import {
-  ToolLoopAgent,
-  stepCountIs,
-  tool,
-  type LanguageModel,
   type ToolSet as AiToolSet,
+  type LanguageModel,
+  stepCountIs,
+  ToolLoopAgent,
+  tool,
 } from "ai";
-import { recordModelUsage, type MetricsSink } from "../metrics";
-import { createAzureModelProvider, type AzureModelConfig } from "./azure-adapter";
+import { type MetricsSink, recordModelUsage } from "../metrics";
+import { type AzureModelConfig, createAzureModelProvider } from "./azure-adapter";
 import type {
   AgentRuntime,
   GenerateRequest,
@@ -40,10 +40,7 @@ const llmProviders: {
 };
 
 /** Provider names, exported so the port schema derives its enum from here. */
-export const providerNames = Object.keys(llmProviders) as [
-  ProviderName,
-  ...ProviderName[],
-];
+export const providerNames = Object.keys(llmProviders) as [ProviderName, ...ProviderName[]];
 
 const createModel = (config: LlmConfig): LanguageModel => {
   // The mapped registry ties each key to its own config type; indexing with a
@@ -95,10 +92,7 @@ const mapTools = (tools: ToolSet): AiToolSet =>
  * temperature/topP/providerOptions/stopWhen are constructor-level, while
  * abortSignal/onStepFinish are generate()-level.
  */
-export const createAiSdkRuntime = (
-  config: LlmConfig,
-  metricsSink?: MetricsSink,
-): AgentRuntime => {
+export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink): AgentRuntime => {
   const model = createModel(config);
 
   return {
@@ -135,15 +129,10 @@ export const createAiSdkRuntime = (
           // at this vendor boundary rather than narrowing the port's shape.
           ...(req.providerOptions
             ? {
-                providerOptions: req.providerOptions as Record<
-                  string,
-                  Record<string, never>
-                >,
+                providerOptions: req.providerOptions as Record<string, Record<string, never>>,
               }
             : {}),
-          ...(req.stopSteps !== undefined
-            ? { stopWhen: stepCountIs(req.stopSteps) }
-            : {}),
+          ...(req.stopSteps !== undefined ? { stopWhen: stepCountIs(req.stopSteps) } : {}),
           toolOrder: Object.keys(req.tools).sort(),
           tools: mapTools(req.tools),
         });
@@ -155,9 +144,7 @@ export const createAiSdkRuntime = (
           ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step)) } : {}),
         });
 
-        const usage =
-          (result as { totalUsage?: typeof result.usage }).totalUsage ??
-          result.usage;
+        const usage = (result as { totalUsage?: typeof result.usage }).totalUsage ?? result.usage;
         const inputTokenDetails = usage.inputTokenDetails as
           | {
               noCacheTokens?: number;

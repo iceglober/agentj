@@ -1,4 +1,4 @@
-import { taskSchema, type Check, type Task } from "../../lib/eval/types";
+import { type Check, type Task, taskSchema } from "../../lib/eval/types";
 
 /**
  * A single injected bug: replace `find` with `replace` in exactly one file of a

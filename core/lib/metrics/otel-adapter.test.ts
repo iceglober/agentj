@@ -28,22 +28,34 @@ interface InstrumentCall {
 function createFakeMeter(options: { throwOnAdd?: boolean } = {}) {
   const counters: InstrumentCall[] = [];
   const histograms: InstrumentCall[] = [];
-  const created: Array<{ readonly kind: "counter" | "histogram"; readonly name: string; readonly unit: string | undefined }> = [];
+  const created: Array<{
+    readonly kind: "counter" | "histogram";
+    readonly name: string;
+    readonly unit: string | undefined;
+  }> = [];
   const add = mock((name: string, unit: string | undefined, value: number, attributes: unknown) => {
     if (options.throwOnAdd) throw new Error("instrument failure");
     counters.push({ name, unit, value, attributes });
   });
-  const record = mock((name: string, unit: string | undefined, value: number, attributes: unknown) => {
-    histograms.push({ name, unit, value, attributes });
-  });
+  const record = mock(
+    (name: string, unit: string | undefined, value: number, attributes: unknown) => {
+      histograms.push({ name, unit, value, attributes });
+    },
+  );
   const meter = {
     createCounter: mock((name: string, instrumentOptions?: { unit?: string }) => {
       created.push({ kind: "counter", name, unit: instrumentOptions?.unit });
-      return { add: (value: number, attributes: unknown) => add(name, instrumentOptions?.unit, value, attributes) } as Counter;
+      return {
+        add: (value: number, attributes: unknown) =>
+          add(name, instrumentOptions?.unit, value, attributes),
+      } as Counter;
     }),
     createHistogram: mock((name: string, instrumentOptions?: { unit?: string }) => {
       created.push({ kind: "histogram", name, unit: instrumentOptions?.unit });
-      return { record: (value: number, attributes: unknown) => record(name, instrumentOptions?.unit, value, attributes) } as Histogram;
+      return {
+        record: (value: number, attributes: unknown) =>
+          record(name, instrumentOptions?.unit, value, attributes),
+      } as Histogram;
     }),
   };
 
@@ -56,11 +68,13 @@ describe("createOtelMetricsSink", () => {
       throw new Error("Disabled telemetry must not resolve a meter");
     });
 
-    expect(() => createOtelMetricsSink({ enabled: false, metricsApi: { getMeter } as never }).record({
-      name: "model.tokens.input",
-      value: 1,
-      attributes: safeAttributes,
-    })).not.toThrow();
+    expect(() =>
+      createOtelMetricsSink({ enabled: false, metricsApi: { getMeter } as never }).record({
+        name: "model.tokens.input",
+        value: 1,
+        attributes: safeAttributes,
+      }),
+    ).not.toThrow();
     expect(getMeter).not.toHaveBeenCalled();
   });
 
@@ -93,8 +107,18 @@ describe("createOtelMetricsSink", () => {
 
     expect(fake.counters).toEqual([
       { name: "agentj.llm.tokens.input", unit: "tokens", value: 100, attributes: safeAttributes },
-      { name: "agentj.llm.tokens.cache_read", unit: "tokens", value: 80, attributes: safeAttributes },
-      { name: "agentj.llm.tokens.cache_write", unit: "tokens", value: 5, attributes: safeAttributes },
+      {
+        name: "agentj.llm.tokens.cache_read",
+        unit: "tokens",
+        value: 80,
+        attributes: safeAttributes,
+      },
+      {
+        name: "agentj.llm.tokens.cache_write",
+        unit: "tokens",
+        value: 5,
+        attributes: safeAttributes,
+      },
       { name: "agentj.llm.tokens.total", unit: "tokens", value: 120, attributes: safeAttributes },
     ]);
     expect(fake.histograms).toEqual([
@@ -132,12 +156,21 @@ describe("createOtelMetricsSink", () => {
     const getMeter = mock(() => {
       throw new Error("meter failure");
     });
-    const unavailableSink = createOtelMetricsSink({ enabled: true, metricsApi: { getMeter } as never });
-    expect(() => unavailableSink.record({ name: "model.tokens.input", value: 1, attributes: safeAttributes })).not.toThrow();
+    const unavailableSink = createOtelMetricsSink({
+      enabled: true,
+      metricsApi: { getMeter } as never,
+    });
+    expect(() =>
+      unavailableSink.record({ name: "model.tokens.input", value: 1, attributes: safeAttributes }),
+    ).not.toThrow();
 
     const fake = createFakeMeter({ throwOnAdd: true });
     const sink = createOtelMetricsSink({ enabled: true, meterFactory: () => fake.meter });
-    const measurement: MetricMeasurement = { name: "model.tokens.input", value: 1, attributes: safeAttributes };
+    const measurement: MetricMeasurement = {
+      name: "model.tokens.input",
+      value: 1,
+      attributes: safeAttributes,
+    };
 
     expect(() => sink.record(measurement)).not.toThrow();
     expect(() => sink.record(measurement)).not.toThrow();

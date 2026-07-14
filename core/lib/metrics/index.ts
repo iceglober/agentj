@@ -113,7 +113,11 @@ export function recordModelUsage(
     if (!safeAttributes) return;
 
     if (isMetricValue(usage.durationMs)) {
-      record(sink, { name: "model.duration_ms", value: usage.durationMs, attributes: safeAttributes });
+      record(sink, {
+        name: "model.duration_ms",
+        value: usage.durationMs,
+        attributes: safeAttributes,
+      });
     }
 
     for (const [key, name] of tokenMeasurements) {
@@ -121,7 +125,11 @@ export function recordModelUsage(
       if (isMetricValue(value)) record(sink, { name, value, attributes: safeAttributes });
     }
 
-    if (isMetricValue(usage.inputTokens) && isMetricValue(usage.cacheReadTokens) && usage.inputTokens > 0) {
+    if (
+      isMetricValue(usage.inputTokens) &&
+      isMetricValue(usage.cacheReadTokens) &&
+      usage.inputTokens > 0
+    ) {
       record(sink, {
         name: "model.cache_read_ratio",
         value: usage.cacheReadTokens / usage.inputTokens,

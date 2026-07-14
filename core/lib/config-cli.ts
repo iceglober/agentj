@@ -1,20 +1,16 @@
-import z from "zod";
+import type z from "zod";
 import {
+  type ConfigObject,
   configSchema,
+  type GlobalConfigMutation,
+  type GlobalConfigOptions,
   mergeConfig,
   mutateGlobalConfig,
   readGlobalConfig,
-  type ConfigObject,
-  type GlobalConfigMutation,
-  type GlobalConfigOptions,
   type ValidatedConfigPath,
 } from "./config";
 import { providerNames } from "./llm/ai-sdk-adapter";
-import {
-  AZURE_API_KEY_ACCOUNT,
-  AZURE_SECRET_SERVICE,
-  type SecretStore,
-} from "./secrets";
+import { AZURE_API_KEY_ACCOUNT, AZURE_SECRET_SERVICE, type SecretStore } from "./secrets";
 
 /** Legacy public aliases retained for existing scripts. */
 export const LLM_MODEL_KEY = "llm.model";
@@ -147,7 +143,7 @@ const unwrap = (schema: InternalSchema): InternalSchema => {
 const parsePath = (key: string): ValidatedConfigPath | null => {
   const path = key.split(".");
   return path.length > 0 && path.every((segment) => PATH_SEGMENT.test(segment))
-    ? path as unknown as ValidatedConfigPath
+    ? (path as unknown as ValidatedConfigPath)
     : null;
 };
 
@@ -172,11 +168,13 @@ const schemaAtPath = (path: ValidatedConfigPath): InternalSchema | null => {
 };
 
 const isSecretPath = (path: readonly string[]): boolean =>
-  path.length === SECRET_PATH.length && path.every((segment, index) => segment === SECRET_PATH[index]);
+  path.length === SECRET_PATH.length &&
+  path.every((segment, index) => segment === SECRET_PATH[index]);
 
-const parseCliValue = (schema: InternalSchema, value: string):
-  | { success: true; data: unknown }
-  | { success: false; error: z.ZodError } => {
+const parseCliValue = (
+  schema: InternalSchema,
+  value: string,
+): { success: true; data: unknown } | { success: false; error: z.ZodError } => {
   let parsed: unknown = value;
   try {
     parsed = JSON.parse(value);
@@ -216,14 +214,19 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
   const mutateConfig = dependencies.mutateConfig ?? mutateGlobalConfig;
   const readConfig = dependencies.readConfig ?? readGlobalConfig;
 
-  const resolveNormalPath = (key: string): { path: ValidatedConfigPath; schema: InternalSchema } | null => {
+  const resolveNormalPath = (
+    key: string,
+  ): { path: ValidatedConfigPath; schema: InternalSchema } | null => {
     const path = parsePath(key);
     if (!path || isSecretPath(path)) return null;
     const schema = schemaAtPath(path);
     return schema ? { path, schema } : null;
   };
 
-  const write = async (key: string, mutations: readonly GlobalConfigMutation[]): Promise<ConfigCliResult> => {
+  const write = async (
+    key: string,
+    mutations: readonly GlobalConfigMutation[],
+  ): Promise<ConfigCliResult> => {
     try {
       const changed = await mutateConfig(mutations, dependencies.config);
       dependencies.writers.stdout.write(`Saved ${key} in global configuration.\n`);
@@ -235,7 +238,9 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
 
   const readEffectiveConfig = async (): Promise<ConfigObject | null> => {
     try {
-      return configSchema.parse(mergeConfig(configSchema.parse({}) as ConfigObject, await readConfig(dependencies.config))) as ConfigObject;
+      return configSchema.parse(
+        mergeConfig(configSchema.parse({}) as ConfigObject, await readConfig(dependencies.config)),
+      ) as ConfigObject;
     } catch {
       return null;
     }
@@ -257,31 +262,39 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
 
     async set(input) {
       if (input.key === LLM_MODEL_KEY) {
-        if (input.secret) return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
+        if (input.secret)
+          return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
         if (!input.value) return writeError(dependencies.writers, "missing_value", input.key);
         const mutations = normalModelMutations(input.value);
-        if (mutations.length === 0) return writeError(dependencies.writers, "invalid_model", input.key);
+        if (mutations.length === 0)
+          return writeError(dependencies.writers, "invalid_model", input.key);
         return write(input.key, mutations);
       }
       if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
-        if (!input.secret) return writeError(dependencies.writers, "secret_flag_required", input.key);
-        if (input.value !== undefined) return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
+        if (!input.secret)
+          return writeError(dependencies.writers, "secret_flag_required", input.key);
+        if (input.value !== undefined)
+          return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
         const secret = await dependencies.prompt.askSecret();
         if (secret === null || secret.trim().length === 0) {
           return writeError(dependencies.writers, "prompt_cancelled", input.key);
         }
         try {
           await dependencies.secretStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, secret);
-          dependencies.writers.stdout.write("Stored providers.azure.api_key in the secure keychain.\n");
+          dependencies.writers.stdout.write(
+            "Stored providers.azure.api_key in the secure keychain.\n",
+          );
           return { ok: true, key: input.key, storage: "keychain", changed: true };
         } catch {
           return writeError(dependencies.writers, "secret_store_failed", input.key);
         }
       }
-      if (input.secret) return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
+      if (input.secret)
+        return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
       const resolved = resolveNormalPath(input.key);
       if (!resolved) return writeError(dependencies.writers, "unknown_key", input.key);
-      if (input.value === undefined) return writeError(dependencies.writers, "missing_value", input.key);
+      if (input.value === undefined)
+        return writeError(dependencies.writers, "missing_value", input.key);
       if (unwrap(resolved.schema)._zod?.def?.type === "array") {
         return writeError(dependencies.writers, "operation_not_supported", input.key);
       }
@@ -291,7 +304,8 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
     },
 
     async add(input) {
-      if (input.value === undefined) return writeError(dependencies.writers, "missing_value", input.key);
+      if (input.value === undefined)
+        return writeError(dependencies.writers, "missing_value", input.key);
       const resolved = resolveNormalPath(input.key);
       if (!resolved) return writeError(dependencies.writers, "unknown_key", input.key);
       const def = resolved.schema._zod?.def;
@@ -303,15 +317,19 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       const config = await readEffectiveConfig();
       if (!config) return writeError(dependencies.writers, "config_read_failed", input.key);
       const current = getAtPath(config, resolved.path);
-      if (!Array.isArray(current)) return writeError(dependencies.writers, "operation_not_supported", input.key);
+      if (!Array.isArray(current))
+        return writeError(dependencies.writers, "operation_not_supported", input.key);
       if (current.some((value) => Object.is(value, parsed.data))) {
         return { ok: true, key: input.key, storage: "global_config", changed: false };
       }
-      return write(input.key, [{ type: "set", path: resolved.path, value: [...current, parsed.data] }]);
+      return write(input.key, [
+        { type: "set", path: resolved.path, value: [...current, parsed.data] },
+      ]);
     },
 
     async remove(input) {
-      if (input.value === undefined) return writeError(dependencies.writers, "missing_value", input.key);
+      if (input.value === undefined)
+        return writeError(dependencies.writers, "missing_value", input.key);
       const resolved = resolveNormalPath(input.key);
       if (!resolved) return writeError(dependencies.writers, "unknown_key", input.key);
       const def = resolved.schema._zod?.def;
@@ -323,15 +341,18 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       const config = await readEffectiveConfig();
       if (!config) return writeError(dependencies.writers, "config_read_failed", input.key);
       const current = getAtPath(config, resolved.path);
-      if (!Array.isArray(current)) return writeError(dependencies.writers, "operation_not_supported", input.key);
+      if (!Array.isArray(current))
+        return writeError(dependencies.writers, "operation_not_supported", input.key);
       const next = current.filter((value) => !Object.is(value, parsed.data));
-      if (next.length === current.length) return { ok: true, key: input.key, storage: "global_config", changed: false };
+      if (next.length === current.length)
+        return { ok: true, key: input.key, storage: "global_config", changed: false };
       return write(input.key, [{ type: "set", path: resolved.path, value: next }]);
     },
 
     async delete(input) {
       if (input.key === LLM_MODEL_KEY) {
-        if (input.secret) return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
+        if (input.secret)
+          return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
         try {
           const changed = await mutateConfig(normalModelDeleteMutations, dependencies.config);
           dependencies.writers.stdout.write("Deleted llm.model from global configuration.\n");
@@ -342,18 +363,27 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       }
       if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
         try {
-          const changed = await dependencies.secretStore.delete(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT);
-          dependencies.writers.stdout.write("Deleted providers.azure.api_key from the secure keychain.\n");
+          const changed = await dependencies.secretStore.delete(
+            AZURE_SECRET_SERVICE,
+            AZURE_API_KEY_ACCOUNT,
+          );
+          dependencies.writers.stdout.write(
+            "Deleted providers.azure.api_key from the secure keychain.\n",
+          );
           return { ok: true, key: input.key, storage: "keychain", changed };
         } catch {
           return writeError(dependencies.writers, "secret_store_failed", input.key);
         }
       }
-      if (input.secret) return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
+      if (input.secret)
+        return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
       const resolved = resolveNormalPath(input.key);
       if (!resolved) return writeError(dependencies.writers, "unknown_key", input.key);
       try {
-        const changed = await mutateConfig([{ type: "delete", path: resolved.path }], dependencies.config);
+        const changed = await mutateConfig(
+          [{ type: "delete", path: resolved.path }],
+          dependencies.config,
+        );
         dependencies.writers.stdout.write(`Deleted ${input.key} from global configuration.\n`);
         return { ok: true, key: input.key, storage: "global_config", changed };
       } catch {

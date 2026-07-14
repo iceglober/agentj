@@ -1,6 +1,6 @@
 import z from "zod";
-import * as scm from "../scm/git";
 import type { Sandbox } from "../sandbox";
+import * as scm from "../scm/git";
 
 /** The `session.*` section of the agent config. */
 export const sessionConfigSchema = z.object({
@@ -160,7 +160,6 @@ function buildSessionBranch(branchPrefix: string, id: string): string {
   return `${branchPrefix}${id}`;
 }
 
-
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -175,7 +174,11 @@ async function resolveBase(sb: Sandbox, config: SessionConfig): Promise<string> 
 
   if (base === "head" || base === "auto") {
     if (!ready) {
-      if (base === "auto" && (await scm.isRepo(sb, repoDir)) && (await scm.hasRemote(sb, repoDir))) {
+      if (
+        base === "auto" &&
+        (await scm.isRepo(sb, repoDir)) &&
+        (await scm.hasRemote(sb, repoDir))
+      ) {
         // cloned-but-unborn repo: prefer the remote over adopting
         const remoteRef = await resolveRemoteDefault(sb, repoDir, false);
         if (remoteRef) return remoteRef;
@@ -440,8 +443,7 @@ async function finalizeChildSession(
     worktreeRemoved = true;
   } catch (error) {
     try {
-      worktreeRemoved =
-        (await scm.inspectWorktree(sb, config.repoDir, session.path)) === null;
+      worktreeRemoved = (await scm.inspectWorktree(sb, config.repoDir, session.path)) === null;
     } catch {
       worktreeRemoved = false;
     }

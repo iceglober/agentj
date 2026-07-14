@@ -10,12 +10,7 @@ export function globMatch(pattern: string, path: string): boolean {
   let re = "";
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i]!;
-    if (
-      c === "/" &&
-      pattern[i + 1] === "*" &&
-      pattern[i + 2] === "*" &&
-      i + 3 === pattern.length
-    ) {
+    if (c === "/" && pattern[i + 1] === "*" && pattern[i + 2] === "*" && i + 3 === pattern.length) {
       // trailing `/**`: the dir itself or anything beneath it
       re += "(?:/.*)?";
       i += 2;

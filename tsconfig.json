@@ -16,11 +16,5 @@
     "skipLibCheck": true
   },
   "include": ["core/**/*.ts"],
-  "exclude": [
-    "node_modules",
-    "**/dist/**",
-    "**/build/**",
-    "**/coverage/**",
-    "core/**/generated/**"
-  ]
+  "exclude": ["node_modules", "**/dist/**", "**/build/**", "**/coverage/**", "core/**/generated/**"]
 }

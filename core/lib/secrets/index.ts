@@ -1,10 +1,7 @@
 export const AZURE_SECRET_SERVICE = "agentj";
 export const AZURE_API_KEY_ACCOUNT = "azure-api-key";
 
-export type AzureApiKeySource =
-  | "azure-foundry-api-key"
-  | "azure-api-key"
-  | "secret-store";
+export type AzureApiKeySource = "azure-foundry-api-key" | "azure-api-key" | "secret-store";
 
 export interface SecretStore {
   get(service: string, account: string): Promise<string | undefined>;
@@ -38,10 +35,7 @@ export interface ResolveAzureApiKeyOptions {
   store?: SecretStore;
 }
 
-function resolved(
-  apiKey: string,
-  source: AzureApiKeySource,
-): AzureApiKeyResolution {
+function resolved(apiKey: string, source: AzureApiKeySource): AzureApiKeyResolution {
   return { status: "resolved", apiKey, source };
 }
 
@@ -65,8 +59,6 @@ export async function resolveAzureApiKey({
   }
 }
 
-export async function hasAzureApiKey(
-  options?: ResolveAzureApiKeyOptions,
-): Promise<boolean> {
+export async function hasAzureApiKey(options?: ResolveAzureApiKeyOptions): Promise<boolean> {
   return (await resolveAzureApiKey(options)).status === "resolved";
 }

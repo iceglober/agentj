@@ -3,8 +3,8 @@ import {
   AZURE_API_KEY_ACCOUNT,
   AZURE_SECRET_SERVICE,
   resolveAzureApiKey,
-  SecretStoreUnavailableError,
   type SecretStore,
+  SecretStoreUnavailableError,
 } from "./index";
 
 const fixtureSecret = "fixture-secret-must-not-leak";

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   composePrompt,
-  profileNames,
-  resolveProfile,
   type PromptConfig,
   type PromptContext,
   type PromptInputs,
+  profileNames,
+  resolveProfile,
 } from "./index";
 import { renderTemplate } from "./render";
 

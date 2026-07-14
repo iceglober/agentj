@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
-
+import type { GlobalConfigMutation } from "./config";
 import {
   AZURE_API_KEY_KEY,
-  createConfigCliHandlers,
-  LLM_MODEL_KEY,
   type ConfigCliDependencies,
   type ConfigCliWriters,
+  createConfigCliHandlers,
+  LLM_MODEL_KEY,
   type MaskedSecretPrompt,
 } from "./config-cli";
-import type { GlobalConfigMutation } from "./config";
 import type { SecretStore } from "./secrets";
 
 const SECRET_FIXTURE = "azure-secret-fixture-never-rendered";
@@ -92,14 +91,18 @@ describe("createConfigCliHandlers", () => {
     const config = createConfigPort();
     const fake = createStore();
     const { stdout, stderr, writers } = createWriters();
-    const handlers = createConfigCliHandlers(createDependencies(config, fake.store, undefined, writers));
+    const handlers = createConfigCliHandlers(
+      createDependencies(config, fake.store, undefined, writers),
+    );
 
-    await expect(handlers.set({ key: LLM_MODEL_KEY, value: "azure/gpt-5.6-sol" })).resolves.toEqual({
-      ok: true,
-      key: LLM_MODEL_KEY,
-      storage: "global_config",
-      changed: true,
-    });
+    await expect(handlers.set({ key: LLM_MODEL_KEY, value: "azure/gpt-5.6-sol" })).resolves.toEqual(
+      {
+        ok: true,
+        key: LLM_MODEL_KEY,
+        storage: "global_config",
+        changed: true,
+      },
+    );
 
     expect(config.calls).toEqual([
       [
@@ -120,11 +123,15 @@ describe("createConfigCliHandlers", () => {
       readConfig: async () => ({}),
     });
 
-    await expect(handlers.set({ key: "agent.llm.temperature", value: "0.7" })).resolves.toMatchObject({
+    await expect(
+      handlers.set({ key: "agent.llm.temperature", value: "0.7" }),
+    ).resolves.toMatchObject({
       ok: true,
       changed: true,
     });
-    await expect(handlers.add({ key: "sandbox.bootstrap", value: "apt-get update" })).resolves.toMatchObject({
+    await expect(
+      handlers.add({ key: "sandbox.bootstrap", value: "apt-get update" }),
+    ).resolves.toMatchObject({
       ok: true,
       changed: true,
     });
@@ -162,11 +169,15 @@ describe("createConfigCliHandlers", () => {
       ok: true,
       value: ["first", "second"],
     });
-    await expect(handlers.remove({ key: "sandbox.bootstrap", value: "first" })).resolves.toMatchObject({
+    await expect(
+      handlers.remove({ key: "sandbox.bootstrap", value: "first" }),
+    ).resolves.toMatchObject({
       ok: true,
       changed: true,
     });
-    await expect(handlers.remove({ key: "sandbox.bootstrap", value: "missing" })).resolves.toMatchObject({
+    await expect(
+      handlers.remove({ key: "sandbox.bootstrap", value: "missing" }),
+    ).resolves.toMatchObject({
       ok: true,
       changed: false,
     });
@@ -187,7 +198,9 @@ describe("createConfigCliHandlers", () => {
       const config = createConfigPort();
       const fake = createStore();
       const { stderr, writers } = createWriters();
-      const handlers = createConfigCliHandlers(createDependencies(config, fake.store, undefined, writers));
+      const handlers = createConfigCliHandlers(
+        createDependencies(config, fake.store, undefined, writers),
+      );
 
       const result = await handlers.set({ key: LLM_MODEL_KEY, value });
 
@@ -205,14 +218,19 @@ describe("createConfigCliHandlers", () => {
   test("enforces secret-only and normal-only key modes without touching either store", async () => {
     const cases = [
       { input: { key: AZURE_API_KEY_KEY }, error: "This configuration key requires --secret.\n" },
-      { input: { key: LLM_MODEL_KEY, value: "azure/gpt-5.6-sol", secret: true }, error: "--secret is only valid for secret configuration keys.\n" },
+      {
+        input: { key: LLM_MODEL_KEY, value: "azure/gpt-5.6-sol", secret: true },
+        error: "--secret is only valid for secret configuration keys.\n",
+      },
     ];
 
     for (const { input, error } of cases) {
       const config = createConfigPort();
       const fake = createStore();
       const { stderr, writers } = createWriters();
-      const handlers = createConfigCliHandlers(createDependencies(config, fake.store, undefined, writers));
+      const handlers = createConfigCliHandlers(
+        createDependencies(config, fake.store, undefined, writers),
+      );
 
       await expect(handlers.set(input)).resolves.toMatchObject({ ok: false });
       expect(config.calls).toEqual([]);
@@ -244,7 +262,9 @@ describe("createConfigCliHandlers", () => {
     const config = createConfigPort();
     const fake = createStore();
     const { stdout, stderr, writers } = createWriters();
-    const handlers = createConfigCliHandlers(createDependencies(config, fake.store, undefined, writers));
+    const handlers = createConfigCliHandlers(
+      createDependencies(config, fake.store, undefined, writers),
+    );
 
     const result = await handlers.set({ key: AZURE_API_KEY_KEY, secret: true });
 
@@ -280,18 +300,29 @@ describe("createConfigCliHandlers", () => {
     });
     const unavailableWriters = createWriters();
     const unavailableHandlers = createConfigCliHandlers(
-      createDependencies(unavailableConfig, unavailableStore.store, undefined, unavailableWriters.writers),
+      createDependencies(
+        unavailableConfig,
+        unavailableStore.store,
+        undefined,
+        unavailableWriters.writers,
+      ),
     );
 
-    await expect(unavailableHandlers.set({ key: AZURE_API_KEY_KEY, secret: true })).resolves.toMatchObject({
+    await expect(
+      unavailableHandlers.set({ key: AZURE_API_KEY_KEY, secret: true }),
+    ).resolves.toMatchObject({
       ok: false,
       code: "secret_store_failed",
     });
     expect(`${unavailableWriters.stdout.text()}${unavailableWriters.stderr.text()}`).toBe(
       "Secure secret store is unavailable.\n",
     );
-    expect(`${unavailableWriters.stdout.text()}${unavailableWriters.stderr.text()}`).not.toContain(BACKEND_FIXTURE);
-    expect(`${unavailableWriters.stdout.text()}${unavailableWriters.stderr.text()}`).not.toContain(SECRET_FIXTURE);
+    expect(`${unavailableWriters.stdout.text()}${unavailableWriters.stderr.text()}`).not.toContain(
+      BACKEND_FIXTURE,
+    );
+    expect(`${unavailableWriters.stdout.text()}${unavailableWriters.stderr.text()}`).not.toContain(
+      SECRET_FIXTURE,
+    );
   });
 
   test("deletes normal configuration idempotently", async () => {
@@ -299,7 +330,9 @@ describe("createConfigCliHandlers", () => {
       const config = createConfigPort(changed);
       const fake = createStore();
       const { stdout, stderr, writers } = createWriters();
-      const handlers = createConfigCliHandlers(createDependencies(config, fake.store, undefined, writers));
+      const handlers = createConfigCliHandlers(
+        createDependencies(config, fake.store, undefined, writers),
+      );
 
       await expect(handlers.delete({ key: LLM_MODEL_KEY })).resolves.toEqual({
         ok: true,
@@ -323,7 +356,9 @@ describe("createConfigCliHandlers", () => {
       const config = createConfigPort();
       const fake = createStore({ delete: async () => changed });
       const { stdout, stderr, writers } = createWriters();
-      const handlers = createConfigCliHandlers(createDependencies(config, fake.store, undefined, writers));
+      const handlers = createConfigCliHandlers(
+        createDependencies(config, fake.store, undefined, writers),
+      );
 
       await expect(handlers.delete({ key: AZURE_API_KEY_KEY, secret: true })).resolves.toEqual({
         ok: true,

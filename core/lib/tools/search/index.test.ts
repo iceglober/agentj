@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import z from "zod";
+import type z from "zod";
 import type { ToolDef } from "../../llm";
 import type { Sandbox, SandboxCommandResult } from "../../sandbox";
 import { shq } from "../../shell";
@@ -29,14 +29,7 @@ async function executeTool<S extends z.ZodType>(tool: ToolDef<S>, input: z.input
 }
 
 function expectedGlobCommand(path: string, pattern: string, maxResults: number) {
-  return (
-    "cd " +
-    shq(path) +
-    " && bash -O globstar -O nullglob -c 'files=( " +
-    pattern +
-    " ); [ ${#files[@]} -gt 0 ] && ls -td -- \"${files[@]}\"' | head -n " +
-    String(maxResults + 1)
-  );
+  return `cd ${shq(path)} && bash -O globstar -O nullglob -c 'files=( ${pattern} ); [ \${#files[@]} -gt 0 ] && ls -td -- "\${files[@]}"' | head -n ${maxResults + 1}`;
 }
 
 describe("createSearchTools", () => {
@@ -88,17 +81,13 @@ describe("createSearchTools", () => {
       const grepSandbox = makeSandbox(() => ({ stdout: "", stderr: "", exitCode: 0 }));
       const { grep } = createSearchTools(grepSandbox, { root });
       const grepResult = await executeTool(grep, { pattern: "needle", path, maxResults: 5 });
-      expect(grepResult).toBe(
-        `ERROR: Path escapes sandbox root: ${path} is outside ${root}`,
-      );
+      expect(grepResult).toBe(`ERROR: Path escapes sandbox root: ${path} is outside ${root}`);
       expect(grepSandbox.commands).toHaveLength(0);
 
       const globSandbox = makeSandbox(() => ({ stdout: "", stderr: "", exitCode: 0 }));
       const { glob } = createSearchTools(globSandbox, { root });
       const globResult = await executeTool(glob, { pattern: "**/*.ts", path, maxResults: 5 });
-      expect(globResult).toBe(
-        `ERROR: Path escapes sandbox root: ${path} is outside ${root}`,
-      );
+      expect(globResult).toBe(`ERROR: Path escapes sandbox root: ${path} is outside ${root}`);
       expect(globSandbox.commands).toHaveLength(0);
     }
   });

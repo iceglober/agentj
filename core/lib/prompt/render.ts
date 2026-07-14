@@ -20,8 +20,7 @@ export function renderTemplate(
   let out = template;
   for (let m = cond.exec(out); m; m = cond.exec(out)) {
     const [full, kind, name, body] = m;
-    if (!(name in flags))
-      throw new Error(`prompt template: unknown flag {{#${kind} ${name}}}`);
+    if (!(name in flags)) throw new Error(`prompt template: unknown flag {{#${kind} ${name}}}`);
     const keep = kind === "if" ? flags[name] : !flags[name];
     out = out.slice(0, m.index) + (keep ? body : "") + out.slice(m.index + full.length);
   }

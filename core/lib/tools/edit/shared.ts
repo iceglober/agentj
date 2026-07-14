@@ -2,8 +2,7 @@ import z from "zod";
 import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 
-export const errMsg = (e: unknown) =>
-  e instanceof Error ? e.message : String(e);
+export const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export async function readLines(sb: Sandbox, path: string): Promise<string[]> {
   const text = await sb.readFile(path);

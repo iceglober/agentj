@@ -1,16 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 
-import type {
-  TaskRunEvent,
-  TaskRunOutcome,
-  TaskRunSessionIdentity,
-} from "../app/run";
+import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
 import {
   createPromptsPromptUi,
   createTranscriptRenderer,
-  safeRenderJson,
   type PromptRunner,
+  safeRenderJson,
   type TerminalWriter,
 } from "./index";
 
@@ -129,9 +125,7 @@ describe("createPromptsPromptUi", () => {
   });
 
   test("rejects empty input, returns null on cancel, and treats EOF as null", async () => {
-    let validate:
-      | ((value: unknown) => boolean | string)
-      | undefined;
+    let validate: ((value: unknown) => boolean | string) | undefined;
 
     const ui = createPromptsPromptUi({
       prompts: (async (question, options) => {

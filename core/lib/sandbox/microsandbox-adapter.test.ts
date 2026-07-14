@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -73,7 +73,6 @@ async function withTempGitRepo(run: (repo: string, nested: string) => Promise<vo
   }
 }
 
-
 async function withLinkedWorktree(repo: string, run: (worktree: string) => Promise<void>) {
   const worktree = path.join(path.dirname(repo), "linked-worktree");
   try {
@@ -97,7 +96,8 @@ async function fileSnapshot(root: string): Promise<Map<string, string>> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const candidate = path.join(directory, entry.name);
       if (entry.isDirectory()) await visit(candidate);
-      else if (entry.isFile()) files.set(path.relative(root, candidate), (await readFile(candidate)).toString("base64"));
+      else if (entry.isFile())
+        files.set(path.relative(root, candidate), (await readFile(candidate)).toString("base64"));
     }
   }
   await visit(root);
@@ -160,7 +160,9 @@ describe("Microsandbox project-directory configuration", () => {
           { target: canonicalWorktree, source: canonicalWorktree },
           { target: commonGitDir, source: commonGitDir },
         ]);
-        expect(new Set(builder.mounts.map(({ target }) => target)).size).toBe(builder.mounts.length);
+        expect(new Set(builder.mounts.map(({ target }) => target)).size).toBe(
+          builder.mounts.length,
+        );
       });
     });
   });
@@ -183,9 +185,13 @@ describe("Microsandbox project-directory configuration", () => {
       const nonGitDirectory = path.join(path.dirname(repo), "not-a-repository");
       await mkdir(nonGitDirectory);
 
-      await expect(resolveAndConfigure(builder, "relative/project")).rejects.toThrow("absolute directory");
+      await expect(resolveAndConfigure(builder, "relative/project")).rejects.toThrow(
+        "absolute directory",
+      );
       await expect(resolveAndConfigure(builder, notDirectory)).rejects.toThrow("not a directory");
-      await expect(resolveAndConfigure(builder, nonGitDirectory)).rejects.toThrow("not inside a Git worktree");
+      await expect(resolveAndConfigure(builder, nonGitDirectory)).rejects.toThrow(
+        "not inside a Git worktree",
+      );
 
       expect(builder.calls).toEqual([]);
       expect(builder.mounts).toEqual([]);
@@ -198,12 +204,15 @@ describe("runSandboxBootstrap", () => {
   test("runs configured commands in order", async () => {
     const commands: string[] = [];
 
-    await runSandboxBootstrap({
-      async executeCommand(command) {
-        commands.push(command);
-        return { stdout: "", stderr: "", exitCode: 0 };
+    await runSandboxBootstrap(
+      {
+        async executeCommand(command) {
+          commands.push(command);
+          return { stdout: "", stderr: "", exitCode: 0 };
+        },
       },
-    }, ["first", "second"]);
+      ["first", "second"],
+    );
 
     expect(commands).toEqual(["first", "second"]);
   });
@@ -211,12 +220,21 @@ describe("runSandboxBootstrap", () => {
   test("stops after the first failed command without exposing command output", async () => {
     const commands: string[] = [];
 
-    await expect(runSandboxBootstrap({
-      async executeCommand(command) {
-        commands.push(command);
-        return { stdout: "secret output", stderr: "secret error", exitCode: command === "bad" ? 7 : 0 };
-      },
-    }, ["good", "bad", "never"])).rejects.toThrow("command 2 failed with exit code 7");
+    await expect(
+      runSandboxBootstrap(
+        {
+          async executeCommand(command) {
+            commands.push(command);
+            return {
+              stdout: "secret output",
+              stderr: "secret error",
+              exitCode: command === "bad" ? 7 : 0,
+            };
+          },
+        },
+        ["good", "bad", "never"],
+      ),
+    ).rejects.toThrow("command 2 failed with exit code 7");
 
     expect(commands).toEqual(["good", "bad"]);
   });

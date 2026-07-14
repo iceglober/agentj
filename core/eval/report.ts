@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { loadConfig } from "../lib/config";
-import { resultRowSchema, type ResultRow } from "../lib/eval/config";
+import { type ResultRow, resultRowSchema } from "../lib/eval/config";
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname;
 const CONFIG_PATH = new URL("../agentj.json", import.meta.url).pathname;
@@ -60,8 +60,12 @@ function perConfigTable(rows: ResultRow[]) {
     console.log(
       `${cid.padEnd(12)} ${String(tasks.length).padStart(5)} ${pct(mean(taskRates)).padStart(9)} ` +
         `${pct(Math.min(...taskRates, 1)).padStart(5)} ${pct(Math.max(...taskRates, 0)).padStart(5)} ` +
-        `${median(nonError.map((r) => r.secs)).toFixed(1).padStart(8)} ` +
-        `${Math.round(mean(cr.map((r) => r.tokensIn))).toString().padStart(10)}`,
+        `${median(nonError.map((r) => r.secs))
+          .toFixed(1)
+          .padStart(8)} ` +
+        `${Math.round(mean(cr.map((r) => r.tokensIn)))
+          .toString()
+          .padStart(10)}`,
     );
   }
 }
@@ -90,7 +94,9 @@ function compare(rows: ResultRow[], a: string, b: string) {
     if (ra.verdict !== "pass" && rb.verdict === "pass") aFailBPass.push(k);
   }
 
-  console.log(`\nCompare ${a} → ${b} (joined on task#seed; ${excluded} pair(s) excluded for errors)`);
+  console.log(
+    `\nCompare ${a} → ${b} (joined on task#seed; ${excluded} pair(s) excluded for errors)`,
+  );
   console.log(`  ${a}-pass → ${b}-fail: ${aPassBFail.length}`);
   for (const k of aPassBFail) console.log(`    ${k}`);
   console.log(`  ${a}-fail → ${b}-pass: ${aFailBPass.length}`);

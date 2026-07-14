@@ -111,13 +111,8 @@ export type LlmConfig = z.infer<typeof llmConfigSchema>;
  */
 export const runtimes = {
   "ai-sdk": createAiSdkRuntime,
-} satisfies Record<
-  RuntimeName,
-  (config: LlmConfig, metricsSink?: MetricsSink) => AgentRuntime
->;
+} satisfies Record<RuntimeName, (config: LlmConfig, metricsSink?: MetricsSink) => AgentRuntime>;
 
 /** The port's factory: pick the runtime by config and hand back the boundary. */
-export const createRuntime = (
-  config: LlmConfig,
-  metricsSink?: MetricsSink,
-): AgentRuntime => runtimes[config.runtime](config, metricsSink);
+export const createRuntime = (config: LlmConfig, metricsSink?: MetricsSink): AgentRuntime =>
+  runtimes[config.runtime](config, metricsSink);

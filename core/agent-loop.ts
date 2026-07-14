@@ -1,19 +1,16 @@
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 
-import {
-  createProductionTaskRunDependencies,
-  runAgentTask,
-} from "./lib/app/run";
+import { createProductionTaskRunDependencies, runAgentTask } from "./lib/app/run";
 import { runAgentjCli } from "./lib/cli";
 import { createConfigCliHandlers } from "./lib/config-cli";
 import { createProductionEvalCliHandlers } from "./lib/eval-cli";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
-import { createPromptsSecretPrompt } from "./secrets-cli";
 import {
   createNodeTerminalWriters,
   createPromptsPromptUi,
   createTranscriptRenderer,
 } from "./lib/tui";
+import { createPromptsSecretPrompt } from "./secrets-cli";
 
 const COMMAND_VERSION = "0.0.0";
 
@@ -44,9 +41,7 @@ const main = async (): Promise<void> => {
     writers,
   });
   let evalHandlers: ReturnType<typeof createProductionEvalCliHandlers> | undefined;
-  let productionDependencies:
-    | ReturnType<typeof createProductionTaskRunDependencies>
-    | undefined;
+  let productionDependencies: ReturnType<typeof createProductionTaskRunDependencies> | undefined;
 
   const handleSigint = (): void => {
     abortController.abort();
@@ -72,10 +67,12 @@ const main = async (): Promise<void> => {
           });
         },
         async runTask(task, options) {
-          const dependencies = await (productionDependencies ??=
-            createProductionTaskRunDependencies(undefined, {
+          if (!productionDependencies) {
+            productionDependencies = createProductionTaskRunDependencies(undefined, {
               projectDir: process.cwd(),
-            }));
+            });
+          }
+          const dependencies = await productionDependencies;
           return runAgentTask(task, {
             ...options,
             dependencies,

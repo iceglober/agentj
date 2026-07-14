@@ -6,7 +6,7 @@ import { resolveWithinRoot } from "../paths";
 
 // Glob patterns are interpolated into a bash -c glob expansion, so restrict
 // them to glob syntax — anything shell-active is rejected, not escaped.
-const GLOB_SAFE = /^[A-Za-z0-9_./*?\[\]{},\- ]+$/;
+const GLOB_SAFE = /^[A-Za-z0-9_./*?[\]{},\- ]+$/;
 
 export interface SearchToolsOptions {
   /** Default directory for relative/omitted paths. */
@@ -15,7 +15,6 @@ export interface SearchToolsOptions {
 
 export function createSearchTools(sb: Sandbox, { root }: SearchToolsOptions) {
   const resolve = (path?: string) => resolveWithinRoot(root, path);
-
 
   const grep = defineTool({
     description:
@@ -28,10 +27,7 @@ export function createSearchTools(sb: Sandbox, { root }: SearchToolsOptions) {
         .describe(
           "File or directory to search inside the working root; defaults to the working directory",
         ),
-      include: z
-        .string()
-        .optional()
-        .describe('Only search files matching this glob, e.g. "*.py"'),
+      include: z.string().optional().describe('Only search files matching this glob, e.g. "*.py"'),
       ignoreCase: z.boolean().optional(),
       fixedString: z
         .boolean()
@@ -96,8 +92,7 @@ export function createSearchTools(sb: Sandbox, { root }: SearchToolsOptions) {
 
       const cmd = `cd ${shq(resolvedPath)} && bash -O globstar -O nullglob -c 'files=( ${pattern} ); [ \${#files[@]} -gt 0 ] && ls -td -- "\${files[@]}"' | head -n ${maxResults + 1}`;
       const r = await sb.executeCommand(cmd);
-      if (r.exitCode !== 0 && r.stderr.trim())
-        return `ERROR: ${r.stderr.trim()}`;
+      if (r.exitCode !== 0 && r.stderr.trim()) return `ERROR: ${r.stderr.trim()}`;
       const lines = r.stdout.split("\n").filter(Boolean);
       if (lines.length === 0) return "No files match.";
       if (lines.length > maxResults)

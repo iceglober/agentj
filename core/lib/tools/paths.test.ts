@@ -24,18 +24,14 @@ class FakeSandbox implements Sandbox {
 
 describe("resolveWithinRoot", () => {
   test("joins relative paths under a normalized POSIX root", () => {
-    expect(resolveWithinRoot("/repo/worktree", "src/agent.ts")).toBe(
-      "/repo/worktree/src/agent.ts",
-    );
+    expect(resolveWithinRoot("/repo/worktree", "src/agent.ts")).toBe("/repo/worktree/src/agent.ts");
   });
 
   test("missing, empty, and root candidates resolve to the normalized root", () => {
     expect(resolveWithinRoot("/repo/worktree", undefined)).toBe("/repo/worktree");
     expect(resolveWithinRoot("/repo/worktree", "")).toBe("/repo/worktree");
     expect(resolveWithinRoot("/repo/worktree", "   ")).toBe("/repo/worktree");
-    expect(resolveWithinRoot("/repo/worktree", "/repo/worktree")).toBe(
-      "/repo/worktree",
-    );
+    expect(resolveWithinRoot("/repo/worktree", "/repo/worktree")).toBe("/repo/worktree");
   });
 
   test("normalized in-root dot segments that stay inside succeed", () => {

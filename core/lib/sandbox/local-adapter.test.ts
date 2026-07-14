@@ -50,9 +50,7 @@ describe("createSandboxProviderLocal", () => {
         const success = await sandbox.executeCommand(
           "printf '%s\n' \"$PWD\"; printf 'stdout-data'; printf 'stderr-data' >&2",
         );
-        const failure = await sandbox.executeCommand(
-          "printf 'bad-news' >&2; exit 7",
-        );
+        const failure = await sandbox.executeCommand("printf 'bad-news' >&2; exit 7");
 
         const [reportedPwd, reportedStdout] = success.stdout.split("\n");
 

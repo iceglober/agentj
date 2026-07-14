@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { Agent } from "../agent";
 import type { RunResult, RunStep } from "../llm";
 import type { MetricsSink } from "../metrics";
-import { SecretStoreUnavailableError, type SecretStore } from "../secrets";
 import type { Sandbox } from "../sandbox";
+import { type SecretStore, SecretStoreUnavailableError } from "../secrets";
 import type { ChildSession, Session } from "../session";
 import {
   createProductionTaskRunDependencies,
-  runAgentTask,
   type ProductionTaskRunDependencyOverrides,
+  runAgentTask,
   type TaskRunDependencies,
   type TaskRunEvent,
 } from "./run";
@@ -123,9 +123,7 @@ function makeSession(options?: {
   } as SessionWithCalls;
 }
 
-function makeAgent(
-  generateImpl: Agent["generate"],
-): Agent {
+function makeAgent(generateImpl: Agent["generate"]): Agent {
   return {
     composed: {} as Agent["composed"],
     generate: generateImpl,
@@ -260,12 +258,10 @@ describe("runAgentTask", () => {
     expect((events[1] as Extract<TaskRunEvent, { type: "tool-call" }>).call.input).toEqual(
       longInput,
     );
-    expect(
-      (events[2] as Extract<TaskRunEvent, { type: "tool-result" }>).result.output,
-    ).toEqual(longOutput);
-    expect(
-      (events[3] as Extract<TaskRunEvent, { type: "result" }>).result.text,
-    ).toBe(longText);
+    expect((events[2] as Extract<TaskRunEvent, { type: "tool-result" }>).result.output).toEqual(
+      longOutput,
+    );
+    expect((events[3] as Extract<TaskRunEvent, { type: "result" }>).result.text).toBe(longText);
     expect(outcome).toEqual({
       kind: "success",
       session: events[0]!.session,
@@ -291,11 +287,7 @@ describe("runAgentTask", () => {
       }),
     );
 
-    expect(events.map((event) => event.type)).toEqual([
-      "session-created",
-      "result",
-      "commit",
-    ]);
+    expect(events.map((event) => event.type)).toEqual(["session-created", "result", "commit"]);
     expect(events[2]).toEqual({
       type: "commit",
       session: events[0]!.session,
@@ -445,10 +437,7 @@ describe("runAgentTask", () => {
       }),
     );
 
-    expect(events.map((event) => event.type)).toEqual([
-      "session-created",
-      "result",
-    ]);
+    expect(events.map((event) => event.type)).toEqual(["session-created", "result"]);
     expect(outcome).toEqual({
       kind: "commit-error",
       session: events[0]!.session,
@@ -583,9 +572,7 @@ describe("runAgentTask", () => {
 
     expect(outcome.kind).toBe("success");
     expect(resolvedProjectDirs).toEqual(["/launch/project"]);
-    expect(sandboxOptions).toEqual([
-      expect.objectContaining({ projectSource }),
-    ]);
+    expect(sandboxOptions).toEqual([expect.objectContaining({ projectSource })]);
     expect(parentSessionConfigs).toEqual([
       expect.objectContaining({ repoDir: projectSource.projectRoot }),
     ]);
@@ -620,14 +607,14 @@ describe("runAgentTask", () => {
 
     expect(outcome.kind).toBe("success");
     expect(resolverCalls).toBe(0);
-    expect(sandboxOptions).toEqual([expect.not.objectContaining({ projectSource: expect.anything() })]);
+    expect(sandboxOptions).toEqual([
+      expect.not.objectContaining({ projectSource: expect.anything() }),
+    ]);
   });
 
   test("maps launch-project preparation failures before sandbox, session, agent, or model work", async () => {
     const fixtureProjectPath = "/private/project/path";
-    const preflightFailure = new Error(
-      `fixture project backend failure ${fixtureProjectPath}`,
-    );
+    const preflightFailure = new Error(`fixture project backend failure ${fixtureProjectPath}`);
     let sandboxCalls = 0;
     let sessionCalls = 0;
     let agentCalls = 0;
@@ -678,9 +665,7 @@ describe("createProductionTaskRunDependencies", () => {
   const fixtureSource = "fixture-secret-store";
   const backendErrorText = "fixture secret backend unavailable";
 
-  function makeConfig(): NonNullable<
-    ProductionTaskRunDependencyOverrides["config"]
-  > {
+  function makeConfig(): NonNullable<ProductionTaskRunDependencyOverrides["config"]> {
     return {
       agent: {
         rules: "fixture rules",
@@ -892,11 +877,7 @@ describe("createProductionTaskRunDependencies", () => {
       await executeRun("secret prompt /private/project/path", dependencies);
     }
 
-    expect(capturedMetrics).toEqual([
-      explicitSink,
-      enabledSink,
-      expect.any(Object),
-    ]);
+    expect(capturedMetrics).toEqual([explicitSink, enabledSink, expect.any(Object)]);
     expect(factoryOptions).toEqual([{ enabled: true }, { enabled: false }]);
     expect(JSON.stringify(factoryOptions)).not.toContain("secret prompt");
     expect(JSON.stringify(factoryOptions)).not.toContain("/private/project/path");

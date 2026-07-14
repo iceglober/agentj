@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type ConfigFileSystem,
   deleteGlobalConfigValue,
   loadConfig,
   mergeConfig,
@@ -7,7 +8,6 @@ import {
   readGlobalConfig,
   resolveGlobalConfigPath,
   setGlobalConfigValue,
-  type ConfigFileSystem,
 } from ".";
 
 type FileCall =
@@ -111,7 +111,10 @@ describe("global config reads and merges", () => {
     const projectPath = "/project/agentj.json";
     const fixture = makeFileSystem({
       [globalPath]: JSON.stringify({
-        agent: { llm: { model: "global-model", providers: { azure: { endpoint: "https://global" } } }, rules: "global" },
+        agent: {
+          llm: { model: "global-model", providers: { azure: { endpoint: "https://global" } } },
+          rules: "global",
+        },
         eval: { prices: { model: { in: 1, out: 2 } } },
       }),
       [projectPath]: JSON.stringify({
@@ -218,7 +221,10 @@ describe("global config mutations", () => {
 
   test("sets an internal validated path atomically with private directory and file modes", async () => {
     const fixture = makeFileSystem({
-      [globalPath]: JSON.stringify({ unknown: { preserved: true }, agent: { llm: { model: "old" } } }),
+      [globalPath]: JSON.stringify({
+        unknown: { preserved: true },
+        agent: { llm: { model: "old" } },
+      }),
     });
 
     await expect(
@@ -229,7 +235,11 @@ describe("global config mutations", () => {
       unknown: { preserved: true },
       agent: { llm: { model: "new" } },
     });
-    expect(fixture.calls).toContainEqual(["mkdir", "/test/global", { recursive: true, mode: 0o700 }]);
+    expect(fixture.calls).toContainEqual([
+      "mkdir",
+      "/test/global",
+      { recursive: true, mode: 0o700 },
+    ]);
     expect(fixture.calls).toContainEqual(["chmod", "/test/global", 0o700]);
     expect(fixture.calls).toContainEqual(["chmod", globalPath, 0o600]);
 
@@ -242,7 +252,10 @@ describe("global config mutations", () => {
 
   test("deletes an existing internal path once, preserves unknown fields, and is idempotent", async () => {
     const fixture = makeFileSystem({
-      [globalPath]: JSON.stringify({ unknown: { preserved: true }, agent: { llm: { model: "remove" } } }),
+      [globalPath]: JSON.stringify({
+        unknown: { preserved: true },
+        agent: { llm: { model: "remove" } },
+      }),
     });
 
     await expect(

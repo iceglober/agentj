@@ -14,7 +14,5 @@ export interface BashToolsOptions {
  * exists to keep the vendor import quarantined in `*-adapter.ts`, not to pick
  * between providers. Add a registry here the day a second impl appears.
  */
-export const createBashTools = (
-  sb: Sandbox,
-  opts: BashToolsOptions,
-): Promise<ToolSet> => createBashToolAdapter(sb, opts);
+export const createBashTools = (sb: Sandbox, opts: BashToolsOptions): Promise<ToolSet> =>
+  createBashToolAdapter(sb, opts);

@@ -6,11 +6,10 @@ import {
   type EvalCommandRunner,
 } from "./eval-cli";
 
-function createRunner(exitCodes: {
-  run: number;
-  report: number;
-  selfcheck: number;
-}): { runner: EvalCommandRunner; calls: string[] } {
+function createRunner(exitCodes: { run: number; report: number; selfcheck: number }): {
+  runner: EvalCommandRunner;
+  calls: string[];
+} {
   const calls: string[] = [];
 
   return {

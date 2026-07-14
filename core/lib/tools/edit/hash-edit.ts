@@ -4,8 +4,7 @@ import { defineTool } from "../../llm";
 import type { Sandbox } from "../../sandbox";
 import { createReadTool, errMsg, readLines } from "./shared";
 
-const lineHash = (line: string) =>
-  createHash("sha256").update(line).digest("hex").slice(0, 4);
+const lineHash = (line: string) => createHash("sha256").update(line).digest("hex").slice(0, 4);
 
 const ANCHOR_RE = /^(\d+)#([0-9a-f]{4})$/;
 
@@ -28,9 +27,7 @@ export function createHashEditTools(sb: Sandbox) {
           z.object({
             anchor: z
               .string()
-              .describe(
-                'Anchor of the target line, "LINE#HASH" as shown by readFile',
-              ),
+              .describe('Anchor of the target line, "LINE#HASH" as shown by readFile'),
             end_anchor: z
               .string()
               .optional()
@@ -39,9 +36,7 @@ export function createHashEditTools(sb: Sandbox) {
             content: z
               .string()
               .optional()
-              .describe(
-                "Text to insert / replace with; may span multiple lines",
-              ),
+              .describe("Text to insert / replace with; may span multiple lines"),
           }),
         )
         .min(1),
@@ -52,8 +47,7 @@ export function createHashEditTools(sb: Sandbox) {
 
         const resolve = (anchor: string): number | string => {
           const m = ANCHOR_RE.exec(anchor);
-          if (!m)
-            return `ERROR: malformed anchor "${anchor}" (expected "LINE#HASH").`;
+          if (!m) return `ERROR: malformed anchor "${anchor}" (expected "LINE#HASH").`;
           const n = Number(m[1]);
           if (n < 1 || n > lines.length)
             return `ERROR: anchor "${anchor}" is out of range (file has ${lines.length} lines).`;
@@ -88,10 +82,8 @@ export function createHashEditTools(sb: Sandbox) {
         resolved.sort((a, b) => b.start - a.start);
         for (const e of resolved) {
           const newLines = e.content !== undefined ? e.content.split("\n") : [];
-          if (e.op === "replace")
-            lines.splice(e.start - 1, e.end - e.start + 1, ...newLines);
-          else if (e.op === "delete")
-            lines.splice(e.start - 1, e.end - e.start + 1);
+          if (e.op === "replace") lines.splice(e.start - 1, e.end - e.start + 1, ...newLines);
+          else if (e.op === "delete") lines.splice(e.start - 1, e.end - e.start + 1);
           else lines.splice(e.end, 0, ...newLines);
         }
 

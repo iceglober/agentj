@@ -1,18 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import type {
-  TaskRunEvent,
-  TaskRunOutcome,
-  TaskRunSessionIdentity,
-} from "../app/run";
-import type { PromptUi, TranscriptRenderer } from "../tui";
+import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
 import { createConfigCliHandlers } from "../config-cli";
+import type { PromptUi, TranscriptRenderer } from "../tui";
 import {
+  type AgentjCommandDependencies,
   EXIT_ABORTED,
   EXIT_FAILURE,
   EXIT_SUCCESS,
   runAgentjCli,
-  type AgentjCommandDependencies,
 } from "./index";
 
 const SESSION: TaskRunSessionIdentity = {
@@ -150,12 +146,17 @@ function createDependencies(options?: {
 
 describe("runAgentjCli", () => {
   test("positional task skips prompt and forwards the exact trimmed task", async () => {
-    const { deps, getPromptCallCount, runTaskCalls, runnerOptions, rendererTasks, renderer, abortSignal } =
-      createDependencies();
+    const {
+      deps,
+      getPromptCallCount,
+      runTaskCalls,
+      runnerOptions,
+      rendererTasks,
+      renderer,
+      abortSignal,
+    } = createDependencies();
 
-    await expect(runAgentjCli(["  fix the flaky test  "], deps)).resolves.toBe(
-      EXIT_SUCCESS,
-    );
+    await expect(runAgentjCli(["  fix the flaky test  "], deps)).resolves.toBe(EXIT_SUCCESS);
 
     expect(getPromptCallCount()).toBe(0);
     expect(runTaskCalls).toEqual(["fix the flaky test"]);
@@ -166,8 +167,9 @@ describe("runAgentjCli", () => {
   });
 
   test("missing task calls prompt once and forwards the prompt response", async () => {
-    const { deps, getPromptCallCount, runTaskCalls, rendererTasks, renderer } =
-      createDependencies({ promptTask: "  explain the module boundary  " });
+    const { deps, getPromptCallCount, runTaskCalls, rendererTasks, renderer } = createDependencies({
+      promptTask: "  explain the module boundary  ",
+    });
 
     await expect(runAgentjCli([], deps)).resolves.toBe(EXIT_SUCCESS);
 
@@ -185,9 +187,7 @@ describe("runAgentjCli", () => {
       const { deps, getPromptCallCount, runTaskCalls, rendererTasks, renderer } =
         createDependencies({ promptTask });
 
-      await expect(
-        runAgentjCli([], deps, { stdout, stderr }),
-      ).resolves.toBe(EXIT_SUCCESS);
+      await expect(runAgentjCli([], deps, { stdout, stderr })).resolves.toBe(EXIT_SUCCESS);
 
       expect(getPromptCallCount()).toBe(1);
       expect(runTaskCalls).toHaveLength(0);
@@ -280,9 +280,7 @@ describe("runAgentjCli", () => {
     const stderr = createMemoryWriter();
     const { deps, getPromptCallCount, runTaskCalls, rendererTasks } = createDependencies();
 
-    await expect(
-      runAgentjCli(["--help"], deps, { stdout, stderr }),
-    ).resolves.toBe(EXIT_SUCCESS);
+    await expect(runAgentjCli(["--help"], deps, { stdout, stderr })).resolves.toBe(EXIT_SUCCESS);
 
     expect(getPromptCallCount()).toBe(0);
     expect(runTaskCalls).toHaveLength(0);
@@ -302,9 +300,7 @@ describe("runAgentjCli", () => {
   test("quoted task words are accepted as one positional arg, while extra unquoted args are rejected by cmd-ts", async () => {
     const accepted = createDependencies();
 
-    await expect(runAgentjCli(["fix the flaky test"], accepted.deps)).resolves.toBe(
-      EXIT_SUCCESS,
-    );
+    await expect(runAgentjCli(["fix the flaky test"], accepted.deps)).resolves.toBe(EXIT_SUCCESS);
 
     expect(accepted.getPromptCallCount()).toBe(0);
     expect(accepted.runTaskCalls).toEqual(["fix the flaky test"]);
@@ -336,7 +332,9 @@ describe("runAgentjCli", () => {
     const normal = createDependencies();
     const normalCalls: unknown[] = [];
     normal.deps.configHandlers = {
-      async get() { throw new Error("get should not run"); },
+      async get() {
+        throw new Error("get should not run");
+      },
       async set(input) {
         normalCalls.push(input);
         return { ok: true, key: "llm.model", storage: "global_config", changed: true };
@@ -344,21 +342,25 @@ describe("runAgentjCli", () => {
       async delete() {
         throw new Error("delete should not run");
       },
-      async add() { throw new Error("add should not run"); },
-      async remove() { throw new Error("remove should not run"); },
+      async add() {
+        throw new Error("add should not run");
+      },
+      async remove() {
+        throw new Error("remove should not run");
+      },
     };
 
     await expect(
       runAgentjCli(["config", "set", "llm.model", "azure/gpt-5.6-sol"], normal.deps),
     ).resolves.toBe(EXIT_SUCCESS);
-    expect(normalCalls).toEqual([
-      { key: "llm.model", secret: false, value: "azure/gpt-5.6-sol" },
-    ]);
+    expect(normalCalls).toEqual([{ key: "llm.model", secret: false, value: "azure/gpt-5.6-sol" }]);
 
     const secret = createDependencies();
     const secretCalls: unknown[] = [];
     secret.deps.configHandlers = {
-      async get() { throw new Error("get should not run"); },
+      async get() {
+        throw new Error("get should not run");
+      },
       async set(input) {
         secretCalls.push(input);
         return { ok: true, key: "providers.azure.api_key", storage: "keychain", changed: true };
@@ -366,8 +368,12 @@ describe("runAgentjCli", () => {
       async delete() {
         throw new Error("delete should not run");
       },
-      async add() { throw new Error("add should not run"); },
-      async remove() { throw new Error("remove should not run"); },
+      async add() {
+        throw new Error("add should not run");
+      },
+      async remove() {
+        throw new Error("remove should not run");
+      },
     };
 
     await expect(
@@ -382,7 +388,9 @@ describe("runAgentjCli", () => {
     const { deps } = createDependencies();
     const calls: unknown[] = [];
     deps.configHandlers = {
-      async get() { throw new Error("get should not run"); },
+      async get() {
+        throw new Error("get should not run");
+      },
       async set() {
         throw new Error("set should not run");
       },
@@ -390,8 +398,12 @@ describe("runAgentjCli", () => {
         calls.push(input);
         return { ok: true, key: "llm.model", storage: "global_config", changed: true };
       },
-      async add() { throw new Error("add should not run"); },
-      async remove() { throw new Error("remove should not run"); },
+      async add() {
+        throw new Error("add should not run");
+      },
+      async remove() {
+        throw new Error("remove should not run");
+      },
     };
 
     await expect(runAgentjCli(["config", "delete", "llm.model"], deps)).resolves.toBe(EXIT_SUCCESS);
@@ -413,7 +425,9 @@ describe("runAgentjCli", () => {
         calls.push({ operation: "get", input });
         return { ok: true, key: input.key, storage: "global_config", value: [] };
       },
-      async set() { throw new Error("set should not run"); },
+      async set() {
+        throw new Error("set should not run");
+      },
       async add(input) {
         calls.push({ operation: "add", input });
         return { ok: true, key: input.key, storage: "global_config", changed: true };
@@ -422,10 +436,14 @@ describe("runAgentjCli", () => {
         calls.push({ operation: "remove", input });
         return { ok: true, key: input.key, storage: "global_config", changed: true };
       },
-      async delete() { throw new Error("delete should not run"); },
+      async delete() {
+        throw new Error("delete should not run");
+      },
     };
 
-    await expect(runAgentjCli(["config", "get", "sandbox.bootstrap"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runAgentjCli(["config", "get", "sandbox.bootstrap"], deps)).resolves.toBe(
+      EXIT_SUCCESS,
+    );
     await expect(
       runAgentjCli(["config", "add", "sandbox.bootstrap", "apt-get update"], deps),
     ).resolves.toBe(EXIT_SUCCESS);
@@ -510,7 +528,9 @@ describe("runAgentjCli", () => {
 
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
-    await expect(runAgentjCli(["eval", "--help"], deps, { stdout, stderr })).resolves.toBe(EXIT_SUCCESS);
+    await expect(runAgentjCli(["eval", "--help"], deps, { stdout, stderr })).resolves.toBe(
+      EXIT_SUCCESS,
+    );
     await expect(runAgentjCli(["eval", "unknown"], deps, { stdout, stderr })).resolves.toBe(2);
     expect(calls).toEqual(["run", "report", "selfcheck"]);
     expect(stdout.text()).toContain("Run AgentJ evaluation commands.");
@@ -526,15 +546,21 @@ describe("runAgentjCli", () => {
     const stderr = createMemoryWriter();
     const incomplete = createDependencies();
     incomplete.deps.configHandlers = {
-      async get() { throw new Error("get should not run"); },
+      async get() {
+        throw new Error("get should not run");
+      },
       async set() {
         throw new Error("set should not run");
       },
       async delete() {
         throw new Error("delete should not run");
       },
-      async add() { throw new Error("add should not run"); },
-      async remove() { throw new Error("remove should not run"); },
+      async add() {
+        throw new Error("add should not run");
+      },
+      async remove() {
+        throw new Error("remove should not run");
+      },
     };
 
     await expect(

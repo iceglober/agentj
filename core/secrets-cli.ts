@@ -1,13 +1,7 @@
 import { createRequire } from "node:module";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 
-import {
-  command,
-  positional,
-  runSafely,
-  string,
-  subcommands,
-} from "cmd-ts";
+import { command, positional, runSafely, string, subcommands } from "cmd-ts";
 
 import {
   AZURE_API_KEY_ACCOUNT,
@@ -81,10 +75,7 @@ export const createPromptsSecretPrompt = (): SecretPrompt => ({
   },
 });
 
-export const createSecretsCommand = (
-  deps: SecretsCliDependencies,
-  writers: SecretCliWriters,
-) => {
+export const createSecretsCommand = (deps: SecretsCliDependencies, writers: SecretCliWriters) => {
   const set = command({
     name: "set",
     description: "Store an AgentJ secret in the OS keychain.",
@@ -121,7 +112,9 @@ export const createSecretsCommand = (
       writeMigrationNotice(writers);
       try {
         const value = await deps.store.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT);
-        writers.stdout.write(value === undefined ? "Azure API key: not stored\n" : "Azure API key: stored\n");
+        writers.stdout.write(
+          value === undefined ? "Azure API key: not stored\n" : "Azure API key: stored\n",
+        );
         return EXIT_SUCCESS;
       } catch (error) {
         writeError(writers, error);
@@ -144,7 +137,9 @@ export const createSecretsCommand = (
       }
       try {
         const deleted = await deps.store.delete(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT);
-        writers.stdout.write(deleted ? "Azure API key deleted.\n" : "Azure API key was not stored.\n");
+        writers.stdout.write(
+          deleted ? "Azure API key deleted.\n" : "Azure API key was not stored.\n",
+        );
         return EXIT_SUCCESS;
       } catch (error) {
         writeError(writers, error);

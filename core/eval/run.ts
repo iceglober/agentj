@@ -1,24 +1,23 @@
-import { mkdir } from "node:fs/promises";
-import { appendFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { createInProcessAdapter } from "./adapters/in-process";
-import { createSandboxFixtureFactory } from "./adapters/sandbox-env";
 import { loadConfig } from "../lib/config";
-import { createRuntime, type LlmConfig } from "../lib/llm";
 import {
   configHash,
-  resultRowSchema,
-  runConfigSchema,
-  usdCost,
   type EvalConfig,
   type ResultRow,
   type RunConfig,
+  resultRowSchema,
+  runConfigSchema,
+  usdCost,
 } from "../lib/eval/config";
 import { composeGrade } from "../lib/eval/grade";
-import { taskKey, type GradeCtx, type Task, type Trajectory } from "../lib/eval/types";
+import { type GradeCtx, type Task, type Trajectory, taskKey } from "../lib/eval/types";
+import { createRuntime, type LlmConfig } from "../lib/llm";
 import { getSandbox } from "../lib/sandbox";
 import { createSandboxProviderLocal } from "../lib/sandbox/local-adapter";
 import { createSandboxProviderMicrosandbox } from "../lib/sandbox/microsandbox-adapter";
+import { createInProcessAdapter } from "./adapters/in-process";
+import { createSandboxFixtureFactory } from "./adapters/sandbox-env";
 
 // Resolve paths against the repo root (two levels up from core/eval/run.ts) so
 // the harness works regardless of the cwd it is invoked from.
@@ -33,7 +32,10 @@ const flag = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const csv = (name: string): string[] | undefined =>
-  flag(name)?.split(",").map((s) => s.trim()).filter(Boolean);
+  flag(name)
+    ?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 const noJudge: GradeCtx = { judge: async () => null };
 
@@ -121,14 +123,17 @@ async function main() {
       `Trial matrix: ${configs.length} configs × ${tasks.length} tasks × ${seeds.length} seeds = ${total} trials\n`,
     );
     console.log("Configs:");
-    for (const c of configs) console.log(`  ${c.id.padEnd(12)} ${hashes.get(c.id)}  ${c.agent.llm.model}`);
+    for (const c of configs)
+      console.log(`  ${c.id.padEnd(12)} ${hashes.get(c.id)}  ${c.agent.llm.model}`);
     console.log("\nTasks:");
     for (const t of tasks) console.log(`  ${taskKey(t).padEnd(28)} [${t.tags.join(", ")}]`);
     console.log("\nTrials:");
     for (const t of tasks)
       for (const c of configs)
         for (const s of seeds)
-          console.log(`  ${taskKey(t).padEnd(28)} ${c.id.padEnd(12)}(${hashes.get(c.id)}) seed=${s}`);
+          console.log(
+            `  ${taskKey(t).padEnd(28)} ${c.id.padEnd(12)}(${hashes.get(c.id)}) seed=${s}`,
+          );
     return;
   }
 
@@ -137,7 +142,10 @@ async function main() {
     await using sandbox = await getSandbox(createSandboxProviderLocal());
     const factory = createSandboxFixtureFactory(sandbox, { root: join(sandbox.root, "eval") });
 
-    const synthTraj = async (env: { diff(): Promise<string>; changedFiles(): Promise<string[]> }): Promise<Trajectory> => ({
+    const synthTraj = async (env: {
+      diff(): Promise<string>;
+      changedFiles(): Promise<string[]>;
+    }): Promise<Trajectory> => ({
       toolCalls: [],
       toolResults: [],
       finalText: "",
@@ -250,7 +258,12 @@ async function main() {
         verdict: grade.verdict,
         tokensIn: traj.usage.inputTokens,
         tokensOut: traj.usage.outputTokens,
-        usd: usdCost(evalCfg.prices, config.agent.llm.model, traj.usage.inputTokens, traj.usage.outputTokens),
+        usd: usdCost(
+          evalCfg.prices,
+          config.agent.llm.model,
+          traj.usage.inputTokens,
+          traj.usage.outputTokens,
+        ),
         secs: +(traj.wallMs / 1000).toFixed(1),
         filesTouched: traj.filesTouched.length,
         subscores: grade.subscores,
