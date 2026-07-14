@@ -1,6 +1,10 @@
 import { createAgent as createProductionAgent, type Agent } from "../agent";
 import { loadConfig } from "../config";
 import type { RunResult, RunStep } from "../llm";
+import type { MetricsSink } from "../metrics";
+import { createOtelMetricsSink } from "../metrics/otel-adapter";
+import { resolveAzureApiKey, type SecretStore } from "../secrets";
+import { createKeyringSecretStore } from "../secrets/keyring-adapter";
 import type { PromptContext } from "../prompt";
 import { getSandbox, type Sandbox } from "../sandbox";
 import {
@@ -285,6 +289,12 @@ export interface ProductionTaskRunDependencyOverrides {
   projectDir?: string;
   /** Test seam for project preflight; production resolves through the adapter. */
   resolveProjectSource?: (projectDir: string) => Promise<ProjectSource>;
+  config?: Awaited<ReturnType<typeof loadConfig>>;
+  loadConfig?: typeof loadConfig;
+  env?: Record<string, string | undefined>;
+  secretStore?: SecretStore;
+  metricsSink?: MetricsSink;
+  createMetricsSink?: (options: { enabled: boolean }) => MetricsSink;
   /** Test seam for sandbox provisioning after launch-project preparation. */
   createSandbox?: (
     options: Parameters<typeof createSandboxProviderMicrosandbox>[0],
@@ -295,32 +305,66 @@ export interface ProductionTaskRunDependencyOverrides {
   createChildSession?: typeof createChildSession;
   /** Test seam for agent construction. */
   createAgent?: typeof createProductionAgent;
+  onAgentCreate?: () => void | Promise<void>;
 }
 
 export async function createProductionTaskRunDependencies(
   configPath: string = new URL("../../agentj.json", import.meta.url).pathname,
   overrides: ProductionTaskRunDependencyOverrides = {},
 ): Promise<TaskRunDependencies> {
-  const config = await loadConfig(configPath);
+  const env = overrides.env ?? process.env;
+  let preparation: Promise<{
+    config: Awaited<ReturnType<typeof loadConfig>>;
+    azureApiKey: string;
+    metricsSink: MetricsSink;
+    projectSource: ProjectSource | undefined;
+  }> | undefined;
+
+  const prepare = () =>
+    (preparation ??= (async () => {
+      let projectSource: ProjectSource | undefined;
+      if (overrides.projectDir) {
+        try {
+          projectSource = await (
+            overrides.resolveProjectSource ?? resolveProjectSource
+          )(overrides.projectDir);
+        } catch {
+          throw new Error("Unable to prepare the launch project.");
+        }
+      }
+
+      const config =
+        overrides.config ??
+        (await (overrides.loadConfig ?? loadConfig)(configPath));
+      const azureApiKey = await resolveAzureApiKey({
+        env,
+        store: overrides.secretStore ?? createKeyringSecretStore({}),
+      });
+      if (azureApiKey.status === "missing") {
+        throw new Error("Azure API key missing; run agentj:secrets ... or set env");
+      }
+      if (azureApiKey.status === "store-unavailable") {
+        throw new Error(
+          "Secure secret store unavailable; set AZURE_FOUNDRY_API_KEY/AZURE_API_KEY for automation or configure the OS keychain.",
+        );
+      }
+
+      return {
+        config,
+        azureApiKey: azureApiKey.apiKey,
+        metricsSink:
+          overrides.metricsSink ??
+          (overrides.createMetricsSink ?? createOtelMetricsSink)({
+            enabled: env.AGENTJ_OTEL_METRICS === "1",
+          }),
+        projectSource,
+      };
+    })());
   const childSessionIds = new Set<string>();
   let childSessionCounter = 0;
-  let preparation: Promise<ProjectSource | undefined> | undefined;
-
-  const prepareProjectSource = (): Promise<ProjectSource | undefined> =>
-    (preparation ??= (async () => {
-      if (!overrides.projectDir) return undefined;
-
-      try {
-        return await (overrides.resolveProjectSource ?? resolveProjectSource)(
-          overrides.projectDir,
-        );
-      } catch {
-        throw new Error("Unable to prepare the launch project.");
-      }
-    })());
 
   const sessionConfig = async () => {
-    const projectSource = await prepareProjectSource();
+    const { config, projectSource } = await prepare();
     return {
       ...config.session,
       ...(projectSource ? { repoDir: projectSource.projectRoot } : {}),
@@ -355,7 +399,7 @@ export async function createProductionTaskRunDependencies(
 
   return {
     createSandbox: async () => {
-      const projectSource = await prepareProjectSource();
+      const { config, projectSource } = await prepare();
       const sandboxOptions = {
         ...config.sandbox,
         ...(projectSource ? { projectSource } : {}),
@@ -367,6 +411,7 @@ export async function createProductionTaskRunDependencies(
     createSession: async (sandbox) =>
       (overrides.createSession ?? createSession)(sandbox, await sessionConfig()),
     createAgent: async ({ sandbox, session }) => {
+      const { azureApiKey, config, metricsSink } = await prepare();
       let agentsMd = "";
       try {
         agentsMd = await sandbox.readFile(`${session.path}/AGENTS.md`);
@@ -374,20 +419,39 @@ export async function createProductionTaskRunDependencies(
 
       const rules = config.agent.rules || agentsMd || "";
 
+      await overrides.onAgentCreate?.();
       return (overrides.createAgent ?? createProductionAgent)(
         sandbox,
-        { ...config.agent, rules },
+        {
+          ...config.agent,
+          rules,
+          llm: {
+            ...config.agent.llm,
+            providers: {
+              ...config.agent.llm.providers,
+              azure: {
+                ...config.agent.llm.providers?.azure,
+                apiKey: azureApiKey,
+              },
+            },
+          },
+        },
         {
           root: session.path,
           ctx: await createPromptContext(sandbox, session),
+          metricsSink,
           delegation: {
             parentRef: session.branch,
             maxConcurrency: DEFAULT_SUBAGENT_MAX_CONCURRENCY,
             createChildSession: async ({ id, parentRef }) =>
-              (overrides.createChildSession ?? createChildSession)(sandbox, await sessionConfig(), {
-                id: nextChildSessionId(id),
-                parentRef,
-              }),
+              (overrides.createChildSession ?? createChildSession)(
+                sandbox,
+                await sessionConfig(),
+                {
+                  id: nextChildSessionId(id),
+                  parentRef,
+                },
+              ),
           },
         },
       );

@@ -5,6 +5,7 @@ import {
   type LanguageModel,
   type ToolSet as AiToolSet,
 } from "ai";
+import { recordModelUsage, type MetricsSink } from "../metrics";
 import { createAzureModelProvider, type AzureModelConfig } from "./azure-adapter";
 import type {
   AgentRuntime,
@@ -12,6 +13,7 @@ import type {
   LlmConfig,
   RunResult,
   RunStep,
+  TokenUsage,
   ToolDef,
   ToolSet,
 } from "./index";
@@ -81,7 +83,9 @@ const toAiTool = (def: ToolDef) =>
 
 const mapTools = (tools: ToolSet): AiToolSet =>
   Object.fromEntries(
-    Object.entries(tools).map(([name, def]) => [name, toAiTool(def)]),
+    Object.keys(tools)
+      .sort()
+      .map((name) => [name, toAiTool(tools[name])]),
   ) as AiToolSet;
 
 /**
@@ -91,52 +95,96 @@ const mapTools = (tools: ToolSet): AiToolSet =>
  * temperature/topP/providerOptions/stopWhen are constructor-level, while
  * abortSignal/onStepFinish are generate()-level.
  */
-export const createAiSdkRuntime = (config: LlmConfig): AgentRuntime => {
+export const createAiSdkRuntime = (
+  config: LlmConfig,
+  metricsSink?: MetricsSink,
+): AgentRuntime => {
   const model = createModel(config);
 
   return {
     async generate(req: GenerateRequest): Promise<RunResult> {
-      const agent = new ToolLoopAgent({
-        model,
-        instructions: req.instructions,
-        ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
-        ...(req.topP !== undefined ? { topP: req.topP } : {}),
-        // Our providerOptions is Record<string, Record<string, unknown>>; the
-        // SDK wants JSON-valued options. It is passed through verbatim, so cast
-        // at this vendor boundary rather than narrowing the port's shape.
-        ...(req.providerOptions
-          ? {
-              providerOptions: req.providerOptions as Record<
-                string,
-                Record<string, never>
-              >,
+      const startedAt = Date.now();
+      const recordUsage = (outcome: "success" | "error", usage?: TokenUsage) => {
+        try {
+          recordModelUsage(
+            metricsSink,
+            { provider: config.provider, model: config.model, outcome },
+            {
+              durationMs: Date.now() - startedAt,
+              inputTokens: usage?.inputTokens,
+              noCacheTokens: usage?.noCacheInputTokens,
+              cacheReadTokens: usage?.cacheReadInputTokens,
+              cacheWriteTokens: usage?.cacheWriteInputTokens,
+              outputTokens: usage?.outputTokens,
+              totalTokens: usage?.totalTokens,
+            },
+          );
+        } catch {
+          // Metrics are observational and must never affect generation.
+        }
+      };
+
+      try {
+        const agent = new ToolLoopAgent({
+          model,
+          instructions: req.instructions,
+          ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+          ...(req.topP !== undefined ? { topP: req.topP } : {}),
+          // Our providerOptions is Record<string, Record<string, unknown>>; the
+          // SDK wants JSON-valued options. It is passed through verbatim, so cast
+          // at this vendor boundary rather than narrowing the port's shape.
+          ...(req.providerOptions
+            ? {
+                providerOptions: req.providerOptions as Record<
+                  string,
+                  Record<string, never>
+                >,
+              }
+            : {}),
+          ...(req.stopSteps !== undefined
+            ? { stopWhen: stepCountIs(req.stopSteps) }
+            : {}),
+          toolOrder: Object.keys(req.tools).sort(),
+          tools: mapTools(req.tools),
+        });
+
+        const onStep = req.onStep;
+        const result = await agent.generate({
+          prompt: req.prompt,
+          ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
+          ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step)) } : {}),
+        });
+
+        const usage =
+          (result as { totalUsage?: typeof result.usage }).totalUsage ??
+          result.usage;
+        const inputTokenDetails = usage.inputTokenDetails as
+          | {
+              noCacheTokens?: number;
+              cacheReadTokens?: number;
+              cacheWriteTokens?: number;
             }
-          : {}),
-        ...(req.stopSteps !== undefined
-          ? { stopWhen: stepCountIs(req.stopSteps) }
-          : {}),
-        tools: mapTools(req.tools),
-      });
-
-      const onStep = req.onStep;
-      const result = await agent.generate({
-        prompt: req.prompt,
-        ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
-        ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step)) } : {}),
-      });
-
-      const usage =
-        (result as { totalUsage?: typeof result.usage }).totalUsage ??
-        result.usage;
-      return {
-        text: result.text,
-        steps: result.steps.map(mapStep),
-        usage: {
+          | undefined;
+        const mappedUsage: TokenUsage = {
           inputTokens: usage.inputTokens ?? 0,
           outputTokens: usage.outputTokens ?? 0,
           totalTokens: usage.totalTokens ?? 0,
-        },
-      };
+          ...(inputTokenDetails?.noCacheTokens !== undefined
+            ? { noCacheInputTokens: inputTokenDetails.noCacheTokens }
+            : {}),
+          ...(inputTokenDetails?.cacheReadTokens !== undefined
+            ? { cacheReadInputTokens: inputTokenDetails.cacheReadTokens }
+            : {}),
+          ...(inputTokenDetails?.cacheWriteTokens !== undefined
+            ? { cacheWriteInputTokens: inputTokenDetails.cacheWriteTokens }
+            : {}),
+        };
+        recordUsage("success", mappedUsage);
+        return { text: result.text, steps: result.steps.map(mapStep), usage: mappedUsage };
+      } catch (error) {
+        recordUsage("error");
+        throw error;
+      }
     },
   };
 };
