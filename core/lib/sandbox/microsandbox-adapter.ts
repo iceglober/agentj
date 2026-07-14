@@ -17,15 +17,18 @@ export const microsandboxOptionsSchema = z.object({
 
 export type MicrosandboxProviderOptions = z.input<
   typeof microsandboxOptionsSchema
->;
+> & {
+  /** Preflighted host paths from the composition root; intentionally not config-schema input. */
+  projectSource?: ProjectSource;
+};
 
 type MicrosandboxBuilder = ReturnType<typeof Microsandbox.builder>;
 type MicrosandboxOptions = z.output<typeof microsandboxOptionsSchema>;
 
 /** The verified host paths required to make a project and its Git metadata visible to a guest. */
 export type ProjectSource = {
-  projectRoot: string;
-  commonGitDir: string;
+  readonly projectRoot: string;
+  readonly commonGitDir: string;
 };
 
 const gitOutput = async (projectRoot: string, args: string[]): Promise<string> => {
@@ -85,20 +88,31 @@ const isNestedPath = (parent: string, child: string): boolean => {
   return pathFromParent === "" || (!pathFromParent.startsWith("..") && !isAbsolute(pathFromParent));
 };
 
+/** Validate only the injected source's mount-path shape; app-run resolves it once. */
+const validateProjectSource = (projectSource: ProjectSource): ProjectSource => {
+  const { projectRoot, commonGitDir } = projectSource;
+  if (
+    projectRoot.length === 0 ||
+    commonGitDir.length === 0 ||
+    !isAbsolute(projectRoot) ||
+    !isAbsolute(commonGitDir)
+  ) {
+    throw new Error("Microsandbox project source is invalid.");
+  }
+
+  return projectSource;
+};
+
 /** Configure the builder without creating a VM; exported for mount-configuration tests. */
 export const configureMicrosandboxBuilder = (
   builder: MicrosandboxBuilder,
   options: MicrosandboxOptions,
-  projectSource?: ProjectSource | string,
+  projectSource?: ProjectSource,
 ): MicrosandboxBuilder => {
   let configured = builder
     .image(options.image)
     .patch((p) => p.mkdir(options.workdir, { mode: 0o755 }))
     .workdir(options.workdir);
-
-  if (typeof projectSource === "string") {
-    throw new Error("Microsandbox project source must be resolved before mounting.");
-  }
 
   if (projectSource) {
     configured = configured.volume(projectSource.projectRoot, (mount) =>
@@ -118,10 +132,13 @@ export const createSandboxProviderMicrosandbox = (
   options: MicrosandboxProviderOptions = {},
 ) =>
   async (): Promise<Sandbox & AsyncDisposable> => {
-    const parsedOptions = microsandboxOptionsSchema.parse(options);
-    const projectSource = parsedOptions.projectDir
-      ? await resolveProjectSource(parsedOptions.projectDir)
-      : undefined;
+    const { projectSource: injectedProjectSource, ...configOptions } = options;
+    const parsedOptions = microsandboxOptionsSchema.parse(configOptions);
+    const projectSource = injectedProjectSource
+      ? await validateProjectSource(injectedProjectSource)
+      : parsedOptions.projectDir
+        ? await resolveProjectSource(parsedOptions.projectDir)
+        : undefined;
     const sb = await configureMicrosandboxBuilder(
       Microsandbox.builder(parsedOptions.name),
       parsedOptions,

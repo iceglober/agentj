@@ -57,7 +57,9 @@ const main = async (): Promise<void> => {
         },
         async runTask(task, options) {
           const dependencies = await (productionDependencies ??=
-            createProductionTaskRunDependencies());
+            createProductionTaskRunDependencies(undefined, {
+              projectDir: process.cwd(),
+            }));
           return runAgentTask(task, {
             ...options,
             dependencies,

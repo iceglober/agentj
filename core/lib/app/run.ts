@@ -3,7 +3,11 @@ import { loadConfig } from "../config";
 import type { RunResult, RunStep } from "../llm";
 import type { PromptContext } from "../prompt";
 import { getSandbox, type Sandbox } from "../sandbox";
-import { createSandboxProviderMicrosandbox } from "../sandbox/microsandbox-adapter";
+import {
+  createSandboxProviderMicrosandbox,
+  resolveProjectSource,
+  type ProjectSource,
+} from "../sandbox/microsandbox-adapter";
 import {
   createChildSession,
   createSession,
@@ -276,12 +280,52 @@ export async function runAgentTask(
   return outcome!;
 }
 
+export interface ProductionTaskRunDependencyOverrides {
+  /** Launch directory used as the session's host Git source. */
+  projectDir?: string;
+  /** Test seam for project preflight; production resolves through the adapter. */
+  resolveProjectSource?: (projectDir: string) => Promise<ProjectSource>;
+  /** Test seam for sandbox provisioning after launch-project preparation. */
+  createSandbox?: (
+    options: Parameters<typeof createSandboxProviderMicrosandbox>[0],
+  ) => Promise<Sandbox>;
+  /** Test seam for parent session construction. */
+  createSession?: typeof createSession;
+  /** Test seam for delegated child-session construction. */
+  createChildSession?: typeof createChildSession;
+  /** Test seam for agent construction. */
+  createAgent?: typeof createProductionAgent;
+}
+
 export async function createProductionTaskRunDependencies(
   configPath: string = new URL("../../agentj.json", import.meta.url).pathname,
+  overrides: ProductionTaskRunDependencyOverrides = {},
 ): Promise<TaskRunDependencies> {
   const config = await loadConfig(configPath);
   const childSessionIds = new Set<string>();
   let childSessionCounter = 0;
+  let preparation: Promise<ProjectSource | undefined> | undefined;
+
+  const prepareProjectSource = (): Promise<ProjectSource | undefined> =>
+    (preparation ??= (async () => {
+      if (!overrides.projectDir) return undefined;
+
+      try {
+        return await (overrides.resolveProjectSource ?? resolveProjectSource)(
+          overrides.projectDir,
+        );
+      } catch {
+        throw new Error("Unable to prepare the launch project.");
+      }
+    })());
+
+  const sessionConfig = async () => {
+    const projectSource = await prepareProjectSource();
+    return {
+      ...config.session,
+      ...(projectSource ? { repoDir: projectSource.projectRoot } : {}),
+    };
+  };
 
   const nextChildSessionId = (taskId: string): string => {
     const stem = safeChildIdSegment(taskId);
@@ -310,9 +354,18 @@ export async function createProductionTaskRunDependencies(
   });
 
   return {
-    createSandbox: () =>
-      getSandbox(createSandboxProviderMicrosandbox(config.sandbox)),
-    createSession: (sandbox) => createSession(sandbox, config.session),
+    createSandbox: async () => {
+      const projectSource = await prepareProjectSource();
+      const sandboxOptions = {
+        ...config.sandbox,
+        ...(projectSource ? { projectSource } : {}),
+      };
+      return overrides.createSandbox
+        ? overrides.createSandbox(sandboxOptions)
+        : getSandbox(createSandboxProviderMicrosandbox(sandboxOptions));
+    },
+    createSession: async (sandbox) =>
+      (overrides.createSession ?? createSession)(sandbox, await sessionConfig()),
     createAgent: async ({ sandbox, session }) => {
       let agentsMd = "";
       try {
@@ -321,7 +374,7 @@ export async function createProductionTaskRunDependencies(
 
       const rules = config.agent.rules || agentsMd || "";
 
-      return createProductionAgent(
+      return (overrides.createAgent ?? createProductionAgent)(
         sandbox,
         { ...config.agent, rules },
         {
@@ -330,8 +383,8 @@ export async function createProductionTaskRunDependencies(
           delegation: {
             parentRef: session.branch,
             maxConcurrency: DEFAULT_SUBAGENT_MAX_CONCURRENCY,
-            createChildSession: ({ id, parentRef }) =>
-              createChildSession(sandbox, config.session, {
+            createChildSession: async ({ id, parentRef }) =>
+              (overrides.createChildSession ?? createChildSession)(sandbox, await sessionConfig(), {
                 id: nextChildSessionId(id),
                 parentRef,
               }),
