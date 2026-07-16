@@ -69,6 +69,8 @@ describe("createChatSession", () => {
       expect(loaded?.turns.map((turn) => turn.mode)).toEqual(["plan", "build"]);
       expect(loaded?.state?.messages).toEqual([{ turn: 1 }, { turn: 2 }]);
       expect(events.filter((event) => event.type === "assistant")).toHaveLength(2);
+      expect(events.filter((event) => event.type === "turn-finished")).toHaveLength(2);
+      expect(events.at(-1)?.type).toBe("turn-finished");
     });
   });
 
@@ -106,6 +108,11 @@ describe("createChatSession", () => {
       release?.();
       await Promise.all([first, second]);
       expect(modes).toEqual(["plan", "build"]); // queued turn ran in the new mode
+      expect(
+        events
+          .filter((event) => event.type === "turn-started" || event.type === "turn-finished")
+          .map((event) => event.type),
+      ).toEqual(["turn-started", "turn-finished", "turn-started", "turn-finished"]);
     });
   });
 
@@ -135,12 +142,43 @@ describe("createChatSession", () => {
       const turn = session.send("long running");
       await new Promise((r) => setTimeout(r, 5));
       expect(session.abort()).toBe(true);
+      expect(session.abort()).toBe(true); // repeated interrupts do not emit duplicate requests
       await turn;
-      expect(events.some((event) => event.type === "turn-aborted")).toBe(true);
+      expect(
+        events
+          .filter(
+            (event) =>
+              event.type === "turn-abort-requested" ||
+              event.type === "turn-aborted" ||
+              event.type === "turn-finished",
+          )
+          .map((event) => event.type),
+      ).toEqual(["turn-abort-requested", "turn-aborted", "turn-finished"]);
 
       await session.send("next");
       expect(prompts[1]).toContain("was interrupted");
       expect(prompts[1]).toContain("next");
+    });
+  });
+
+  test("forwards internal blank lines to the agent and durable log unchanged", async () => {
+    await withLog(async (log, root) => {
+      const prompts: string[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            return result("ok");
+          }),
+        log,
+      });
+      const text = "first\n\n\n\nsecond";
+
+      await session.send(text);
+
+      expect(prompts).toEqual([text]);
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.turns[0]?.user).toBe(text);
     });
   });
 
@@ -163,6 +201,7 @@ describe("createChatSession", () => {
 
       await session.send("boom");
       expect(events.some((event) => event.type === "turn-error")).toBe(true);
+      expect(events.at(-1)?.type).toBe("turn-finished");
       expect(session.busy).toBe(false);
 
       await session.send("again");

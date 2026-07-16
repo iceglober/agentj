@@ -19,6 +19,13 @@ describe("parseInput", () => {
     });
     expect(parseInput("  fix the bug  ")).toEqual({ kind: "message", text: "fix the bug" });
   });
+
+  test("trims outer whitespace but preserves internal blank lines", () => {
+    expect(parseInput(" \n\nfirst\n\n\n\nsecond\n\n ")).toEqual({
+      kind: "message",
+      text: "first\n\n\n\nsecond",
+    });
+  });
 });
 
 describe("expandAtFiles", () => {

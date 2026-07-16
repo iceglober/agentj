@@ -4,6 +4,7 @@ import { applyEditorCommand, createEditorState, type EditorState } from "./edito
 import { TerminalKeyDecoder } from "./key-decoder";
 import {
   displayWidth,
+  escapeTerminalText,
   renderEditorLayout,
   truncateToDisplayWidth,
   wrapToDisplayWidth,
@@ -100,19 +101,17 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   }
 
   const safeLine = (line: string): string =>
-    truncateToDisplayWidth(line.replace(/[\r\n]+/gu, " "), contentWidth());
+    truncateToDisplayWidth(escapeTerminalText(line).replace(/\n+/gu, " "), contentWidth());
 
   const liveLines = (): LiveLayout => {
     const progress = progressLines.map(safeLine);
     const safeStatus = safeLine(status);
     if (pendingAsk) {
-      const { request } = pendingAsk;
-      const detail = truncateToDisplayWidth(
-        request.detail.replace(/[\r\n]+/gu, " "),
-        contentWidth() * 2,
-      );
       const askLines = [
-        ...wrapToDisplayWidth(`Permission ${request.tool}: ${detail}`, contentWidth()),
+        ...wrapToDisplayWidth(
+          `Permission ${escapeTerminalText(pendingAsk.request.tool)} — review request above`,
+          contentWidth(),
+        ),
         ...wrapToDisplayWidth("[y]es once · [a]lways this session · [n]o", contentWidth()),
       ];
       const askCursorRow = progress.length + askLines.length - 1;
@@ -173,6 +172,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     lastLayout = null;
   };
 
+  const printTranscript = (text: string): void => {
+    clearLive();
+    write(`${escapeTerminalText(text).split("\n").join("\r\n")}\r\n`);
+    paint();
+  };
+
+  const printPermissionRequest = (request: PermissionRequest): void => {
+    printTranscript(`Permission ${request.tool}:\n${request.detail}`);
+  };
+
   const armEscapeFlush = (): void => {
     if (escapeTimer) clearTimeout(escapeTimer);
     escapeTimer = setTimeout(() => {
@@ -185,8 +194,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     const ask = pendingAsk;
     if (!ask) return;
     pendingAsk = askQueue.shift() ?? null;
-    paint();
     ask.resolve(decision);
+    if (pendingAsk) printPermissionRequest(pendingAsk.request);
+    else paint();
   };
 
   const handleAskKey = (command: { type: string; text?: string }): void => {
@@ -312,9 +322,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     },
 
     printAbove(text) {
-      clearLive();
-      write(`${text.split("\n").join("\r\n")}\r\n`);
-      paint();
+      printTranscript(text);
     },
 
     setProgressLines(lines) {
@@ -334,7 +342,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         if (pendingAsk) askQueue.push(ask);
         else {
           pendingAsk = ask;
-          paint();
+          printPermissionRequest(request);
         }
       });
     },

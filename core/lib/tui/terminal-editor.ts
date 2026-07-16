@@ -43,6 +43,19 @@ export const graphemeWidth = (value: string): number => {
 export const displayWidth = (value: string): number =>
   splitGraphemes(value).reduce((total, grapheme) => total + graphemeWidth(grapheme), 0);
 
+const escapeCodePoint = (value: string): string => {
+  const code = value.codePointAt(0) ?? 0;
+  return code <= 0xff ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u{${code.toString(16)}}`;
+};
+
+/** Neutralize terminal controls while retaining line breaks for transcript layout. */
+export const escapeTerminalText = (value: string): string =>
+  value
+    .replace(/\r\n?/gu, "\n")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: these are the characters being escaped
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/gu, escapeCodePoint)
+    .replace(/\p{Bidi_Control}/gu, escapeCodePoint);
+
 export const truncateToDisplayWidth = (value: string, maxWidth: number): string => {
   const width = Math.max(0, Math.floor(maxWidth));
   if (displayWidth(value) <= width) return value;

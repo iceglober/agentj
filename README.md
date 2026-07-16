@@ -44,7 +44,8 @@ Keys and commands:
 - **Tab** — toggle plan/build (applies at the next turn if one is running).
 - **Esc** — interrupt the running turn. The session survives; the model is told it was cut short.
 - **Ctrl+C** — clear the input; on empty input it interrupts, and a double press quits.
-- **Enter** — send. **Shift+Return** — newline. Messages typed mid-turn are queued.
+- **Enter** — send. **Shift+Return** — newline. Outer whitespace is trimmed when routing a
+  message; internal blank lines are preserved. Messages typed mid-turn are queued.
 - **↑/↓** or **Ctrl+P/N** — browse recent submitted prompts from an empty editor.
 - **`& <task>`** — run the task as a background job in the current mode. Jobs run in their own
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
@@ -70,8 +71,9 @@ no mutating tools at all. In build mode:
 ./bin/agentj config add permissions.bash.deny "git push*"
 ```
 
-Asks render inline (`[y]es once · [a]lways this session · [n]o`) and concurrent asks are queued.
-Session-wide approval applies only to policy outcomes of `ask`; configured denies remain authoritative.
+The complete, terminal-escaped request is printed into the transcript before the inline controls
+(`[y]es once · [a]lways this session · [n]o`) appear; concurrent asks are queued. Session-wide
+approval applies only to policy outcomes of `ask`; configured denies remain authoritative.
 In `agentj run` there is no TTY: asks resolve to deny with a notice unless `--allow-all` is passed. A
 denial is returned to the model as a tool result, so it adapts instead of crashing the turn.
 
@@ -80,7 +82,8 @@ denial is returned to the model as a tool result, so it adapts instead of crashi
 In both modes the agent has `run_subagents`: a task DAG (`waitsOn` between tasks) executed with
 bounded concurrency. Plan mode fans out read-only researchers; build mode gives each child an
 isolated git worktree and integrates the results back as a batch — a child failure preserves its
-branch instead of losing work. `agent.tools.subagents.model` routes children to a cheaper tier.
+branch instead of losing work. Running DAG state stays in the live region, then a final task summary
+is retained in the transcript. `agent.tools.subagents.model` routes children to a cheaper tier.
 
 ## Sessions and persistence
 

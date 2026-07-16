@@ -92,6 +92,15 @@ describe("createChatScreen", () => {
     expect(input.rawModes).toEqual([true, false]);
   });
 
+  test("submits multiline input without collapsing internal blank lines", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+    input.write("  first\u001b[13;2u\u001b[13;2u\u001b[13;2u\u001b[13;2usecond  \r");
+    await settle();
+    expect(calls.submit).toEqual(["  first\n\n\n\nsecond  "]);
+    screen.stop();
+  });
+
   test("Tab toggles mode, bare Escape flushes to an interrupt", async () => {
     const { screen, input, calls } = makeScreen();
     screen.start();
@@ -140,12 +149,14 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("permission asks are modal and distinguish once, always, and deny", async () => {
+  test("permission asks show the complete request and distinguish once, always, and deny", async () => {
     const { screen, input, text } = makeScreen();
     screen.start();
-    const first = screen.askPermission({ tool: "bash", kind: "bash", detail: "git push" });
+    const detail = `git push origin a-very-long-branch-name-that-exceeds-the-terminal-width\necho done`;
+    const first = screen.askPermission({ tool: "bash", kind: "bash", detail });
     await settle();
-    expect(text()).toContain("Permission bash: git push");
+    expect(text()).toContain(`Permission bash:\r\n${detail.replace("\n", "\r\n")}`);
+    expect(text()).toContain("Permission bash — review request above");
     input.write("y");
     await expect(first).resolves.toBe("allow");
 
@@ -158,6 +169,22 @@ describe("createChatScreen", () => {
     input.write("n");
     await expect(third).resolves.toBe("deny");
     screen.stop();
+  });
+
+  test("escapes terminal controls in transcript and permission output", async () => {
+    const { screen, text } = makeScreen();
+    screen.start();
+    screen.printAbove("unsafe \u001b[2J output");
+    const ask = screen.askPermission({
+      tool: "bash",
+      kind: "bash",
+      detail: "printf '\u001b[31mred'\u202e",
+    });
+    await settle();
+    expect(text()).toContain("unsafe \\x1b[2J output");
+    expect(text()).toContain("printf '\\x1b[31mred'\\u{202e}");
+    screen.stop();
+    await expect(ask).resolves.toBe("deny");
   });
 
   test("queues concurrent permission asks and denies pending asks on stop", async () => {

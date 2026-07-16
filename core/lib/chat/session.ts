@@ -109,6 +109,7 @@ export function createChatSession(
       busy = false;
       turnAbort = null;
       if (pendingMode !== mode) emit({ type: "mode-changed", mode: pendingMode, pending: false });
+      emit({ type: "turn-finished" });
     }
   };
 
@@ -153,7 +154,10 @@ export function createChatSession(
 
     abort() {
       if (!turnAbort) return false;
-      turnAbort.abort();
+      if (!turnAbort.signal.aborted) {
+        turnAbort.abort();
+        emit({ type: "turn-abort-requested" });
+      }
       return true;
     },
 

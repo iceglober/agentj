@@ -29,8 +29,10 @@ export type ChatEvent =
   | { type: "tool-call"; call: ToolCall }
   | { type: "tool-result"; result: ToolResult }
   | { type: "assistant"; mode: ChatMode; text: string; stepLimitReached?: boolean }
+  | { type: "turn-abort-requested" }
   | { type: "turn-aborted" }
   | { type: "turn-error"; error: string }
+  | { type: "turn-finished" }
   | { type: "mode-changed"; mode: ChatMode; pending: boolean }
   | { type: "subagent-progress"; progress: SubagentProgressEvent }
   | { type: "permission-ask"; request: PermissionRequest }

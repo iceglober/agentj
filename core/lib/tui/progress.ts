@@ -31,6 +31,24 @@ export interface ProgressTracker {
   readonly live: boolean;
 }
 
+export interface ProgressUpdate {
+  /** Current ephemeral live-region lines. */
+  lines: string[];
+  /** Final task lines to append to the transcript exactly once. */
+  completedLines: string[];
+}
+
+/** Apply one event, retaining the final task state before dag-completed clears it. */
+export function applyProgressEvent(
+  tracker: ProgressTracker,
+  event: SubagentProgressEvent,
+  frame = 0,
+): ProgressUpdate {
+  const completedLines = event.type === "dag-completed" && tracker.live ? tracker.lines(frame) : [];
+  tracker.apply(event);
+  return { lines: tracker.lines(frame), completedLines };
+}
+
 export function createProgressTracker(): ProgressTracker {
   let tasks: TrackedTask[] = [];
   let live = false;
@@ -86,7 +104,8 @@ export function createProgressTracker(): ProgressTracker {
 
     lines(frame = 0) {
       if (!live) return [];
-      return tasks.map((task) => {
+      const MAX_LEFT = 48;
+      const rows = tasks.map((task) => {
         const marker =
           task.state === "completed"
             ? "✓"
@@ -99,11 +118,20 @@ export function createProgressTracker(): ProgressTracker {
           task.state === "waiting" && task.waitsOn.length > 0
             ? ` · waits on ${task.waitsOn.join(", ")}`
             : "";
+        const outcome =
+          task.state === "failed" || task.state === "blocked" ? ` (${task.state})` : "";
+        let left = `  ${marker} ${task.id} ${task.title}${outcome}${waits}`;
+        if (left.length > MAX_LEFT) left = `${left.slice(0, MAX_LEFT - 1)}…`;
         const elapsed =
-          task.elapsedMs !== undefined ? `  ${(task.elapsedMs / 1000).toFixed(1)}s` : "";
-        const usage = task.usage ? `  ${formatUsage(task.usage)}` : "";
-        return `  ${marker} ${task.id} ${task.title}${waits}${usage}${elapsed}`;
+          task.elapsedMs !== undefined ? `${(task.elapsedMs / 1000).toFixed(1)}s` : "";
+        const usage = task.usage ? formatUsage(task.usage) : "";
+        const right = [usage, elapsed].filter(Boolean).join("  ");
+        return { left, right };
       });
+      const width = Math.max(...rows.map((row) => row.left.length));
+      return rows.map((row) =>
+        row.right ? `${row.left.padEnd(width + 2)}${row.right}` : row.left,
+      );
     },
   };
 }

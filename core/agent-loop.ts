@@ -31,7 +31,7 @@ import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
 import { createUndoStack } from "./lib/session/undo";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
-import { createProgressTracker } from "./lib/tui/progress";
+import { applyProgressEvent, createProgressTracker } from "./lib/tui/progress";
 import {
   createGitDelegationSnapshot,
   integrateGitDelegation,
@@ -101,6 +101,37 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
     default:
       return null;
   }
+};
+
+export const formatChatStatus = (state: {
+  mode: ChatMode;
+  sessionId: string;
+  runningJobs: number;
+  busy: boolean;
+  interruptRequested: boolean;
+  spinnerFrame: number;
+  turnStartedAt: number | null;
+  currentActivity: ToolActivity | null;
+  now?: number;
+}): string => {
+  let busy = "";
+  if (state.busy) {
+    const spinner = ["◐", "◓", "◑", "◒"];
+    const frame = spinner[state.spinnerFrame % spinner.length] ?? "◐";
+    const elapsed =
+      state.turnStartedAt !== null
+        ? ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`
+        : "";
+    const doing = state.interruptRequested
+      ? "interrupting…"
+      : state.currentActivity
+        ? state.currentActivity.tool === "run_subagents"
+          ? `run_subagents (${state.currentActivity.detail})`
+          : state.currentActivity.tool
+        : "thinking";
+    busy = ` · ${frame} ${doing}${elapsed}${state.interruptRequested ? "" : " (esc to interrupt)"}`;
+  }
+  return `⏵ ${state.mode} · session ${state.sessionId} · ${state.runningJobs} job${state.runningJobs === 1 ? "" : "s"}${busy} · tab: mode · /help`;
 };
 
 interface ChatComposition {
@@ -308,15 +339,9 @@ export async function runAgentjChat(
 ): Promise<number> {
   const tracker = createProgressTracker();
   let screen: ChatScreen | undefined;
+  let emitChatEvent: ((event: ChatEvent) => void) | null = null;
   const onDagProgress = (progress: SubagentProgressEvent): void => {
-    // Freeze the final per-task lines (usage + elapsed) into the transcript
-    // before the live block clears.
-    if (progress.type === "dag-completed" && tracker.live) {
-      const finalLines = tracker.lines();
-      if (finalLines.length > 0) screen?.printAbove(finalLines.join("\n"));
-    }
-    tracker.apply(progress);
-    screen?.setProgressLines(tracker.lines());
+    emitChatEvent?.({ type: "subagent-progress", progress });
   };
 
   const permissionGate = createSessionPermissionGate((request) =>
@@ -326,6 +351,7 @@ export async function runAgentjChat(
   // Live activity for the status line: what is running right now, since when.
   let currentActivity: ToolActivity | null = null;
   let turnStartedAt: number | null = null;
+  let interruptRequested = false;
   let spinnerFrame = 0;
   const onToolActivity = (activity: ToolActivity): void => {
     currentActivity = activity.phase === "start" ? activity : null;
@@ -378,19 +404,26 @@ export async function runAgentjChat(
   });
 
   const render = (event: ChatEvent): void => {
-    if (event.type === "turn-started") turnStartedAt = Date.now();
-    if (
-      event.type === "assistant" ||
-      event.type === "turn-aborted" ||
-      event.type === "turn-error"
-    ) {
+    if (event.type === "turn-started") {
+      turnStartedAt = Date.now();
+      interruptRequested = false;
+    }
+    if (event.type === "turn-abort-requested") interruptRequested = true;
+    if (event.type === "turn-finished") {
       turnStartedAt = null;
       currentActivity = null;
+      interruptRequested = false;
+    }
+    if (event.type === "subagent-progress") {
+      const update = applyProgressEvent(tracker, event.progress, spinnerFrame);
+      if (update.completedLines.length > 0) screen?.printAbove(update.completedLines.join("\n"));
+      screen?.setProgressLines(update.lines);
     }
     const text = formatChatEvent(event);
     if (text) screen?.printAbove(text);
     updateStatus();
   };
+  emitChatEvent = render;
 
   const chat: ChatSession = createChatSession(
     { agentFor, log, undo, onEvent: render },
@@ -406,22 +439,19 @@ export async function runAgentjChat(
         : composition.runBuildJob(prompt, abortSignal),
   });
 
-  const SPINNER = ["◐", "◓", "◑", "◒"];
   const updateStatus = (): void => {
-    const running = jobs.list().filter((job) => job.status === "running").length;
-    let busy = "";
-    if (chat.busy) {
-      const frame = SPINNER[spinnerFrame % SPINNER.length] ?? "◐";
-      const elapsed = turnStartedAt ? ` ${Math.round((Date.now() - turnStartedAt) / 1000)}s` : "";
-      const doing = currentActivity
-        ? currentActivity.tool === "run_subagents"
-          ? `run_subagents (${currentActivity.detail})`
-          : currentActivity.tool
-        : "thinking";
-      busy = ` · ${frame} ${doing}${elapsed} (esc to interrupt)`;
-    }
+    const runningJobs = jobs.list().filter((job) => job.status === "running").length;
     screen?.setStatus(
-      `⏵ ${chat.pendingMode} · session ${log.id} · ${running} job${running === 1 ? "" : "s"}${busy} · tab: mode · /help`,
+      formatChatStatus({
+        mode: chat.pendingMode,
+        sessionId: log.id,
+        runningJobs,
+        busy: chat.busy,
+        interruptRequested,
+        spinnerFrame,
+        turnStartedAt,
+        currentActivity,
+      }),
     );
   };
 
