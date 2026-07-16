@@ -35,6 +35,48 @@ function makeScreen(over: Partial<ChatScreenCallbacks> = {}) {
   return { screen, input, calls, text: () => Buffer.concat(chunks).toString("utf8") };
 }
 
+/**
+ * Minimal virtual terminal: interprets the screen's ANSI output (CR, LF,
+ * cursor up/forward, ESC[J clear-down) so tests can assert what actually
+ * survives on screen — presence-in-stream assertions cannot catch repaint
+ * arithmetic bugs that eat lines above the live region.
+ */
+function renderScreen(stream: string): string[] {
+  const rows: string[][] = [[]];
+  let row = 0;
+  let col = 0;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: parsing ANSI escapes is the point
+  const pattern = /\u001b\[([0-9]*)([A-Za-z])|([\s\S])/g;
+  for (const match of stream.matchAll(pattern)) {
+    const [, count, command, char] = match;
+    if (command) {
+      const n = count === "" || count === undefined ? 1 : Number(count);
+      if (command === "A") row = Math.max(0, row - n);
+      else if (command === "B") row += n;
+      else if (command === "C") col += n;
+      else if (command === "J") {
+        rows[row] = (rows[row] ?? []).slice(0, col);
+        rows.length = row + 1;
+      }
+      continue;
+    }
+    if (char === "\r") col = 0;
+    else if (char === "\n") {
+      row += 1;
+      col = 0;
+      while (rows.length <= row) rows.push([]);
+    } else if (char !== undefined) {
+      while (rows.length <= row) rows.push([]);
+      const line = rows[row] ?? [];
+      while (line.length < col) line.push(" ");
+      line[col] = char;
+      rows[row] = line;
+      col += 1;
+    }
+  }
+  return rows.map((line) => line.join(""));
+}
+
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe("createChatScreen", () => {
@@ -110,6 +152,33 @@ describe("createChatScreen", () => {
     input.write("x"); // ignored — not an answer key
     input.write("n");
     await expect(second).resolves.toBe("deny");
+    screen.stop();
+  });
+
+  test("repaints never climb above the live region (shell history survives)", async () => {
+    const { screen, input, text } = makeScreen();
+    // Pre-existing shell history above where the screen starts painting.
+    const output = text; // capture closure
+    void output;
+    screen.start();
+    screen.printAbove("shell-history-1");
+    screen.printAbove("shell-history-2");
+    // Many repaints: typing, Tab-driven status updates, progress churn.
+    input.write("hello");
+    await settle();
+    for (let i = 0; i < 5; i += 1) screen.setStatus(`status ${i}`);
+    screen.setProgressLines(["  · t1 working"]);
+    screen.setProgressLines([]);
+    input.write(" world");
+    await settle();
+
+    const rows = renderScreen(text());
+    const joined = rows.join("\n");
+    expect(joined).toContain("shell-history-1");
+    expect(joined).toContain("shell-history-2");
+    // History stays ABOVE the live region, in order.
+    expect(joined.indexOf("shell-history-1")).toBeLessThan(joined.indexOf("shell-history-2"));
+    expect(joined.indexOf("shell-history-2")).toBeLessThan(joined.indexOf("> hello world"));
     screen.stop();
   });
 

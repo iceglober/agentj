@@ -102,21 +102,32 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
   const csi = (sequence: string): string => `\u001b[${sequence}`;
 
+  /** Where paint() parked the terminal cursor, as a row inside the live
+   *  region — repaints must climb exactly this far to reach the region top.
+   *  Moving `liveLineCount - 1` instead (the old bug) assumed the cursor sat
+   *  on the bottom line; it actually sits on the editor's caret row, so every
+   *  repaint overshot upward and ESC[J ate a line of shell history. */
+  let lastCursorRow = 0;
+
+  const moveToRegionTop = (): void => {
+    if (lastCursorRow > 0) write(csi(`${lastCursorRow}A`));
+    write(`\r${csi("J")}`);
+  };
+
   const paint = (): void => {
     const { lines, cursorRow, cursorColumn } = liveLines();
-    // CSI 0A means "up 1" on many terminals, so guard the single-line case.
-    if (liveLineCount > 1) write(csi(`${liveLineCount - 1}A`));
-    write(`\r${csi("J")}`);
+    moveToRegionTop();
     write(lines.join("\r\n"));
     const up = lines.length - 1 - cursorRow;
     write(`\r${up > 0 ? csi(`${up}A`) : ""}${cursorColumn > 0 ? csi(`${cursorColumn}C`) : ""}`);
     liveLineCount = lines.length;
+    lastCursorRow = cursorRow;
   };
 
   const clearLive = (): void => {
-    if (liveLineCount > 1) write(csi(`${liveLineCount - 1}A`));
-    if (liveLineCount > 0) write(`\r${csi("J")}`);
+    if (liveLineCount > 0) moveToRegionTop();
     liveLineCount = 0;
+    lastCursorRow = 0;
   };
 
   const armEscapeFlush = (): void => {
