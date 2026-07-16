@@ -405,7 +405,9 @@ export async function runAgentjChat(
       const frame = SPINNER[spinnerFrame % SPINNER.length] ?? "◐";
       const elapsed = turnStartedAt ? ` ${Math.round((Date.now() - turnStartedAt) / 1000)}s` : "";
       const doing = currentActivity
-        ? `${currentActivity.tool}: ${currentActivity.detail.slice(0, 40)}`
+        ? currentActivity.tool === "run_subagents"
+          ? `run_subagents (${currentActivity.detail})`
+          : currentActivity.tool
         : "thinking";
       busy = ` · ${frame} ${doing}${elapsed} (esc to interrupt)`;
     }

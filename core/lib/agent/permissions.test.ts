@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ToolSet } from "../llm";
 import {
   createSessionPermissionGate,
+  describeToolInput,
   type PermissionPromptDecision,
   type PermissionRequest,
   permissionsConfigSchema,
@@ -140,5 +141,14 @@ describe("withPermissions", () => {
 
     await expect(tools.bash!.execute({ command: "bun test" })).resolves.toBe("ran");
     expect(executed).toEqual(["bash:bun test"]);
+  });
+});
+
+describe("describeToolInput", () => {
+  test("summarizes commands, paths, task fan-outs, and falls back to JSON", () => {
+    expect(describeToolInput({ command: "git status" })).toBe("git status");
+    expect(describeToolInput({ path: "src/a.ts" })).toBe("src/a.ts");
+    expect(describeToolInput({ tasks: [{}, {}, {}] })).toBe("3 tasks");
+    expect(describeToolInput({ other: 1 })).toBe('{"other":1}');
   });
 });

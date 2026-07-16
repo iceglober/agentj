@@ -87,12 +87,14 @@ const GATED_TOOLS: Record<string, PermissionRequest["kind"]> = {
   writeFile: "edit",
 };
 
-/** Human-readable summary of a tool input: the command, the path, or JSON. */
+/** Human-readable summary of a tool input: the command, the path, a task
+ *  count for fan-out tools, or JSON as the last resort. */
 export const describeToolInput = (input: unknown): string => {
   if (typeof input === "object" && input !== null) {
     const record = input as Record<string, unknown>;
     if (typeof record.command === "string") return record.command;
     if (typeof record.path === "string") return record.path;
+    if (Array.isArray(record.tasks)) return `${record.tasks.length} tasks`;
   }
   return JSON.stringify(input) ?? "";
 };
