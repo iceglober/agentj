@@ -48,11 +48,22 @@ export interface RunResult {
   usage: TokenUsage;
   finishReason?: string;
   stepLimitReached?: boolean;
+  /**
+   * Opaque continuation: the full vendor message history after this turn
+   * (input messages + this turn's). Feed back via GenerateRequest.messages to
+   * continue the conversation with tool-call memory intact. Only the adapter
+   * knows the element shape; callers store/pass it verbatim. Optional so
+   * non-chat fakes need not fabricate it; real adapters always populate it.
+   */
+  messages?: unknown[];
 }
 
 export interface GenerateRequest {
   instructions: string;
   prompt: string;
+  /** Prior turns (RunResult.messages). When present, `prompt` is appended as
+   *  the next user message; when absent, the turn starts fresh from `prompt`. */
+  messages?: unknown[];
   tools: ToolSet;
   temperature?: number;
   topP?: number;

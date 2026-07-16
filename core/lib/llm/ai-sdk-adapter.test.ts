@@ -174,4 +174,39 @@ describe("createAiSdkRuntime", () => {
     });
     expect(generateCalls).toHaveLength(1);
   });
+
+  test("fresh turns send prompt and return a continuation with the response messages", async () => {
+    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    const assistantTurn = { role: "assistant", content: "hi" };
+    nextResult.response = { messages: [assistantTurn] };
+
+    const result = await createAiSdkRuntime(config).generate(request());
+
+    expect(generateCalls[0]).toMatchObject({ prompt });
+    expect(generateCalls[0]).not.toHaveProperty("messages");
+    expect(result.messages).toEqual([{ role: "user", content: prompt }, assistantTurn]);
+  });
+
+  test("continued turns send prior messages plus the prompt as the next user message", async () => {
+    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    const history = [
+      { role: "user", content: "earlier" },
+      { role: "assistant", content: "reply" },
+    ];
+    const assistantTurn = { role: "assistant", content: "again" };
+    nextResult.response = { messages: [assistantTurn] };
+
+    const result = await createAiSdkRuntime(config).generate({
+      ...request(),
+      messages: history,
+    });
+
+    expect(generateCalls[0]).not.toHaveProperty("prompt");
+    expect(generateCalls[0]?.messages).toEqual([...history, { role: "user", content: prompt }]);
+    expect(result.messages).toEqual([
+      ...history,
+      { role: "user", content: prompt },
+      assistantTurn,
+    ]);
+  });
 });

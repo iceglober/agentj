@@ -1,6 +1,7 @@
 import {
   type ToolSet as AiToolSet,
   type LanguageModel,
+  type ModelMessage,
   stepCountIs,
   ToolLoopAgent,
   tool,
@@ -145,8 +146,17 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
         });
 
         const onStep = req.onStep;
+        // Continuation: prior turns (opaque vendor messages) plus this turn's
+        // prompt as the next user message; fresh turns send prompt alone.
+        const inputMessages = req.messages
+          ? [...req.messages, { role: "user" as const, content: req.prompt }]
+          : undefined;
+        // The continuation is opaque at the port; this vendor boundary is the
+        // one place that re-asserts its true shape (same idiom as providerOptions).
         const result = await agent.generate({
-          prompt: req.prompt,
+          ...(inputMessages
+            ? { messages: inputMessages as ModelMessage[] }
+            : { prompt: req.prompt }),
           ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
           ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step)) } : {}),
         });
@@ -176,10 +186,16 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
         recordUsage("success", mappedUsage);
         const finishReason = (result as { finishReason?: string }).finishReason;
         const stepLimit = req.stopSteps ?? 20;
+        const responseMessages =
+          (result as { response?: { messages?: unknown[] } }).response?.messages ?? [];
         return {
           text: result.text,
           steps: result.steps.map(mapStep),
           usage: mappedUsage,
+          messages: [
+            ...(inputMessages ?? [{ role: "user", content: req.prompt }]),
+            ...responseMessages,
+          ],
           ...(finishReason ? { finishReason } : {}),
           ...(result.steps.length >= stepLimit && result.text.trim() === ""
             ? { stepLimitReached: true }
