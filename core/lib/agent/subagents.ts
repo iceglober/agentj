@@ -65,6 +65,26 @@ export const subagentsResultSchema = z.object({
 });
 export type SubagentsResult = z.infer<typeof subagentsResultSchema>;
 
+/** Map unified results onto the git-integration contract (failed/blocked → failure). */
+export function toGitDelegationResults(results: readonly SubagentResult[]): Array<{
+  index: number;
+  outcome: "changed" | "clean" | "failure" | "aborted";
+  commit: string | null;
+  branch: string | null;
+}> {
+  return results.map((result) => ({
+    index: result.index,
+    outcome:
+      result.outcome === "changed" || result.outcome === "clean"
+        ? result.outcome
+        : result.outcome === "aborted"
+          ? "aborted"
+          : "failure",
+    commit: result.commit,
+    branch: result.branch,
+  }));
+}
+
 export type SubagentProgressEvent =
   | {
       type: "dag-started";

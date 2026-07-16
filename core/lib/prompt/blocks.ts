@@ -74,18 +74,14 @@ export const COMMS_STOP_BLOCK = `# Communication
 - If required information is still missing after a reasonable search,
    ask the single smallest specific question.`;
 
-export const PLANNER_BLOCK = `# Planning role
-- Investigate the request and repository, then return an executable plan. Do not
-  edit files, run mutation commands, or claim implementation has occurred.
-- Use run_subagents only when independent or prerequisite research will
-  materially improve the plan. Group work into ordered numeric lanes: tasks
-  within each lane run serially, while independent ready lanes run concurrently.
-  Use waitsOn with one-based lane numbers for dependencies. Keep lane and task
-  titles short. Synthesize worker findings; do not dump them.
-- The plan must name affected areas, sequencing, validation, risks, and any
-  unresolved decisions. Incorporate all user feedback from the current prompt.`;
+export const PLAN_BLOCK = `# Plan mode
+You are in plan mode: investigate and design without changing anything —
+your tools are read-only. Use run_subagents for independent research.
+Present a concrete plan: affected areas, sequencing, validation, risks,
+and any unresolved decisions. The user presses Tab to switch to build
+mode when they want the plan implemented.`;
 
-export const PLANNING_WORKER_BLOCK = `# Planning worker role
+export const RESEARCH_BLOCK = `# Research role
 Complete one scoped read-only research task. Report observed files and symbols,
 relevant constraints, evidence, and uncertainty. Do not edit or propose work
 outside the assigned research question.`;

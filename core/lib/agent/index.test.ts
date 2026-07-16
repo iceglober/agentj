@@ -62,12 +62,12 @@ describe("createAgentTools", () => {
     expect(String(allowed)).not.toContain("Denied by user");
   });
 
-  test("planner and planning workers receive only read/search capabilities", async () => {
+  test("plan mode receives only read/search capabilities; research adds run_subagents", async () => {
     const config = agentConfigSchema.parse({});
-    const planner = await createAgentTools(sandbox, config, {
+    const planPrimary = await createAgentTools(sandbox, config, {
       ...baseOptions,
-      purpose: "planner",
-      planning: {
+      mode: "plan",
+      research: {
         async createWorker() {
           return {
             generate: async () => ({
@@ -79,26 +79,23 @@ describe("createAgentTools", () => {
         },
       },
     });
-    const worker = await createAgentTools(sandbox, config, {
+    const planDelegate = await createAgentTools(sandbox, config, {
       ...baseOptions,
-      purpose: "planning-worker",
+      mode: "plan",
     });
 
-    expect(Object.keys(planner).sort()).toEqual(["glob", "grep", "readFile", "run_subagents"]);
-    expect(Object.keys(worker).sort()).toEqual(["glob", "grep", "readFile"]);
-    for (const tools of [planner, worker]) {
+    expect(Object.keys(planPrimary).sort()).toEqual(["glob", "grep", "readFile", "run_subagents"]);
+    expect(Object.keys(planDelegate).sort()).toEqual(["glob", "grep", "readFile"]);
+    for (const tools of [planPrimary, planDelegate]) {
       expect(tools).not.toHaveProperty("bash");
       expect(tools).not.toHaveProperty("writeFile");
       expect(tools).not.toHaveProperty("edit");
     }
-    expect(worker).not.toHaveProperty("run_subagents");
+    expect(planDelegate).not.toHaveProperty("run_subagents");
   });
 
-  test("builder retains mutation tools", async () => {
-    const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), {
-      ...baseOptions,
-      purpose: "builder",
-    });
+  test("build mode (the default) retains mutation tools", async () => {
+    const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), baseOptions);
     expect(tools).toHaveProperty("bash");
     expect(tools).toHaveProperty("writeFile");
     expect(tools).toHaveProperty("edit");

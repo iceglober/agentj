@@ -63,7 +63,8 @@ export interface PromptInputs {
   model: string;
   agentName: string;
   role: "primary" | "delegate";
-  purpose?: "planner" | "planning-worker" | "builder";
+  /** Capability mode: plan (read-only) or build (full). Default build. */
+  mode?: "plan" | "build";
   rules: string;
   /** Fills SUBAGENT_CONTRACT's {{OUTPUT_SCHEMA}}; used by a future orchestrator. */
   outputSchema?: string;
@@ -96,8 +97,8 @@ const DEFAULT_OUTPUT_SCHEMA = "{status, changes[], evidence[], open_questions[]}
  *   1. Pick the profile ("auto" → resolveProfile, else the named one; a miss
  *      yields the neutral default with no delta and empty params).
  *   2. Merge flags: DEFAULT_FLAGS ← profile.flags ← defined-only config.flags.
- *   3. Pick the template: delegate role on a profile with a standalone uses it,
- *      otherwise the base template.
+ *   3. Pick the template: build mode picks standalone (delegate) or primary
+ *      overrides when the profile defines them; plan mode always uses base.
  *   4. Render, then hash instructions+params for the version key.
  */
 export function composePrompt(
@@ -114,11 +115,11 @@ export function composePrompt(
     if (value !== undefined) flags[key as keyof PromptFlags] = value;
   }
 
-  const isBuilder = (inputs.purpose ?? "builder") === "builder";
+  const isBuild = (inputs.mode ?? "build") === "build";
   const template =
-    inputs.role === "delegate" && isBuilder && profile?.standalone
+    inputs.role === "delegate" && isBuild && profile?.standalone
       ? profile.standalone
-      : isBuilder && profile?.primary
+      : isBuild && profile?.primary
         ? profile.primary
         : BASE_TEMPLATE;
 
@@ -136,15 +137,15 @@ export function composePrompt(
 
   // Template flags are UPPER_SNAKE; map the camelCase RenderFlags across.
   const templateFlags: Record<string, boolean> = {
-    WORKFLOW_STEPS: flags.workflowSteps && (inputs.purpose ?? "builder") === "builder",
-    WORKFLOW_OUTCOME: flags.workflowOutcome && (inputs.purpose ?? "builder") === "builder",
+    WORKFLOW_STEPS: flags.workflowSteps && isBuild,
+    WORKFLOW_OUTCOME: flags.workflowOutcome && isBuild,
     PLANNING: flags.planning,
     SMALL_MODEL: flags.smallModel,
     HALLUCINATION_GUARD: flags.hallucinationGuard,
     SUBAGENT_CONTRACT: flags.subagentContract,
-    PLANNER: inputs.purpose === "planner",
-    PLANNING_WORKER: inputs.purpose === "planning-worker",
-    BUILDER: (inputs.purpose ?? "builder") === "builder",
+    PLAN: !isBuild && inputs.role === "primary",
+    RESEARCH: !isBuild && inputs.role === "delegate",
+    BUILDER: isBuild,
   };
 
   const instructions = renderTemplate(template, vars, templateFlags);

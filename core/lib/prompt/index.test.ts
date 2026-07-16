@@ -7,7 +7,6 @@ import {
   profileNames,
   resolveProfile,
 } from "./index";
-import { renderTemplate } from "./render";
 
 const CTX: PromptContext = {
   cwd: "/repo",
@@ -143,46 +142,63 @@ describe("composePrompt", () => {
     }
   });
 
-  test("10. purpose composes orthogonally with model profiles", () => {
-    const planner = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", purpose: "planner" }), CTX);
-    expect(planner.instructions).toContain("# Planning role");
-    expect(planner.instructions).toContain("Use run_subagents");
-    expect(planner.instructions).toContain("within each lane run serially");
-    expect(planner.instructions).not.toContain("# Build role");
-    expect(planner.instructions).not.toContain("# Goal");
-    expect(planner.instructions).not.toContain("Verify behavior");
+  test("10. mode composes orthogonally with model profiles", () => {
+    const plan = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "plan" }), CTX);
+    expect(plan.instructions).toContain("# Plan mode");
+    expect(plan.instructions).toContain("presses Tab to switch to build");
+    expect(plan.instructions).not.toContain("# Build role");
+    expect(plan.instructions).not.toContain("# Goal");
+    expect(plan.instructions).not.toContain("Verify behavior");
 
-    const worker = composePrompt(
+    const research = composePrompt(
       AUTO,
-      inputs({ model: "gpt-5.4-nano", role: "delegate", purpose: "planning-worker" }),
+      inputs({ model: "gpt-5.4-nano", role: "delegate", mode: "plan" }),
       CTX,
     );
-    expect(worker.instructions).toContain("# Planning worker role");
-    expect(worker.instructions.startsWith("You are a coding executor")).toBe(false);
+    expect(research.instructions).toContain("# Research role");
+    expect(research.instructions.startsWith("You are a coding executor")).toBe(false);
 
-    const builder = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", purpose: "builder" }), CTX);
-    expect(builder.instructions).toContain("# Build role");
-    expect(builder.instructions).toContain("# Completion report");
-    expect(builder.instructions).toContain('"status":"done|blocked|failed"');
-    expect(builder.instructions).toContain("# Goal");
-    expect(builder.instructions).toContain("Verify behavior");
-  });
-});
-
-describe("renderTemplate", () => {
-  test("10a. nested if/unless collapse innermost-first", () => {
-    const tpl = "A{{#if OUTER}}[{{#unless INNER}}x{{/unless}}]{{/if}}B";
-    expect(renderTemplate(tpl, {}, { OUTER: true, INNER: false })).toBe("A[x]B");
-    expect(renderTemplate(tpl, {}, { OUTER: true, INNER: true })).toBe("A[]B");
-    expect(renderTemplate(tpl, {}, { OUTER: false, INNER: true })).toBe("AB");
+    const build = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "build" }), CTX);
+    expect(build.instructions).toContain("# Build role");
+    expect(build.instructions).toContain("# Completion report");
+    expect(build.instructions).toContain('"status":"done|blocked|failed"');
+    expect(build.instructions).toContain("# Goal");
+    expect(build.instructions).toContain("Verify behavior");
   });
 
-  test("10b. throws on unknown flag and unknown var", () => {
-    expect(() => renderTemplate("{{#if NOPE}}x{{/if}}", {}, {})).toThrow(/unknown flag/);
-    expect(() => renderTemplate("{{NOPE}}", {}, {})).toThrow(/unknown var/);
-  });
-
-  test("10c. substitutes vars and collapses 3+ newlines", () => {
-    expect(renderTemplate("hi {{NAME}}\n\n\n\nbye", { NAME: "bo" }, {})).toBe("hi bo\n\nbye");
+  test("11. hash pin: the purpose→mode collapse left build prompts byte-identical", () => {
+    // Versions captured on main before the collapse (2026-07-16). If this
+    // fails, prompt CONTENT changed — that is a separate, eval-validated
+    // decision, never a refactor side effect.
+    const pinned: Record<string, { primary: string; delegate: string }> = {
+      "gpt-5.6-sol": { primary: "6cc6fd104800", delegate: "6cc6fd104800" },
+      "gpt-5.6-terra": { primary: "4e24d536121e", delegate: "4e24d536121e" },
+      "gpt-5.6-luna": { primary: "f91c9447de64", delegate: "f91c9447de64" },
+      "gpt-5.4": { primary: "fe304a12a750", delegate: "fe304a12a750" },
+      "gpt-5.4-nano": { primary: "35ae181e4740", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "448130e272fd", delegate: "448130e272fd" },
+      "claude-x": { primary: "2419b9429dda", delegate: "2419b9429dda" },
+    };
+    const pinCtx = {
+      cwd: "/repo",
+      os: "linux",
+      date: "2026-01-01",
+      gitBranch: "main",
+      gitStatusSummary: "clean",
+    };
+    for (const [model, expected] of Object.entries(pinned)) {
+      const primary = composePrompt(
+        AUTO,
+        inputs({ model, role: "primary", rules: "", mode: "build" }),
+        pinCtx,
+      );
+      const delegate = composePrompt(
+        AUTO,
+        inputs({ model, role: "delegate", rules: "", mode: "build" }),
+        pinCtx,
+      );
+      expect(`${model}:${primary.version}`).toBe(`${model}:${expected.primary}`);
+      expect(`${model}:${delegate.version}`).toBe(`${model}:${expected.delegate}`);
+    }
   });
 });

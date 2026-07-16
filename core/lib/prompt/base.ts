@@ -2,8 +2,8 @@ import {
   BUILDER_BLOCK,
   COMMS_STOP_BLOCK,
   HALLUCINATION_GUARD,
-  PLANNER_BLOCK,
-  PLANNING_WORKER_BLOCK,
+  PLAN_BLOCK,
+  RESEARCH_BLOCK,
   SMALL_MODEL_BLOCK,
   SOL_OUTCOME_BLOCK,
   SUBAGENT_CONTRACT_BLOCK,
@@ -39,8 +39,8 @@ structure, use your tools to read and verify — do NOT guess or invent.
 - Scope: make only the changes requested or clearly required to complete
   them. No drive-by refactors, extra features, or commentary in code.
 
-{{#if PLANNER}}${PLANNER_BLOCK}
-{{/if}}{{#if PLANNING_WORKER}}${PLANNING_WORKER_BLOCK}
+{{#if PLAN}}${PLAN_BLOCK}
+{{/if}}{{#if RESEARCH}}${RESEARCH_BLOCK}
 {{/if}}{{#if BUILDER}}${BUILDER_BLOCK}
 {{/if}}
 

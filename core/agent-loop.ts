@@ -4,7 +4,11 @@ import { stderr as processStderr, stdout as processStdout } from "node:process";
 
 import { type Agent, createAgent as createProductionAgent } from "./lib/agent";
 import type { PermissionGate } from "./lib/agent/permissions";
-import { createSubagentsTool, type SubagentProgressEvent } from "./lib/agent/subagents";
+import {
+  createSubagentsTool,
+  type SubagentProgressEvent,
+  toGitDelegationResults,
+} from "./lib/agent/subagents";
 import {
   type ChatCommandContext,
   expandAtFiles,
@@ -187,30 +191,13 @@ async function composeChat(
       const snapshot = await createGitDelegationSnapshot(environment, root, sessionId);
       return {
         parentRef: snapshot.commit,
-        integrate: (
-          results: readonly {
-            index: number;
-            outcome: string;
-            commit: string | null;
-            branch: string | null;
-          }[],
-        ) =>
+        integrate: (results: readonly Parameters<typeof toGitDelegationResults>[0][number][]) =>
           integrateGitDelegation(
             environment,
             root,
             sessionId,
             snapshot,
-            results.map((result) => ({
-              index: result.index,
-              outcome:
-                result.outcome === "changed" || result.outcome === "clean"
-                  ? (result.outcome as "changed" | "clean")
-                  : result.outcome === "aborted"
-                    ? ("aborted" as const)
-                    : ("failure" as const),
-              commit: result.commit,
-              branch: result.branch,
-            })),
+            toGitDelegationResults(results),
           ),
       };
     },
@@ -223,42 +210,12 @@ async function composeChat(
       model: config.agent.tools.subagents.model ?? agentConfig.llm.model,
     },
   };
-  const createPlanningWorker = async () =>
-    createProductionAgent(environment, workerConfig, {
-      root,
-      ctx,
-      metricsSink,
-      purpose: "planning-worker",
-    });
-
-  // Interim adapter until phase 4 unifies the tools: lane-shaped planning
-  // progress flattens onto the task-shaped tracker events.
-  const onPlanningProgress = (
-    event: Parameters<
-      NonNullable<Parameters<typeof createProductionAgent>[2]["planning"]>["onProgress"] extends
-        | ((e: infer E) => unknown)
-        | undefined
-        ? (e: E) => void
-        : never
-    >[0],
-  ): void => {
-    if (event.type === "dag-started") {
-      onDagProgress({
-        type: "dag-started",
-        concurrency: event.concurrency,
-        startedAt: event.startedAt,
-        tasks: event.lanes.flatMap((lane) =>
-          lane.tasks.map((task) => ({
-            id: task.id,
-            title: task.title,
-            waitsOn: lane.waitsOn.map((laneId) => `lane ${laneId}`),
-          })),
-        ),
-      });
-      return;
-    }
-    onDagProgress(event as SubagentProgressEvent);
-  };
+  const createResearchWorker = async () =>
+    createProductionAgent(
+      environment,
+      { ...workerConfig, role: "delegate" },
+      { root, ctx, metricsSink, mode: "plan" },
+    );
 
   const agents = new Map<ChatMode, Promise<Agent>>();
   const agentFor = (mode: ChatMode): Promise<Agent> => {
@@ -270,23 +227,23 @@ async function composeChat(
             root,
             ctx,
             metricsSink,
-            purpose: "planner",
-            planning: { createWorker: createPlanningWorker, onProgress: onPlanningProgress },
+            mode: "plan",
+            research: { createWorker: createResearchWorker, onProgress: onDagProgress },
           })
         : createProductionAgent(environment, agentConfig, {
             root,
             ctx,
             metricsSink,
-            purpose: "builder",
             delegation,
             permissions: { config: config.permissions, gate },
+            onSubagentProgress: onDagProgress,
           });
     agents.set(mode, agent);
     return agent;
   };
 
   const runPlanJob = async (prompt: string, abortSignal: AbortSignal) => {
-    const worker = await createPlanningWorker();
+    const worker = await createResearchWorker();
     const result = await worker.generate(prompt, { abortSignal });
     return { text: result.text };
   };
@@ -304,7 +261,6 @@ async function composeChat(
               root: session.path,
               ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
               metricsSink,
-              purpose: "builder",
             },
           );
           return {

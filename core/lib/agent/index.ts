@@ -13,14 +13,14 @@ import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
-import { type CreateSubagentToolOptions, createSubagentTool } from "./delegate";
 import { type WithPermissionsOptions, withPermissions } from "./permissions";
 import {
-  createPlanningDagTool,
-  type PlanningDagProgressEvent,
-  type PlanningTask,
-  type PlanningWorker,
-} from "./planning-delegate";
+  createSubagentsTool,
+  type DelegationWiring,
+  type NormalizedSubagentTask,
+  type SubagentProgressEvent,
+  type SubagentRunner,
+} from "./subagents";
 
 /**
  * The agent owns identity/role/rules and composes the three domain modules the
@@ -59,10 +59,10 @@ export const agentConfigSchema = z.object({
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
 export interface CreateAgentDelegationOptions
-  extends Pick<
-    CreateSubagentToolOptions,
-    "createChildSession" | "maxConcurrency" | "parentRef" | "prepareBatch"
-  > {}
+  extends Pick<DelegationWiring, "createChildSession" | "parentRef" | "prepareBatch"> {
+  /** Concurrent children ceiling for one tool invocation. */
+  maxConcurrency?: number;
+}
 
 export interface CreateAgentOptions {
   /** The session worktree the agent's tools operate in. */
@@ -88,11 +88,15 @@ export interface CreateAgentOptions {
    * runtime's default stands.
    */
   stopSteps?: number;
-  purpose?: "planner" | "planning-worker" | "builder";
-  planning?: {
-    createWorker(task: PlanningTask): Promise<PlanningWorker>;
-    onProgress?(event: PlanningDagProgressEvent): void | Promise<void>;
+  /** Capability mode: plan (read-only tools) or build (full). Default build. */
+  mode?: "plan" | "build";
+  /** Plan-mode run_subagents wiring: read-only research workers. */
+  research?: {
+    createWorker(task: NormalizedSubagentTask): Promise<SubagentRunner>;
+    onProgress?(event: SubagentProgressEvent): void | Promise<void>;
   };
+  /** Build-mode run_subagents progress (worktree children). */
+  onSubagentProgress?(event: SubagentProgressEvent): void | Promise<void>;
 }
 
 /** Per-turn hooks for a single generate() call. */
@@ -133,44 +137,46 @@ export async function createAgentTools(
   const fileSandbox = confineSandboxFiles(sb, opts.root);
   const delegationTool: ToolSet = opts.delegation
     ? {
-        run_subagents: createSubagentTool({
-          parentRef: opts.delegation.parentRef,
-          maxConcurrency: opts.delegation.maxConcurrency,
-          createChildSession: opts.delegation.createChildSession,
-          prepareBatch: opts.delegation.prepareBatch,
-          createChildAgent: async ({ root, session, role }) => {
-            const child = await createAgent(sb, childAgentConfig(config, role), {
-              root,
-              ctx: {
-                ...opts.ctx,
-                cwd: root,
-                gitBranch: session.branch,
-                gitStatusSummary: await session.status(),
-              },
-              metricsSink: opts.metricsSink,
-              stopSteps: opts.stopSteps,
-              purpose: "builder",
-            });
-            return {
-              generate: (prompt, generateOpts) =>
-                child.generate(prompt, { abortSignal: generateOpts?.abortSignal }),
-            };
+        run_subagents: createSubagentsTool({
+          execution: {
+            kind: "delegation",
+            parentRef: opts.delegation.parentRef,
+            createChildSession: opts.delegation.createChildSession,
+            prepareBatch: opts.delegation.prepareBatch,
+            createChildAgent: async ({ session, root }) => {
+              const child = await createAgent(sb, childAgentConfig(config, "delegate"), {
+                root,
+                ctx: {
+                  ...opts.ctx,
+                  cwd: root,
+                  gitBranch: session.branch,
+                  gitStatusSummary: await session.status(),
+                },
+                metricsSink: opts.metricsSink,
+                stopSteps: opts.stopSteps,
+              });
+              return {
+                generate: (prompt, generateOpts) =>
+                  child.generate(prompt, { abortSignal: generateOpts?.abortSignal }),
+              };
+            },
           },
+          concurrency: opts.delegation.maxConcurrency,
+          onProgress: opts.onSubagentProgress,
         }),
       }
     : {};
 
-  const purpose = opts.purpose ?? "builder";
-  if (purpose !== "builder") {
+  if ((opts.mode ?? "build") === "plan") {
     return {
       ...createReadTools(fileSandbox, { root: opts.root }),
       ...createSearchTools(sb, { root: opts.root }),
-      ...(purpose === "planner" && opts.planning
+      ...(opts.research
         ? {
-            run_subagents: createPlanningDagTool({
+            run_subagents: createSubagentsTool({
+              execution: { kind: "research", createWorker: opts.research.createWorker },
               concurrency: config.tools.subagents.concurrency,
-              createWorker: opts.planning.createWorker,
-              onProgress: opts.planning.onProgress,
+              onProgress: opts.research.onProgress,
             }),
           }
         : {}),
@@ -209,7 +215,7 @@ export async function createAgent(
       agentName: config.name,
       role: config.role,
       rules: config.rules,
-      purpose: opts.purpose ?? "builder",
+      mode: opts.mode ?? "build",
     },
     opts.ctx,
   );

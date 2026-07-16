@@ -1,4 +1,5 @@
 import { createAgent } from "../../lib/agent";
+import { toGitDelegationResults } from "../../lib/agent/subagents";
 import type { RunConfig } from "../../lib/eval/config";
 import type { AgentAdapter, Env, Task, Trajectory } from "../../lib/eval/types";
 import type { PromptContext } from "../../lib/prompt";
@@ -79,7 +80,13 @@ export function createInProcessAdapter(sb: Sandbox): AgentAdapter<RunConfig> {
               return {
                 parentRef: snapshot.commit,
                 integrate: (results) =>
-                  integrateGitDelegation(sb, env.dir, sessionId, snapshot, results),
+                  integrateGitDelegation(
+                    sb,
+                    env.dir,
+                    sessionId,
+                    snapshot,
+                    toGitDelegationResults(results),
+                  ),
               };
             },
           },

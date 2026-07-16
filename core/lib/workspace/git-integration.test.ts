@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { SubagentTaskResult } from "../agent/delegate";
+import type { GitDelegationResult } from "./git-integration";
 import { createGitDelegationSnapshot, integrateGitDelegation } from "./git-integration";
 import { createHostExecutionEnvironment } from "./host-adapter";
 
@@ -39,25 +39,11 @@ test("snapshots dirty parent state and integrates child commits without changing
     const childCommit = await git(child, "rev-parse", "HEAD");
     await git(root, "worktree", "remove", child);
 
-    const result: SubagentTaskResult = {
+    const result: GitDelegationResult = {
       index: 0,
-      id: "child",
       outcome: "changed",
       branch: "agentj-child",
-      path: null,
-      base: snapshot.commit,
       commit: childCommit,
-      text: "done",
-      error: null,
-      recovery: {
-        preserved: false,
-        reason: null,
-        parentRef: snapshot.commit,
-        head: childCommit,
-        status: "",
-        worktreeRemoved: true,
-        branchDeleted: false,
-      },
     };
     await expect(
       integrateGitDelegation(environment, root, "test-session", snapshot, [result]),
