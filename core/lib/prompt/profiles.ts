@@ -1,5 +1,5 @@
 import { STANDALONE_EXECUTOR } from "./base";
-import { DEEPSEEK_DELTA, GPT54_DELTA, LUNA_DELTA } from "./blocks";
+import { DEEPSEEK_DELTA, GPT54_DELTA } from "./blocks";
 import type { RenderFlags } from "./index";
 
 /**
@@ -73,7 +73,6 @@ export const profiles = {
     // Data-only; not deployed.
     match: [/^gpt-5\.6-luna\b/],
     flags: {},
-    delta: LUNA_DELTA,
     params: { providerOptions: { openai: { reasoningEffort: "low", textVerbosity: "low" } } },
   },
 } satisfies Record<string, Profile>;
