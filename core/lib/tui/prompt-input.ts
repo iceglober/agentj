@@ -12,7 +12,6 @@ export interface PromptIo {
 
 export interface TextPromptRequest extends PromptIo {
   message: string;
-  hint: string;
   validationMessage?: string;
 }
 
@@ -47,7 +46,6 @@ const resolveInteractiveInput = (
 
 interface RequiredTextPrompt {
   message: string;
-  hint: string;
   validationMessage: string;
 }
 
@@ -64,7 +62,6 @@ export const createPromptUi = (options: CreatePromptUiOptions): PromptUi => {
     while (resolveInteractiveInput(options.isInteractive, stdin)) {
       const value = await options.editor.read({
         message: prompt.message,
-        hint: prompt.hint,
         ...(stdin ? { stdin } : {}),
         ...(stdout ? { stdout } : {}),
         ...(validationMessage ? { validationMessage } : {}),
@@ -81,9 +78,7 @@ export const createPromptUi = (options: CreatePromptUiOptions): PromptUi => {
     askTask: (override = {}) =>
       readRequiredText(
         {
-          message:
-            "What should AgentJ plan and build?\nExamples: fix a failing test; explain a module boundary; add a targeted regression test.",
-          hint: "Describe one coding task.",
+          message: "What do you want to get done?",
           validationMessage: "Enter a task, or press Ctrl+C to cancel.",
         },
         override,
@@ -92,7 +87,6 @@ export const createPromptUi = (options: CreatePromptUiOptions): PromptUi => {
       readRequiredText(
         {
           message: "Review the plan: provide feedback, or type 'proceed' to build.",
-          hint: "Feedback or explicit approval.",
           validationMessage: "Enter feedback, approval, or press Ctrl+C to stop.",
         },
         override,

@@ -45,6 +45,23 @@ export const checkSchema = z.discriminatedUnion("kind", [
     maxChangedLines: z.number().int(),
   }),
   z.object({
+    kind: z.literal("file_state"),
+    id: z.string(),
+    required: z.boolean().default(true),
+    path: z.string(),
+    /** Substrings that must appear in the file's final content. */
+    contains: z.array(z.string()).default([]),
+    /** Substrings that must NOT appear in the file's final content. */
+    absent: z.array(z.string()).default([]),
+  }), // observes final file content — removals, copy changes, negative constraints
+  z.object({
+    kind: z.literal("report_contains"),
+    id: z.string(),
+    required: z.boolean().default(true),
+    /** Case-insensitive substrings that must appear in the agent's final report. */
+    contains: z.array(z.string()).min(1),
+  }), // observes the final report — embedded questions, synthesis tasks
+  z.object({
     kind: z.literal("judge"),
     id: z.string(),
     required: z.boolean().default(false),
@@ -73,7 +90,12 @@ export const taskSchema = z.object({
     .prefault({}),
   /** Task-QA gate: reference solution proves solvable; a no-op run must fail (falsifiable). */
   reference: z
-    .object({ files: z.record(z.string(), z.string()).optional(), command: z.string().optional() })
+    .object({
+      files: z.record(z.string(), z.string()).optional(),
+      command: z.string().optional(),
+      /** Reference final report, so report-based checks stay covered by the QA gate. */
+      report: z.string().optional(),
+    })
     .optional(),
 });
 export type Task = z.infer<typeof taskSchema>;

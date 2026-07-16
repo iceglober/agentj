@@ -70,6 +70,26 @@ function perConfigTable(rows: ResultRow[]) {
   }
 }
 
+/** Pass rate per tag per config — shows which difficulty class moves a metric. */
+function perTagTable(rows: ResultRow[]) {
+  const tags = [...new Set(rows.flatMap((r) => r.tags))].sort();
+  if (tags.length === 0) return;
+  const configs = [...new Set(rows.map((r) => r.configId))].sort();
+
+  console.log(`\n${"tag".padEnd(22)} ${configs.map((c) => c.padStart(12)).join(" ")}`);
+  for (const tag of tags) {
+    const cells = configs.map((cid) => {
+      const tr = rows.filter(
+        (r) => r.configId === cid && r.tags.includes(tag) && r.verdict !== "error",
+      );
+      if (tr.length === 0) return "—".padStart(12);
+      const rate = tr.filter((r) => r.verdict === "pass").length / tr.length;
+      return `${pct(rate)} n=${tr.length}`.padStart(12);
+    });
+    console.log(`${tag.padEnd(22)} ${cells.join(" ")}`);
+  }
+}
+
 function compare(rows: ResultRow[], a: string, b: string) {
   const key = (r: ResultRow) => `${r.task}#${r.seed}`;
   const byKey = new Map<string, { a?: ResultRow; b?: ResultRow }>();
@@ -119,6 +139,7 @@ async function main() {
   console.log(`Report for ${file} (${rows.length} rows)\n`);
 
   perConfigTable(rows);
+  perTagTable(rows);
 
   const compareArgs = flag("compare");
   if (compareArgs) {

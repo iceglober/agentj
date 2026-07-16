@@ -1,6 +1,11 @@
-import { gradeDiffScope, gradeTestCommand } from "./graders/deterministic";
+import { gradeDiffScope, gradeFileState, gradeTestCommand } from "./graders/deterministic";
 import { gradeJudge } from "./graders/judge";
-import { gradeDiffSize, gradeNoNewDeps, gradeNoPlaceholder } from "./graders/property";
+import {
+  gradeDiffSize,
+  gradeNoNewDeps,
+  gradeNoPlaceholder,
+  gradeReportContains,
+} from "./graders/property";
 import type {
   Check,
   CheckGrader,
@@ -16,6 +21,8 @@ import type {
 export const checkGraders = {
   test_command: gradeTestCommand,
   diff_scope: gradeDiffScope,
+  file_state: gradeFileState,
+  report_contains: gradeReportContains,
   no_placeholder: gradeNoPlaceholder,
   no_new_deps: gradeNoNewDeps,
   diff_size: gradeDiffSize,

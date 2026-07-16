@@ -160,6 +160,76 @@ describe("diff_scope", () => {
   });
 });
 
+// --- file_state ------------------------------------------------------------
+
+describe("file_state", () => {
+  const CONTENT = 'LABEL = "Billing Assistant"\nWARNING = "A sign-in code is still pending."\n';
+  const catEnv = (content: string | null) =>
+    new FakeEnv({
+      exec: () =>
+        content === null
+          ? { stdout: "", stderr: "cat: no such file", exitCode: 1 }
+          : { stdout: content, stderr: "", exitCode: 0 },
+    });
+
+  test("passes when required strings are present and forbidden ones absent", async () => {
+    const task = makeTask([
+      {
+        kind: "file_state",
+        id: "copy",
+        path: "templates.py",
+        contains: ["Billing Assistant"],
+        absent: ["Organization Persona"],
+      },
+    ]);
+    const res = await composeGrade(catEnv(CONTENT), task, makeTraj(), noJudge);
+    expect(res.verdict).toBe("pass");
+  });
+
+  test("fails naming each missing and each still-present string", async () => {
+    const task = makeTask([
+      {
+        kind: "file_state",
+        id: "copy",
+        path: "templates.py",
+        contains: ["Approved Copy"],
+        absent: ["sign-in code"],
+      },
+    ]);
+    const res = await composeGrade(catEnv(CONTENT), task, makeTraj(), noJudge);
+    expect(res.verdict).toBe("fail");
+    expect(res.checks[0]?.detail).toContain('missing "Approved Copy"');
+    expect(res.checks[0]?.detail).toContain('still contains "sign-in code"');
+  });
+
+  test("fails when the file cannot be read (e.g. deleted by the agent)", async () => {
+    const task = makeTask([
+      { kind: "file_state", id: "copy", path: "templates.py", contains: ["x"] },
+    ]);
+    const res = await composeGrade(catEnv(null), task, makeTraj(), noJudge);
+    expect(res.verdict).toBe("fail");
+    expect(res.checks[0]?.detail).toContain("cannot read");
+  });
+});
+
+// --- report_contains -------------------------------------------------------
+
+describe("report_contains", () => {
+  test("matches case-insensitively against the final report", async () => {
+    const task = makeTask([{ kind: "report_contains", id: "rc", contains: ["flags.py", "Audit"] }]);
+    const traj = makeTraj({ finalText: "The default lives in FLAGS.PY; add an audit event." });
+    const res = await composeGrade(new FakeEnv(), task, traj, noJudge);
+    expect(res.verdict).toBe("pass");
+  });
+
+  test("fails an empty report, naming the missing points", async () => {
+    const task = makeTask([{ kind: "report_contains", id: "rc", contains: ["legacy_flags"] }]);
+    const res = await composeGrade(new FakeEnv(), task, makeTraj(), noJudge);
+    expect(res.verdict).toBe("fail");
+    expect(res.checks[0]?.detail).toContain('"legacy_flags"');
+  });
+});
+
 // --- no_placeholder ------------------------------------------------------
 
 describe("no_placeholder", () => {

@@ -61,6 +61,7 @@ const tasks: Task[] = seededDefects({
   base: CORRECT_FILES,
   prompt: PROMPT,
   defects: DEFECTS,
+  tags: ["ambiguity:explicit"],
 });
 
 export default tasks;

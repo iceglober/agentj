@@ -54,6 +54,19 @@ export const gradeNoNewDeps: CheckGrader = async (_env, _task, traj, check) => {
   return { pass: true, detail: "no new dependency lines detected" };
 };
 
+export const gradeReportContains: CheckGrader = async (_env, _task, traj, check) => {
+  if (check.kind !== "report_contains") throw new Error("wrong grader");
+  const report = traj.finalText.toLowerCase();
+  const missing = check.contains.filter((s) => !report.includes(s.toLowerCase()));
+  const pass = missing.length === 0;
+  return {
+    pass,
+    detail: pass
+      ? `report covers all ${check.contains.length} expected point(s)`
+      : `report missing: ${missing.map((s) => `"${s}"`).join(", ")}`,
+  };
+};
+
 export const gradeDiffSize: CheckGrader = async (_env, _task, traj, check) => {
   if (check.kind !== "diff_size") throw new Error("wrong grader");
   let changed = 0;

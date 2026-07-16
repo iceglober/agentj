@@ -55,6 +55,7 @@ export const resultRowSchema = z.object({
   configId: z.string(),
   promptVersion: z.string(),
   task: z.string(), // "id@version"
+  tags: z.array(z.string()).default([]),
   seed: z.number().int(),
   verdict: verdictEnum,
   tokensIn: z.number(),

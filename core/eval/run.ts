@@ -142,13 +142,13 @@ async function main() {
     await using sandbox = await getSandbox(createSandboxProviderLocal());
     const factory = createSandboxFixtureFactory(sandbox, { root: join(sandbox.root, "eval") });
 
-    const synthTraj = async (env: {
-      diff(): Promise<string>;
-      changedFiles(): Promise<string[]>;
-    }): Promise<Trajectory> => ({
+    const synthTraj = async (
+      env: { diff(): Promise<string>; changedFiles(): Promise<string[]> },
+      finalText = "",
+    ): Promise<Trajectory> => ({
       toolCalls: [],
       toolResults: [],
-      finalText: "",
+      finalText,
       finalDiff: await env.diff(),
       filesTouched: await env.changedFiles(),
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
@@ -169,7 +169,12 @@ async function main() {
           const files = refFiles(task);
           if (files.length > 0) await env.writeFiles(files);
           if (task.reference?.command) await env.exec(task.reference.command);
-          const grade = await composeGrade(env, task, await synthTraj(env), noJudge);
+          const grade = await composeGrade(
+            env,
+            task,
+            await synthTraj(env, task.reference?.report ?? ""),
+            noJudge,
+          );
           solvable = grade.verdict === "pass";
           if (!solvable) detail = `reference verdict=${grade.verdict}: ${gradeSummary(grade)}`;
         } finally {
@@ -254,6 +259,7 @@ async function main() {
         configId: config.id,
         promptVersion: traj.promptVersion ?? "",
         task: taskKey(task),
+        tags: task.tags,
         seed,
         verdict: grade.verdict,
         tokensIn: traj.usage.inputTokens,

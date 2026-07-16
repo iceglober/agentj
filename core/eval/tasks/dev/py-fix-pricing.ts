@@ -19,7 +19,7 @@ const task = taskSchema.parse({
   reference: { files: CORRECT_FILES },
   timeoutSec: 600,
   budget: { steps: 30 },
-  tags: ["ported", "edit"],
+  tags: ["ported", "edit", "ambiguity:explicit"],
 });
 
 export default task;

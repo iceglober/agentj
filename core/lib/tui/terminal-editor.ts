@@ -221,7 +221,7 @@ export const createTerminalPromptEditor = (
 
       try {
         if (request.validationMessage) write(`! ${request.validationMessage}\n`);
-        write(`${request.message}\n  ${request.hint}\n`);
+        write(`${request.message}\n`);
         paint();
         if (stdin.setRawMode && !previousRawMode) {
           stdin.setRawMode(true);

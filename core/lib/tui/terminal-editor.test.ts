@@ -23,7 +23,7 @@ const memoryOutput = (columns = 80) => {
   return { output, text: () => Buffer.concat(chunks).toString("utf8") };
 };
 
-const request = { message: "Enter a task", hint: "Shift+Return for a newline." };
+const request = { message: "Enter a task" };
 
 describe("terminal prompt editor", () => {
   test("renders, repaints multiline input, and submits Return", async () => {
@@ -35,7 +35,7 @@ describe("terminal prompt editor", () => {
     input.write("first\u001b[13;2usecond\r");
 
     await expect(result).resolves.toBe("first\nsecond");
-    expect(text()).toContain("Enter a task\n  Shift+Return for a newline.\n> ");
+    expect(text()).toContain("Enter a task\n> ");
     expect(text()).toContain("first\r\nsecond");
     expect(text()).toContain("\u001b[J");
     expect(text().endsWith("\r\n")).toBe(true);

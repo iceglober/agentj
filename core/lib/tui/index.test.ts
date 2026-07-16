@@ -68,9 +68,7 @@ describe("createPromptUi", () => {
 
     await expect(ui.askTask()).resolves.toBe("fix the flaky test\nthen add coverage");
     expect(requests[0]).toMatchObject({
-      message:
-        "What should AgentJ plan and build?\nExamples: fix a failing test; explain a module boundary; add a targeted regression test.",
-      hint: "Describe one coding task.",
+      message: "What do you want to get done?",
       stdin,
       stdout,
     });
