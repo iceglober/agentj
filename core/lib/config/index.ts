@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path";
 import z from "zod";
 import { agentConfigSchema } from "../agent";
+import { permissionsConfigSchema } from "../agent/permissions";
 import { evalConfigSchema } from "../eval/config";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
 import { sessionConfigSchema } from "../session";
@@ -17,6 +18,7 @@ import { projectSetupConfigSchema } from "../workspace";
  */
 export const configSchema = z.object({
   agent: agentConfigSchema.prefault({}),
+  permissions: permissionsConfigSchema.prefault({}),
   sandbox: microsandboxOptionsSchema.prefault({}),
   session: sessionConfigSchema.prefault({}),
   eval: evalConfigSchema.prefault({}),

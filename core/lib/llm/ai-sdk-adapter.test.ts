@@ -203,10 +203,6 @@ describe("createAiSdkRuntime", () => {
 
     expect(generateCalls[0]).not.toHaveProperty("prompt");
     expect(generateCalls[0]?.messages).toEqual([...history, { role: "user", content: prompt }]);
-    expect(result.messages).toEqual([
-      ...history,
-      { role: "user", content: prompt },
-      assistantTurn,
-    ]);
+    expect(result.messages).toEqual([...history, { role: "user", content: prompt }, assistantTurn]);
   });
 });
