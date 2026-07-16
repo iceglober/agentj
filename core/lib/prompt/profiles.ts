@@ -72,7 +72,7 @@ export const profiles = {
   "gpt-5.6-luna": {
     // Data-only; not deployed.
     match: [/^gpt-5\.6-luna\b/],
-    flags: { planning: true },
+    flags: {},
     delta: LUNA_DELTA,
     params: { providerOptions: { openai: { reasoningEffort: "low", textVerbosity: "low" } } },
   },
