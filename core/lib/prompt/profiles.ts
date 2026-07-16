@@ -1,4 +1,4 @@
-import { STANDALONE_EXECUTOR } from "./base";
+import { COMPACT_PRIMARY, STANDALONE_EXECUTOR } from "./base";
 import { DEEPSEEK_DELTA, GPT54_DELTA } from "./blocks";
 import type { RenderFlags } from "./index";
 
@@ -25,6 +25,8 @@ export interface Profile {
   flags: Partial<RenderFlags>;
   /** Appended into {{PROFILE_DELTA}}. */
   delta?: string;
+  /** Primary builder role uses this template instead of base. */
+  primary?: string;
   /** Delegate role uses this template instead of base. */
   standalone?: string;
   params: ModelParams;
@@ -73,6 +75,7 @@ export const profiles = {
     // Data-only; not deployed.
     match: [/^gpt-5\.6-luna\b/],
     flags: {},
+    primary: COMPACT_PRIMARY,
     params: { providerOptions: { openai: { reasoningEffort: "low", textVerbosity: "low" } } },
   },
 } satisfies Record<string, Profile>;
