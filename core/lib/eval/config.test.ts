@@ -26,6 +26,21 @@ describe("configHash", () => {
     expect(configHash(a)).toBe(configHash(b));
   });
 
+  test("subagent model routing moves the hash; absence keeps legacy hashes stable", () => {
+    const plain = base();
+    const routed = runConfigSchema.parse({
+      id: "sol",
+      agent: { llm: { model: "gpt-5.6-sol" }, tools: { subagents: { model: "gpt-5.6-luna" } } },
+    });
+    expect(configHash(routed)).not.toBe(configHash(plain));
+    // Unset routing must hash identically to configs written before the field existed.
+    const explicitConcurrencyOnly = runConfigSchema.parse({
+      id: "sol",
+      agent: { llm: { model: "gpt-5.6-sol" }, tools: { subagents: { concurrency: 2 } } },
+    });
+    expect(configHash(explicitConcurrencyOnly)).toBe(configHash(plain));
+  });
+
   test("a flag change moves the hash", () => {
     const off = base();
     const on = runConfigSchema.parse({

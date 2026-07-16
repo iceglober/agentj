@@ -39,7 +39,18 @@ export const agentConfigSchema = z.object({
   tools: z
     .object({
       edit: editConfigSchema.prefault({}),
-      subagents: z.object({ concurrency: z.number().int().min(1).max(8).default(2) }).prefault({}),
+      subagents: z
+        .object({
+          concurrency: z.number().int().min(1).max(8).default(2),
+          /**
+           * Tier routing: when set, planning workers and build subagents run
+           * this model instead of the parent's (e.g. a high-volume tier for
+           * fan-out work). The prompt profile re-resolves from the child
+           * model, so its own template/params apply.
+           */
+          model: z.string().optional(),
+        })
+        .prefault({}),
     })
     .prefault({}),
 });
@@ -91,6 +102,20 @@ export interface Agent {
   generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
 }
 
+/**
+ * The config a child (subagent / planning worker) runs under: the parent's,
+ * with the given role and — when tier routing is configured — the subagent
+ * model swapped in.
+ */
+export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"]): AgentConfig {
+  const model = config.tools.subagents.model;
+  return {
+    ...config,
+    role,
+    llm: model ? { ...config.llm, model } : config.llm,
+  };
+}
+
 /** Assemble the capability boundary independently from model construction. */
 export async function createAgentTools(
   sb: Sandbox,
@@ -106,22 +131,18 @@ export async function createAgentTools(
           createChildSession: opts.delegation.createChildSession,
           prepareBatch: opts.delegation.prepareBatch,
           createChildAgent: async ({ root, session, role }) => {
-            const child = await createAgent(
-              sb,
-              { ...config, role },
-              {
-                root,
-                ctx: {
-                  ...opts.ctx,
-                  cwd: root,
-                  gitBranch: session.branch,
-                  gitStatusSummary: await session.status(),
-                },
-                metricsSink: opts.metricsSink,
-                stopSteps: opts.stopSteps,
-                purpose: "builder",
+            const child = await createAgent(sb, childAgentConfig(config, role), {
+              root,
+              ctx: {
+                ...opts.ctx,
+                cwd: root,
+                gitBranch: session.branch,
+                gitStatusSummary: await session.status(),
               },
-            );
+              metricsSink: opts.metricsSink,
+              stopSteps: opts.stopSteps,
+              purpose: "builder",
+            });
             return {
               generate: (prompt, generateOpts) =>
                 child.generate(prompt, { abortSignal: generateOpts?.abortSignal }),

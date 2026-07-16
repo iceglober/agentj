@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Sandbox } from "../sandbox";
-import { agentConfigSchema, type CreateAgentOptions, createAgentTools } from ".";
+import { agentConfigSchema, type CreateAgentOptions, childAgentConfig, createAgentTools } from ".";
 
 const sandbox: Sandbox = {
   async executeCommand() {
@@ -22,6 +22,26 @@ const baseOptions: CreateAgentOptions = {
     gitStatusSummary: "clean",
   },
 };
+
+describe("childAgentConfig", () => {
+  test("routes children to the configured subagent model, preserving providers", () => {
+    const config = agentConfigSchema.parse({
+      llm: { model: "gpt-5.6-terra", providers: { azure: { resourceName: "r" } } },
+      tools: { subagents: { model: "gpt-5.6-luna" } },
+    });
+    const child = childAgentConfig(config, "delegate");
+    expect(child.role).toBe("delegate");
+    expect(child.llm.model).toBe("gpt-5.6-luna");
+    expect(child.llm.providers?.azure?.resourceName).toBe("r");
+    // The parent config is untouched.
+    expect(config.llm.model).toBe("gpt-5.6-terra");
+  });
+
+  test("without tier routing, children inherit the parent model", () => {
+    const config = agentConfigSchema.parse({ llm: { model: "gpt-5.6-terra" } });
+    expect(childAgentConfig(config, "delegate").llm.model).toBe("gpt-5.6-terra");
+  });
+});
 
 describe("createAgentTools", () => {
   test("planner and planning workers receive only read/search capabilities", async () => {

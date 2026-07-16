@@ -180,11 +180,18 @@ export async function createProductionTaskRunDependencies(
     try {
       agentsMd = await sandbox.readFile(`${session.path}/AGENTS.md`);
     } catch {}
+    // Tier routing: planning workers run the configured subagent model (build
+    // subagents get theirs inside the run_subagents tool via childAgentConfig).
+    const routedModel =
+      purpose === "planning-worker"
+        ? (config.agent.tools.subagents.model ?? config.agent.llm.model)
+        : config.agent.llm.model;
     const agentConfig = {
       ...config.agent,
       rules: config.agent.rules || agentsMd || "",
       llm: {
         ...config.agent.llm,
+        model: routedModel,
         providers: {
           ...config.agent.llm.providers,
           azure: { ...config.agent.llm.providers?.azure, apiKey: azureApiKey },

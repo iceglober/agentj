@@ -28,6 +28,7 @@ bun run agentj -- sandbox "add a --json flag"   # isolated Microsandbox/worktree
 bun run agentj -- --resume <session-id>          # resume persisted task/plan/feedback state
 ./bin/agentj config set agent.llm.model gpt-5.6-sol
 ./bin/agentj config set agent.tools.subagents.concurrency 3
+./bin/agentj config set agent.tools.subagents.model gpt-5.6-luna  # tier-route fan-out work
 ./bin/agentj config add sandbox.bootstrap "apt-get install -y gh"
 ./bin/aj config set --secret providers.azure.api_key
 ./bin/agentj config delete providers.azure.api_key

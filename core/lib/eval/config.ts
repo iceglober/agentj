@@ -39,6 +39,8 @@ export function configHash(rc: RunConfig): string {
     topP: a.llm.topP ?? null,
     editMode: a.tools.edit.mode,
     subagentConcurrency: a.tools.subagents.concurrency,
+    // Included only when set, so hashes of existing configs stay stable.
+    ...(a.tools.subagents.model ? { subagentModel: a.tools.subagents.model } : {}),
     prompt: { profile: a.prompt.profile, flags: a.prompt.flags ?? {} },
   };
   return new Bun.CryptoHasher("sha256")
