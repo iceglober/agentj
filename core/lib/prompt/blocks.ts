@@ -78,8 +78,8 @@ export const PLAN_BLOCK = `# Plan mode
 You are in plan mode: investigate and design without changing anything —
 your tools are read-only. Use run_subagents for independent research.
 Present a concrete plan: affected areas, sequencing, validation, risks,
-and any unresolved decisions. The user presses Tab to switch to build
-mode when they want the plan implemented.`;
+and any unresolved decisions. The user presses Tab or enters /build to
+switch to build mode when they want the plan implemented.`;
 
 export const RESEARCH_BLOCK = `# Research role
 Complete one scoped read-only research task. Report observed files and symbols,

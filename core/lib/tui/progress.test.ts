@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { SubagentProgressEvent } from "../agent/subagents";
-import { applyProgressEvent, createProgressTracker } from "./progress";
+import { applyProgressEvent, createProgressTracker, formatDuration } from "./progress";
 
 const apply = (tracker: ReturnType<typeof createProgressTracker>, event: SubagentProgressEvent) =>
   applyProgressEvent(tracker, event);
@@ -53,7 +53,7 @@ describe("subagent progress", () => {
     expect(completed.completedLines).toEqual([
       `${"  ✓ t1 Map modules".padEnd(width)}in:1.2k, out:300, ctx:900  2.1s`,
       `${"  x t2 Run tests (failed)".padEnd(width)}4.3s`,
-      `${"  x t3 Integrate (blocked)".padEnd(width)}0.0s`,
+      `${"  x t3 Integrate (blocked)".padEnd(width)}0ms`,
     ]);
     expect(tracker.live).toBe(false);
 
@@ -95,4 +95,12 @@ test("usage columns align across tasks with different title lengths", () => {
   const clamped = tracker.lines();
   expect(clamped[0]?.length).toBeLessThanOrEqual(48);
   expect(clamped[0]).toContain("…");
+});
+
+test("formatDuration uses ms under a second", () => {
+  expect(formatDuration(0)).toBe("0ms");
+  expect(formatDuration(340)).toBe("340ms");
+  expect(formatDuration(999)).toBe("999ms");
+  expect(formatDuration(2140)).toBe("2.1s");
+  expect(formatDuration(74_200)).toBe("74.2s");
 });

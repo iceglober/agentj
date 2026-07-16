@@ -145,7 +145,7 @@ describe("composePrompt", () => {
   test("10. mode composes orthogonally with model profiles", () => {
     const plan = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "plan" }), CTX);
     expect(plan.instructions).toContain("# Plan mode");
-    expect(plan.instructions).toContain("presses Tab to switch to build");
+    expect(plan.instructions).toContain("presses Tab or enters /build");
     expect(plan.instructions).not.toContain("# Build role");
     expect(plan.instructions).not.toContain("# Goal");
     expect(plan.instructions).not.toContain("Verify behavior");

@@ -33,7 +33,7 @@ import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
-import { applyProgressEvent, createProgressTracker } from "./lib/tui/progress";
+import { applyProgressEvent, createProgressTracker, formatDuration } from "./lib/tui/progress";
 import { escapeTerminalText } from "./lib/tui/terminal-editor";
 import {
   createGitDelegationSnapshot,
@@ -78,7 +78,7 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
     case "turn-started":
       return `> ${event.text}`;
     case "turn-queued":
-      return `(queued) ${event.text}`;
+      return null; // shown as a live-region line until its turn starts
     case "tool-call":
       return null; // superseded by live tool-activity lines
     case "assistant": {
@@ -379,8 +379,14 @@ export async function runAgentjChat(
         `  ${SPINNER[spinnerFrame % SPINNER.length] ?? "◐"} ${tool}${detail && tool !== "run_subagents" ? ` ${detail.slice(0, 40)}` : ""}`,
     );
 
+  // Messages queued mid-turn wait visibly in the live region, below running
+  // tools and above the editor, until their own turn starts.
+  const queuedMessages: string[] = [];
+  const queuedLines = (): string[] =>
+    queuedMessages.map((text) => `  ↳ queued: ${text.split("\n")[0]?.slice(0, 60) ?? ""}`);
+
   const refreshProgress = (): void => {
-    screen?.setProgressLines([...dagLines, ...toolLines()]);
+    screen?.setProgressLines([...dagLines, ...toolLines(), ...queuedLines()]);
   };
 
   const onToolActivity = (activity: ToolActivity): void => {
@@ -395,7 +401,7 @@ export async function runAgentjChat(
       const started = activeTools.get(activity.id);
       activeTools.delete(activity.id);
       currentActivity = null;
-      const elapsed = started ? ` ${((Date.now() - started.startedAt) / 1000).toFixed(1)}s` : "";
+      const elapsed = started ? ` ${formatDuration(Date.now() - started.startedAt)}` : "";
       screen?.printAbove(`  ✓ ${activity.tool}${elapsed}`);
     }
     refreshProgress();
@@ -462,7 +468,17 @@ export async function runAgentjChat(
   });
 
   const render = (event: ChatEvent): void => {
+    if (event.type === "turn-queued") {
+      queuedMessages.push(event.text);
+      refreshProgress();
+      updateStatus();
+      return;
+    }
     if (event.type === "turn-started") {
+      if (queuedMessages[0] === event.text) {
+        queuedMessages.shift();
+        refreshProgress();
+      }
       turnStartedAt = Date.now();
       interruptRequested = false;
     }

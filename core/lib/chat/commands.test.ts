@@ -89,9 +89,30 @@ describe("runChatCommand", () => {
     const { context, events } = makeContext();
     await runChatCommand(context, "help", "");
     const text = (events[0] as { text: string }).text;
-    for (const name of ["/help", "/jobs", "/undo", "/redo", "/clear", "/quit"]) {
+    for (const name of ["/help", "/build", "/jobs", "/undo", "/redo", "/clear", "/quit"]) {
       expect(text).toContain(name);
     }
+  });
+
+  test("build switches mode before sending an implementation turn", async () => {
+    const { context } = makeContext();
+    const calls: string[] = [];
+    context.session = {
+      setMode: (mode) => {
+        calls.push(`mode:${mode}`);
+        return mode ?? "plan";
+      },
+      send: async (text) => {
+        calls.push(`send:${text}`);
+      },
+    } as ChatCommandContext["session"];
+
+    await runChatCommand(context, "build", "");
+
+    expect(calls).toEqual([
+      "mode:build",
+      "send:Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
+    ]);
   });
 
   test("jobs lists and aborts; undo/redo report labels; unknown suggests help", async () => {

@@ -17,6 +17,10 @@ interface TrackedTask {
   usage?: { inputTokens: number; outputTokens: number; contextTokens: number };
 }
 
+/** 340 → "340ms", 2140 → "2.1s", 74_200 → "74.2s". */
+export const formatDuration = (ms: number): string =>
+  ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+
 /** 456 → "456", 2437 → "2.4k", 432_312 → "432.3k". */
 const formatTokens = (count: number): string =>
   count < 1000 ? `${count}` : `${(count / 1000).toFixed(1)}k`;
@@ -122,8 +126,7 @@ export function createProgressTracker(): ProgressTracker {
           task.state === "failed" || task.state === "blocked" ? ` (${task.state})` : "";
         let left = `  ${marker} ${task.id} ${task.title}${outcome}${waits}`;
         if (left.length > MAX_LEFT) left = `${left.slice(0, MAX_LEFT - 1)}…`;
-        const elapsed =
-          task.elapsedMs !== undefined ? `${(task.elapsedMs / 1000).toFixed(1)}s` : "";
+        const elapsed = task.elapsedMs !== undefined ? formatDuration(task.elapsedMs) : "";
         const usage = task.usage ? formatUsage(task.usage) : "";
         const right = [usage, elapsed].filter(Boolean).join("  ");
         return { left, right };

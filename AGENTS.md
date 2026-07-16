@@ -7,7 +7,7 @@
 
 ## Component map
 - `core/agent-loop.ts` — the sole production composition root. `composeChat` wires config, secrets, metrics, the host execution environment, mode-specific agents, delegation, permissions, jobs, and the chat log/undo; `runAgentjChat` (interactive) and `runAgentjOnce` (`agentj run`) are the two entrypoints. Owns SIGINT lifecycle. Wires but never orchestrates.
-- `core/lib/chat/` — the interaction core, pure logic with no TTY. `session.ts`: one foreground turn at a time over an opaque message continuation, Tab-able mode with pending semantics, message queueing, abort. `jobs.ts`: user-initiated (`&`) background jobs with completion notices prepended to the next turn. `commands.ts`: input routing (slash//&/message), bounded `@file` expansion, keyed command registry. `events.ts`: the ChatEvent union the TUI renders.
+- `core/lib/chat/` — the interaction core, pure logic with no TTY. `session.ts`: one foreground turn at a time over an opaque message continuation, Tab-able mode with pending semantics, message queueing, abort. `jobs.ts`: user-initiated (`&`) background jobs with completion notices prepended to the next turn. `commands.ts`: input routing (slash//&/message), bounded `@file` expansion, keyed command registry including `/build` mode handoff. `events.ts`: the ChatEvent union the TUI renders.
 - `core/lib/cli/` — `cmd-ts` dispatch: bare invocation → chat, `run` → one-shot, `--continue`/`--resume`, and exact `config`/`eval` routes through injected handlers.
 - `core/lib/config-cli.ts` — per-key config mapping over the zod schema; `--secret` paths use the keychain; masked input via `createMaskedSecretPrompt`.
 - `core/lib/tui/` — terminal surface. `chat-screen.ts`: persistent raw mode with a repainted live region (progress block → editor rows → status line), transcript printed above, single-key permission asks, Tab/Esc/Ctrl+C routing. `editor.ts` + `key-decoder.ts`: grapheme-aware multiline editor model and escape-sequence decoding (CSI-u, bracketed paste, bare-ESC flush). `terminal-editor.ts`: pure layout (wrapping, emoji widths). `progress.ts`: subagent DAG lines.
@@ -27,7 +27,7 @@
 ## How the pieces fit together
 - `core/agent-loop.ts` is the only composition root; domain modules never construct production dependencies.
 - The chat session emits `ChatEvent`s; the screen renders them and decides nothing. Pure logic (chat/, prompt/, scheduler, editor model) is separated from IO (chat-screen, adapters).
-- Mode is capability: plan-mode agents simply lack mutating tools — no policy or approval phrase gates the transition, Tab does.
+- Mode is capability: plan-mode agents simply lack mutating tools — no policy or approval phrase gates the transition; Tab toggles modes and `/build` switches modes plus starts implementation.
 - Permission gating wraps tool execute at one place (`withPermissions`), consulted config-first, with an injected gate function for asks. Eval and sandboxed runs pass no gate and are unchanged.
 - Subagents (both modes) and background build jobs share the same machinery: snapshot → child worktree → finalize → integrate, all through `scheduler.ts` and `git-integration.ts`.
 - Ports and domain services depend on zod and other lib modules only; vendor imports live only in `*-adapter.ts` files (see `core/lib/README.md`).

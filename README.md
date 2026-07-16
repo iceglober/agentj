@@ -2,8 +2,8 @@
 
 A terminal coding agent — same category as Claude Code and OpenCode. It runs as a persistent chat
 session in your repo: you talk, it reads and edits files, runs commands, and fans out parallel
-subagents, with **plan** and **build** modes you toggle with Tab. Host-first, gated by a permission
-system; git (plus built-in undo) is the safety net.
+subagents, with **plan** and **build** modes you toggle with Tab or `/build`. Host-first, gated by a
+permission system; git (plus built-in undo) is the safety net.
 
 The implementation lives in [`core/`](core/) — a Bun TypeScript agent.
 
@@ -37,7 +37,9 @@ bun run agentj -- run --allow-all "fix the tests"      # asks auto-resolve to al
 
 You start in **plan mode**: the agent's tools are read-only — it can investigate, fan out research
 subagents, and present a plan, but it cannot edit anything. Press **Tab** to switch to **build
-mode** (full tools). Tab is the approval gesture: there is no magic approval phrase.
+mode** (full tools), or enter **`/build`** to switch and immediately ask the agent to implement the
+work agreed on in the conversation. These are explicit approval gestures; there is no magic
+approval phrase.
 
 Keys and commands:
 
@@ -51,8 +53,9 @@ Keys and commands:
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
   and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one.
 - **`@path/to/file`** — attach a file's contents to your message.
-- **`/help /jobs /undo /redo /clear /quit`** — built-in commands. `/undo` and `/redo` step the
-  agent's file changes through git snapshots without touching your HEAD, index, or branch.
+- **`/build`** — switch to build mode and implement the plan and discussion so far.
+- **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
+  the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 
 Editor shortcuts: Option+←/→ word hop, Option+Backspace/Delete word delete, Cmd+←/→ line bounds,
 Cmd+Backspace/Delete delete to bound; Home/End, Ctrl+A/E/U/K, and Esc+B/F/D fallbacks work in any

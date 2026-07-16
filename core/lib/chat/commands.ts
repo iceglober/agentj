@@ -83,6 +83,15 @@ export const chatCommands: Record<string, ChatCommand> = {
       context.emit({ type: "notice", text: lines.join("\n") });
     },
   },
+  build: {
+    summary: "Switch to build mode and implement the plan",
+    async run(context) {
+      context.session.setMode("build");
+      await context.session.send(
+        "Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
+      );
+    },
+  },
   jobs: {
     summary: "List background jobs, or `/jobs abort <id>`",
     run(context, args) {
