@@ -116,14 +116,3 @@ ask for a textual description or the underlying file.`;
 export const GPT54_DELTA = `# Diffs and code
 Write code and patches fully and legibly (descriptive names, complete
 hunks); keep chat updates brief.`;
-
-/** Luna: lane + retrieval budget for a fast, well-scoped worker. */
-export const LUNA_DELTA = `# Lane
-You handle first-pass and well-scoped work quickly. If the task requires
-cross-cutting design decisions, more than ~3 files of coordinated change,
-or unresolved product ambiguity, stop and return NEEDS_ESCALATION with
-your findings instead of attempting it.
-# Retrieval budget
-Start with one broad search using short discriminative keywords; search
-again only when a required fact/file is still missing — never merely to
-polish phrasing.`;
