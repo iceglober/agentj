@@ -132,6 +132,24 @@ describe("terminal key decoder", () => {
     ]);
   });
 
+  test("Tab decodes as a screen-level tab command", () => {
+    expect(decode("\t")).toEqual([{ type: "tab" }]);
+  });
+
+  test("a bare Escape resolves via flush after no continuation arrives", () => {
+    const decoder = new TerminalKeyDecoder();
+    expect(decoder.push("\u001b")).toEqual([]);
+    expect(decoder.pendingLoneEscape).toBe(true);
+    expect(decoder.flush()).toEqual([{ type: "escape" }]);
+    expect(decoder.pendingLoneEscape).toBe(false);
+    // flush is a no-op when a real sequence is pending or the buffer is empty.
+    expect(decoder.flush()).toEqual([]);
+    expect(decoder.push("\u001b[")).toEqual([]);
+    expect(decoder.pendingLoneEscape).toBe(false);
+    expect(decoder.flush()).toEqual([]);
+    expect(decoder.push("D")).toEqual([{ type: "move-left" }]);
+  });
+
   test("maps Ctrl+C and raw Ctrl+D EOF to cancellation", () => {
     expect(decode("\u0003\u0004")).toEqual([{ type: "cancel" }, { type: "cancel" }]);
   });

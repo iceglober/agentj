@@ -16,7 +16,10 @@ export type EditorCommand =
   | { type: "delete-line-backward" }
   | { type: "delete-line-forward" }
   | { type: "submit" }
-  | { type: "cancel" };
+  | { type: "cancel" }
+  /** Screen-level keys (mode toggle, interrupt) — no-ops on the editor model. */
+  | { type: "tab" }
+  | { type: "escape" };
 
 export interface EditorState {
   text: string;
@@ -107,7 +110,14 @@ const replaceRange = (
 };
 
 export const applyEditorCommand = (state: EditorState, command: EditorCommand): EditorState => {
-  if (command.type === "submit" || command.type === "cancel") return state;
+  if (
+    command.type === "submit" ||
+    command.type === "cancel" ||
+    command.type === "tab" ||
+    command.type === "escape"
+  ) {
+    return state;
+  }
 
   const value = splitGraphemes(state.text);
   const cursor = Math.max(0, Math.min(state.cursor, value.length));

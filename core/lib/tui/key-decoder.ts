@@ -94,6 +94,8 @@ const decodeControl = (character: string): EditorCommand | undefined => {
     case "\r":
     case "\n":
       return { type: "submit" };
+    case "\t":
+      return { type: "tab" };
     case "\u0003":
     case "\u0004":
       return { type: "cancel" };
@@ -140,6 +142,21 @@ export class TerminalKeyDecoder {
   end(): EditorCommand[] {
     this.pending += this.textDecoder.decode();
     return this.drain(true);
+  }
+
+  /** True while the buffer holds exactly a bare ESC awaiting a continuation. */
+  get pendingLoneEscape(): boolean {
+    return this.pending === ESCAPE;
+  }
+
+  /**
+   * Resolve a bare ESC that never got its continuation (the caller arms a
+   * short timer after push() when pendingLoneEscape is set): emits `escape`.
+   */
+  flush(): EditorCommand[] {
+    if (!this.pendingLoneEscape) return [];
+    this.pending = "";
+    return [{ type: "escape" }];
   }
 
   private drain(ending: boolean): EditorCommand[] {
