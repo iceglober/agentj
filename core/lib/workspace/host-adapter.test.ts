@@ -18,3 +18,14 @@ test("host execution uses cwd and never owns or removes it", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("kills commands that exceed the timeout and reports exit 124", async () => {
+  const environment = await createHostExecutionEnvironment(process.cwd(), {
+    commandTimeoutMs: 200,
+  });
+  const started = Date.now();
+  const result = await environment.executeCommand("sleep 30");
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(result.exitCode).toBe(124);
+  expect(result.stderr).toContain("timed out");
+});
