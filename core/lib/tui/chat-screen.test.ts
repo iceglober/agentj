@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { type ChatScreenCallbacks, createChatScreen } from "./chat-screen";
+import { displayWidth } from "./terminal-editor";
 
 class FakeInput extends PassThrough {
   isRaw = false;
@@ -32,7 +33,7 @@ function makeScreen(over: Partial<ChatScreenCallbacks> = {}) {
       ...over,
     },
   });
-  return { screen, input, calls, text: () => Buffer.concat(chunks).toString("utf8") };
+  return { screen, input, output, calls, text: () => Buffer.concat(chunks).toString("utf8") };
 }
 
 /**
@@ -139,7 +140,7 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("permission asks are modal: y allows, n denies, editor input is suspended", async () => {
+  test("permission asks are modal and distinguish once, always, and deny", async () => {
     const { screen, input, text } = makeScreen();
     screen.start();
     const first = screen.askPermission({ tool: "bash", kind: "bash", detail: "git push" });
@@ -150,8 +151,53 @@ describe("createChatScreen", () => {
 
     const second = screen.askPermission({ tool: "edit", kind: "edit", detail: "src/a.ts" });
     input.write("x"); // ignored — not an answer key
+    input.write("a");
+    await expect(second).resolves.toBe("always");
+
+    const third = screen.askPermission({ tool: "bash", kind: "bash", detail: "curl example.com" });
     input.write("n");
+    await expect(third).resolves.toBe("deny");
+    screen.stop();
+  });
+
+  test("queues concurrent permission asks and denies pending asks on stop", async () => {
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    const first = screen.askPermission({ tool: "bash", kind: "bash", detail: "first command" });
+    const second = screen.askPermission({ tool: "edit", kind: "edit", detail: "second path" });
+    await settle();
+    const beforeAnswer = text();
+    expect(beforeAnswer).toContain("first command");
+    expect(beforeAnswer).not.toContain("second path");
+
+    input.write("y");
+    await expect(first).resolves.toBe("allow");
+    await settle();
+    expect(text()).toContain("second path");
+    screen.stop();
     await expect(second).resolves.toBe("deny");
+  });
+
+  test("recalls submitted prompts with arrows and Ctrl+P/N from an empty editor", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+    input.write("first\rsecond\r");
+    await settle();
+
+    input.write("\u001b[A\r");
+    input.write("\u0010\r");
+    input.write("\u0010\u0010\u000e\r");
+    await settle();
+    expect(calls.submit).toEqual(["first", "second", "second", "second", "second"]);
+    screen.stop();
+  });
+
+  test("keeps Up/Down as multiline cursor movement outside history browsing", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+    input.write("one\u001b[13;2utwo\u001b[AX\r");
+    await settle();
+    expect(calls.submit).toEqual(["oneX\ntwo"]);
     screen.stop();
   });
 
@@ -191,5 +237,28 @@ describe("createChatScreen", () => {
     expect(text()).toContain("⏵ build · 1 job");
     expect(text()).toContain("t1 ◐ mapping modules");
     screen.stop();
+  });
+
+  test("repaints on resize and keeps every live line within the new width", () => {
+    const { screen, output, text } = makeScreen();
+    screen.start();
+    screen.setStatus("⏵ build · a deliberately long status");
+    screen.setProgressLines(["t1 ◐ a deliberately long progress description"]);
+    const beforeResize = text().length;
+
+    output.columns = 14;
+    output.emit("resize");
+    const repaint = text().slice(beforeResize);
+    const body = repaint.slice(repaint.indexOf("\u001b[J") + 3);
+    const lines = body.split("\r\n");
+    const finalLine = lines.pop()?.split("\r")[0] ?? "";
+    lines.push(finalLine);
+    expect(lines.every((line) => displayWidth(line) <= 13)).toBe(true);
+    expect(repaint).toContain("…");
+
+    screen.stop();
+    const afterStop = text().length;
+    output.emit("resize");
+    expect(text()).toHaveLength(afterStop);
   });
 });

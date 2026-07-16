@@ -12,7 +12,7 @@ interface RenderLayout {
   finalColumn: number;
 }
 
-const graphemeWidth = (value: string): number => {
+export const graphemeWidth = (value: string): number => {
   if (/^\p{Mark}+$/u.test(value)) return 0;
   // VS-16 (U+FE0F) forces emoji presentation, rendered two cells wide.
   if (value.includes("\ufe0f")) return 2;
@@ -40,10 +40,58 @@ const graphemeWidth = (value: string): number => {
   return 1;
 };
 
+export const displayWidth = (value: string): number =>
+  splitGraphemes(value).reduce((total, grapheme) => total + graphemeWidth(grapheme), 0);
+
+export const truncateToDisplayWidth = (value: string, maxWidth: number): string => {
+  const width = Math.max(0, Math.floor(maxWidth));
+  if (displayWidth(value) <= width) return value;
+  if (width === 0) return "";
+
+  const target = width - 1;
+  let rendered = "";
+  let column = 0;
+  for (const grapheme of splitGraphemes(value)) {
+    const cellWidth = graphemeWidth(grapheme);
+    if (column + cellWidth > target) break;
+    rendered += grapheme;
+    column += cellWidth;
+  }
+  return `${rendered}…`;
+};
+
+export const wrapToDisplayWidth = (value: string, maxWidth: number): string[] => {
+  const width = Math.max(1, Math.floor(maxWidth));
+  const rows = [""];
+  let column = 0;
+
+  for (const grapheme of splitGraphemes(value)) {
+    if (grapheme === "\n") {
+      rows.push("");
+      column = 0;
+      continue;
+    }
+    const cellWidth = graphemeWidth(grapheme);
+    if (column > 0 && column + cellWidth > width) {
+      rows.push("");
+      column = 0;
+    }
+    if (cellWidth > width) {
+      rows[rows.length - 1] += "?";
+      column += 1;
+    } else {
+      rows[rows.length - 1] += grapheme;
+      column += cellWidth;
+    }
+  }
+  return rows;
+};
+
 export const renderEditorLayout = (state: EditorState, terminalWidth: number): RenderLayout => {
-  const width = Math.max(10, terminalWidth);
-  const rows = ["> "];
-  let column = 2;
+  const width = Math.max(1, Math.floor(terminalWidth));
+  const prefix = width === 1 ? ">" : "> ";
+  const rows = [prefix];
+  let column = displayWidth(prefix);
   let cursorRow = 0;
   let cursorColumn = column;
   const graphemes = splitGraphemes(state.text);
@@ -64,8 +112,12 @@ export const renderEditorLayout = (state: EditorState, terminalWidth: number): R
       continue;
     }
 
-    const rendered = grapheme === "\t" ? " ".repeat(4 - (column % 4)) : grapheme;
-    const cellWidth = grapheme === "\t" ? rendered.length : graphemeWidth(grapheme);
+    let rendered = grapheme === "\t" ? " ".repeat(4 - (column % 4)) : grapheme;
+    let cellWidth = grapheme === "\t" ? rendered.length : graphemeWidth(grapheme);
+    if (cellWidth > width) {
+      rendered = grapheme === "\t" ? " ".repeat(width) : "?";
+      cellWidth = rendered.length;
+    }
     if (column > 0 && column + cellWidth > width) {
       rows.push("");
       column = 0;

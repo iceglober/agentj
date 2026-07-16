@@ -1,8 +1,13 @@
 import type { Readable, Writable } from "node:stream";
-import type { PermissionRequest } from "../agent/permissions";
+import type { PermissionPromptDecision, PermissionRequest } from "../agent/permissions";
 import { applyEditorCommand, createEditorState, type EditorState } from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
-import { renderEditorLayout } from "./terminal-editor";
+import {
+  displayWidth,
+  renderEditorLayout,
+  truncateToDisplayWidth,
+  wrapToDisplayWidth,
+} from "./terminal-editor";
 
 /**
  * The persistent chat surface: raw mode for the whole session, one live
@@ -50,7 +55,7 @@ export interface ChatScreen {
   setProgressLines(lines: string[]): void;
   setStatus(text: string): void;
   /** Modal single-key permission prompt in the live region. */
-  askPermission(request: PermissionRequest): Promise<"allow" | "deny">;
+  askPermission(request: PermissionRequest): Promise<PermissionPromptDecision>;
 }
 
 export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
@@ -58,76 +63,114 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const stdout = (options.stdout ?? process.stdout) as TerminalOutput;
   const width = (): number =>
     Math.max(
-      20,
-      typeof options.terminalWidth === "function"
-        ? options.terminalWidth()
-        : (options.terminalWidth ?? stdout.columns ?? 80),
+      1,
+      Math.floor(
+        typeof options.terminalWidth === "function"
+          ? options.terminalWidth()
+          : (options.terminalWidth ?? stdout.columns ?? 80),
+      ),
     );
+  const contentWidth = (): number => Math.max(1, width() - 1);
 
   const decoder = new TerminalKeyDecoder();
   let editor: EditorState = createEditorState();
+  const history: string[] = [];
+  let historyIndex: number | null = null;
   let progressLines: string[] = [];
   let status = "";
-  let liveLineCount = 0;
   let started = false;
   let previousRawMode = false;
   let escapeTimer: ReturnType<typeof setTimeout> | null = null;
   let quitArmedAt = 0;
-  let pendingAsk: {
+  interface PendingAsk {
     request: PermissionRequest;
-    resolve: (decision: "allow" | "deny") => void;
-  } | null = null;
+    resolve: (decision: PermissionPromptDecision) => void;
+  }
+  let pendingAsk: PendingAsk | null = null;
+  const askQueue: PendingAsk[] = [];
 
   const write = (text: string): void => {
     stdout.write(text);
   };
 
-  const liveLines = (): { lines: string[]; cursorRow: number; cursorColumn: number } => {
+  interface LiveLayout {
+    lines: string[];
+    cursorRow: number;
+    cursorColumn: number;
+  }
+
+  const safeLine = (line: string): string =>
+    truncateToDisplayWidth(line.replace(/[\r\n]+/gu, " "), contentWidth());
+
+  const liveLines = (): LiveLayout => {
+    const progress = progressLines.map(safeLine);
+    const safeStatus = safeLine(status);
     if (pendingAsk) {
       const { request } = pendingAsk;
-      const ask = `Permission ${request.tool}: ${request.detail.slice(0, width() - 30)} — [y]es once · [a]lways · [n]o`;
+      const detail = truncateToDisplayWidth(
+        request.detail.replace(/[\r\n]+/gu, " "),
+        contentWidth() * 2,
+      );
+      const askLines = [
+        ...wrapToDisplayWidth(`Permission ${request.tool}: ${detail}`, contentWidth()),
+        ...wrapToDisplayWidth("[y]es once · [a]lways this session · [n]o", contentWidth()),
+      ];
+      const askCursorRow = progress.length + askLines.length - 1;
       return {
-        lines: [...progressLines, ask, status],
-        cursorRow: progressLines.length,
-        cursorColumn: ask.length,
+        lines: [...progress, ...askLines, safeStatus],
+        cursorRow: askCursorRow,
+        cursorColumn: displayWidth(askLines.at(-1) ?? ""),
       };
     }
-    const layout = renderEditorLayout(editor, width());
+    const layout = renderEditorLayout(editor, contentWidth());
     return {
-      lines: [...progressLines, ...layout.rows, status],
-      cursorRow: progressLines.length + layout.cursorRow,
+      lines: [...progress, ...layout.rows, safeStatus],
+      cursorRow: progress.length + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
   };
 
   const csi = (sequence: string): string => `\u001b[${sequence}`;
 
-  /** Where paint() parked the terminal cursor, as a row inside the live
-   *  region — repaints must climb exactly this far to reach the region top.
-   *  Moving `liveLineCount - 1` instead (the old bug) assumed the cursor sat
-   *  on the bottom line; it actually sits on the editor's caret row, so every
-   *  repaint overshot upward and ESC[J ate a line of shell history. */
-  let lastCursorRow = 0;
+  /** The previous logical layout is retained so a resize can account for
+   * terminal reflow before climbing back to the live region's first row. */
+  let lastLayout: LiveLayout | null = null;
+
+  const physicalCursorRow = (layout: LiveLayout): number => {
+    const terminalWidth = width();
+    const rowsBefore = layout.lines
+      .slice(0, layout.cursorRow)
+      .reduce(
+        (total, line) => total + Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
+        0,
+      );
+    const cursorWrap =
+      layout.cursorColumn === 0
+        ? 0
+        : Math.floor(Math.max(0, layout.cursorColumn - 1) / terminalWidth);
+    return rowsBefore + cursorWrap;
+  };
 
   const moveToRegionTop = (): void => {
-    if (lastCursorRow > 0) write(csi(`${lastCursorRow}A`));
+    const cursorRow = lastLayout ? physicalCursorRow(lastLayout) : 0;
+    if (cursorRow > 0) write(csi(`${cursorRow}A`));
     write(`\r${csi("J")}`);
   };
 
   const paint = (): void => {
-    const { lines, cursorRow, cursorColumn } = liveLines();
+    const layout = liveLines();
     moveToRegionTop();
-    write(lines.join("\r\n"));
-    const up = lines.length - 1 - cursorRow;
-    write(`\r${up > 0 ? csi(`${up}A`) : ""}${cursorColumn > 0 ? csi(`${cursorColumn}C`) : ""}`);
-    liveLineCount = lines.length;
-    lastCursorRow = cursorRow;
+    write(layout.lines.join("\r\n"));
+    const up = layout.lines.length - 1 - layout.cursorRow;
+    write(
+      `\r${up > 0 ? csi(`${up}A`) : ""}${layout.cursorColumn > 0 ? csi(`${layout.cursorColumn}C`) : ""}`,
+    );
+    lastLayout = layout;
   };
 
   const clearLive = (): void => {
-    if (liveLineCount > 0) moveToRegionTop();
-    liveLineCount = 0;
-    lastCursorRow = 0;
+    if (lastLayout) moveToRegionTop();
+    lastLayout = null;
   };
 
   const armEscapeFlush = (): void => {
@@ -138,20 +181,46 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     }, options.escapeFlushMs ?? 40);
   };
 
+  const settleAsk = (decision: PermissionPromptDecision): void => {
+    const ask = pendingAsk;
+    if (!ask) return;
+    pendingAsk = askQueue.shift() ?? null;
+    paint();
+    ask.resolve(decision);
+  };
+
   const handleAskKey = (command: { type: string; text?: string }): void => {
     if (!pendingAsk) return;
     const key = command.type === "insert" ? command.text?.toLowerCase() : null;
     const decision =
-      key === "y" || key === "a"
+      key === "y"
         ? "allow"
-        : key === "n" || command.type === "cancel"
-          ? "deny"
-          : null;
-    if (!decision) return;
-    const ask = pendingAsk;
-    pendingAsk = null;
+        : key === "a"
+          ? "always"
+          : key === "n" || command.type === "cancel" || command.type === "escape"
+            ? "deny"
+            : null;
+    if (decision) settleAsk(decision);
+  };
+
+  const browseHistory = (direction: -1 | 1): boolean => {
+    if (history.length === 0) return false;
+    if (historyIndex === null) {
+      if (direction === 1 || editor.text.length > 0) return false;
+      historyIndex = history.length - 1;
+    } else {
+      const next = historyIndex + direction;
+      if (next >= history.length) {
+        historyIndex = null;
+        editor = createEditorState();
+        paint();
+        return true;
+      }
+      historyIndex = Math.max(0, next);
+    }
+    editor = createEditorState(history[historyIndex] ?? "");
     paint();
-    ask.resolve(decision);
+    return true;
   };
 
   const handleCommand = (command: ReturnType<TerminalKeyDecoder["push"]>[number]): void => {
@@ -169,6 +238,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       case "submit": {
         const text = editor.text;
         if (text.trim().length === 0) return;
+        if (history.at(-1) !== text) history.push(text);
+        if (history.length > 100) history.shift();
+        historyIndex = null;
         editor = createEditorState();
         paint();
         options.callbacks.onSubmit(text);
@@ -176,6 +248,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       }
       case "cancel": {
         if (editor.text.length > 0) {
+          historyIndex = null;
           editor = createEditorState();
           paint();
           return;
@@ -190,9 +263,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         return;
       }
       default:
+        if (command.type === "move-up" && browseHistory(-1)) return;
+        if (command.type === "move-down" && historyIndex !== null && browseHistory(1)) return;
+        historyIndex = null;
         editor = applyEditorCommand(editor, command);
         paint();
     }
+  };
+
+  const onResize = (): void => {
+    if (started) paint();
   };
 
   const onData = (chunk: string | Buffer): void => {
@@ -210,6 +290,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       started = true;
       previousRawMode = stdin.isRaw === true;
       stdin.on("data", onData);
+      stdout.on("resize", onResize);
       if (stdin.setRawMode && !previousRawMode) stdin.setRawMode(true);
       stdin.resume?.();
       paint();
@@ -220,8 +301,13 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       started = false;
       if (escapeTimer) clearTimeout(escapeTimer);
       stdin.removeListener("data", onData);
+      stdout.removeListener("resize", onResize);
       if (stdin.setRawMode) stdin.setRawMode(previousRawMode);
       clearLive();
+      const asks = pendingAsk ? [pendingAsk, ...askQueue] : [...askQueue];
+      pendingAsk = null;
+      askQueue.length = 0;
+      for (const ask of asks) ask.resolve("deny");
       write("\r\n");
     },
 
@@ -242,9 +328,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     },
 
     askPermission(request) {
+      if (!started) return Promise.resolve("deny");
       return new Promise((resolve) => {
-        pendingAsk = { request, resolve };
-        paint();
+        const ask = { request, resolve };
+        if (pendingAsk) askQueue.push(ask);
+        else {
+          pendingAsk = ask;
+          paint();
+        }
       });
     },
   };

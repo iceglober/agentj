@@ -34,8 +34,36 @@ export interface PermissionRequest {
   detail: string;
 }
 
+export type PermissionPromptDecision = "allow" | "always" | "deny";
+
 /** Settles "ask" outcomes. Injected; the TUI implementation prompts the user. */
 export type PermissionGate = (request: PermissionRequest) => Promise<"allow" | "deny">;
+
+/**
+ * Serializes interactive asks and remembers an "always" answer for this gate's
+ * lifetime. Configured policy is resolved before the gate, so explicit denies
+ * remain authoritative.
+ */
+export function createSessionPermissionGate(
+  prompt: (request: PermissionRequest) => Promise<PermissionPromptDecision>,
+): PermissionGate {
+  let allowSession = false;
+  let tail = Promise.resolve();
+
+  return (request) => {
+    const result = tail.then(async () => {
+      if (allowSession) return "allow" as const;
+      const decision = await prompt(request);
+      if (decision === "always") allowSession = true;
+      return decision === "deny" ? "deny" : "allow";
+    });
+    tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+}
 
 /** Literal prefix match with an optional trailing `*` wildcard. */
 const matchesPattern = (pattern: string, value: string): boolean =>
@@ -59,7 +87,8 @@ const GATED_TOOLS: Record<string, PermissionRequest["kind"]> = {
   writeFile: "edit",
 };
 
-const requestDetail = (input: unknown): string => {
+/** Human-readable summary of a tool input: the command, the path, or JSON. */
+export const describeToolInput = (input: unknown): string => {
   if (typeof input === "object" && input !== null) {
     const record = input as Record<string, unknown>;
     if (typeof record.command === "string") return record.command;
@@ -90,7 +119,7 @@ export function withPermissions(tools: ToolSet, options: WithPermissionsOptions)
     wrapped[name] = {
       ...def,
       async execute(input, executeOptions) {
-        const request: PermissionRequest = { tool: name, kind, detail: requestDetail(input) };
+        const request: PermissionRequest = { tool: name, kind, detail: describeToolInput(input) };
         const decision = resolvePermission(options.config, request);
         const settled = decision === "ask" ? await options.gate(request) : decision;
         if (settled === "deny") {

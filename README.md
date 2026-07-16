@@ -45,6 +45,7 @@ Keys and commands:
 - **Esc** — interrupt the running turn. The session survives; the model is told it was cut short.
 - **Ctrl+C** — clear the input; on empty input it interrupts, and a double press quits.
 - **Enter** — send. **Shift+Return** — newline. Messages typed mid-turn are queued.
+- **↑/↓** or **Ctrl+P/N** — browse recent submitted prompts from an empty editor.
 - **`& <task>`** — run the task as a background job in the current mode. Jobs run in their own
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
   and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one.
@@ -69,9 +70,10 @@ no mutating tools at all. In build mode:
 ./bin/agentj config add permissions.bash.deny "git push*"
 ```
 
-Asks render inline (`[y]es once · [a]lways this session · [n]o`). In `agentj run` there is no TTY:
-asks resolve to deny with a notice unless `--allow-all` is passed. A denial is returned to the
-model as a tool result, so it adapts instead of crashing the turn.
+Asks render inline (`[y]es once · [a]lways this session · [n]o`) and concurrent asks are queued.
+Session-wide approval applies only to policy outcomes of `ask`; configured denies remain authoritative.
+In `agentj run` there is no TTY: asks resolve to deny with a notice unless `--allow-all` is passed. A
+denial is returned to the model as a tool result, so it adapts instead of crashing the turn.
 
 ## Parallel subagents
 

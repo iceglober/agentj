@@ -62,6 +62,32 @@ describe("createAgentTools", () => {
     expect(String(allowed)).not.toContain("Denied by user");
   });
 
+  test("tool activity fires around execution, after permission grants, never on deny", async () => {
+    const config = agentConfigSchema.parse({});
+    const activities: string[] = [];
+    const record = (activity: { tool: string; detail: string; phase: string }) =>
+      activities.push(`${activity.phase}:${activity.tool}:${activity.detail}`);
+
+    const denied = await createAgentTools(sandbox, config, {
+      ...baseOptions,
+      onToolActivity: record,
+      permissions: {
+        config: permissionsConfigSchema.parse({ bash: { default: "deny" } }),
+        gate: async () => "deny",
+      },
+    });
+    const deniedResult = await denied.bash?.execute({ command: "ls" });
+    expect(String(deniedResult)).toContain("Denied by user");
+    expect(activities).toEqual([]); // denial short-circuits before activity
+
+    const allowed = await createAgentTools(sandbox, config, {
+      ...baseOptions,
+      onToolActivity: record,
+    });
+    await allowed.bash?.execute({ command: "ls" });
+    expect(activities).toEqual(["start:bash:ls", "end:bash:ls"]);
+  });
+
   test("plan mode receives only read/search capabilities; research adds run_subagents", async () => {
     const config = agentConfigSchema.parse({});
     const planPrimary = await createAgentTools(sandbox, config, {

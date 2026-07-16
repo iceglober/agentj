@@ -13,7 +13,7 @@ import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
-import { type WithPermissionsOptions, withPermissions } from "./permissions";
+import { describeToolInput, type WithPermissionsOptions, withPermissions } from "./permissions";
 import {
   createSubagentsTool,
   type DelegationWiring,
@@ -82,6 +82,12 @@ export interface CreateAgentOptions {
    */
   permissions?: WithPermissionsOptions;
   /**
+   * Live execution feedback: fires when a tool actually starts and ends
+   * (after any permission grant), so a UI can show what is running now —
+   * step-end events alone leave long tool calls invisible.
+   */
+  onToolActivity?(activity: ToolActivity): void;
+  /**
    * Cap the tool loop at N steps. Routed through the runtime port's `stopSteps`
    * so the eval harness can set its per-task step budget once, without the
    * caller knowing how any particular runtime enforces the cap. Omitted → the
@@ -128,6 +134,35 @@ export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"])
   };
 }
 
+export interface ToolActivity {
+  tool: string;
+  detail: string;
+  phase: "start" | "end";
+}
+
+/** Wrap every tool's execute with start/end activity callbacks. */
+const withToolActivity = (
+  tools: ToolSet,
+  onActivity: (activity: ToolActivity) => void,
+): ToolSet => {
+  const wrapped: ToolSet = {};
+  for (const [name, def] of Object.entries(tools)) {
+    wrapped[name] = {
+      ...def,
+      async execute(input, executeOptions) {
+        const detail = describeToolInput(input);
+        onActivity({ tool: name, detail, phase: "start" });
+        try {
+          return await def.execute(input, executeOptions);
+        } finally {
+          onActivity({ tool: name, detail, phase: "end" });
+        }
+      },
+    };
+  }
+  return wrapped;
+};
+
 /** Assemble the capability boundary independently from model construction. */
 export async function createAgentTools(
   sb: Sandbox,
@@ -167,8 +202,11 @@ export async function createAgentTools(
       }
     : {};
 
+  const activity = (tools: ToolSet): ToolSet =>
+    opts.onToolActivity ? withToolActivity(tools, opts.onToolActivity) : tools;
+
   if ((opts.mode ?? "build") === "plan") {
-    return {
+    return activity({
       ...createReadTools(fileSandbox, { root: opts.root }),
       ...createSearchTools(sb, { root: opts.root }),
       ...(opts.research
@@ -180,15 +218,15 @@ export async function createAgentTools(
             }),
           }
         : {}),
-    };
+    });
   }
 
-  const builderTools: ToolSet = {
+  const builderTools: ToolSet = activity({
     ...(await createBashTools(fileSandbox, { root: opts.root })),
     ...createSearchTools(sb, { root: opts.root }),
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
-  };
+  });
   return opts.permissions ? withPermissions(builderTools, opts.permissions) : builderTools;
 }
 

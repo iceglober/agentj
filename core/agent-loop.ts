@@ -2,8 +2,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 
-import { type Agent, createAgent as createProductionAgent } from "./lib/agent";
-import type { PermissionGate } from "./lib/agent/permissions";
+import { type Agent, createAgent as createProductionAgent, type ToolActivity } from "./lib/agent";
+import { createSessionPermissionGate, type PermissionGate } from "./lib/agent/permissions";
 import {
   createSubagentsTool,
   type SubagentProgressEvent,
@@ -123,6 +123,7 @@ async function composeChat(
   sessionId: string,
   gate: PermissionGate,
   onDagProgress: (progress: SubagentProgressEvent) => void,
+  onToolActivity?: (activity: ToolActivity) => void,
 ): Promise<ChatComposition> {
   const projectSource = await resolveProjectSource(process.cwd());
   const root = projectSource.projectRoot;
@@ -229,6 +230,7 @@ async function composeChat(
             metricsSink,
             mode: "plan",
             research: { createWorker: createResearchWorker, onProgress: onDagProgress },
+            onToolActivity,
           })
         : createProductionAgent(environment, agentConfig, {
             root,
@@ -237,6 +239,7 @@ async function composeChat(
             delegation,
             permissions: { config: config.permissions, gate },
             onSubagentProgress: onDagProgress,
+            onToolActivity,
           });
     agents.set(mode, agent);
     return agent;
@@ -307,13 +310,27 @@ export async function runAgentjChat(
     screen?.setProgressLines(tracker.lines());
   };
 
+  const permissionGate = createSessionPermissionGate((request) =>
+    screen ? screen.askPermission(request) : Promise.resolve("deny"),
+  );
+
+  // Live activity for the status line: what is running right now, since when.
+  let currentActivity: ToolActivity | null = null;
+  let turnStartedAt: number | null = null;
+  let spinnerFrame = 0;
+  const onToolActivity = (activity: ToolActivity): void => {
+    currentActivity = activity.phase === "start" ? activity : null;
+    updateStatus();
+  };
+
   let composition: ChatComposition;
   try {
     composition = await composeChat(
       configPath,
       "chat",
-      (request) => (screen ? screen.askPermission(request) : Promise.resolve("deny")),
+      permissionGate,
       onDagProgress,
+      onToolActivity,
     );
   } catch (error) {
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -352,6 +369,15 @@ export async function runAgentjChat(
   });
 
   const render = (event: ChatEvent): void => {
+    if (event.type === "turn-started") turnStartedAt = Date.now();
+    if (
+      event.type === "assistant" ||
+      event.type === "turn-aborted" ||
+      event.type === "turn-error"
+    ) {
+      turnStartedAt = null;
+      currentActivity = null;
+    }
     const text = formatChatEvent(event);
     if (text) screen?.printAbove(text);
     updateStatus();
@@ -371,13 +397,29 @@ export async function runAgentjChat(
         : composition.runBuildJob(prompt, abortSignal),
   });
 
+  const SPINNER = ["◐", "◓", "◑", "◒"];
   const updateStatus = (): void => {
     const running = jobs.list().filter((job) => job.status === "running").length;
-    const busy = chat.busy ? " · working (esc to interrupt)" : "";
+    let busy = "";
+    if (chat.busy) {
+      const frame = SPINNER[spinnerFrame % SPINNER.length] ?? "◐";
+      const elapsed = turnStartedAt ? ` ${Math.round((Date.now() - turnStartedAt) / 1000)}s` : "";
+      const doing = currentActivity
+        ? `${currentActivity.tool}: ${currentActivity.detail.slice(0, 40)}`
+        : "thinking";
+      busy = ` · ${frame} ${doing}${elapsed} (esc to interrupt)`;
+    }
     screen?.setStatus(
       `⏵ ${chat.pendingMode} · session ${log.id} · ${running} job${running === 1 ? "" : "s"}${busy} · tab: mode · /help`,
     );
   };
+
+  // Animate the spinner and elapsed time while anything is running.
+  const ticker = setInterval(() => {
+    spinnerFrame += 1;
+    if (tracker.live) screen?.setProgressLines(tracker.lines(spinnerFrame));
+    if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
+  }, 250);
 
   const commandContext: ChatCommandContext = {
     session: chat,
@@ -433,6 +475,7 @@ export async function runAgentjChat(
   try {
     await done;
   } finally {
+    clearInterval(ticker);
     process.removeListener("SIGINT", handleSigint);
     jobs.dispose();
     await undo.dispose().catch(() => {});
@@ -455,11 +498,21 @@ export async function runAgentjOnce(
 
   let composition: ChatComposition;
   try {
-    composition = await composeChat(configPath, "run", gate, (progress) => {
-      if (progress.type === "task-completed" || progress.type === "task-failed") {
-        processStderr.write(`subagent ${progress.id}: ${progress.type.slice(5)}\n`);
-      }
-    });
+    composition = await composeChat(
+      configPath,
+      "run",
+      gate,
+      (progress) => {
+        if (progress.type === "task-completed" || progress.type === "task-failed") {
+          processStderr.write(`subagent ${progress.id}: ${progress.type.slice(5)}\n`);
+        }
+      },
+      (activity) => {
+        if (activity.phase === "start") {
+          processStderr.write(`  · ${activity.tool}: ${activity.detail.slice(0, 80)}\n`);
+        }
+      },
+    );
   } catch (error) {
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_FAILURE;

@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { ToolSet } from "../llm";
 import {
+  createSessionPermissionGate,
+  type PermissionPromptDecision,
   type PermissionRequest,
   permissionsConfigSchema,
   resolvePermission,
@@ -39,6 +41,30 @@ describe("resolvePermission", () => {
     const request: PermissionRequest = { tool: "edit", kind: "edit", detail: "src/a.ts" };
     expect(resolvePermission(allow, request)).toBe("allow");
     expect(resolvePermission(deny, request)).toBe("deny");
+  });
+});
+
+describe("createSessionPermissionGate", () => {
+  test("serializes prompts and applies always to later asks in the session", async () => {
+    const prompts: PermissionRequest[] = [];
+    const answers: Array<(decision: PermissionPromptDecision) => void> = [];
+    const gate = createSessionPermissionGate(
+      (request) =>
+        new Promise((resolve) => {
+          prompts.push(request);
+          answers.push(resolve);
+        }),
+    );
+
+    const first = gate(bashRequest("curl one"));
+    const second = gate(bashRequest("curl two"));
+    await Promise.resolve();
+    expect(prompts).toEqual([bashRequest("curl one")]);
+
+    answers[0]?.("always");
+    await expect(first).resolves.toBe("allow");
+    await expect(second).resolves.toBe("allow");
+    expect(prompts).toEqual([bashRequest("curl one")]);
   });
 });
 
