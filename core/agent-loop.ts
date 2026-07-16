@@ -268,7 +268,10 @@ async function composeChat(
           );
           return {
             generate: (childPrompt, opts) =>
-              child.generate(childPrompt, { abortSignal: opts?.abortSignal }),
+              child.generate(childPrompt, {
+                abortSignal: opts?.abortSignal,
+                onStep: opts?.onStep,
+              }),
           };
         },
       },
@@ -306,6 +309,12 @@ export async function runAgentjChat(
   const tracker = createProgressTracker();
   let screen: ChatScreen | undefined;
   const onDagProgress = (progress: SubagentProgressEvent): void => {
+    // Freeze the final per-task lines (usage + elapsed) into the transcript
+    // before the live block clears.
+    if (progress.type === "dag-completed" && tracker.live) {
+      const finalLines = tracker.lines();
+      if (finalLines.length > 0) screen?.printAbove(finalLines.join("\n"));
+    }
     tracker.apply(progress);
     screen?.setProgressLines(tracker.lines());
   };

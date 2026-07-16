@@ -98,6 +98,45 @@ describe("research execution", () => {
   });
 });
 
+describe("task usage events", () => {
+  test("cumulative in/out with current context, per task", async () => {
+    const events: SubagentProgressEvent[] = [];
+    const tool = createSubagentsTool({
+      execution: {
+        kind: "research",
+        createWorker: async () => ({
+          generate: async (_prompt, opts) => {
+            opts?.onStep?.({
+              toolCalls: [],
+              toolResults: [],
+              usage: { inputTokens: 1000, outputTokens: 50, totalTokens: 1050 },
+            });
+            opts?.onStep?.({
+              toolCalls: [],
+              toolResults: [],
+              usage: { inputTokens: 1400, outputTokens: 80, totalTokens: 1480 },
+            });
+            return run("done");
+          },
+        }),
+      },
+      onProgress: (event) => {
+        events.push(event);
+      },
+    });
+
+    await (tool.execute({
+      tasks: [{ id: "a", title: "A", prompt: "p", waitsOn: [] }],
+    }) as Promise<SubagentsResult>);
+
+    const usage = events.filter((event) => event.type === "task-usage");
+    expect(usage).toEqual([
+      { type: "task-usage", id: "a", inputTokens: 1000, outputTokens: 50, contextTokens: 1000 },
+      { type: "task-usage", id: "a", inputTokens: 2400, outputTokens: 130, contextTokens: 1400 },
+    ]);
+  });
+});
+
 describe("delegation execution", () => {
   const makeSession = (
     id: string,

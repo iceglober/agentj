@@ -14,7 +14,15 @@ interface TrackedTask {
   waitsOn: string[];
   state: "waiting" | "running" | "completed" | "failed" | "blocked";
   elapsedMs?: number;
+  usage?: { inputTokens: number; outputTokens: number; contextTokens: number };
 }
+
+/** 456 → "456", 2437 → "2.4k", 432_312 → "432.3k". */
+const formatTokens = (count: number): string =>
+  count < 1000 ? `${count}` : `${(count / 1000).toFixed(1)}k`;
+
+const formatUsage = (usage: NonNullable<TrackedTask["usage"]>): string =>
+  `in:${formatTokens(usage.inputTokens)}, out:${formatTokens(usage.outputTokens)}, ctx:${formatTokens(usage.contextTokens)}`;
 
 export interface ProgressTracker {
   apply(event: SubagentProgressEvent): void;
@@ -41,6 +49,17 @@ export function createProgressTracker(): ProgressTracker {
         case "task-started": {
           const task = tasks.find((entry) => entry.id === event.id);
           if (task) task.state = "running";
+          return;
+        }
+        case "task-usage": {
+          const task = tasks.find((entry) => entry.id === event.id);
+          if (task) {
+            task.usage = {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              contextTokens: event.contextTokens,
+            };
+          }
           return;
         }
         case "task-completed":
@@ -82,7 +101,8 @@ export function createProgressTracker(): ProgressTracker {
             : "";
         const elapsed =
           task.elapsedMs !== undefined ? `  ${(task.elapsedMs / 1000).toFixed(1)}s` : "";
-        return `  ${marker} ${task.id} ${task.title}${waits}${elapsed}`;
+        const usage = task.usage ? `  ${formatUsage(task.usage)}` : "";
+        return `  ${marker} ${task.id} ${task.title}${waits}${usage}${elapsed}`;
       });
     },
   };

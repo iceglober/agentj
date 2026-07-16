@@ -192,7 +192,10 @@ export async function createAgentTools(
               });
               return {
                 generate: (prompt, generateOpts) =>
-                  child.generate(prompt, { abortSignal: generateOpts?.abortSignal }),
+                  child.generate(prompt, {
+                    abortSignal: generateOpts?.abortSignal,
+                    onStep: generateOpts?.onStep,
+                  }),
               };
             },
           },

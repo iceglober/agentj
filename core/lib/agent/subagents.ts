@@ -1,5 +1,5 @@
 import z from "zod";
-import type { RunResult } from "../llm";
+import type { RunResult, RunStep } from "../llm";
 import { defineTool } from "../llm";
 import type { ChildSession, ChildSessionFinalizeResult } from "../session";
 import { scheduleTasks } from "./scheduler";
@@ -94,6 +94,14 @@ export type SubagentProgressEvent =
     }
   | { type: "task-started"; id: string; title: string; startedAt: number }
   | {
+      /** Live cumulative token usage; ctx is the latest request's input size. */
+      type: "task-usage";
+      id: string;
+      inputTokens: number;
+      outputTokens: number;
+      contextTokens: number;
+    }
+  | {
       type: "task-completed" | "task-failed" | "task-blocked";
       id: string;
       title: string;
@@ -103,7 +111,10 @@ export type SubagentProgressEvent =
   | { type: "dag-completed"; elapsedMs: number };
 
 export interface SubagentRunner {
-  generate(prompt: string, opts?: { abortSignal?: AbortSignal }): Promise<RunResult>;
+  generate(
+    prompt: string,
+    opts?: { abortSignal?: AbortSignal; onStep?: (step: RunStep) => void },
+  ): Promise<RunResult>;
 }
 
 export interface DelegationWiring {
@@ -228,13 +239,14 @@ async function runDelegationTask(
   prompt: string,
   wiring: DelegationWiring,
   abortSignal?: AbortSignal,
+  onStep?: (step: RunStep) => void,
 ): Promise<SubagentResult> {
   let session: ChildSession | null = null;
   let run: RunResult | null = null;
   try {
     session = await wiring.createChildSession({ id: task.id, parentRef: wiring.parentRef, task });
     const child = await wiring.createChildAgent({ task, session, root: session.path });
-    run = await child.generate(prompt, abortSignal ? { abortSignal } : undefined);
+    run = await child.generate(prompt, { abortSignal, onStep });
 
     let finalized: ChildSessionFinalizeResult;
     try {
@@ -350,15 +362,29 @@ export function createSubagentsTool(options: CreateSubagentsToolOptions) {
             title: task.title,
             startedAt: taskStartedAt,
           });
+          let inputTokens = 0;
+          let outputTokens = 0;
+          const onStep = (step: RunStep): void => {
+            if (!step.usage) return;
+            inputTokens += step.usage.inputTokens;
+            outputTokens += step.usage.outputTokens;
+            void emit({
+              type: "task-usage",
+              id: task.id,
+              inputTokens,
+              outputTokens,
+              contextTokens: step.usage.inputTokens,
+            });
+          };
           const prompt = withFindings(task, completed);
           let result: SubagentResult;
           if (wiring) {
-            result = await runDelegationTask(task, prompt, wiring, abortSignal);
+            result = await runDelegationTask(task, prompt, wiring, abortSignal, onStep);
           } else if (execution.kind === "research") {
             try {
               if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
               const worker = await execution.createWorker(task);
-              const run = await worker.generate(prompt, abortSignal ? { abortSignal } : undefined);
+              const run = await worker.generate(prompt, { abortSignal, onStep });
               result = baseResult(task, "completed", { text: run.text });
             } catch (error) {
               if (isAbort(error, abortSignal)) throw error;

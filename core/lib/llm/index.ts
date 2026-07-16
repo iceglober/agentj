@@ -40,6 +40,9 @@ export interface TokenUsage {
 export interface RunStep {
   toolCalls: { name: string; input: unknown }[];
   toolResults: { name: string; output: unknown; isError?: boolean }[];
+  /** This step's request usage: inputTokens is the request's full context
+   *  size, so live UIs can show both cumulative spend and current window. */
+  usage?: TokenUsage;
 }
 
 export interface RunResult {

@@ -59,7 +59,22 @@ interface AiStepLike {
   toolResults: readonly { toolName: string; output?: unknown }[];
 }
 
+const mapStepUsage = (step: AiStepLike): { usage?: RunStep["usage"] } => {
+  const usage = (
+    step as { usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }
+  ).usage;
+  if (!usage) return {};
+  return {
+    usage: {
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+      totalTokens: usage.totalTokens ?? 0,
+    },
+  };
+};
+
 const mapStep = (step: AiStepLike): RunStep => ({
+  ...mapStepUsage(step),
   toolCalls: step.toolCalls.map((c) => ({ name: c.toolName, input: c.input })),
   toolResults: step.toolResults.map((tr) => {
     const output = tr.output;
