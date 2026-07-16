@@ -72,7 +72,8 @@ export const profiles = {
     params: { providerOptions: { openai: { reasoningEffort: "medium", textVerbosity: "low" } } },
   },
   "gpt-5.6-luna": {
-    // Data-only; not deployed.
+    // Deployed on the user's Azure resource. Compact primary: per-step prompt
+    // weight dominates cost at this tier (validated -19% tokens, eval 2026-07-16).
     match: [/^gpt-5\.6-luna\b/],
     flags: {},
     primary: COMPACT_PRIMARY,
