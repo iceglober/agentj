@@ -33,8 +33,8 @@ import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
-import { escapeTerminalText } from "./lib/tui/terminal-editor";
 import { applyProgressEvent, createProgressTracker } from "./lib/tui/progress";
+import { escapeTerminalText } from "./lib/tui/terminal-editor";
 import {
   createGitDelegationSnapshot,
   integrateGitDelegation,

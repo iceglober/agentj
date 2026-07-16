@@ -268,7 +268,6 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-
   test("printAbove sanitizes by default; preStyled preserves trusted ANSI", async () => {
     const { screen, text } = makeScreen();
     screen.start();
