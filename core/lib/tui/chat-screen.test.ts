@@ -268,6 +268,19 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+
+  test("printAbove sanitizes by default; preStyled preserves trusted ANSI", async () => {
+    const { screen, text } = makeScreen();
+    screen.start();
+    // Untrusted content: a raw ESC must be neutralized to visible text.
+    screen.printAbove("evil \u001b[2J payload");
+    expect(text()).toContain("\\x1b[2J");
+    // Trusted styled line (caller sanitized its interpolations) passes through.
+    screen.printAbove("\u001b[1mstyled\u001b[0m", { preStyled: true });
+    expect(text()).toContain("\u001b[1mstyled\u001b[0m");
+    screen.stop();
+  });
+
   test("status and progress lines render in the live region", async () => {
     const { screen, text } = makeScreen();
     screen.start();

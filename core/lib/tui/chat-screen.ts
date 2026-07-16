@@ -53,7 +53,10 @@ export interface ChatScreen {
   start(): void;
   stop(): void;
   /** Append transcript output above the live region. */
-  printAbove(text: string): void;
+  /** Append transcript output. Text is sanitized against terminal-escape
+   *  injection unless `preStyled` — then the CALLER must have sanitized any
+   *  interpolated content before adding its own trusted ANSI styling. */
+  printAbove(text: string, options?: { preStyled?: boolean }): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: string[]): void;
   setStatus(text: string): void;
@@ -176,9 +179,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     lastLayout = null;
   };
 
-  const printTranscript = (text: string): void => {
+  const printTranscript = (text: string, preStyled = false): void => {
     clearLive();
-    write(`${escapeTerminalText(text).split("\n").join("\r\n")}\r\n`);
+    write(`${(preStyled ? text : escapeTerminalText(text)).split("\n").join("\r\n")}\r\n`);
     paint();
   };
 
@@ -325,8 +328,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       write("\r\n");
     },
 
-    printAbove(text) {
-      printTranscript(text);
+    printAbove(text, options) {
+      printTranscript(text, options?.preStyled === true);
     },
 
     setProgressLines(lines) {

@@ -33,6 +33,7 @@ import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
+import { escapeTerminalText } from "./lib/tui/terminal-editor";
 import { applyProgressEvent, createProgressTracker } from "./lib/tui/progress";
 import {
   createGitDelegationSnapshot,
@@ -480,13 +481,16 @@ export async function runAgentjChat(
     // Chat styling (interactive only): a blank line + colored prefix separates
     // turns; assistant markdown renders lightly.
     if (event.type === "turn-started") {
-      screen?.printAbove(`\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${event.text}\u001b[0m`);
+      screen?.printAbove(
+        `\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
+        { preStyled: true },
+      );
       updateStatus();
       return;
     }
     if (event.type === "assistant") {
       const body = formatChatEvent(event) ?? event.text;
-      screen?.printAbove(`\n${renderMarkdownLite(body)}`);
+      screen?.printAbove(`\n${renderMarkdownLite(escapeTerminalText(body))}`, { preStyled: true });
       updateStatus();
       return;
     }
