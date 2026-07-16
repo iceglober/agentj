@@ -11,8 +11,8 @@ import type { Sandbox } from "../sandbox";
 import { createBashTools } from "../tools/bash";
 import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
-import { createSearchTools } from "../tools/search";
 import { createReadTools } from "../tools/read";
+import { createSearchTools } from "../tools/search";
 import { type CreateSubagentToolOptions, createSubagentTool } from "./delegate";
 import {
   createPlanningDagTool,

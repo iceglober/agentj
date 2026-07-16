@@ -1,6 +1,6 @@
-import { stderr as processStderr, stdout as processStdout } from "node:process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { stderr as processStderr, stdout as processStdout } from "node:process";
 
 import { type Agent, createAgent as createProductionAgent } from "./lib/agent";
 import type { CreatePlanningDagToolOptions } from "./lib/agent/planning-delegate";
@@ -8,32 +8,32 @@ import type { ConversationDependencies } from "./lib/app/conversation";
 import { runAgentConversation } from "./lib/app/conversation";
 import type { TaskRunDependencies } from "./lib/app/run";
 import { type AgentjTaskRunnerOptions, runAgentjCli } from "./lib/cli";
-import { createConfigCliHandlers } from "./lib/config-cli";
 import { loadConfig } from "./lib/config";
+import { createConfigCliHandlers } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
 import type { PromptContext } from "./lib/prompt";
 import { getSandbox, type Sandbox } from "./lib/sandbox";
 import { type ProjectSource, resolveProjectSource } from "./lib/sandbox/microsandbox-adapter";
-import { sandboxAdapters, type SandboxProviderName } from "./lib/sandbox/registry";
+import { type SandboxProviderName, sandboxAdapters } from "./lib/sandbox/registry";
 import { resolveAzureApiKey, type SecretStore } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession, createLocalSession, createSession, type Session } from "./lib/session";
+import type { StoredAgentSession } from "./lib/session-store";
+import { createFileSessionStore } from "./lib/session-store/file-adapter";
 import {
   createNodeTerminalWriters,
   createPromptUi,
   createTerminalPromptEditor,
   createTranscriptRenderer,
 } from "./lib/tui";
-import { createPromptsSecretPrompt } from "./secrets-cli";
-import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
 import {
   createGitDelegationSnapshot,
   integrateGitDelegation,
 } from "./lib/workspace/git-integration";
-import { createFileSessionStore } from "./lib/session-store/file-adapter";
-import type { StoredAgentSession } from "./lib/session-store";
+import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
+import { createPromptsSecretPrompt } from "./secrets-cli";
 
 const COMMAND_VERSION = "0.0.0";
 

@@ -4,10 +4,10 @@ import type { RunResult } from "../llm";
 import type { Sandbox } from "../sandbox";
 import type { Session } from "../session";
 import {
-  isExplicitApproval,
-  runAgentConversation,
   type ConversationDependencies,
   type ConversationEvent,
+  isExplicitApproval,
+  runAgentConversation,
 } from "./conversation";
 
 const result = (text: string): RunResult => ({

@@ -3,9 +3,9 @@ import { describe, expect, test } from "bun:test";
 import {
   applyEditorCommand,
   createEditorState,
-  splitGraphemes,
   type EditorCommand,
   type EditorState,
+  splitGraphemes,
 } from "./editor";
 
 const apply = (state: EditorState, ...commands: EditorCommand[]): EditorState =>

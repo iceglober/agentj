@@ -1,7 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
-
-import { createEvalCliHandlers, type EvalCommandRunner } from "./eval-cli";
 import { createProductionEvalCliHandlers } from "../agent-loop";
+import { createEvalCliHandlers, type EvalCommandRunner } from "./eval-cli";
 
 function createRunner(exitCodes: { run: number; report: number; selfcheck: number }): {
   runner: EvalCommandRunner;

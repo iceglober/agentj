@@ -1,6 +1,6 @@
 import type { Readable, Writable } from "node:stream";
 
-import { applyEditorCommand, createEditorState, splitGraphemes, type EditorState } from "./editor";
+import { applyEditorCommand, createEditorState, type EditorState, splitGraphemes } from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
 import type { TextPromptEditor, TextPromptRequest } from "./prompt-input";
 

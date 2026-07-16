@@ -19,6 +19,7 @@ export async function getExecutionEnvironment<T extends ExecutionEnvironment>(
 ): Promise<T> {
   return await provider();
 }
+
 import z from "zod";
 
 export const projectSetupConfigSchema = z.object({

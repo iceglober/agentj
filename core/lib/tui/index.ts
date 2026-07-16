@@ -4,8 +4,8 @@ import type { ConversationEvent, ConversationOutcome } from "../app/conversation
 import type { TaskRunSessionIdentity } from "../app/run";
 
 export {
-  createPromptUi,
   type CreatePromptUiOptions,
+  createPromptUi,
   type InteractiveInputGate,
   type PromptIo,
   type PromptUi,
@@ -13,8 +13,8 @@ export {
   type TextPromptRequest,
 } from "./prompt-input";
 export {
-  createTerminalPromptEditor,
   type CreateTerminalPromptEditorOptions,
+  createTerminalPromptEditor,
   renderEditorLayout,
 } from "./terminal-editor";
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Sandbox } from "../sandbox";
-import { agentConfigSchema, createAgentTools, type CreateAgentOptions } from ".";
+import { agentConfigSchema, type CreateAgentOptions, createAgentTools } from ".";
 
 const sandbox: Sandbox = {
   async executeCommand() {

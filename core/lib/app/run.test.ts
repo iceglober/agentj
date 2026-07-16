@@ -1,4 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import {
+  createProductionTaskRunDependencies,
+  type ProductionDependencyOverrides as ProductionTaskRunDependencyOverrides,
+} from "../../agent-loop";
 import type { Agent } from "../agent";
 import { configSchema } from "../config";
 import type { RunResult, RunStep } from "../llm";
@@ -6,10 +10,6 @@ import type { MetricsSink } from "../metrics";
 import type { Sandbox } from "../sandbox";
 import { type SecretStore, SecretStoreUnavailableError } from "../secrets";
 import type { ChildSession, Session } from "../session";
-import {
-  createProductionTaskRunDependencies,
-  type ProductionDependencyOverrides as ProductionTaskRunDependencyOverrides,
-} from "../../agent-loop";
 import { runAgentTask, type TaskRunDependencies, type TaskRunEvent } from "./run";
 
 function makeRunResult(text: string, steps: RunStep[] = []): RunResult {

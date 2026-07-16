@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SubagentTaskResult } from "../agent/delegate";
-import { createHostExecutionEnvironment } from "./host-adapter";
 import { createGitDelegationSnapshot, integrateGitDelegation } from "./git-integration";
+import { createHostExecutionEnvironment } from "./host-adapter";
 
 async function git(root: string, ...args: string[]): Promise<string> {
   const process = Bun.spawn({ cmd: ["git", "-C", root, ...args], stdout: "pipe", stderr: "pipe" });

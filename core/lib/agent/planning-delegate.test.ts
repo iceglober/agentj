@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { RunResult } from "../llm";
 import {
   createPlanningDagTool,
-  planningDagInputSchema,
   type PlanningDagProgressEvent,
+  planningDagInputSchema,
 } from "./planning-delegate";
 
 const runResult = (text: string): RunResult => ({
