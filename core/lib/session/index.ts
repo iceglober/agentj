@@ -11,8 +11,8 @@ export const sessionConfigSchema = z.object({
   branchPrefix: z.string().default("session/"),
   /**
    * Where the session branch starts:
-   * - "auto": remote default branch (fetched, best-effort) when a remote
-   *   exists, else local HEAD, else adopt the directory as a new repo.
+   * - "auto": newest descendant of local and remote default branches; when
+   *   they diverge, prefer the shared remote baseline. Falls back to HEAD.
    * - "remote-default": origin's default branch; error if unresolvable.
    * - "head": current local HEAD (adopting the directory if not a repo yet).
    * - anything else: an explicit ref, verified to exist.
@@ -29,18 +29,45 @@ export const sessionConfigSchema = z.object({
 export type SessionConfig = z.infer<typeof sessionConfigSchema>;
 
 export interface Session extends AsyncDisposable {
+  readonly mode?: "local" | "sandbox";
   readonly id: string;
   /** The session's git worktree — point the agent's tools here. */
   readonly path: string;
   readonly branch: string;
   /** The resolved ref the session branched from, e.g. "origin/main". */
   readonly base: string;
+  readonly baseWarning?: string;
   status(): Promise<string>;
   diff(): Promise<string>;
   commitAll(message: string): Promise<string | null>;
   log(maxCount?: number): Promise<string>;
   /** Remove the worktree; the branch and its commits stay in the repo. */
   dispose(): Promise<void>;
+}
+
+/** Non-owning session over the caller's actual checkout. */
+export async function createLocalSession(
+  sb: Sandbox,
+  repoDir: string,
+  id = `local-${crypto.randomUUID().slice(0, 8)}`,
+): Promise<Session> {
+  const [branch, head] = await Promise.all([
+    scm.currentBranch(sb, repoDir),
+    scm.resolveCommit(sb, repoDir),
+  ]);
+  return {
+    mode: "local",
+    id,
+    path: repoDir,
+    branch,
+    base: head,
+    status: () => scm.status(sb, repoDir),
+    diff: () => scm.diff(sb, repoDir),
+    commitAll: async () => null,
+    log: (maxCount) => scm.log(sb, repoDir, maxCount),
+    dispose: async () => {},
+    async [Symbol.asyncDispose]() {},
+  };
 }
 
 export interface ChildSession extends Session {
@@ -168,7 +195,51 @@ function describeError(error: unknown): string {
  * Resolve the ref a new session branches from, per `config.base`.
  * May initialize/adopt the repo when the policy allows starting from scratch.
  */
-async function resolveBase(sb: Sandbox, config: SessionConfig): Promise<string> {
+interface ResolvedBase {
+  ref: string;
+  warning?: string;
+}
+
+export interface CanonicalBaseCandidates {
+  remoteRef: string | null;
+  localRef: string | null;
+  localIsAncestorOfRemote: boolean;
+  remoteIsAncestorOfLocal: boolean;
+}
+
+export function chooseCanonicalBase(candidates: CanonicalBaseCandidates): ResolvedBase {
+  const { remoteRef, localRef, localIsAncestorOfRemote, remoteIsAncestorOfLocal } = candidates;
+  if (remoteRef && !localRef) return { ref: remoteRef };
+  if (!remoteRef && localRef) return { ref: localRef };
+  if (!remoteRef || !localRef) return { ref: "HEAD" };
+  if (localIsAncestorOfRemote) return { ref: remoteRef };
+  if (remoteIsAncestorOfLocal) return { ref: localRef };
+  return {
+    ref: remoteRef,
+    warning: `local ${localRef} diverges from ${remoteRef}; using shared remote baseline`,
+  };
+}
+
+async function resolveAutoBase(sb: Sandbox, repoDir: string): Promise<ResolvedBase> {
+  if (!(await scm.hasRemote(sb, repoDir))) return { ref: "HEAD" };
+  const name = await scm.remoteDefaultBranch(sb, repoDir);
+  if (!name) return { ref: "HEAD" };
+  await scm.tryFetch(sb, repoDir, "origin", name);
+
+  const remoteRef = `origin/${name}`;
+  const hasRemoteRef = await scm.refExists(sb, repoDir, remoteRef);
+  const hasLocalRef = await scm.refExists(sb, repoDir, name);
+  return chooseCanonicalBase({
+    remoteRef: hasRemoteRef ? remoteRef : null,
+    localRef: hasLocalRef ? name : null,
+    localIsAncestorOfRemote:
+      hasRemoteRef && hasLocalRef ? await scm.isAncestor(sb, repoDir, name, remoteRef) : false,
+    remoteIsAncestorOfLocal:
+      hasRemoteRef && hasLocalRef ? await scm.isAncestor(sb, repoDir, remoteRef, name) : false,
+  });
+}
+
+async function resolveBase(sb: Sandbox, config: SessionConfig): Promise<ResolvedBase> {
   const { repoDir, base } = config;
   const ready = (await scm.isRepo(sb, repoDir)) && (await scm.hasCommits(sb, repoDir));
 
@@ -181,17 +252,13 @@ async function resolveBase(sb: Sandbox, config: SessionConfig): Promise<string> 
       ) {
         // cloned-but-unborn repo: prefer the remote over adopting
         const remoteRef = await resolveRemoteDefault(sb, repoDir, false);
-        if (remoteRef) return remoteRef;
+        if (remoteRef) return { ref: remoteRef };
       }
       await scm.ensureRepo(sb, repoDir); // init/adopt working files
-      return "HEAD";
+      return { ref: "HEAD" };
     }
-    if (base === "head") return "HEAD";
-    if (await scm.hasRemote(sb, repoDir)) {
-      const remoteRef = await resolveRemoteDefault(sb, repoDir, false);
-      if (remoteRef) return remoteRef;
-    }
-    return "HEAD";
+    if (base === "head") return { ref: "HEAD" };
+    return resolveAutoBase(sb, repoDir);
   }
 
   if (base === "remote-default") {
@@ -202,7 +269,7 @@ async function resolveBase(sb: Sandbox, config: SessionConfig): Promise<string> 
       throw new Error(
         `session.base "remote-default": cannot resolve origin's default branch in ${repoDir}`,
       );
-    return remoteRef;
+    return { ref: remoteRef };
   }
 
   // explicit ref
@@ -210,7 +277,7 @@ async function resolveBase(sb: Sandbox, config: SessionConfig): Promise<string> 
     throw new Error(`session.base "${base}": ${repoDir} has no commits to resolve it against`);
   if (!(await scm.refExists(sb, repoDir, base)))
     throw new Error(`session.base "${base}": ref does not exist in ${repoDir}`);
-  return base;
+  return { ref: base };
 }
 
 /**
@@ -260,12 +327,15 @@ function createSessionHandle(
   base: string,
   path: string,
   dispose: () => Promise<void>,
+  baseWarning?: string,
 ): Session {
   return {
+    mode: "sandbox",
     id,
     path,
     branch,
     base,
+    ...(baseWarning ? { baseWarning } : {}),
     status: () => scm.status(sb, path),
     diff: () => scm.diff(sb, path),
     commitAll: (message) => scm.commitAll(sb, path, message),
@@ -480,12 +550,18 @@ export async function createSession(
   const path = `${config.root}/${id}`;
   const branch = `${config.branchPrefix}${id}`;
 
-  await scm.ensureIdentity(sb, config.identity);
-  const base = await resolveBase(sb, config);
-  await scm.addWorktree(sb, config.repoDir, path, branch, base);
+  await scm.ensureIdentity(sb, config.repoDir, config.identity);
+  const resolvedBase = await resolveBase(sb, config);
+  await scm.addWorktree(sb, config.repoDir, path, branch, resolvedBase.ref);
 
-  return createSessionHandle(sb, id, branch, base, path, () =>
-    scm.removeWorktree(sb, config.repoDir, path),
+  return createSessionHandle(
+    sb,
+    id,
+    branch,
+    resolvedBase.ref,
+    path,
+    () => scm.removeWorktree(sb, config.repoDir, path),
+    resolvedBase.warning,
   );
 }
 
@@ -499,7 +575,7 @@ export async function createChildSession(
   const branch = buildSessionBranch(config.branchPrefix, id);
   const base = await scm.resolveCommit(sb, config.repoDir, options.parentRef);
 
-  await scm.ensureIdentity(sb, config.identity);
+  await scm.ensureIdentity(sb, config.repoDir, config.identity);
   await scm.addWorktree(sb, config.repoDir, path, branch, base);
 
   let finalized: Promise<ChildSessionFinalizeResult> | null = null;

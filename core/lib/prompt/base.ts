@@ -5,6 +5,9 @@ import {
   SOL_OUTCOME_BLOCK,
   SUBAGENT_CONTRACT_BLOCK,
   WORKFLOW_STEPS_BLOCK,
+  PLANNER_BLOCK,
+  PLANNING_WORKER_BLOCK,
+  BUILDER_BLOCK,
 } from "./blocks";
 
 /**
@@ -36,22 +39,29 @@ structure, use your tools to read and verify — do NOT guess or invent.
 - Scope: make only the changes requested or clearly required to complete
   them. No drive-by refactors, extra features, or commentary in code.
 
+{{#if PLANNER}}${PLANNER_BLOCK}
+{{/if}}{{#if PLANNING_WORKER}}${PLANNING_WORKER_BLOCK}
+{{/if}}{{#if BUILDER}}${BUILDER_BLOCK}
+{{/if}}
+
 {{#if WORKFLOW_STEPS}}# Workflow
 ${WORKFLOW_STEPS_BLOCK}{{/if}}{{#if WORKFLOW_OUTCOME}}${SOL_OUTCOME_BLOCK}{{/if}}
 
-Then, before finishing:
+{{#if BUILDER}}Then, before finishing:
 - Verify behavior: run the project's own tests for what you changed —
   discover the test command from the repo; never assume one.
 - Verify standards: run the project's lint / typecheck / build commands
   you identified. If validation cannot run, say why and name the next
   best check.
+{{/if}}
 
-# Action & approval policy
+{{#if BUILDER}}# Action & approval policy
 - Without asking: read files, inspect logs, edit in-scope files, and run
   non-destructive validation.
 - Ask first: pushes or other external writes, destructive operations
   (rm -rf, branch deletion, force-push, history rewrites), environment-
   changing installs, anything costly, or a material expansion of scope.
+{{/if}}
 
 {{#if SMALL_MODEL}}${SMALL_MODEL_BLOCK}
 {{/if}}{{#if HALLUCINATION_GUARD}}${HALLUCINATION_GUARD}

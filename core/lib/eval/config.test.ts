@@ -44,6 +44,18 @@ describe("configHash", () => {
     expect(configHash(batch)).not.toBe(configHash(exact));
   });
 
+  test("subagent concurrency change moves the hash", () => {
+    const one = runConfigSchema.parse({
+      id: "one",
+      agent: { tools: { subagents: { concurrency: 1 } } },
+    });
+    const three = runConfigSchema.parse({
+      id: "three",
+      agent: { tools: { subagents: { concurrency: 3 } } },
+    });
+    expect(configHash(one)).not.toBe(configHash(three));
+  });
+
   test("identical agent → identical hash across parses", () => {
     expect(configHash(base())).toBe(configHash(base()));
   });

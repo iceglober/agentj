@@ -2,6 +2,7 @@ import z from "zod";
 import type { RunResult } from "../llm";
 import { defineTool } from "../llm";
 import type { ChildSession, ChildSessionFinalizeResult } from "../session";
+import { scheduleTasks } from "./scheduler";
 
 /** One autonomous child lane: prompt, commit message, optional stable id. */
 export const subagentTaskSchema = z.object({
@@ -49,13 +50,18 @@ export type SubagentTaskResult = z.infer<typeof subagentTaskResultSchema>;
 
 export const subagentToolInputSchema = z.object({
   tasks: z.array(subagentTaskSchema).min(1),
-  concurrency: z.number().int().positive().default(1),
 });
 
 export type SubagentToolInput = z.infer<typeof subagentToolInputSchema>;
 
 export const subagentToolResultSchema = z.object({
   results: z.array(subagentTaskResultSchema),
+  integration: z
+    .object({
+      outcome: z.enum(["applied", "clean", "blocked"]),
+      detail: z.string().nullable(),
+    })
+    .optional(),
 });
 
 export type SubagentToolResult = z.infer<typeof subagentToolResultSchema>;
@@ -85,6 +91,14 @@ export interface CreateSubagentToolOptions {
   readonly maxConcurrency?: number;
   readonly createChildSession: (args: CreateChildSessionArgs) => Promise<ChildSession>;
   readonly createChildAgent: (args: CreateChildAgentArgs) => Promise<SubagentRunner>;
+  readonly prepareBatch?: () => Promise<{
+    parentRef: string;
+    createChildSession?: CreateSubagentToolOptions["createChildSession"];
+    integrate(results: readonly SubagentTaskResult[]): Promise<{
+      outcome: "applied" | "clean" | "blocked";
+      detail: string | null;
+    }>;
+  }>;
 }
 
 interface ToolExecuteOptions {
@@ -113,9 +127,6 @@ const toIndexedTasks = (tasks: SubagentTask[]): IndexedSubagentTask[] =>
     index,
     id: task.id ?? `subagent-${index + 1}`,
   }));
-
-const clampConcurrency = (requested: number, taskCount: number, maxConcurrency: number): number =>
-  Math.max(1, Math.min(requested, taskCount, maxConcurrency));
 
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -298,36 +309,44 @@ export function createSubagentTool(options: CreateSubagentToolOptions) {
       "Run multiple child agents in isolated worktrees and return ordered changeset metadata.",
     inputSchema: subagentToolInputSchema,
     async execute(input: SubagentToolInput, toolOptions?: unknown): Promise<SubagentToolResult> {
+      const prepared = await options.prepareBatch?.();
+      const invocationOptions: CreateSubagentToolOptions = {
+        ...options,
+        ...(prepared
+          ? {
+              parentRef: prepared.parentRef,
+              createChildSession: prepared.createChildSession ?? options.createChildSession,
+            }
+          : {}),
+      };
       const indexed = toIndexedTasks(input.tasks);
       const abortSignal = (toolOptions as ToolExecuteOptions | undefined)?.abortSignal;
-      const results = new Array<SubagentTaskResult>(indexed.length);
-      const concurrency = clampConcurrency(
-        input.concurrency,
+      const concurrency = Math.min(
         indexed.length,
         options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY,
       );
 
-      let nextIndex = 0;
-      const workers = Array.from({ length: concurrency }, async () => {
-        while (true) {
-          if (abortSignal?.aborted) {
-            return;
-          }
-
-          const current = nextIndex;
-          nextIndex += 1;
-          if (current >= indexed.length) {
-            return;
-          }
-
-          results[current] = await runLane(indexed[current], options, abortSignal);
-        }
-      });
-
-      await Promise.all(workers);
-
-      for (const task of indexed) {
-        results[task.index] ??= {
+      const results = await scheduleTasks<IndexedSubagentTask, SubagentTaskResult>({
+        tasks: indexed,
+        concurrency,
+        abortSignal,
+        id: (task) => task.id,
+        dependencies: () => [],
+        run: (task) => runLane(task, invocationOptions, abortSignal),
+        dependencySucceeded: () => true,
+        blocked: (task) => ({
+          index: task.index,
+          id: task.id,
+          outcome: "failure",
+          branch: null,
+          path: null,
+          base: null,
+          commit: null,
+          text: null,
+          error: "Subagent task graph blocked.",
+          recovery: emptyRecovery(false, null, invocationOptions.parentRef),
+        }),
+        abortedBeforeStart: (task) => ({
           index: task.index,
           id: task.id,
           outcome: "aborted",
@@ -337,11 +356,14 @@ export function createSubagentTool(options: CreateSubagentToolOptions) {
           commit: null,
           text: null,
           error: "Aborted before this lane started.",
-          recovery: emptyRecovery(false, null, options.parentRef),
-        };
-      }
+          recovery: emptyRecovery(false, null, invocationOptions.parentRef),
+        }),
+      });
 
-      return { results };
+      return {
+        results,
+        ...(prepared ? { integration: await prepared.integrate(results) } : {}),
+      };
     },
   });
 }

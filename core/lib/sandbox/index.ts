@@ -1,24 +1,17 @@
-export interface SandboxCommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
+import type {
+  CommandResult,
+  ExecutionEnvironment,
+  ExecutionEnvironmentProvider,
+} from "../workspace";
+
+export type SandboxCommandResult = CommandResult;
 
 /**
  * v1 sandbox port. Intentionally the same shape as bash-tool's `Sandbox`
  * interface so a port sandbox can be passed straight to `createBashTool` —
  * the match is a design choice, not an accident.
  */
-export interface Sandbox {
-  executeCommand(command: string): Promise<SandboxCommandResult>;
-  readFile(path: string): Promise<string>;
-  writeFiles(
-    files: Array<{
-      path: string;
-      content: string | Buffer;
-    }>,
-  ): Promise<void>;
-}
+export interface Sandbox extends ExecutionEnvironment {}
 
 export class SandboxProvisioningError extends Error {
   constructor(error: unknown | Error) {
@@ -34,7 +27,7 @@ export class SandboxProvisioningError extends Error {
   }
 }
 
-export type SandboxProvider<T extends Sandbox = Sandbox> = () => Promise<T> | T;
+export type SandboxProvider<T extends Sandbox = Sandbox> = ExecutionEnvironmentProvider<T>;
 
 export const getSandbox = async <T extends Sandbox>(
   sandboxProvider: SandboxProvider<T>,

@@ -12,7 +12,14 @@ import { createBashTools } from "../tools/bash";
 import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createSearchTools } from "../tools/search";
+import { createReadTools } from "../tools/read";
 import { type CreateSubagentToolOptions, createSubagentTool } from "./delegate";
+import {
+  createPlanningDagTool,
+  type PlanningDagProgressEvent,
+  type PlanningTask,
+  type PlanningWorker,
+} from "./planning-delegate";
 
 /**
  * The agent owns identity/role/rules and composes the three domain modules the
@@ -29,13 +36,21 @@ export const agentConfigSchema = z.object({
   rules: z.string().default(""),
   llm: llmConfigSchema.prefault({}),
   prompt: promptConfigSchema.prefault({}),
-  tools: z.object({ edit: editConfigSchema.prefault({}) }).prefault({}),
+  tools: z
+    .object({
+      edit: editConfigSchema.prefault({}),
+      subagents: z.object({ concurrency: z.number().int().min(1).max(8).default(2) }).prefault({}),
+    })
+    .prefault({}),
 });
 
 export type AgentConfig = z.infer<typeof agentConfigSchema>;
 
 export interface CreateAgentDelegationOptions
-  extends Pick<CreateSubagentToolOptions, "createChildSession" | "maxConcurrency" | "parentRef"> {}
+  extends Pick<
+    CreateSubagentToolOptions,
+    "createChildSession" | "maxConcurrency" | "parentRef" | "prepareBatch"
+  > {}
 
 export interface CreateAgentOptions {
   /** The session worktree the agent's tools operate in. */
@@ -56,6 +71,11 @@ export interface CreateAgentOptions {
    * runtime's default stands.
    */
   stopSteps?: number;
+  purpose?: "planner" | "planning-worker" | "builder";
+  planning?: {
+    createWorker(task: PlanningTask): Promise<PlanningWorker>;
+    onProgress?(event: PlanningDagProgressEvent): void | Promise<void>;
+  };
 }
 
 /** Per-turn hooks for a single generate() call. */
@@ -69,6 +89,71 @@ export interface Agent {
   composed: ComposedPrompt;
   /** Run one turn: prompt in, final text + trajectory + usage out. */
   generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
+}
+
+/** Assemble the capability boundary independently from model construction. */
+export async function createAgentTools(
+  sb: Sandbox,
+  config: AgentConfig,
+  opts: CreateAgentOptions,
+): Promise<ToolSet> {
+  const fileSandbox = confineSandboxFiles(sb, opts.root);
+  const delegationTool: ToolSet = opts.delegation
+    ? {
+        run_subagents: createSubagentTool({
+          parentRef: opts.delegation.parentRef,
+          maxConcurrency: opts.delegation.maxConcurrency,
+          createChildSession: opts.delegation.createChildSession,
+          prepareBatch: opts.delegation.prepareBatch,
+          createChildAgent: async ({ root, session, role }) => {
+            const child = await createAgent(
+              sb,
+              { ...config, role },
+              {
+                root,
+                ctx: {
+                  ...opts.ctx,
+                  cwd: root,
+                  gitBranch: session.branch,
+                  gitStatusSummary: await session.status(),
+                },
+                metricsSink: opts.metricsSink,
+                stopSteps: opts.stopSteps,
+                purpose: "builder",
+              },
+            );
+            return {
+              generate: (prompt, generateOpts) =>
+                child.generate(prompt, { abortSignal: generateOpts?.abortSignal }),
+            };
+          },
+        }),
+      }
+    : {};
+
+  const purpose = opts.purpose ?? "builder";
+  if (purpose !== "builder") {
+    return {
+      ...createReadTools(fileSandbox, { root: opts.root }),
+      ...createSearchTools(sb, { root: opts.root }),
+      ...(purpose === "planner" && opts.planning
+        ? {
+            run_subagents: createPlanningDagTool({
+              concurrency: config.tools.subagents.concurrency,
+              createWorker: opts.planning.createWorker,
+              onProgress: opts.planning.onProgress,
+            }),
+          }
+        : {}),
+    };
+  }
+
+  return {
+    ...(await createBashTools(fileSandbox, { root: opts.root })),
+    ...createSearchTools(sb, { root: opts.root }),
+    ...createEditTools(fileSandbox, config.tools.edit.mode),
+    ...delegationTool,
+  };
 }
 
 /**
@@ -94,60 +179,12 @@ export async function createAgent(
       agentName: config.name,
       role: config.role,
       rules: config.rules,
+      purpose: opts.purpose ?? "builder",
     },
     opts.ctx,
   );
 
-  const fileSandbox = confineSandboxFiles(sb, opts.root);
-
-  const delegationTool: ToolSet = opts.delegation
-    ? {
-        run_subagents: createSubagentTool({
-          parentRef: opts.delegation.parentRef,
-          maxConcurrency: opts.delegation.maxConcurrency,
-          createChildSession: opts.delegation.createChildSession,
-          createChildAgent: async ({ root, session, role }) => {
-            const child = await createAgent(
-              sb,
-              { ...config, role },
-              {
-                root,
-                ctx: {
-                  ...opts.ctx,
-                  cwd: root,
-                  gitBranch: session.branch,
-                  gitStatusSummary: await session.status(),
-                },
-                metricsSink: opts.metricsSink,
-                stopSteps: opts.stopSteps,
-              },
-            );
-
-            return {
-              generate: (prompt, generateOpts) =>
-                child.generate(prompt, {
-                  abortSignal: generateOpts?.abortSignal,
-                }),
-            };
-          },
-        }),
-      }
-    : {};
-
-  // Search keeps its explicit root resolver on the original sandbox, while both
-  // bash-adapter structured file tools and edit tools use a sandbox view whose
-  // file reads/writes are lexically confined to opts.root. That preserves the
-  // existing tool precedence — editTools still replaces bash-tool's plain readFile
-  // with mode-specific line/anchor prefixes — and the same createAgent wiring
-  // automatically confines both parent and child agents. Delegation stays last
-  // because only the parent opts into it, and no later spread can accidentally
-  // overwrite `run_subagents` and silently disable it.
-  const tools: ToolSet = {
-    ...(await createBashTools(fileSandbox, { root: opts.root })),
-    ...createSearchTools(sb, { root: opts.root }),
-    ...createEditTools(fileSandbox, config.tools.edit.mode),
-    ...delegationTool,
-  };
+  const tools = await createAgentTools(sb, config, opts);
 
   return {
     composed,

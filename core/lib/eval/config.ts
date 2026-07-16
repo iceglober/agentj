@@ -38,6 +38,7 @@ export function configHash(rc: RunConfig): string {
     temperature: a.llm.temperature ?? null,
     topP: a.llm.topP ?? null,
     editMode: a.tools.edit.mode,
+    subagentConcurrency: a.tools.subagents.concurrency,
     prompt: { profile: a.prompt.profile, flags: a.prompt.flags ?? {} },
   };
   return new Bun.CryptoHasher("sha256")

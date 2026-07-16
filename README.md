@@ -21,9 +21,13 @@ git clone git@github.com:iceglober/agentj.git && cd agentj
 The unified command surface is `agentj` (or `aj` after linking/installing the package):
 
 ```sh
-bun run agentj                                  # prompts once for a task, then runs
-bun run agentj -- "add a --json flag"           # runs the task directly (one-shot)
+bun run agentj                                  # local cwd; prompts, plans, then waits for approval
+bun run dev                                     # same local-first entrypoint for development
+bun run agentj -- "add a --json flag"           # edits and validates the actual checkout
+bun run agentj -- sandbox "add a --json flag"   # isolated Microsandbox/worktree
+bun run agentj -- --resume <session-id>          # resume persisted task/plan/feedback state
 ./bin/agentj config set agent.llm.model gpt-5.6-sol
+./bin/agentj config set agent.tools.subagents.concurrency 3
 ./bin/agentj config add sandbox.bootstrap "apt-get install -y gh"
 ./bin/aj config set --secret providers.azure.api_key
 ./bin/agentj config delete providers.azure.api_key
@@ -33,18 +37,43 @@ bun run agentj -- "add a --json flag"           # runs the task directly (one-sh
 ./bin/agentj --help
 ```
 
-The task is a single positional argument — shell-quote multi-word tasks. Bare invocation asks once
-through a text prompt; Ctrl+C at the prompt exits cleanly before any sandbox or model work starts.
+The task is a single positional argument — shell-quote multi-word tasks. Bare invocation asks for
+the initial task. AgentJ investigates first and presents a plan; feedback revises that plan, while an
+explicit `proceed`, `build it`, `implement it`, `implement the plan`, `go ahead`, or `approved`
+starts implementation. Ambiguous replies remain in planning.
 
-AgentJ runs one task, then exits. It is not a multi-turn chat or fullscreen application. The output
-is a line-oriented transcript:
+Interactive task and feedback prompts support:
 
+- Shift+Return for a newline; Return submits.
+- Option+Left/Right to move by word and Option+Backspace/Delete to delete by word.
+- Cmd+Left/Right to move to the current line boundary and Cmd+Backspace/Delete to delete to it.
+- Home/End and Ctrl+A/E are line-movement fallbacks; Ctrl+U/K are line-deletion fallbacks.
+- Esc+B/F moves by word, while Esc+Backspace and Esc+D delete the previous/next word.
+
+Modifier encodings vary by terminal. Shift+Return and Cmd shortcuts require a terminal with a
+modifier-aware keyboard protocol (such as CSI-u) or equivalent key mappings when those combinations
+would otherwise be sent as ordinary Return, arrow, Backspace, or Delete keys.
+
+Local mode operates directly on the caller's Git checkout, so validated changes are immediately
+available to host tools. Sandbox mode uses an isolated worktree. Session task, plan, feedback, phase,
+and workspace mode are persisted for `--resume`. If interactive input is unavailable, AgentJ prints
+the plan and exits without building. The output remains a line-oriented transcript:
+
+- **Sandbox** — configured image and bootstrap command count, shown before setup starts.
+- **Bootstrap** — completion or a safely redacted setup failure. An empty bootstrap prints a reminder.
 - **Prompt** — the task as received.
 - **Session** — worktree id, branch, and base commit.
 - **Tool** — every tool call, with payloads safely truncated.
 - **Tool result** — shown only when the runner forwards a relevant result (e.g. `run_subagents`).
-- **Result** — the agent's final answer.
+- **Plan** — the current draft; subsequent feedback produces a revised plan.
+- **Build** — shown only after explicit approval.
+- **Result** — the builder's final answer.
 - **Commit** — the commit SHA and message, or "no changes" if nothing was produced.
+
+AgentJ accepts a build as successful only when the builder returns a structured completion report,
+no tool failed, and at least one claimed passing validation command was observed. A blocked build
+with changes is committed to the session branch as an `agentj recovery` commit instead of being
+reported as shipped; the transcript prints the branch and recovery SHA.
 
 Ctrl+C during generation aborts the run, skips the commit, and exits with code 130. Generation and
 commit failures exit with code 1 and print recovery details (session path and branch).
@@ -61,6 +90,7 @@ accept every schema-valid non-secret key path; `add` and `remove` operate on arr
 ./bin/agentj config set agent.llm.model gpt-5.6-sol
 ./bin/agentj config set sandbox.image ghcr.io/iceglober/agentj-sandbox-base:1
 ./bin/agentj config add sandbox.bootstrap "apt-get install -y --no-install-recommends gh"
+./bin/agentj config add project.setup "bun install --frozen-lockfile"
 ./bin/agentj config get sandbox.bootstrap
 ./bin/agentj config remove sandbox.bootstrap "apt-get install -y --no-install-recommends gh"
 ./bin/agentj config delete sandbox.bootstrap
@@ -68,12 +98,31 @@ accept every schema-valid non-secret key path; `add` and `remove` operate on arr
 
 `sandbox.bootstrap` commands run in order after the sandbox starts and before AgentJ creates a
 session worktree. They are persisted configuration, so never put credentials in them.
+At the start of every interactive run, AgentJ prints the sandbox image and configured bootstrap
+command count. Command text and output are not printed because setup may contain sensitive values.
+`project.setup` commands run from the resolved workspace root after local workspace selection or
+sandbox worktree creation and before any model call. Use this phase for locked dependency installs.
 `llm.model` remains a compatibility alias that also selects its provider.
+
+`session.base` defaults to `auto`. AgentJ fetches the remote default branch best-effort and compares
+it with the matching local branch. It uses whichever ref is a descendant of the other; if the
+histories diverge, it uses the shared `origin/<default>` baseline and prints a warning. Set an
+explicit ref such as `main`, `head`, or `remote-default` to override that policy. This policy applies
+to sandbox worktrees; local mode uses the caller's current checkout exactly as it exists.
 
 `core/agentj.json` remains a project/bundled override layer and never needs a secret:
 
 ```json
 {
+  "sandbox": {
+    "bootstrap": [
+      "apt-get update && apt-get install -y --no-install-recommends unzip",
+      "bash -o pipefail -c 'curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s \"bun-v1.3.14\"'"
+    ]
+  },
+  "project": {
+    "setup": ["bun install --frozen-lockfile"]
+  },
   "agent": {
     "llm": {
       "model": "gpt-5.6-sol",
@@ -168,7 +217,9 @@ overhead.
 
 ## What it can do
 
-- **Built-in tools:** `bash`, `readFile`, `writeFile`, `edit`, `grep`, `glob`, `run_subagents`.
+- **Built-in tools:** builders receive `bash`, `readFile`, `writeFile`, `edit`, `grep`, `glob`, and
+  `run_subagents`. Planners receive confined `readFile`, `grep`, `glob`, and a read-only
+  `run_subagents`; planning workers cannot delegate recursively.
   Structured file, edit, and search paths are confined to the session worktree root; `bash` starts
   there but is a powerful shell — it is not a security boundary.
 - **Autonomous subagents** — `run_subagents` delegates tasks to parallel child agents, each in its own
@@ -181,27 +232,43 @@ overhead.
     metadata (path, branch, head commit, reason) so no work is lost.
   - Child agents cannot delegate recursively.
   - Concurrency is bounded at 2.
-- **SPEAR prompt** — Scope → Plan → Execute → Assess → Resolve, with branch-first safety and
-  "prove it with hard evidence" completion.
+  - Before local or sandbox delegation, AgentJ snapshots the parent's current filesystem through a
+    temporary Git index, so dirty parent changes are visible to every child without altering the real
+    index. Successful child commits are composed in task order and applied back as one checked patch.
+- **Adaptive planning DAG** — the planner's `run_subagents` groups read-only workers into numbered
+  serial lanes. Independent ready lanes run concurrently; dependent lanes wait for prerequisite
+  lanes. Interactive terminals show live worker state and elapsed time:
+
+  ```text
+  Subagents: 2/4 finished · elapsed 4.8s
+  1  Repository research
+    ✓ 1.1 map modules  1.8s
+    ◐ 1.2 inspect metrics  3.0s
+  2  Command design · waits on: 1
+    · 2.1 design command
+  ```
+- **Purpose-specific prompts** — planner, planning-worker, and builder instructions compose with the
+  existing model-family profiles; planning purpose never receives mutation tools.
 
 ## Architecture
 
 ```
 core/
-  agent-loop.ts              # thin entrypoint: wires production deps, runs cmd-ts CLI
+  agent-loop.ts              # sole composition root: selects all production adapters and runs CLI
   lib/
-    app/                     # one-task orchestration and structured outcomes
-    agent/                   # agent loop, tool assembly, subagent delegation
+    app/                     # multi-turn conversation and one-shot orchestration services
+    agent/                   # purpose-specific tool assembly and subagent delegation
       delegate.ts            # run_subagents tool: parallel isolated-worktree child agents
+      planning-delegate.ts   # planner run_subagents: bounded read-only serial-lane DAG
     cli/                     # cmd-ts command parsing and exit-code mapping
     config/                  # config loading and validation
     llm/                     # model client and tool-calling runtime
-    prompt/                  # SPEAR prompt assembly
+    prompt/                  # pure model-profile and agent-purpose prompt assembly
     sandbox/                 # microsandbox adapter for confined command execution
     scm/                     # git primitives (branch, worktree, commit, safe cleanup)
     session/                 # session lifecycle: branch/worktree creation and child-lane finalization
     tools/                   # built-in tool definitions (files, search, bash)
-    tui/                     # prompts input adapter and line-oriented transcript renderer
+    tui/                     # multiline prompt editor and line-oriented transcript renderer
   eval/                      # eval harness: fixture projects + task runner, objectively graded
     run.ts                   # eval entry point
     fixtures/                # fixed test projects

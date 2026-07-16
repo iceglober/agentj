@@ -142,6 +142,31 @@ describe("composePrompt", () => {
       }
     }
   });
+
+  test("10. purpose composes orthogonally with model profiles", () => {
+    const planner = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", purpose: "planner" }), CTX);
+    expect(planner.instructions).toContain("# Planning role");
+    expect(planner.instructions).toContain("Use run_subagents");
+    expect(planner.instructions).toContain("within each lane run serially");
+    expect(planner.instructions).not.toContain("# Build role");
+    expect(planner.instructions).not.toContain("# Goal");
+    expect(planner.instructions).not.toContain("Verify behavior");
+
+    const worker = composePrompt(
+      AUTO,
+      inputs({ model: "gpt-5.4-nano", role: "delegate", purpose: "planning-worker" }),
+      CTX,
+    );
+    expect(worker.instructions).toContain("# Planning worker role");
+    expect(worker.instructions.startsWith("You are a coding executor")).toBe(false);
+
+    const builder = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", purpose: "builder" }), CTX);
+    expect(builder.instructions).toContain("# Build role");
+    expect(builder.instructions).toContain("# Completion report");
+    expect(builder.instructions).toContain('"status":"done|blocked|failed"');
+    expect(builder.instructions).toContain("# Goal");
+    expect(builder.instructions).toContain("Verify behavior");
+  });
 });
 
 describe("renderTemplate", () => {

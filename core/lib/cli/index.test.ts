@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { ConversationEvent, ConversationOutcome } from "../app/conversation";
 import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
 import { createConfigCliHandlers } from "../config-cli";
 import type { PromptUi, TranscriptRenderer } from "../tui";
@@ -78,8 +79,8 @@ function makeAbortedOutcome(): TaskRunOutcome {
 
 function createRendererSpy() {
   const prompts: string[] = [];
-  const events: TaskRunEvent[] = [];
-  const outcomes: TaskRunOutcome[] = [];
+  const events: ConversationEvent[] = [];
+  const outcomes: ConversationOutcome[] = [];
 
   const renderer: TranscriptRenderer = {
     renderPrompt() {
@@ -98,7 +99,7 @@ function createRendererSpy() {
 
 function createDependencies(options?: {
   promptTask?: string | null;
-  outcome?: TaskRunOutcome;
+  outcome?: ConversationOutcome;
   onRunTask?: (
     task: string,
     options: Parameters<AgentjCommandDependencies["runTask"]>[1],
@@ -265,6 +266,15 @@ describe("runAgentjCli", () => {
       { outcome: makeSuccessOutcome(null), expectedExit: EXIT_SUCCESS },
       { outcome: makeGenerationErrorOutcome(), expectedExit: EXIT_FAILURE },
       { outcome: makeCommitErrorOutcome(), expectedExit: EXIT_FAILURE },
+      {
+        outcome: {
+          kind: "build-blocked" as const,
+          session: SESSION,
+          reason: "validation failed",
+          recoveryCommitSha: "def456",
+        },
+        expectedExit: EXIT_FAILURE,
+      },
       { outcome: makeAbortedOutcome(), expectedExit: EXIT_ABORTED },
     ];
 
@@ -326,6 +336,43 @@ describe("runAgentjCli", () => {
         "      ^ Unknown arguments\n\n\n" +
         "hint: for more information, try 'agentj --help'",
     );
+  });
+
+  test("routes sandbox and resume forms through typed cmd-ts leaf commands", async () => {
+    const created = createDependencies({ outcome: makeSuccessOutcome() });
+    const sandboxCalls: Array<{ task: string; provider?: string }> = [];
+    const resumeCalls: string[] = [];
+    created.deps.runSandboxTask = async (task, options) => {
+      sandboxCalls.push({ task, ...(options.provider ? { provider: options.provider } : {}) });
+      return makeSuccessOutcome();
+    };
+    created.deps.resumeSession = async (id) => {
+      resumeCalls.push(id);
+      return makeSuccessOutcome();
+    };
+
+    await expect(runAgentjCli(["sandbox", "task"], created.deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(
+      runAgentjCli(["sandbox", "--provider", "microsandbox", "other"], created.deps),
+    ).resolves.toBe(EXIT_SUCCESS);
+    await expect(runAgentjCli(["--resume", "abc123"], created.deps)).resolves.toBe(EXIT_SUCCESS);
+
+    expect(sandboxCalls).toEqual([{ task: "task" }, { task: "other", provider: "microsandbox" }]);
+    expect(resumeCalls).toEqual(["abc123"]);
+    expect(created.runTaskCalls).toEqual([]);
+  });
+
+  test("rejects missing sandbox provider and resume values before running", async () => {
+    const created = createDependencies();
+    created.deps.runSandboxTask = async () => makeSuccessOutcome();
+    created.deps.resumeSession = async () => makeSuccessOutcome();
+    const stderr = createMemoryWriter();
+
+    await expect(
+      runAgentjCli(["sandbox", "--provider"], created.deps, { stderr }),
+    ).resolves.toBeGreaterThan(0);
+    await expect(runAgentjCli(["--resume"], created.deps, { stderr })).resolves.toBeGreaterThan(0);
+    expect(created.runTaskCalls).toEqual([]);
   });
 
   test("config set parses normal and secret inputs before calling injected handlers", async () => {

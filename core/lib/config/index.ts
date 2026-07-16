@@ -5,6 +5,7 @@ import { agentConfigSchema } from "../agent";
 import { evalConfigSchema } from "../eval/config";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
 import { sessionConfigSchema } from "../session";
+import { projectSetupConfigSchema } from "../workspace";
 
 /**
  * The user-facing config surface, composed from the schemas each domain
@@ -19,6 +20,7 @@ export const configSchema = z.object({
   sandbox: microsandboxOptionsSchema.prefault({}),
   session: sessionConfigSchema.prefault({}),
   eval: evalConfigSchema.prefault({}),
+  project: projectSetupConfigSchema.prefault({}),
 });
 
 export type Config = z.infer<typeof configSchema>;

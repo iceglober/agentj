@@ -1,20 +1,7 @@
-import { type Agent, createAgent as createProductionAgent } from "../agent";
-import { loadConfig } from "../config";
+import type { Agent } from "../agent";
 import type { RunResult, RunStep } from "../llm";
-import type { MetricsSink } from "../metrics";
-import { createOtelMetricsSink } from "../metrics/otel-adapter";
-import type { PromptContext } from "../prompt";
-import { getSandbox, type Sandbox } from "../sandbox";
-import {
-  createSandboxProviderMicrosandbox,
-  type ProjectSource,
-  resolveProjectSource,
-} from "../sandbox/microsandbox-adapter";
-import { resolveAzureApiKey, type SecretStore } from "../secrets";
-import { createKeyringSecretStore } from "../secrets/keyring-adapter";
-import { createChildSession, createSession, type Session } from "../session";
-
-const DEFAULT_SUBAGENT_MAX_CONCURRENCY = 2;
+import type { Sandbox } from "../sandbox";
+import type { Session } from "../session";
 
 type ToolCall = RunStep["toolCalls"][number];
 type ToolResult = RunStep["toolResults"][number];
@@ -24,6 +11,8 @@ export interface TaskRunSessionIdentity {
   branch: string;
   base: string;
   path: string;
+  baseWarning?: string;
+  mode?: "local" | "sandbox";
 }
 
 export type TaskRunEvent =
@@ -94,25 +83,13 @@ export interface RunAgentTaskOptions {
 const defaultShouldIncludeToolResult = (toolResult: ToolResult): boolean =>
   toolResult.name === "run_subagents";
 
-const safeChildIdSegment = (value: string): string => {
-  const safe = value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-  return safe || "task";
-};
-
-const summarizeStatus = (porcelain: string): string => {
-  const count = porcelain.split("\n").filter(Boolean).length;
-  return count === 0 ? "clean" : `${count} files changed`;
-};
-
 const toSessionIdentity = (session: Session): TaskRunSessionIdentity => ({
   id: session.id,
   branch: session.branch,
   base: session.base,
   path: session.path,
+  ...(session.baseWarning ? { baseWarning: session.baseWarning } : {}),
+  ...(session.mode ? { mode: session.mode } : {}),
 });
 
 const buildCommitMessage = (task: string): string => `agentj: ${task.slice(0, 72)}`;
@@ -214,7 +191,7 @@ export async function runAgentTask(
         }
 
         for (const toolResult of step.toolResults) {
-          if (!shouldIncludeToolResult(toolResult)) {
+          if (!toolResult.isError && !shouldIncludeToolResult(toolResult)) {
             continue;
           }
 
@@ -275,175 +252,4 @@ export async function runAgentTask(
   }
 
   return outcome!;
-}
-
-export interface ProductionTaskRunDependencyOverrides {
-  /** Launch directory used as the session's host Git source. */
-  projectDir?: string;
-  /** Test seam for project preflight; production resolves through the adapter. */
-  resolveProjectSource?: (projectDir: string) => Promise<ProjectSource>;
-  config?: Awaited<ReturnType<typeof loadConfig>>;
-  loadConfig?: typeof loadConfig;
-  env?: Record<string, string | undefined>;
-  secretStore?: SecretStore;
-  metricsSink?: MetricsSink;
-  createMetricsSink?: (options: { enabled: boolean }) => MetricsSink;
-  /** Test seam for sandbox provisioning after launch-project preparation. */
-  createSandbox?: (
-    options: Parameters<typeof createSandboxProviderMicrosandbox>[0],
-  ) => Promise<Sandbox>;
-  /** Test seam for parent session construction. */
-  createSession?: typeof createSession;
-  /** Test seam for delegated child-session construction. */
-  createChildSession?: typeof createChildSession;
-  /** Test seam for agent construction. */
-  createAgent?: typeof createProductionAgent;
-  onAgentCreate?: () => void | Promise<void>;
-}
-
-export async function createProductionTaskRunDependencies(
-  configPath: string = new URL("../../agentj.json", import.meta.url).pathname,
-  overrides: ProductionTaskRunDependencyOverrides = {},
-): Promise<TaskRunDependencies> {
-  const env = overrides.env ?? process.env;
-  let preparation:
-    | Promise<{
-        config: Awaited<ReturnType<typeof loadConfig>>;
-        azureApiKey: string;
-        metricsSink: MetricsSink;
-        projectSource: ProjectSource | undefined;
-      }>
-    | undefined;
-
-  const prepare = () =>
-    (preparation ??= (async () => {
-      let projectSource: ProjectSource | undefined;
-      if (overrides.projectDir) {
-        try {
-          projectSource = await (overrides.resolveProjectSource ?? resolveProjectSource)(
-            overrides.projectDir,
-          );
-        } catch {
-          throw new Error("Unable to prepare the launch project.");
-        }
-      }
-
-      const config = overrides.config ?? (await (overrides.loadConfig ?? loadConfig)(configPath));
-      const azureApiKey = await resolveAzureApiKey({
-        env,
-        store: overrides.secretStore ?? createKeyringSecretStore({}),
-      });
-      if (azureApiKey.status === "missing") {
-        throw new Error("Azure API key missing; run agentj:secrets ... or set env");
-      }
-      if (azureApiKey.status === "store-unavailable") {
-        throw new Error(
-          "Secure secret store unavailable; set AZURE_FOUNDRY_API_KEY/AZURE_API_KEY for automation or configure the OS keychain.",
-        );
-      }
-
-      return {
-        config,
-        azureApiKey: azureApiKey.apiKey,
-        metricsSink:
-          overrides.metricsSink ??
-          (overrides.createMetricsSink ?? createOtelMetricsSink)({
-            enabled: env.AGENTJ_OTEL_METRICS === "1",
-          }),
-        projectSource,
-      };
-    })());
-  const childSessionIds = new Set<string>();
-  let childSessionCounter = 0;
-
-  const sessionConfig = async () => {
-    const { config, projectSource } = await prepare();
-    return {
-      ...config.session,
-      ...(projectSource ? { repoDir: projectSource.projectRoot } : {}),
-    };
-  };
-
-  const nextChildSessionId = (taskId: string): string => {
-    const stem = safeChildIdSegment(taskId);
-
-    while (true) {
-      childSessionCounter += 1;
-      const candidate = `subagent-${childSessionCounter.toString().padStart(4, "0")}-${stem}`;
-      if (childSessionIds.has(candidate)) {
-        continue;
-      }
-
-      childSessionIds.add(candidate);
-      return candidate;
-    }
-  };
-
-  const createPromptContext = async (
-    sandbox: Sandbox,
-    session: Session,
-  ): Promise<PromptContext> => ({
-    cwd: session.path,
-    os: (await sandbox.executeCommand("uname -sr")).stdout.trim(),
-    date: new Date().toISOString().slice(0, 10),
-    gitBranch: session.branch,
-    gitStatusSummary: summarizeStatus(await session.status()),
-  });
-
-  return {
-    createSandbox: async () => {
-      const { config, projectSource } = await prepare();
-      const sandboxOptions = {
-        ...config.sandbox,
-        ...(projectSource ? { projectSource } : {}),
-      };
-      return overrides.createSandbox
-        ? overrides.createSandbox(sandboxOptions)
-        : getSandbox(createSandboxProviderMicrosandbox(sandboxOptions));
-    },
-    createSession: async (sandbox) =>
-      (overrides.createSession ?? createSession)(sandbox, await sessionConfig()),
-    createAgent: async ({ sandbox, session }) => {
-      const { azureApiKey, config, metricsSink } = await prepare();
-      let agentsMd = "";
-      try {
-        agentsMd = await sandbox.readFile(`${session.path}/AGENTS.md`);
-      } catch {}
-
-      const rules = config.agent.rules || agentsMd || "";
-
-      await overrides.onAgentCreate?.();
-      return (overrides.createAgent ?? createProductionAgent)(
-        sandbox,
-        {
-          ...config.agent,
-          rules,
-          llm: {
-            ...config.agent.llm,
-            providers: {
-              ...config.agent.llm.providers,
-              azure: {
-                ...config.agent.llm.providers?.azure,
-                apiKey: azureApiKey,
-              },
-            },
-          },
-        },
-        {
-          root: session.path,
-          ctx: await createPromptContext(sandbox, session),
-          metricsSink,
-          delegation: {
-            parentRef: session.branch,
-            maxConcurrency: DEFAULT_SUBAGENT_MAX_CONCURRENCY,
-            createChildSession: async ({ id, parentRef }) =>
-              (overrides.createChildSession ?? createChildSession)(sandbox, await sessionConfig(), {
-                id: nextChildSessionId(id),
-                parentRef,
-              }),
-          },
-        },
-      );
-    },
-  };
 }

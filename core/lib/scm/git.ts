@@ -26,11 +26,10 @@ export interface GitIdentity {
 }
 
 /** Set the sandbox-global commit identity (idempotent). */
-export async function ensureIdentity(sb: Sandbox, identity: GitIdentity) {
+export async function ensureIdentity(sb: Sandbox, repoDir: string, identity: GitIdentity) {
   await sb.executeCommand(
-    `git config --global user.name ${shq(identity.name)} && ` +
-      `git config --global user.email ${shq(identity.email)} && ` +
-      `git config --global init.defaultBranch main`,
+    `git -C ${shq(repoDir)} config user.name ${shq(identity.name)} && ` +
+      `git -C ${shq(repoDir)} config user.email ${shq(identity.email)}`,
   );
 }
 
@@ -48,7 +47,7 @@ export async function isRepo(sb: Sandbox, dir: string): Promise<boolean> {
  */
 export async function ensureRepo(sb: Sandbox, dir: string) {
   await sb.executeCommand(`mkdir -p ${shq(dir)}`);
-  if (!(await isRepo(sb, dir))) await git(sb, dir, ["init"]);
+  if (!(await isRepo(sb, dir))) await git(sb, dir, ["init", "-b", "main"]);
   const hasCommit =
     (await sb.executeCommand(`git -C ${shq(dir)} rev-parse -q --verify HEAD`)).exitCode === 0;
   if (!hasCommit) {
@@ -105,6 +104,25 @@ export async function refExists(sb: Sandbox, dir: string, ref: string): Promise<
     `git -C ${shq(dir)} rev-parse -q --verify ${shq(`${ref}^{commit}`)}`,
   );
   return r.exitCode === 0;
+}
+
+/** True when ancestor is reachable from descendant; exit 1 is a normal false result. */
+export async function isAncestor(
+  sb: Sandbox,
+  dir: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  const result = await sb.executeCommand(
+    `git -C ${shq(dir)} merge-base --is-ancestor ${shq(ancestor)} ${shq(descendant)}`,
+  );
+  if (result.exitCode === 0) return true;
+  if (result.exitCode === 1) return false;
+  throw new GitError(
+    ["merge-base", "--is-ancestor", ancestor, descendant],
+    result.exitCode,
+    result.stderr,
+  );
 }
 
 function assertLocalBranchName(branch: string): string {
@@ -179,6 +197,10 @@ async function listWorktrees(sb: Sandbox, repoDir: string): Promise<WorktreeInfo
 /** Resolve a ref like HEAD or main to an immutable commit SHA. */
 export async function resolveCommit(sb: Sandbox, dir: string, ref = "HEAD"): Promise<string> {
   return (await git(sb, dir, ["rev-parse", "-q", "--verify", `${ref}^{commit}`])).trim();
+}
+
+export async function currentBranch(sb: Sandbox, dir: string): Promise<string> {
+  return (await git(sb, dir, ["branch", "--show-current"])).trim() || "HEAD";
 }
 
 async function resolveExpectedCommit(

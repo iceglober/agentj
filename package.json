@@ -31,6 +31,7 @@
   },
   "packageManager": "bun@1.3.14",
   "scripts": {
+    "dev": "bun core/agent-loop.ts",
     "agentj": "bun core/agent-loop.ts",
     "test": "bun test core",
     "typecheck": "tsc --noEmit",

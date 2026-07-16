@@ -63,6 +63,7 @@ export interface PromptInputs {
   model: string;
   agentName: string;
   role: "primary" | "delegate";
+  purpose?: "planner" | "planning-worker" | "builder";
   rules: string;
   /** Fills SUBAGENT_CONTRACT's {{OUTPUT_SCHEMA}}; used by a future orchestrator. */
   outputSchema?: string;
@@ -114,7 +115,9 @@ export function composePrompt(
   }
 
   const template =
-    inputs.role === "delegate" && profile?.standalone ? profile.standalone : BASE_TEMPLATE;
+    inputs.role === "delegate" && (inputs.purpose ?? "builder") === "builder" && profile?.standalone
+      ? profile.standalone
+      : BASE_TEMPLATE;
 
   const vars: Record<string, string> = {
     AGENT_NAME: inputs.agentName,
@@ -130,12 +133,15 @@ export function composePrompt(
 
   // Template flags are UPPER_SNAKE; map the camelCase RenderFlags across.
   const templateFlags: Record<string, boolean> = {
-    WORKFLOW_STEPS: flags.workflowSteps,
-    WORKFLOW_OUTCOME: flags.workflowOutcome,
+    WORKFLOW_STEPS: flags.workflowSteps && (inputs.purpose ?? "builder") === "builder",
+    WORKFLOW_OUTCOME: flags.workflowOutcome && (inputs.purpose ?? "builder") === "builder",
     PLANNING: flags.planning,
     SMALL_MODEL: flags.smallModel,
     HALLUCINATION_GUARD: flags.hallucinationGuard,
     SUBAGENT_CONTRACT: flags.subagentContract,
+    PLANNER: inputs.purpose === "planner",
+    PLANNING_WORKER: inputs.purpose === "planning-worker",
+    BUILDER: (inputs.purpose ?? "builder") === "builder",
   };
 
   const instructions = renderTemplate(template, vars, templateFlags);

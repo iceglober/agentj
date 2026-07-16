@@ -1,8 +1,8 @@
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 
-import { command, flag, optional, positional, runSafely, string } from "cmd-ts";
+import { command, flag, option, optional, positional, runSafely, string } from "cmd-ts";
 
-import type { TaskRunEvent, TaskRunOutcome } from "../app/run";
+import type { ConversationEvent, ConversationOutcome } from "../app/conversation";
 import type { ConfigCliHandlers } from "../config-cli";
 import type { EvalCliHandlers } from "../eval-cli";
 import type { PromptUi, TranscriptRenderer } from "../tui";
@@ -16,19 +16,25 @@ export const DEFAULT_COMMAND_DESCRIPTION = "Run one AgentJ task from the termina
 
 export interface AgentjTaskRunnerOptions {
   signal: AbortSignal;
-  onEvent?: (event: TaskRunEvent) => void | Promise<void>;
+  nextUserMessage?: () => Promise<string | null>;
+  onEvent?: (event: ConversationEvent) => void | Promise<void>;
 }
 
 export type AgentjTaskRunner = (
   task: string,
   options: AgentjTaskRunnerOptions,
-) => Promise<TaskRunOutcome>;
+) => Promise<ConversationOutcome>;
 
 export interface AgentjCommandDependencies {
   version: string;
   promptUi: PromptUi;
   createRenderer(task: string): TranscriptRenderer;
   runTask: AgentjTaskRunner;
+  runSandboxTask?: (
+    task: string,
+    options: AgentjTaskRunnerOptions & { provider?: string },
+  ) => Promise<ConversationOutcome>;
+  resumeSession?: (id: string, options: AgentjTaskRunnerOptions) => Promise<ConversationOutcome>;
   createAbortSignal?: () => AbortSignal;
   name?: string;
   description?: string;
@@ -52,9 +58,13 @@ const normalizeTask = (value: string | undefined): string | null => {
   return trimmed.length > 0 ? trimmed : null;
 };
 
-const toExitCode = (outcome: TaskRunOutcome): number => {
+const toExitCode = (outcome: ConversationOutcome): number => {
   switch (outcome.kind) {
     case "success": {
+      return EXIT_SUCCESS;
+    }
+
+    case "plan-ready": {
       return EXIT_SUCCESS;
     }
 
@@ -63,10 +73,33 @@ const toExitCode = (outcome: TaskRunOutcome): number => {
     }
 
     case "generation-error":
-    case "commit-error": {
+    case "commit-error":
+    case "build-blocked": {
       return EXIT_FAILURE;
     }
   }
+};
+
+const executeTask = async (
+  task: string | undefined,
+  deps: AgentjCommandDependencies,
+  runner: AgentjTaskRunner,
+): Promise<number> => {
+  const resolvedTask = normalizeTask(task) ?? (await deps.promptUi.askTask());
+  const normalizedTask = normalizeTask(resolvedTask ?? undefined);
+  if (normalizedTask === null) return EXIT_SUCCESS;
+
+  const renderer = deps.createRenderer(normalizedTask);
+  renderer.renderPrompt();
+  const outcome = await runner(normalizedTask, {
+    signal: (deps.createAbortSignal ?? (() => new AbortController().signal))(),
+    nextUserMessage: deps.promptUi.askFollowUp
+      ? () => deps.promptUi.askFollowUp!()
+      : async () => null,
+    onEvent: (event) => renderer.renderEvent(event),
+  });
+  renderer.renderOutcome(outcome);
+  return toExitCode(outcome);
 };
 
 export const createAgentjCommand = ({
@@ -88,24 +121,61 @@ export const createAgentjCommand = ({
         description: "Task to run. If omitted, AgentJ asks once.",
       }),
     },
-    async handler({ task }): Promise<number> {
-      const resolvedTask = normalizeTask(task) ?? (await promptUi.askTask());
-      const normalizedTask = normalizeTask(resolvedTask ?? undefined);
-
-      if (normalizedTask === null) {
-        return EXIT_SUCCESS;
-      }
-
-      const renderer = createRenderer(normalizedTask);
-      renderer.renderPrompt();
-
-      const outcome = await runTask(normalizedTask, {
-        signal: createAbortSignal(),
-        onEvent(event) {
-          renderer.renderEvent(event);
+    handler: ({ task }) =>
+      executeTask(
+        task,
+        {
+          version,
+          promptUi,
+          createRenderer,
+          runTask,
+          createAbortSignal,
+          name,
+          description,
         },
-      });
+        runTask,
+      ),
+  });
 
+const createSandboxCommand = (deps: AgentjCommandDependencies, withProvider: boolean) =>
+  command({
+    name: `${deps.name ?? DEFAULT_COMMAND_NAME} sandbox`,
+    version: deps.version,
+    description: "Run one AgentJ task in an isolated sandbox.",
+    args: {
+      ...(withProvider
+        ? { provider: option({ long: "provider", type: string, description: "Sandbox provider." }) }
+        : {}),
+      task: positional({
+        type: optional(string),
+        description: "Task to run. If omitted, AgentJ asks once.",
+      }),
+    },
+    async handler(args): Promise<number> {
+      if (!deps.runSandboxTask) return EXIT_FAILURE;
+      const provider = "provider" in args ? args.provider : undefined;
+      return executeTask(args.task, deps, (task, options) =>
+        deps.runSandboxTask!(task, { ...options, ...(provider ? { provider } : {}) }),
+      );
+    },
+  });
+
+const createResumeCommand = (deps: AgentjCommandDependencies) =>
+  command({
+    name: `${deps.name ?? DEFAULT_COMMAND_NAME} --resume`,
+    version: deps.version,
+    description: "Resume an AgentJ session.",
+    args: { resume: option({ long: "resume", type: string, description: "Session ID." }) },
+    async handler({ resume }): Promise<number> {
+      if (!deps.resumeSession) return EXIT_FAILURE;
+      const renderer = deps.createRenderer(`resume ${resume}`);
+      const outcome = await deps.resumeSession(resume, {
+        signal: (deps.createAbortSignal ?? (() => new AbortController().signal))(),
+        nextUserMessage: deps.promptUi.askFollowUp
+          ? () => deps.promptUi.askFollowUp!()
+          : async () => null,
+        onEvent: (event) => renderer.renderEvent(event),
+      });
       renderer.renderOutcome(outcome);
       return toExitCode(outcome);
     },
@@ -273,6 +343,16 @@ const dispatchEval = async (
   return handlers[route]();
 };
 
+const dispatchLeaf = async (
+  parser: Parameters<typeof runSafely>[0],
+  argv: string[],
+  writers: Required<AgentjCliIo>,
+): Promise<number> => {
+  const result = await runSafely(parser, argv);
+  if (result._tag === "error") return writeResult(result, writers) ?? EXIT_FAILURE;
+  return await Promise.resolve(result.value as number);
+};
+
 export async function runAgentjCli(
   argv: string[],
   deps: AgentjCommandDependencies,
@@ -289,6 +369,16 @@ export async function runAgentjCli(
 
   if (isEvalRoute(argv)) {
     return dispatchEval(argv, deps, writers);
+  }
+
+  if (argv[0] === "--resume" || argv[0]?.startsWith("--resume=") === true) {
+    return dispatchLeaf(createResumeCommand(deps), argv, writers);
+  }
+
+  if (argv[0] === "sandbox") {
+    const args = argv.slice(1);
+    const withProvider = args.some((arg) => arg === "--provider" || arg.startsWith("--provider="));
+    return dispatchLeaf(createSandboxCommand(deps, withProvider), args, writers);
   }
 
   const result = await runSafely(createAgentjCommand(deps), argv);

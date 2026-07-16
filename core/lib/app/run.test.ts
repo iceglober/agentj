@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Agent } from "../agent";
+import { configSchema } from "../config";
 import type { RunResult, RunStep } from "../llm";
 import type { MetricsSink } from "../metrics";
 import type { Sandbox } from "../sandbox";
@@ -7,11 +8,9 @@ import { type SecretStore, SecretStoreUnavailableError } from "../secrets";
 import type { ChildSession, Session } from "../session";
 import {
   createProductionTaskRunDependencies,
-  type ProductionTaskRunDependencyOverrides,
-  runAgentTask,
-  type TaskRunDependencies,
-  type TaskRunEvent,
-} from "./run";
+  type ProductionDependencyOverrides as ProductionTaskRunDependencyOverrides,
+} from "../../agent-loop";
+import { runAgentTask, type TaskRunDependencies, type TaskRunEvent } from "./run";
 
 function makeRunResult(text: string, steps: RunStep[] = []): RunResult {
   return {
@@ -306,6 +305,7 @@ describe("runAgentTask", () => {
   test("uses the production-default tool-result filter when none is injected", async () => {
     const keptOutput = { subagents: "kept".repeat(200) };
     const droppedOutput = { stdout: "dropped".repeat(200) };
+    const failedOutput = { exitCode: 1, stderr: "dependency install failed" };
 
     const { events, outcome } = await executeRun(
       "filter task",
@@ -317,6 +317,7 @@ describe("runAgentTask", () => {
             toolResults: [
               { name: "bash", output: droppedOutput },
               { name: "run_subagents", output: keptOutput },
+              { name: "bash", output: failedOutput, isError: true },
             ],
           });
           return makeRunResult("filtered");
@@ -334,6 +335,11 @@ describe("runAgentTask", () => {
         type: "tool-result",
         session: events[0]!.session,
         result: { name: "run_subagents", output: keptOutput },
+      },
+      {
+        type: "tool-result",
+        session: events[0]!.session,
+        result: { name: "bash", output: failedOutput, isError: true },
       },
     ]);
     expect(outcome.kind).toBe("success");
@@ -666,7 +672,7 @@ describe("createProductionTaskRunDependencies", () => {
   const backendErrorText = "fixture secret backend unavailable";
 
   function makeConfig(): NonNullable<ProductionTaskRunDependencyOverrides["config"]> {
-    return {
+    return configSchema.parse({
       agent: {
         rules: "fixture rules",
         llm: {
@@ -677,7 +683,7 @@ describe("createProductionTaskRunDependencies", () => {
       },
       sandbox: {},
       session: {},
-    } as NonNullable<ProductionTaskRunDependencyOverrides["config"]>;
+    });
   }
 
   function makeSecretStore(get: SecretStore["get"]): SecretStore {
@@ -689,6 +695,28 @@ describe("createProductionTaskRunDependencies", () => {
       },
     };
   }
+
+  test("local mode uses the launch checkout directly without creating a worktree", async () => {
+    const projectRoot = process.cwd();
+    const dependencies = await createProductionTaskRunDependencies("fixture-config", {
+      workspaceMode: "local",
+      projectDir: projectRoot,
+      config: configSchema.parse({}),
+      env: { AZURE_API_KEY: fixtureKey },
+      resolveProjectSource: async () => ({
+        projectRoot,
+        commonGitDir: `${projectRoot}/.git`,
+      }),
+    });
+    const environment = await dependencies.createSandbox();
+    const session = await dependencies.createSession(environment);
+    expect(session.mode).toBe("local");
+    expect(session.path).toBe(projectRoot);
+    await session[Symbol.asyncDispose]();
+    if (Symbol.asyncDispose in environment) {
+      await (environment as unknown as AsyncDisposable)[Symbol.asyncDispose]();
+    }
+  });
 
   test("uses Foundry env, Azure env, then the secure store without mutating config or env", async () => {
     const cases = [

@@ -72,7 +72,6 @@ function makeAbortError(message: string) {
 type SubagentTool = ReturnType<typeof createSubagentTool>;
 type ExecuteSubagentToolInput = {
   tasks: SubagentTask[];
-  concurrency: number;
 };
 
 async function executeSubagentTool(
@@ -239,7 +238,6 @@ describe("createSubagentTool", () => {
 
     const run = executeSubagentTool(tool, {
       tasks: [makeTask("one"), makeTask("two"), makeTask("three")],
-      concurrency: 3,
     });
 
     await firstTwoStarted.wait();
@@ -302,7 +300,7 @@ describe("createSubagentTool", () => {
     });
 
     const results: SubagentTaskResult[] = (
-      await executeSubagentTool(tool, { tasks: [makeTask("alpha")], concurrency: 1 })
+      await executeSubagentTool(tool, { tasks: [makeTask("alpha")] })
     ).results;
 
     expect(session.finalizeCalls).toEqual([{ outcome: "success", commitMessage: "commit alpha" }]);
@@ -351,7 +349,7 @@ describe("createSubagentTool", () => {
     });
 
     const results: SubagentTaskResult[] = (
-      await executeSubagentTool(tool, { tasks: [makeTask("clean")], concurrency: 1 })
+      await executeSubagentTool(tool, { tasks: [makeTask("clean")] })
     ).results;
 
     expect(session.finalizeCalls).toEqual([{ outcome: "success", commitMessage: "commit clean" }]);
@@ -412,7 +410,6 @@ describe("createSubagentTool", () => {
     const results: SubagentTaskResult[] = (
       await executeSubagentTool(tool, {
         tasks: [makeTask("bad"), makeTask("good")],
-        concurrency: 2,
       })
     ).results;
 
@@ -516,7 +513,6 @@ describe("createSubagentTool", () => {
       tool,
       {
         tasks: [makeTask("one"), makeTask("two"), makeTask("three")],
-        concurrency: 3,
       },
       { abortSignal: controller.signal },
     );
@@ -624,7 +620,6 @@ describe("createSubagentTool", () => {
     const results: SubagentTaskResult[] = (
       await executeSubagentTool(tool, {
         tasks: [makeTask("broken"), makeTask("good")],
-        concurrency: 2,
       })
     ).results;
 
@@ -704,7 +699,6 @@ describe("createSubagentTool", () => {
     const results: SubagentTaskResult[] = (
       await executeSubagentTool(tool, {
         tasks: [makeTask("boom"), makeTask("good")],
-        concurrency: 2,
       })
     ).results;
 
@@ -782,14 +776,13 @@ describe("createSubagentTool", () => {
 
     await executeSubagentTool(tool, {
       tasks: [makeTask("one"), makeTask("two")],
-      concurrency: 2,
     });
 
     expect(roles).toEqual(["delegate", "delegate"]);
     expect(new Set(roles)).toEqual(new Set(["delegate"]));
   });
 
-  test("input schema rejects empty tasks and invalid concurrency", () => {
+  test("input schema rejects empty tasks and does not expose per-call concurrency", () => {
     const tool = createSubagentTool({
       parentRef: PARENT_REF,
       async createChildSession() {
@@ -800,12 +793,8 @@ describe("createSubagentTool", () => {
       },
     });
 
-    expect(tool.inputSchema.safeParse({ tasks: [], concurrency: 1 }).success).toBe(false);
-    expect(tool.inputSchema.safeParse({ tasks: [makeTask("x")], concurrency: 0 }).success).toBe(
-      false,
-    );
-    expect(tool.inputSchema.safeParse({ tasks: [makeTask("x")], concurrency: 1.5 }).success).toBe(
-      false,
-    );
+    expect(tool.inputSchema.safeParse({ tasks: [] }).success).toBe(false);
+    const parsed = tool.inputSchema.parse({ tasks: [makeTask("x")], concurrency: 99 });
+    expect(parsed).toEqual({ tasks: [makeTask("x")] });
   });
 });

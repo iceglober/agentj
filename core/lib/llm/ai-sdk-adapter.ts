@@ -65,7 +65,14 @@ const mapStep = (step: AiStepLike): RunStep => ({
     return {
       name: tr.toolName,
       output,
-      isError: typeof output === "string" && output.startsWith("ERROR"),
+      isError:
+        (typeof output === "string" && output.startsWith("ERROR")) ||
+        (typeof output === "object" &&
+          output !== null &&
+          ((typeof (output as Record<string, unknown>).exitCode === "number" &&
+            (output as Record<string, unknown>).exitCode !== 0) ||
+            (output as Record<string, unknown>).success === false ||
+            (output as Record<string, unknown>).error != null)),
     };
   }),
 });
@@ -167,7 +174,17 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
             : {}),
         };
         recordUsage("success", mappedUsage);
-        return { text: result.text, steps: result.steps.map(mapStep), usage: mappedUsage };
+        const finishReason = (result as { finishReason?: string }).finishReason;
+        const stepLimit = req.stopSteps ?? 20;
+        return {
+          text: result.text,
+          steps: result.steps.map(mapStep),
+          usage: mappedUsage,
+          ...(finishReason ? { finishReason } : {}),
+          ...(result.steps.length >= stepLimit && result.text.trim() === ""
+            ? { stepLimitReached: true }
+            : {}),
+        };
       } catch (error) {
         recordUsage("error");
         throw error;

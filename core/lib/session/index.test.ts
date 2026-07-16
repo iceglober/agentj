@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { Sandbox, SandboxCommandResult } from "../sandbox";
-import { createChildSession, createSession, sessionConfigSchema } from "./index";
+import {
+  chooseCanonicalBase,
+  createChildSession,
+  createSession,
+  sessionConfigSchema,
+} from "./index";
 
 type GitCall = {
   raw: string;
@@ -94,9 +99,8 @@ class FakeSandbox implements Sandbox {
 
   get identityCommand(): string {
     return [
-      "git config --global user.name 'agentj'",
-      "git config --global user.email 'agentj@example.com'",
-      "git config --global init.defaultBranch main",
+      `git -C '${this.repoDir}' config user.name 'agentj'`,
+      `git -C '${this.repoDir}' config user.email 'agentj@example.com'`,
     ].join(" && ");
   }
 
@@ -274,6 +278,49 @@ function renderWorktreeList(worktrees: Map<string, { branch: string; head: strin
     })
     .join("\n");
 }
+
+describe("chooseCanonicalBase", () => {
+  test("chooses the available canonical ref and the descendant when histories are comparable", () => {
+    expect(
+      chooseCanonicalBase({
+        remoteRef: "origin/main",
+        localRef: null,
+        localIsAncestorOfRemote: false,
+        remoteIsAncestorOfLocal: false,
+      }),
+    ).toEqual({ ref: "origin/main" });
+    expect(
+      chooseCanonicalBase({
+        remoteRef: "origin/main",
+        localRef: "main",
+        localIsAncestorOfRemote: true,
+        remoteIsAncestorOfLocal: false,
+      }),
+    ).toEqual({ ref: "origin/main" });
+    expect(
+      chooseCanonicalBase({
+        remoteRef: "origin/main",
+        localRef: "main",
+        localIsAncestorOfRemote: false,
+        remoteIsAncestorOfLocal: true,
+      }),
+    ).toEqual({ ref: "main" });
+  });
+
+  test("prefers the shared remote baseline and warns when histories diverge", () => {
+    expect(
+      chooseCanonicalBase({
+        remoteRef: "origin/main",
+        localRef: "main",
+        localIsAncestorOfRemote: false,
+        remoteIsAncestorOfLocal: false,
+      }),
+    ).toEqual({
+      ref: "origin/main",
+      warning: "local main diverges from origin/main; using shared remote baseline",
+    });
+  });
+});
 
 function splitShell(command: string): string[] {
   const parts: string[] = [];

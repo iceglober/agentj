@@ -51,9 +51,12 @@ export function createSandboxFixtureFactory(sb: Sandbox, opts: { root: string })
           : [{ path: ".gitignore", content: DEFAULT_GITIGNORE }, ...files],
       );
 
-      await scm.ensureIdentity(sb, FIXTURE_IDENTITY);
+      const initRepo = await sb.executeCommand(`cd ${shq(dir)} && git init -q -b main`);
+      if (initRepo.exitCode !== 0)
+        throw new Error(`fixture git init failed: ${initRepo.stderr || initRepo.stdout}`);
+      await scm.ensureIdentity(sb, dir, FIXTURE_IDENTITY);
       const init = await sb.executeCommand(
-        `cd ${shq(dir)} && git init -q && git add -A && git commit -qm fixture`,
+        `cd ${shq(dir)} && git add -A && git commit -qm fixture`,
       );
       if (init.exitCode !== 0)
         throw new Error(`fixture baseline commit failed: ${init.stderr || init.stdout}`);

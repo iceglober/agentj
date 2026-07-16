@@ -46,6 +46,8 @@ export interface RunResult {
   text: string;
   steps: RunStep[];
   usage: TokenUsage;
+  finishReason?: string;
+  stepLimitReached?: boolean;
 }
 
 export interface GenerateRequest {

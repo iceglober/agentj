@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 
+import type { ConversationEvent } from "../app/conversation";
 import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
 import {
-  createPromptsPromptUi,
+  createPromptUi,
   createTranscriptRenderer,
-  type PromptRunner,
   safeRenderJson,
   type TerminalWriter,
+  type TextPromptEditor,
+  type TextPromptRequest,
 } from "./index";
 
 const SESSION: TaskRunSessionIdentity = {
@@ -43,112 +45,95 @@ const RESULT = {
   },
 };
 
-describe("createPromptsPromptUi", () => {
-  test("submits a trimmed task and passes configured prompt IO through", async () => {
+describe("createPromptUi", () => {
+  const fakeEditor = (
+    values: Array<string | null>,
+    requests: TextPromptRequest[] = [],
+  ): TextPromptEditor => ({
+    async read(request) {
+      requests.push(request);
+      return values.shift() ?? null;
+    },
+  });
+
+  test("preserves internal newlines, trims the task, and passes configured IO through", async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
-    let capturedQuestion: Parameters<PromptRunner>[0] | undefined;
-
-    const ui = createPromptsPromptUi({
+    const requests: TextPromptRequest[] = [];
+    const ui = createPromptUi({
+      editor: fakeEditor(["  fix the flaky test\nthen add coverage  "], requests),
       stdin,
       stdout,
-      prompts: (async (question) => {
-        capturedQuestion = question;
-        return { task: "  fix the flaky test  " };
-      }) as PromptRunner,
     });
 
-    await expect(ui.askTask()).resolves.toBe("fix the flaky test");
-
-    expect(capturedQuestion).toMatchObject({
-      type: "text",
-      name: "task",
+    await expect(ui.askTask()).resolves.toBe("fix the flaky test\nthen add coverage");
+    expect(requests[0]).toMatchObject({
       message:
-        "AgentJ runs one task, then exits. What should it do?\nExamples: fix a failing test; explain a module boundary; add a targeted regression test.",
+        "What should AgentJ plan and build?\nExamples: fix a failing test; explain a module boundary; add a targeted regression test.",
       hint: "Describe one coding task.",
       stdin,
       stdout,
     });
   });
 
-  test("returns null when isInteractive is false and never invokes the prompt runner", async () => {
-    let invoked = false;
-
-    const ui = createPromptsPromptUi({
-      isInteractive: false,
-      prompts: (async () => {
-        invoked = true;
-        return { task: "should not reach" };
-      }) as PromptRunner,
+  test("uses one blank-input retry workflow for tasks and follow-up feedback", async () => {
+    const taskRequests: TextPromptRequest[] = [];
+    const taskUi = createPromptUi({
+      editor: fakeEditor(["   ", "  first line\nsecond line  "], taskRequests),
     });
+    await expect(taskUi.askTask()).resolves.toBe("first line\nsecond line");
+    expect(taskRequests[0]?.validationMessage).toBeUndefined();
+    expect(taskRequests[1]?.validationMessage).toBe("Enter a task, or press Ctrl+C to cancel.");
 
-    await expect(ui.askTask()).resolves.toBeNull();
-    expect(invoked).toBe(false);
+    const feedbackRequests: TextPromptRequest[] = [];
+    const feedbackUi = createPromptUi({
+      editor: fakeEditor(["", "  revise this\nand that  "], feedbackRequests),
+    });
+    await expect(feedbackUi.askFollowUp?.()).resolves.toBe("revise this\nand that");
+    expect(feedbackRequests[1]?.validationMessage).toBe(
+      "Enter feedback, approval, or press Ctrl+C to stop.",
+    );
   });
 
-  test("returns null when stdin is already destroyed and never invokes the prompt runner", async () => {
-    const stdin = new PassThrough();
-    stdin.destroy();
-    let invoked = false;
+  test("returns null without invoking the editor for noninteractive or closed input", async () => {
+    let invocations = 0;
+    const editor: TextPromptEditor = {
+      async read() {
+        invocations += 1;
+        return "not reached";
+      },
+    };
+    const noninteractive = createPromptUi({ editor, isInteractive: false });
+    await expect(noninteractive.askTask()).resolves.toBeNull();
 
-    const ui = createPromptsPromptUi({
-      stdin,
-      prompts: (async () => {
-        invoked = true;
-        return { task: "should not reach" };
-      }) as PromptRunner,
-    });
+    const destroyed = new PassThrough();
+    destroyed.destroy();
+    const closed = createPromptUi({ editor, stdin: destroyed });
+    await expect(closed.askTask()).resolves.toBeNull();
 
-    await expect(ui.askTask()).resolves.toBeNull();
-    expect(invoked).toBe(false);
-  });
-
-  test("returns null when stdin is already readableEnded and never invokes the prompt runner", async () => {
-    const stdin = new PassThrough();
-    stdin.push(null); // signal EOF
-    // drain the stream so readableEnded becomes true
-    for await (const _ of stdin) {
-      /* consume */
+    const ended = new PassThrough();
+    ended.end();
+    for await (const _ of ended) {
+      // Drain the stream so readableEnded is observable.
     }
-    let invoked = false;
-
-    const ui = createPromptsPromptUi({
-      stdin,
-      prompts: (async () => {
-        invoked = true;
-        return { task: "should not reach" };
-      }) as PromptRunner,
-    });
-
-    await expect(ui.askTask()).resolves.toBeNull();
-    expect(invoked).toBe(false);
+    const eof = createPromptUi({ editor, stdin: ended });
+    await expect(eof.askTask()).resolves.toBeNull();
+    expect(invocations).toBe(0);
   });
 
-  test("rejects empty input, returns null on cancel, and treats EOF as null", async () => {
-    let validate: ((value: unknown) => boolean | string) | undefined;
-
-    const ui = createPromptsPromptUi({
-      prompts: (async (question, options) => {
-        const single = Array.isArray(question) ? question[0] : question;
-        validate = single.validate as typeof validate;
-        if (options?.onCancel) {
-          (options.onCancel as (...args: unknown[]) => void)(single);
-        }
-        return { task: "ignored" };
-      }) as PromptRunner,
+  test("returns null on editor cancellation and honors per-call stream overrides", async () => {
+    const configuredInput = new PassThrough();
+    const overrideInput = new PassThrough();
+    const overrideOutput = new PassThrough();
+    const requests: TextPromptRequest[] = [];
+    const ui = createPromptUi({
+      editor: fakeEditor([null], requests),
+      stdin: configuredInput,
     });
 
-    expect(validate).toBeUndefined();
-    await expect(ui.askTask()).resolves.toBeNull();
-
-    expect(validate?.("   ")).toBe("Enter a task, or press Ctrl+C to cancel.");
-    expect(validate?.("  explain the boundary  ")).toBe(true);
-
-    const eofUi = createPromptsPromptUi({
-      prompts: (async () => ({ task: undefined })) as PromptRunner,
-    });
-
-    await expect(eofUi.askTask()).resolves.toBeNull();
+    await expect(ui.askTask({ stdin: overrideInput, stdout: overrideOutput })).resolves.toBeNull();
+    expect(requests[0]?.stdin).toBe(overrideInput);
+    expect(requests[0]?.stdout).toBe(overrideOutput);
   });
 });
 
@@ -189,6 +174,30 @@ describe("createTranscriptRenderer", () => {
     },
   });
 
+  const dagStarted = (): ConversationEvent => ({
+    type: "subagent-progress",
+    session: SESSION,
+    progress: {
+      type: "dag-started",
+      concurrency: 2,
+      startedAt: 1000,
+      lanes: [
+        {
+          id: 1,
+          title: "Repository research",
+          waitsOn: [],
+          tasks: [{ id: "1.1", title: "Map modules" }],
+        },
+        {
+          id: 2,
+          title: "Command design",
+          waitsOn: [1],
+          tasks: [{ id: "2.1", title: "Design command" }],
+        },
+      ],
+    },
+  });
+
   test("routes prompt and session header to stderr with exact copy", () => {
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
@@ -209,6 +218,101 @@ describe("createTranscriptRenderer", () => {
       "Prompt: explain the module boundary\n" +
         "Session: session-123 | feat/simple-tui from main\n",
     );
+  });
+
+  test("renders sandbox image, bootstrap state, and a safe empty-bootstrap reminder", () => {
+    const stderr = createMemoryWriter();
+    const renderer = createTranscriptRenderer({
+      task: "task",
+      color: false,
+      writers: { stderr: stderr.writer },
+    });
+    renderer.renderEvent({
+      type: "sandbox-preparing",
+      image: "example/sandbox:1",
+      bootstrapCount: 0,
+    });
+    renderer.renderEvent({ type: "sandbox-ready" });
+
+    expect(stderr.text()).toBe(
+      "Sandbox: example/sandbox:1\n" +
+        "Bootstrap: none configured\n" +
+        'Tip: agentj config add sandbox.bootstrap "<project setup command>"\n' +
+        "Bootstrap: complete\n",
+    );
+  });
+
+  test("renders local workspace ownership and completion", () => {
+    const stderr = createMemoryWriter();
+    const renderer = createTranscriptRenderer({
+      task: "task",
+      color: false,
+      writers: { stderr: stderr.writer },
+    });
+    renderer.renderEvent({
+      type: "local-workspace",
+      root: "/repo",
+      branch: "feature/local",
+      status: "2 files changed",
+    });
+    renderer.renderEvent({
+      type: "local-complete",
+      session: { ...SESSION, mode: "local" },
+    });
+    expect(stderr.text()).toContain("Workspace: local\n");
+    expect(stderr.text()).toContain("Root: /repo\n");
+    expect(stderr.text()).toContain("Git: feature/local · 2 files changed\n");
+    expect(stderr.text()).toContain("Workspace: validated changes left in local checkout\n");
+  });
+
+  test("renders only bootstrap count and safe setup failure metadata", () => {
+    const stderr = createMemoryWriter();
+    const renderer = createTranscriptRenderer({
+      task: "task",
+      color: false,
+      writers: { stderr: stderr.writer },
+    });
+    renderer.renderEvent({
+      type: "sandbox-preparing",
+      image: "example/sandbox:1",
+      bootstrapCount: 2,
+    });
+    renderer.renderEvent({
+      type: "sandbox-failed",
+      error: "Sandbox bootstrap command 2 failed with exit code 127.",
+    });
+
+    expect(stderr.text()).toContain("Bootstrap: 2 commands configured\n");
+    expect(stderr.text()).toContain(
+      "Sandbox setup failed: Sandbox bootstrap command 2 failed with exit code 127.\n",
+    );
+    expect(stderr.text()).not.toContain("curl secret installer");
+  });
+
+  test("renders canonical-base warnings and recovery commits", () => {
+    const stderr = createMemoryWriter();
+    const renderer = createTranscriptRenderer({
+      task: "task",
+      color: false,
+      writers: { stderr: stderr.writer },
+    });
+    const session = {
+      ...SESSION,
+      baseWarning: "local main diverges from origin/main; using shared remote baseline",
+    };
+    renderer.renderEvent({ type: "session-created", session });
+    renderer.renderEvent({
+      type: "build-blocked",
+      session,
+      reason: "a build tool failed",
+      recoveryCommitSha: "def456",
+    });
+
+    expect(stderr.text()).toContain(
+      "Warning: local main diverges from origin/main; using shared remote baseline",
+    );
+    expect(stderr.text()).toContain("Build blocked: a build tool failed");
+    expect(stderr.text()).toContain("Recovery: def456 on feat/simple-tui");
   });
 
   test("shows tool activity, truncates payloads at the configured cap, and stays colorless when forced off", () => {
@@ -367,5 +471,86 @@ describe("createTranscriptRenderer", () => {
     forcedOffRenderer.renderPrompt();
     expect(forcedOffStderr.text()).toBe("Prompt: task\n");
     expect(forcedOffStderr.text()).not.toContain("\u001b[");
+  });
+
+  test("renders append-only planning subagent lifecycle events without a TTY", () => {
+    const stderr = createMemoryWriter();
+    const renderer = createTranscriptRenderer({
+      task: "task",
+      color: false,
+      isTty: false,
+      writers: { stderr: stderr.writer },
+    });
+    renderer.renderEvent(dagStarted());
+    renderer.renderEvent({
+      type: "subagent-progress",
+      session: SESSION,
+      progress: { type: "task-started", id: "1.1", lane: 1, title: "Map modules", startedAt: 1000 },
+    });
+    renderer.renderEvent({
+      type: "subagent-progress",
+      session: SESSION,
+      progress: {
+        type: "task-completed",
+        id: "1.1",
+        lane: 1,
+        title: "Map modules",
+        elapsedMs: 1800,
+      },
+    });
+    renderer.renderEvent({
+      type: "subagent-progress",
+      session: SESSION,
+      progress: { type: "dag-completed", elapsedMs: 1800 },
+    });
+
+    const output = stderr.text();
+    expect(output).toContain("Subagents: Launch DAG · 2 workers · concurrency 2");
+    expect(output).toContain("2  Command design · waits on: 1");
+    expect(output).toContain("Subagent: 1.1 Map modules: started");
+    expect(output).toContain("Subagent: 1.1 Map modules: completed in 1.8s");
+    expect(output).toContain("Subagents: DAG complete in 1.8s");
+    expect(output).not.toContain("\u001b[");
+  });
+
+  test("repaints a compact TTY DAG ledger and settles running rows", () => {
+    const stderr = createMemoryWriter();
+    const renderer = createTranscriptRenderer({
+      task: "task",
+      color: false,
+      isTty: true,
+      terminalWidth: 54,
+      spinnerIntervalMs: 60_000,
+      now: () => 2200,
+      writers: { stderr: stderr.writer },
+    });
+    renderer.renderEvent(dagStarted());
+    renderer.renderEvent({
+      type: "subagent-progress",
+      session: SESSION,
+      progress: { type: "task-started", id: "1.1", lane: 1, title: "Map modules", startedAt: 1000 },
+    });
+    renderer.renderEvent({
+      type: "subagent-progress",
+      session: SESSION,
+      progress: {
+        type: "task-completed",
+        id: "1.1",
+        lane: 1,
+        title: "Map modules",
+        elapsedMs: 1200,
+      },
+    });
+    renderer.renderEvent({
+      type: "subagent-progress",
+      session: SESSION,
+      progress: { type: "dag-completed", elapsedMs: 1200 },
+    });
+
+    const output = stderr.text();
+    expect(output).toContain("Subagents: Launch DAG");
+    expect(output).toContain("◐ 1.1 Map modules  1.2s");
+    expect(output).toContain("✓ 1.1 Map modules  1.2s");
+    expect(output).toContain("\u001b[");
   });
 });

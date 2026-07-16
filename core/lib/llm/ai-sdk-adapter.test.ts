@@ -93,6 +93,23 @@ describe("createAiSdkRuntime", () => {
     expect(Object.keys(constructedAgents[0].tools as object)).toEqual(["alpha", "middle", "zebra"]);
   });
 
+  test("marks structured nonzero command results as tool errors", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    nextResult.steps = [
+      {
+        toolCalls: [{ toolName: "bash", input: { command: "bun add missing" } }],
+        toolResults: [{ toolName: "bash", output: { exitCode: 1, stderr: "failed" } }],
+      },
+    ];
+
+    const result = await createAiSdkRuntime(config).generate(request());
+    expect(result.steps[0]?.toolResults[0]).toEqual({
+      name: "bash",
+      output: { exitCode: 1, stderr: "failed" },
+      isError: true,
+    });
+  });
+
   test("records only aggregate metrics and contains a throwing sink", async () => {
     resetResult({
       inputTokens: 30,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   type ConfigFileSystem,
+  configSchema,
   deleteGlobalConfigValue,
   loadConfig,
   mergeConfig,
@@ -78,6 +79,13 @@ describe("global config paths", () => {
 });
 
 describe("global config reads and merges", () => {
+  test("defaults project setup to an empty post-workspace command list", () => {
+    expect(configSchema.parse({}).project.setup).toEqual([]);
+    expect(configSchema.parse({ project: { setup: ["bun install"] } }).project.setup).toEqual([
+      "bun install",
+    ]);
+  });
+
   test("treats a missing global config as empty and rejects malformed or non-object files", async () => {
     const absent = makeFileSystem();
     await expect(readGlobalConfig(globalOptions(absent.fileSystem))).resolves.toEqual({});

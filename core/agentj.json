@@ -1,4 +1,13 @@
 {
+  "sandbox": {
+    "bootstrap": [
+      "apt-get update && apt-get install -y --no-install-recommends unzip",
+      "bash -o pipefail -c 'curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s \"bun-v1.3.14\"'"
+    ]
+  },
+  "project": {
+    "setup": ["bun install --frozen-lockfile"]
+  },
   "agent": {
     "llm": {
       "model": "gpt-5.6-sol",

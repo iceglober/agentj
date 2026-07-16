@@ -1,33 +1,22 @@
-import { createRequire } from "node:module";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
-import type { Readable, Writable } from "node:stream";
 
-import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
+import type { ConversationEvent, ConversationOutcome } from "../app/conversation";
+import type { TaskRunSessionIdentity } from "../app/run";
 
-type PromptQuestion<T extends string = string> = import("prompts").PromptObject<T>;
-type PromptAnswers<T extends string = string> = import("prompts").Answers<T>;
-type PromptOptions = import("prompts").Options;
-
-export type PromptRunner = <T extends string = string>(
-  questions: PromptQuestion<T> | PromptQuestion<T>[],
-  options?: PromptOptions,
-) => Promise<PromptAnswers<T>>;
-
-export interface PromptUi {
-  askTask(options?: PromptIo): Promise<string | null>;
-}
-
-export interface PromptIo {
-  stdin?: Readable;
-  stdout?: Writable;
-}
-
-export type InteractiveInputGate = boolean | ((stdin?: Readable) => boolean);
-
-export interface CreatePromptsPromptUiOptions extends PromptIo {
-  prompts?: PromptRunner;
-  isInteractive?: InteractiveInputGate;
-}
+export {
+  createPromptUi,
+  type CreatePromptUiOptions,
+  type InteractiveInputGate,
+  type PromptIo,
+  type PromptUi,
+  type TextPromptEditor,
+  type TextPromptRequest,
+} from "./prompt-input";
+export {
+  createTerminalPromptEditor,
+  type CreateTerminalPromptEditorOptions,
+  renderEditorLayout,
+} from "./terminal-editor";
 
 export interface TerminalWriter {
   write(text: string): void;
@@ -42,8 +31,8 @@ export type ColorMode = "auto" | boolean;
 
 export interface TranscriptRenderer {
   renderPrompt(): void;
-  renderEvent(event: TaskRunEvent): void;
-  renderOutcome(outcome: TaskRunOutcome): void;
+  renderEvent(event: ConversationEvent): void;
+  renderOutcome(outcome: ConversationOutcome): void;
 }
 
 export interface CreateTranscriptRendererOptions {
@@ -52,6 +41,9 @@ export interface CreateTranscriptRendererOptions {
   color?: ColorMode;
   isTty?: boolean;
   maxPayloadLength?: number;
+  terminalWidth?: number | (() => number);
+  spinnerIntervalMs?: number;
+  now?: () => number;
 }
 
 export const DEFAULT_MAX_RENDER_LENGTH = 200;
@@ -63,9 +55,6 @@ const ANSI_CYAN = "\u001b[36m";
 const ANSI_GREEN = "\u001b[32m";
 const ANSI_RED = "\u001b[31m";
 const ANSI_YELLOW = "\u001b[33m";
-
-const require = createRequire(import.meta.url);
-const prompts = require("prompts") as PromptRunner;
 
 const renderLabel = (
   label: string,
@@ -201,74 +190,6 @@ const formatError = (error: unknown, maxLength: number): string => {
   return safeRenderJson(error, maxLength);
 };
 
-const normalizeTask = (value: unknown): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const isPromptInputClosed = (stdin?: Readable): boolean => {
-  return stdin?.destroyed === true || stdin?.readableEnded === true;
-};
-
-const resolveInteractiveInput = (
-  gate: InteractiveInputGate | undefined,
-  stdin?: Readable,
-): boolean => {
-  if (isPromptInputClosed(stdin)) {
-    return false;
-  }
-
-  if (typeof gate === "function") {
-    return gate(stdin);
-  }
-
-  return gate ?? true;
-};
-
-export const createPromptsPromptUi = (options: CreatePromptsPromptUiOptions = {}): PromptUi => {
-  const promptRunner = options.prompts ?? prompts;
-
-  return {
-    async askTask(override = {}) {
-      const stdin = override.stdin ?? options.stdin;
-
-      if (!resolveInteractiveInput(options.isInteractive, stdin)) {
-        return null;
-      }
-
-      let cancelled = false;
-
-      const question: PromptQuestion<"task"> = {
-        type: "text",
-        name: "task",
-        message:
-          "AgentJ runs one task, then exits. What should it do?\nExamples: fix a failing test; explain a module boundary; add a targeted regression test.",
-        hint: "Describe one coding task.",
-        stdin,
-        stdout: override.stdout ?? options.stdout,
-        validate: (value) =>
-          normalizeTask(value) !== null || "Enter a task, or press Ctrl+C to cancel.",
-      };
-
-      const answers = await promptRunner<"task">(question, {
-        onCancel: () => {
-          cancelled = true;
-        },
-      });
-
-      if (cancelled) {
-        return null;
-      }
-
-      return normalizeTask(answers.task);
-    },
-  };
-};
-
 export const createNodeTerminalWriters = (
   stdout: Pick<typeof processStdout, "write"> = processStdout,
   stderr: Pick<typeof processStderr, "write"> = processStderr,
@@ -299,6 +220,9 @@ export const createTranscriptRenderer = ({
   color = "auto",
   isTty = false,
   maxPayloadLength = DEFAULT_MAX_RENDER_LENGTH,
+  terminalWidth = () => processStdout.columns ?? 80,
+  spinnerIntervalMs = 120,
+  now = Date.now,
 }: CreateTranscriptRendererOptions): TranscriptRenderer => {
   const io = {
     ...createNodeTerminalWriters(),
@@ -307,6 +231,26 @@ export const createTranscriptRenderer = ({
 
   const colorEnabled = resolveColorEnabled(color, isTty);
   let lastSession: TaskRunSessionIdentity | undefined;
+  type DagStarted = Extract<ConversationEvent, { type: "subagent-progress" }>["progress"] & {
+    type: "dag-started";
+  };
+  type TaskProgress = {
+    state: "waiting" | "running" | "completed" | "failed" | "blocked";
+    startedAt?: number;
+    elapsedMs?: number;
+    error?: string;
+  };
+  let liveDag:
+    | {
+        definition: DagStarted;
+        tasks: Map<string, TaskProgress>;
+        lineCount: number;
+        frame: number;
+        timer?: ReturnType<typeof setInterval>;
+        initial: boolean;
+        completedElapsedMs?: number;
+      }
+    | undefined;
 
   const writeLine = (writer: TerminalWriter, line = ""): void => {
     writer.write(`${line}\n`);
@@ -322,6 +266,163 @@ export const createTranscriptRenderer = ({
 
   const writeSessionIdentity = (session: TaskRunSessionIdentity): void => {
     writeStatus("Session", formatSession(session));
+    if (session.baseWarning) writeStatus("Warning", session.baseWarning, "warning");
+  };
+
+  const width = (): number =>
+    Math.max(30, typeof terminalWidth === "function" ? terminalWidth() : terminalWidth);
+  const ansiPattern = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "gu");
+  const cleanTerminalText = (value: string): string =>
+    [...value.replace(ansiPattern, "")]
+      .map((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code <= 31 || code === 127 ? " " : character;
+      })
+      .join("");
+  const elapsed = (milliseconds: number): string =>
+    milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(1)}s`;
+  const fit = (value: string, available: number): string => truncate(value, Math.max(1, available));
+  const spinner = ["◐", "◓", "◑", "◒"];
+
+  const dagLines = (): string[] => {
+    if (!liveDag) return [];
+    const total = liveDag.definition.lanes.reduce((sum, lane) => sum + lane.tasks.length, 0);
+    const complete = [...liveDag.tasks.values()].filter((task) =>
+      ["completed", "failed", "blocked"].includes(task.state),
+    ).length;
+    const dagElapsed =
+      liveDag.completedElapsedMs ?? Math.max(0, now() - liveDag.definition.startedAt);
+    const header = liveDag.initial
+      ? `Subagents: Launch DAG · ${total} workers · concurrency ${liveDag.definition.concurrency}`
+      : `Subagents: ${complete}/${total} finished · elapsed ${elapsed(dagElapsed)}`;
+    const lines = [fit(header, width())];
+    for (const lane of liveDag.definition.lanes) {
+      const wait = lane.waitsOn.length > 0 ? ` · waits on: ${lane.waitsOn.join(", ")}` : "";
+      lines.push(fit(`${lane.id}  ${cleanTerminalText(lane.title)}${wait}`, width()));
+      for (const task of lane.tasks) {
+        const progress = liveDag.tasks.get(task.id) ?? { state: "waiting" as const };
+        const marker =
+          progress.state === "completed"
+            ? "✓"
+            : progress.state === "failed"
+              ? "x"
+              : progress.state === "blocked"
+                ? "x"
+                : progress.state === "running"
+                  ? spinner[liveDag.frame % spinner.length]
+                  : "·";
+        const duration =
+          progress.state === "running" && progress.startedAt !== undefined
+            ? elapsed(Math.max(0, now() - progress.startedAt))
+            : progress.elapsedMs !== undefined && progress.state !== "blocked"
+              ? elapsed(progress.elapsedMs)
+              : "";
+        const detail = progress.error ? ` · ${cleanTerminalText(progress.error)}` : "";
+        const suffix = duration ? `  ${duration}` : "";
+        lines.push(
+          fit(`  ${marker} ${task.id} ${cleanTerminalText(task.title)}${detail}${suffix}`, width()),
+        );
+      }
+    }
+    return lines;
+  };
+
+  const paintDag = (): void => {
+    if (!liveDag) return;
+    const lines = dagLines();
+    if (liveDag.lineCount > 0) io.stderr.write(`\u001b[${liveDag.lineCount}A`);
+    for (const line of lines) io.stderr.write(`\r\u001b[2K${line}\n`);
+    liveDag.lineCount = lines.length;
+    liveDag.initial = false;
+  };
+
+  const appendDagEvent = (
+    progress: Extract<ConversationEvent, { type: "subagent-progress" }>["progress"],
+  ): void => {
+    switch (progress.type) {
+      case "dag-started": {
+        writeStatus(
+          "Subagents",
+          `Launch DAG · ${progress.lanes.reduce((sum, lane) => sum + lane.tasks.length, 0)} workers · concurrency ${progress.concurrency}`,
+        );
+        for (const lane of progress.lanes) {
+          writeLine(
+            io.stderr,
+            `${lane.id}  ${cleanTerminalText(lane.title)}${lane.waitsOn.length > 0 ? ` · waits on: ${lane.waitsOn.join(", ")}` : ""}`,
+          );
+          for (const task of lane.tasks)
+            writeLine(io.stderr, `  · ${task.id} ${cleanTerminalText(task.title)}`);
+        }
+        break;
+      }
+      case "task-started":
+        writeStatus("Subagent", `${progress.id} ${cleanTerminalText(progress.title)}: started`);
+        break;
+      case "task-completed":
+        writeStatus(
+          "Subagent",
+          `${progress.id} ${cleanTerminalText(progress.title)}: completed in ${elapsed(progress.elapsedMs)}`,
+          "success",
+        );
+        break;
+      case "task-failed":
+      case "task-blocked":
+        writeStatus(
+          "Subagent",
+          `${progress.id} ${cleanTerminalText(progress.title)}: ${progress.type === "task-failed" ? "failed" : "blocked"}${progress.error ? ` · ${cleanTerminalText(progress.error)}` : ""}`,
+          "warning",
+        );
+        break;
+      case "dag-completed":
+        writeStatus("Subagents", `DAG complete in ${elapsed(progress.elapsedMs)}`, "success");
+        break;
+    }
+  };
+
+  const renderDagProgress = (
+    progress: Extract<ConversationEvent, { type: "subagent-progress" }>["progress"],
+  ): void => {
+    if (!isTty) {
+      appendDagEvent(progress);
+      return;
+    }
+    if (progress.type === "dag-started") {
+      liveDag = {
+        definition: progress,
+        tasks: new Map(
+          progress.lanes.flatMap((lane) =>
+            lane.tasks.map((task) => [task.id, { state: "waiting" as const }]),
+          ),
+        ),
+        lineCount: 0,
+        frame: 0,
+        initial: true,
+      };
+      paintDag();
+      liveDag.timer = setInterval(() => {
+        if (!liveDag) return;
+        liveDag.frame += 1;
+        paintDag();
+      }, spinnerIntervalMs);
+      return;
+    }
+    if (!liveDag) return;
+    if (progress.type === "task-started") {
+      liveDag.tasks.set(progress.id, { state: "running", startedAt: progress.startedAt });
+    } else if (progress.type === "task-completed") {
+      liveDag.tasks.set(progress.id, { state: "completed", elapsedMs: progress.elapsedMs });
+    } else if (progress.type === "task-failed" || progress.type === "task-blocked") {
+      liveDag.tasks.set(progress.id, {
+        state: progress.type === "task-failed" ? "failed" : "blocked",
+        elapsedMs: progress.elapsedMs,
+        error: progress.error,
+      });
+    } else if (progress.type === "dag-completed") {
+      liveDag.completedElapsedMs = progress.elapsedMs;
+      if (liveDag.timer) clearInterval(liveDag.timer);
+    }
+    paintDag();
+    if (progress.type === "dag-completed") liveDag = undefined;
   };
 
   return {
@@ -329,10 +430,58 @@ export const createTranscriptRenderer = ({
       writeStatus("Prompt", task);
     },
 
-    renderEvent(event: TaskRunEvent): void {
-      lastSession = event.session;
+    renderEvent(event: ConversationEvent): void {
+      if ("session" in event) lastSession = event.session;
 
       switch (event.type) {
+        case "sandbox-preparing": {
+          writeStatus("Sandbox", event.image);
+          if (event.bootstrapCount === 0) {
+            writeStatus("Bootstrap", "none configured", "warning");
+            writeLine(
+              io.stderr,
+              'Tip: agentj config add sandbox.bootstrap "<project setup command>"',
+            );
+          } else {
+            writeStatus(
+              "Bootstrap",
+              `${event.bootstrapCount} command${event.bootstrapCount === 1 ? "" : "s"} configured`,
+            );
+          }
+          break;
+        }
+
+        case "sandbox-ready": {
+          writeStatus("Bootstrap", "complete", "success");
+          break;
+        }
+
+        case "sandbox-failed": {
+          writeStatus("Sandbox setup failed", event.error, "error");
+          break;
+        }
+
+        case "local-workspace": {
+          writeStatus("Workspace", "local");
+          writeStatus("Root", event.root);
+          writeStatus("Git", `${event.branch} · ${event.status || "clean"}`);
+          break;
+        }
+
+        case "project-setup": {
+          writeStatus(
+            "Project setup",
+            `${event.commandCount} command${event.commandCount === 1 ? "" : "s"} complete`,
+            "success",
+          );
+          break;
+        }
+
+        case "project-setup-failed": {
+          writeStatus("Project setup failed", event.error, "error");
+          break;
+        }
+
         case "session-created": {
           writeSessionIdentity(event.session);
           break;
@@ -369,12 +518,70 @@ export const createTranscriptRenderer = ({
           );
           break;
         }
+
+        case "phase": {
+          if (event.phase === "planning") writeStatus("Planning", "investigating request");
+          if (event.phase === "building") writeStatus("Build", "approved plan", "success");
+          break;
+        }
+
+        case "plan": {
+          writeLine(
+            io.stdout,
+            renderLabel(event.revision === 1 ? "Plan" : "Revised plan", colorEnabled),
+          );
+          writeLine(io.stdout, event.text);
+          break;
+        }
+
+        case "feedback": {
+          writeStatus("Feedback", event.text);
+          break;
+        }
+
+        case "subagent-progress": {
+          renderDagProgress(event.progress);
+          break;
+        }
+
+        case "build-blocked": {
+          writeStatus("Build blocked", event.reason, "warning");
+          writeStatus(
+            event.session.mode === "local" ? "Workspace" : "Recovery",
+            event.session.mode === "local"
+              ? "changes remain in local checkout"
+              : event.recoveryCommitSha
+                ? `${event.recoveryCommitSha} on ${event.session.branch}`
+                : `no changes on ${event.session.branch}`,
+            "warning",
+          );
+          break;
+        }
+
+        case "local-complete": {
+          writeStatus("Workspace", "validated changes left in local checkout", "success");
+          break;
+        }
       }
     },
 
-    renderOutcome(outcome: TaskRunOutcome): void {
+    renderOutcome(outcome: ConversationOutcome): void {
+      if (liveDag?.timer) clearInterval(liveDag.timer);
+      if (liveDag) {
+        paintDag();
+        liveDag = undefined;
+      }
       switch (outcome.kind) {
         case "success": {
+          return;
+        }
+
+        case "plan-ready": {
+          writeStatus("Plan ready", "no changes made; explicit approval is required to build");
+          return;
+        }
+
+        case "build-blocked": {
           return;
         }
 
