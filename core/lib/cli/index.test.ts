@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ConversationEvent, ConversationOutcome } from "../app/conversation";
-import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
+import type {
+  ConversationEvent,
+  ConversationOutcome,
+  TaskRunEvent,
+  TaskRunSessionIdentity,
+} from "../app/conversation";
 import { createConfigCliHandlers } from "../config-cli";
 import type { PromptUi, TranscriptRenderer } from "../tui";
 import {
@@ -43,7 +47,7 @@ function createMemoryWriter(): { write: (text: string) => true; text: () => stri
   };
 }
 
-function makeSuccessOutcome(commitSha: string | null = "abc123"): TaskRunOutcome {
+function makeSuccessOutcome(commitSha: string | null = "abc123"): ConversationOutcome {
   return {
     kind: "success",
     session: SESSION,
@@ -52,7 +56,7 @@ function makeSuccessOutcome(commitSha: string | null = "abc123"): TaskRunOutcome
   };
 }
 
-function makeGenerationErrorOutcome(): TaskRunOutcome {
+function makeGenerationErrorOutcome(): ConversationOutcome {
   return {
     kind: "generation-error",
     session: SESSION,
@@ -60,7 +64,7 @@ function makeGenerationErrorOutcome(): TaskRunOutcome {
   };
 }
 
-function makeCommitErrorOutcome(): TaskRunOutcome {
+function makeCommitErrorOutcome(): ConversationOutcome {
   return {
     kind: "commit-error",
     session: SESSION,
@@ -69,7 +73,7 @@ function makeCommitErrorOutcome(): TaskRunOutcome {
   };
 }
 
-function makeAbortedOutcome(): TaskRunOutcome {
+function makeAbortedOutcome(): ConversationOutcome {
   return {
     kind: "aborted",
     session: SESSION,

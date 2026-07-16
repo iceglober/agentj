@@ -6,10 +6,9 @@ import { type Agent, createAgent as createProductionAgent } from "./lib/agent";
 import type { CreatePlanningDagToolOptions } from "./lib/agent/planning-delegate";
 import type { ConversationDependencies } from "./lib/app/conversation";
 import { runAgentConversation } from "./lib/app/conversation";
-import type { TaskRunDependencies } from "./lib/app/run";
 import { type AgentjTaskRunnerOptions, runAgentjCli } from "./lib/cli";
 import { loadConfig } from "./lib/config";
-import { createConfigCliHandlers } from "./lib/config-cli";
+import { createConfigCliHandlers, createMaskedSecretPrompt } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
@@ -33,7 +32,6 @@ import {
   integrateGitDelegation,
 } from "./lib/workspace/git-integration";
 import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
-import { createPromptsSecretPrompt } from "./secrets-cli";
 
 const COMMAND_VERSION = "0.0.0";
 
@@ -93,7 +91,7 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
 export async function createProductionTaskRunDependencies(
   configPath: string = new URL("./agentj.json", import.meta.url).pathname,
   overrides: ProductionDependencyOverrides = {},
-): Promise<TaskRunDependencies & ConversationDependencies> {
+): Promise<ConversationDependencies> {
   const workspaceMode = overrides.workspaceMode ?? "sandbox";
   const env = overrides.env ?? process.env;
   let preparation:
@@ -122,7 +120,9 @@ export async function createProductionTaskRunDependencies(
         store: overrides.secretStore ?? createKeyringSecretStore({}),
       });
       if (key.status === "missing") {
-        throw new Error("Azure API key missing; run agentj:secrets ... or set env");
+        throw new Error(
+          "Azure API key missing; run: agentj config set --secret providers.azure.api_key",
+        );
       }
       if (key.status === "store-unavailable") {
         throw new Error(
@@ -330,11 +330,7 @@ const main = async (): Promise<void> => {
   const sessionStore = createFileSessionStore(join(stateRoot, "agentj", "sessions"));
   const configHandlers = createConfigCliHandlers({
     secretStore: createKeyringSecretStore({}),
-    prompt: {
-      async askSecret() {
-        return createPromptsSecretPrompt().askAzureApiKey();
-      },
-    },
+    prompt: createMaskedSecretPrompt(),
     writers,
   });
   let evalHandlers: ReturnType<typeof createProductionEvalCliHandlers> | undefined;

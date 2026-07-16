@@ -26,6 +26,31 @@ export interface MaskedSecretPrompt {
   askSecret(): Promise<string | null>;
 }
 
+/** The production MaskedSecretPrompt: masked entry via the prompts package. */
+export const createMaskedSecretPrompt = (): MaskedSecretPrompt => ({
+  async askSecret(): Promise<string | null> {
+    const { createRequire } = await import("node:module");
+    const prompts = createRequire(import.meta.url)("prompts") as (
+      question: { type: "password"; name: "secret"; message: string },
+      options: { onCancel: () => void },
+    ) => Promise<{ secret?: unknown }>;
+
+    let cancelled = false;
+    const answer = await prompts(
+      { type: "password", name: "secret", message: "Secret value" },
+      {
+        onCancel: () => {
+          cancelled = true;
+        },
+      },
+    );
+    if (cancelled || typeof answer.secret !== "string" || answer.secret.length === 0) {
+      return null;
+    }
+    return answer.secret;
+  },
+});
+
 export interface ConfigCliDependencies {
   config?: GlobalConfigOptions;
   mutateConfig?: (

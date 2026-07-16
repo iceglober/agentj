@@ -42,7 +42,6 @@
     "eval": "bun core/eval/run.ts",
     "eval:report": "bun core/eval/report.ts",
     "eval:selfcheck": "bun core/eval/run.ts --selfcheck",
-    "agentj:secrets": "bun core/secrets-cli.ts",
     "changeset": "changeset",
     "version:packages": "changeset version",
     "release:next": "bun publish --access public --tag next"

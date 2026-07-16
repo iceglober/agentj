@@ -153,7 +153,6 @@ convenient path for interactive use — store once, never type again.
 ./bin/agentj config delete providers.azure.api_key
 ```
 
-`bun run agentj:secrets -- …` remains a deprecated compatibility shim for one release.
 
 The key is stored globally in the host OS keychain (macOS Keychain, Windows Credential
 Manager, Linux `libsecret`). Secret values are never printed, logged, or passed as

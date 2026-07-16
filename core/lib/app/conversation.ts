@@ -4,9 +4,31 @@ import type { RunResult, RunStep } from "../llm";
 import type { Sandbox } from "../sandbox";
 import type { Session } from "../session";
 import { assessBuildResult } from "./build-report";
-import type { TaskRunEvent, TaskRunSessionIdentity } from "./run";
 
+type ToolCall = RunStep["toolCalls"][number];
 type ToolResult = RunStep["toolResults"][number];
+
+export interface TaskRunSessionIdentity {
+  id: string;
+  branch: string;
+  base: string;
+  path: string;
+  baseWarning?: string;
+  mode?: "local" | "sandbox";
+}
+
+export type TaskRunEvent =
+  | { type: "session-created"; session: TaskRunSessionIdentity }
+  | { type: "tool-call"; session: TaskRunSessionIdentity; call: ToolCall }
+  | { type: "tool-result"; session: TaskRunSessionIdentity; result: ToolResult }
+  | { type: "result"; session: TaskRunSessionIdentity; result: RunResult }
+  | {
+      type: "commit";
+      session: TaskRunSessionIdentity;
+      result: RunResult;
+      message: string;
+      sha: string | null;
+    };
 
 export type ConversationPhase = "planning" | "awaiting-feedback" | "building";
 

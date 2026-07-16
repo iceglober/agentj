@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 
-import type { ConversationEvent } from "../app/conversation";
-import type { TaskRunEvent, TaskRunOutcome, TaskRunSessionIdentity } from "../app/run";
+import type {
+  ConversationEvent,
+  ConversationOutcome,
+  TaskRunEvent,
+  TaskRunSessionIdentity,
+} from "../app/conversation";
 import {
   createPromptUi,
   createTranscriptRenderer,
@@ -408,7 +412,7 @@ describe("createTranscriptRenderer", () => {
       },
     });
 
-    const outcomes: TaskRunOutcome[] = [
+    const outcomes: ConversationOutcome[] = [
       {
         kind: "generation-error",
         session: SESSION,
