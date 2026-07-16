@@ -2,39 +2,31 @@ import { stderr as processStderr, stdout as processStdout } from "node:process";
 
 import { command, flag, option, optional, positional, runSafely, string } from "cmd-ts";
 
-import type { ConversationEvent, ConversationOutcome } from "../app/conversation";
 import type { ConfigCliHandlers } from "../config-cli";
 import type { EvalCliHandlers } from "../eval-cli";
-import type { PromptUi, TranscriptRenderer } from "../tui";
 
 export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_ABORTED = 130;
 
 export const DEFAULT_COMMAND_NAME = "agentj";
-export const DEFAULT_COMMAND_DESCRIPTION = "Run one AgentJ task from the terminal.";
+export const DEFAULT_COMMAND_DESCRIPTION =
+  "Interactive coding agent. Bare invocation opens a chat session; `run` executes one task.";
 
-export interface AgentjTaskRunnerOptions {
+export interface RunOnceOptions {
+  /** Plan-only: read-only tools, no edits. */
+  plan: boolean;
+  /** Resolve permission asks to allow instead of the safe deny default. */
+  allowAll: boolean;
   signal: AbortSignal;
-  nextUserMessage?: () => Promise<string | null>;
-  onEvent?: (event: ConversationEvent) => void | Promise<void>;
 }
-
-export type AgentjTaskRunner = (
-  task: string,
-  options: AgentjTaskRunnerOptions,
-) => Promise<ConversationOutcome>;
 
 export interface AgentjCommandDependencies {
   version: string;
-  promptUi: PromptUi;
-  createRenderer(task: string): TranscriptRenderer;
-  runTask: AgentjTaskRunner;
-  runSandboxTask?: (
-    task: string,
-    options: AgentjTaskRunnerOptions & { provider?: string },
-  ) => Promise<ConversationOutcome>;
-  resumeSession?: (id: string, options: AgentjTaskRunnerOptions) => Promise<ConversationOutcome>;
+  /** The interactive chat session (default command). */
+  runChat(options?: { resume?: string; continueLatest?: boolean }): Promise<number>;
+  /** Non-interactive one-shot turn for scripts/CI. */
+  runOnce(task: string, options: RunOnceOptions): Promise<number>;
   createAbortSignal?: () => AbortSignal;
   name?: string;
   description?: string;
@@ -49,136 +41,45 @@ export interface AgentjCliIo {
   stderr?: Pick<typeof processStderr, "write">;
 }
 
-const normalizeTask = (value: string | undefined): string | null => {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const toExitCode = (outcome: ConversationOutcome): number => {
-  switch (outcome.kind) {
-    case "success": {
-      return EXIT_SUCCESS;
-    }
-
-    case "plan-ready": {
-      return EXIT_SUCCESS;
-    }
-
-    case "aborted": {
-      return EXIT_ABORTED;
-    }
-
-    case "generation-error":
-    case "commit-error":
-    case "build-blocked": {
-      return EXIT_FAILURE;
-    }
-  }
-};
-
-const executeTask = async (
-  task: string | undefined,
-  deps: AgentjCommandDependencies,
-  runner: AgentjTaskRunner,
-): Promise<number> => {
-  const resolvedTask = normalizeTask(task) ?? (await deps.promptUi.askTask());
-  const normalizedTask = normalizeTask(resolvedTask ?? undefined);
-  if (normalizedTask === null) return EXIT_SUCCESS;
-
-  const renderer = deps.createRenderer(normalizedTask);
-  renderer.renderPrompt();
-  const outcome = await runner(normalizedTask, {
-    signal: (deps.createAbortSignal ?? (() => new AbortController().signal))(),
-    nextUserMessage: deps.promptUi.askFollowUp
-      ? () => deps.promptUi.askFollowUp!()
-      : async () => null,
-    onEvent: (event) => renderer.renderEvent(event),
-  });
-  renderer.renderOutcome(outcome);
-  return toExitCode(outcome);
-};
-
-export const createAgentjCommand = ({
-  version,
-  promptUi,
-  createRenderer,
-  runTask,
-  createAbortSignal = () => new AbortController().signal,
-  name = DEFAULT_COMMAND_NAME,
-  description = DEFAULT_COMMAND_DESCRIPTION,
-}: AgentjCommandDependencies) =>
+const createChatCommand = (deps: AgentjCommandDependencies) =>
   command({
-    name,
-    version,
-    description,
+    name: deps.name ?? DEFAULT_COMMAND_NAME,
+    version: deps.version,
+    description: deps.description ?? DEFAULT_COMMAND_DESCRIPTION,
     args: {
-      task: positional({
+      resume: option({
+        long: "resume",
         type: optional(string),
-        description: "Task to run. If omitted, AgentJ asks once.",
+        description: "Resume a chat session by id.",
+      }),
+      continueLatest: flag({
+        long: "continue",
+        description: "Resume the newest chat session for this project.",
       }),
     },
-    handler: ({ task }) =>
-      executeTask(
-        task,
-        {
-          version,
-          promptUi,
-          createRenderer,
-          runTask,
-          createAbortSignal,
-          name,
-          description,
-        },
-        runTask,
-      ),
+    handler: ({ resume, continueLatest }) =>
+      deps.runChat({ ...(resume ? { resume } : {}), continueLatest }),
   });
 
-const createSandboxCommand = (deps: AgentjCommandDependencies, withProvider: boolean) =>
+const createRunCommand = (deps: AgentjCommandDependencies) =>
   command({
-    name: `${deps.name ?? DEFAULT_COMMAND_NAME} sandbox`,
+    name: `${deps.name ?? DEFAULT_COMMAND_NAME} run`,
     version: deps.version,
-    description: "Run one AgentJ task in an isolated sandbox.",
+    description: "Run one task non-interactively and exit.",
     args: {
-      ...(withProvider
-        ? { provider: option({ long: "provider", type: string, description: "Sandbox provider." }) }
-        : {}),
-      task: positional({
-        type: optional(string),
-        description: "Task to run. If omitted, AgentJ asks once.",
+      plan: flag({ long: "plan", description: "Plan only — read-only tools, no edits." }),
+      allowAll: flag({
+        long: "allow-all",
+        description: "Resolve permission asks to allow (default: deny with a notice).",
       }),
+      task: positional({ type: string, displayName: "task", description: "Task to run." }),
     },
-    async handler(args): Promise<number> {
-      if (!deps.runSandboxTask) return EXIT_FAILURE;
-      const provider = "provider" in args ? args.provider : undefined;
-      return executeTask(args.task, deps, (task, options) =>
-        deps.runSandboxTask!(task, { ...options, ...(provider ? { provider } : {}) }),
-      );
-    },
-  });
-
-const createResumeCommand = (deps: AgentjCommandDependencies) =>
-  command({
-    name: `${deps.name ?? DEFAULT_COMMAND_NAME} --resume`,
-    version: deps.version,
-    description: "Resume an AgentJ session.",
-    args: { resume: option({ long: "resume", type: string, description: "Session ID." }) },
-    async handler({ resume }): Promise<number> {
-      if (!deps.resumeSession) return EXIT_FAILURE;
-      const renderer = deps.createRenderer(`resume ${resume}`);
-      const outcome = await deps.resumeSession(resume, {
+    handler: ({ task, plan, allowAll }) =>
+      deps.runOnce(task.trim(), {
+        plan,
+        allowAll,
         signal: (deps.createAbortSignal ?? (() => new AbortController().signal))(),
-        nextUserMessage: deps.promptUi.askFollowUp
-          ? () => deps.promptUi.askFollowUp!()
-          : async () => null,
-        onEvent: (event) => renderer.renderEvent(event),
-      });
-      renderer.renderOutcome(outcome);
-      return toExitCode(outcome);
-    },
+      }),
   });
 
 const createConfigSetCommand = (handlers: ConfigCliHandlers) =>
@@ -371,20 +272,9 @@ export async function runAgentjCli(
     return dispatchEval(argv, deps, writers);
   }
 
-  if (argv[0] === "--resume" || argv[0]?.startsWith("--resume=") === true) {
-    return dispatchLeaf(createResumeCommand(deps), argv, writers);
+  if (argv[0] === "run") {
+    return dispatchLeaf(createRunCommand(deps), argv.slice(1), writers);
   }
 
-  if (argv[0] === "sandbox") {
-    const args = argv.slice(1);
-    const withProvider = args.some((arg) => arg === "--provider" || arg.startsWith("--provider="));
-    return dispatchLeaf(createSandboxCommand(deps, withProvider), args, writers);
-  }
-
-  const result = await runSafely(createAgentjCommand(deps), argv);
-  if (result._tag === "error") {
-    return writeResult(result, writers) ?? EXIT_FAILURE;
-  }
-
-  return await Promise.resolve(result.value);
+  return dispatchLeaf(createChatCommand(deps), argv, writers);
 }

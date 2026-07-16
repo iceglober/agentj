@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Sandbox, SandboxCommandResult } from "../sandbox";
-import {
-  chooseCanonicalBase,
-  createChildSession,
-  createSession,
-  sessionConfigSchema,
-} from "./index";
+import { createChildSession, sessionConfigSchema } from "./index";
 
 type GitCall = {
   raw: string;
@@ -279,49 +274,6 @@ function renderWorktreeList(worktrees: Map<string, { branch: string; head: strin
     .join("\n");
 }
 
-describe("chooseCanonicalBase", () => {
-  test("chooses the available canonical ref and the descendant when histories are comparable", () => {
-    expect(
-      chooseCanonicalBase({
-        remoteRef: "origin/main",
-        localRef: null,
-        localIsAncestorOfRemote: false,
-        remoteIsAncestorOfLocal: false,
-      }),
-    ).toEqual({ ref: "origin/main" });
-    expect(
-      chooseCanonicalBase({
-        remoteRef: "origin/main",
-        localRef: "main",
-        localIsAncestorOfRemote: true,
-        remoteIsAncestorOfLocal: false,
-      }),
-    ).toEqual({ ref: "origin/main" });
-    expect(
-      chooseCanonicalBase({
-        remoteRef: "origin/main",
-        localRef: "main",
-        localIsAncestorOfRemote: false,
-        remoteIsAncestorOfLocal: true,
-      }),
-    ).toEqual({ ref: "main" });
-  });
-
-  test("prefers the shared remote baseline and warns when histories diverge", () => {
-    expect(
-      chooseCanonicalBase({
-        remoteRef: "origin/main",
-        localRef: "main",
-        localIsAncestorOfRemote: false,
-        remoteIsAncestorOfLocal: false,
-      }),
-    ).toEqual({
-      ref: "origin/main",
-      warning: "local main diverges from origin/main; using shared remote baseline",
-    });
-  });
-});
-
 function splitShell(command: string): string[] {
   const parts: string[] = [];
   let current = "";
@@ -385,54 +337,6 @@ async function makeChildSession(options: FakeSandboxOptions = {}) {
 function matchingCalls(sb: FakeSandbox, predicate: (call: GitCall) => boolean): GitCall[] {
   return sb.calls.filter(predicate);
 }
-
-describe("createSession", () => {
-  test("caller-supplied id with a separator still uses historical path and branch and reaches addWorktree", async () => {
-    const id = "feature/foo";
-    const sb = new FakeSandbox({ childId: id });
-    const config = sessionConfigSchema.parse({
-      repoDir: sb.repoDir,
-      root: sb.root,
-      branchPrefix: sb.branchPrefix,
-      base: "head",
-      identity: { name: "agentj", email: "agentj@example.com" },
-    });
-
-    const session = await createSession(sb, config, id);
-
-    expect(session.id).toBe(id);
-    expect(session.path).toBe(`${sb.root}/${id}`);
-    expect(session.branch).toBe(`${sb.branchPrefix}${id}`);
-    expect(session.base).toBe("HEAD");
-
-    const addWorktree = matchingCalls(
-      sb,
-      (call) => call.cwd === sb.repoDir && call.args[0] === "worktree" && call.args[1] === "add",
-    );
-    expect(addWorktree).toHaveLength(1);
-    expect(addWorktree[0]?.raw).toBe(
-      `git -C '${sb.repoDir}' 'worktree' 'add' '--no-track' '-b' '${sb.branchPrefix}${id}' '${sb.root}/${id}' 'HEAD'`,
-    );
-    expect(addWorktree[0]?.args).toEqual([
-      "worktree",
-      "add",
-      "--no-track",
-      "-b",
-      `${sb.branchPrefix}${id}`,
-      `${sb.root}/${id}`,
-      "HEAD",
-    ]);
-
-    await session.dispose();
-
-    const removeCalls = matchingCalls(
-      sb,
-      (call) => call.cwd === sb.repoDir && call.args[0] === "worktree" && call.args[1] === "remove",
-    );
-    expect(removeCalls).toHaveLength(1);
-    expect(removeCalls[0]?.args).toEqual(["worktree", "remove", "--force", `${sb.root}/${id}`]);
-  });
-});
 
 describe("createChildSession", () => {
   test("explicit parent ref resolves once to immutable SHA and addWorktree uses that SHA", async () => {
