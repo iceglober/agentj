@@ -93,6 +93,8 @@ export interface CreateAgentOptions {
 export interface GenerateOptions {
   abortSignal?: AbortSignal;
   onStep?: (step: RunStep) => void;
+  /** Prior turns (RunResult.messages) — the chat loop's opaque continuation. */
+  messages?: unknown[];
 }
 
 export interface Agent {
@@ -213,6 +215,7 @@ export async function createAgent(
       runtime.generate({
         instructions: composed.instructions,
         prompt,
+        messages: generateOpts?.messages,
         tools,
         temperature: config.llm.temperature ?? composed.params.temperature,
         topP: config.llm.topP ?? composed.params.topP,
