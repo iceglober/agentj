@@ -1,5 +1,5 @@
-import { STANDALONE_EXECUTOR } from "./base";
-import { DEEPSEEK_DELTA, GPT54_DELTA, LUNA_DELTA } from "./blocks";
+import { COMPACT_PRIMARY, STANDALONE_EXECUTOR } from "./base";
+import { DEEPSEEK_DELTA, GPT54_DELTA } from "./blocks";
 import type { RenderFlags } from "./index";
 
 /**
@@ -25,6 +25,8 @@ export interface Profile {
   flags: Partial<RenderFlags>;
   /** Appended into {{PROFILE_DELTA}}. */
   delta?: string;
+  /** Primary builder role uses this template instead of base. */
+  primary?: string;
   /** Delegate role uses this template instead of base. */
   standalone?: string;
   params: ModelParams;
@@ -70,10 +72,11 @@ export const profiles = {
     params: { providerOptions: { openai: { reasoningEffort: "medium", textVerbosity: "low" } } },
   },
   "gpt-5.6-luna": {
-    // Data-only; not deployed.
+    // Deployed on the user's Azure resource. Compact primary: per-step prompt
+    // weight dominates cost at this tier (validated -19% tokens, eval 2026-07-16).
     match: [/^gpt-5\.6-luna\b/],
-    flags: { planning: true },
-    delta: LUNA_DELTA,
+    flags: {},
+    primary: COMPACT_PRIMARY,
     params: { providerOptions: { openai: { reasoningEffort: "low", textVerbosity: "low" } } },
   },
 } satisfies Record<string, Profile>;

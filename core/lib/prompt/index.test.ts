@@ -73,13 +73,13 @@ describe("composePrompt", () => {
   });
 
   test("4. flag precedence: config overrides profile", () => {
-    const on = composePrompt(AUTO, inputs({ model: "gpt-5.6-luna" }), CTX);
+    const on = composePrompt(AUTO, inputs({ model: "gpt-5.4-nano" }), CTX);
     expect(on.flags.planning).toBe(true);
     expect(on.instructions).toContain("2. Plan:");
 
     const off = composePrompt(
       { profile: "auto", flags: { planning: false } },
-      inputs({ model: "gpt-5.6-luna" }),
+      inputs({ model: "gpt-5.4-nano" }),
       CTX,
     );
     expect(off.flags.planning).toBe(false);

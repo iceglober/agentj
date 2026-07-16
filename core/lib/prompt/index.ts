@@ -114,10 +114,13 @@ export function composePrompt(
     if (value !== undefined) flags[key as keyof PromptFlags] = value;
   }
 
+  const isBuilder = (inputs.purpose ?? "builder") === "builder";
   const template =
-    inputs.role === "delegate" && (inputs.purpose ?? "builder") === "builder" && profile?.standalone
+    inputs.role === "delegate" && isBuilder && profile?.standalone
       ? profile.standalone
-      : BASE_TEMPLATE;
+      : isBuilder && profile?.primary
+        ? profile.primary
+        : BASE_TEMPLATE;
 
   const vars: Record<string, string> = {
     AGENT_NAME: inputs.agentName,
