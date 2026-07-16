@@ -1,0 +1,56 @@
+import { expect, test } from "bun:test";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { createChatLog, latestChatLogId, loadChatLog } from "./log";
+
+test("append, load with last-state-wins, and torn-tail tolerance", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const projectRoot = "/repo/example";
+  try {
+    const log = await createChatLog({ root, projectRoot, title: "fix the flaky test" });
+    await log.append({ type: "turn", mode: "plan", user: "hi", assistant: "hello", ts: "t1" });
+    await log.append({ type: "state", messages: [{ role: "user" }], mode: "plan", ts: "t1" });
+    await log.append({ type: "turn", mode: "build", user: "go", assistant: "done", ts: "t2" });
+    await log.append({
+      type: "state",
+      messages: [{ role: "user" }, { role: "assistant" }],
+      mode: "build",
+      ts: "t2",
+    });
+    await appendFile(log.path, '{"type":"state","mess'); // torn tail from a crash
+
+    const loaded = await loadChatLog({ root, projectRoot, id: log.id });
+    expect(loaded?.meta.title).toBe("fix the flaky test");
+    expect(loaded?.turns.map((turn) => turn.user)).toEqual(["hi", "go"]);
+    expect(loaded?.state?.mode).toBe("build");
+    expect(loaded?.state?.messages).toHaveLength(2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("latestChatLogId picks the newest session for the project, null when none", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const projectRoot = "/repo/example";
+  try {
+    expect(await latestChatLogId({ root, projectRoot })).toBeNull();
+    await createChatLog({ root, projectRoot, id: "older" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await createChatLog({ root, projectRoot, id: "newer" });
+    expect(await latestChatLogId({ root, projectRoot })).toBe("newer");
+    // A different project sees nothing.
+    expect(await latestChatLogId({ root, projectRoot: "/repo/other" })).toBeNull();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("loadChatLog returns null for unknown sessions", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  try {
+    expect(await loadChatLog({ root, projectRoot: "/repo/x", id: "nope" })).toBeNull();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
