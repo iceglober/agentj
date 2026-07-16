@@ -45,6 +45,8 @@ export interface CreateChatScreenOptions {
   escapeFlushMs?: number;
   /** Double-Ctrl+C exit window. */
   quitWindowMs?: number;
+  /** Previously submitted prompts, oldest first. */
+  initialHistory?: readonly string[];
 }
 
 export interface ChatScreen {
@@ -75,7 +77,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
   const decoder = new TerminalKeyDecoder();
   let editor: EditorState = createEditorState();
-  const history: string[] = [];
+  const history = (options.initialHistory ?? [])
+    .filter((entry) => entry.trim().length > 0)
+    .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: string[] = [];
   let status = "";

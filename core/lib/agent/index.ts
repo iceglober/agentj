@@ -135,6 +135,8 @@ export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"])
 }
 
 export interface ToolActivity {
+  /** Pairs a start with its end (parallel calls to the same tool differ). */
+  id: number;
   tool: string;
   detail: string;
   phase: "start" | "end";
@@ -145,17 +147,20 @@ const withToolActivity = (
   tools: ToolSet,
   onActivity: (activity: ToolActivity) => void,
 ): ToolSet => {
+  let sequence = 0;
   const wrapped: ToolSet = {};
   for (const [name, def] of Object.entries(tools)) {
     wrapped[name] = {
       ...def,
       async execute(input, executeOptions) {
+        sequence += 1;
+        const id = sequence;
         const detail = describeToolInput(input);
-        onActivity({ tool: name, detail, phase: "start" });
+        onActivity({ id, tool: name, detail, phase: "start" });
         try {
           return await def.execute(input, executeOptions);
         } finally {
-          onActivity({ tool: name, detail, phase: "end" });
+          onActivity({ id, tool: name, detail, phase: "end" });
         }
       },
     };

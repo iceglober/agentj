@@ -13,7 +13,10 @@ class FakeInput extends PassThrough {
   }
 }
 
-function makeScreen(over: Partial<ChatScreenCallbacks> = {}) {
+function makeScreen(
+  over: Partial<ChatScreenCallbacks> = {},
+  initialHistory: readonly string[] = [],
+) {
   const input = new FakeInput();
   const output = new PassThrough() as PassThrough & { columns: number };
   output.columns = 60;
@@ -25,6 +28,7 @@ function makeScreen(over: Partial<ChatScreenCallbacks> = {}) {
     stdout: output,
     escapeFlushMs: 5,
     quitWindowMs: 100,
+    initialHistory,
     callbacks: {
       onSubmit: (text) => calls.submit.push(text),
       onTab: () => (calls.tab += 1),
@@ -216,6 +220,15 @@ describe("createChatScreen", () => {
     input.write("\u0010\u0010\u000e\r");
     await settle();
     expect(calls.submit).toEqual(["first", "second", "second", "second", "second"]);
+    screen.stop();
+  });
+
+  test("recalls persisted prompts supplied by a previous session", async () => {
+    const { screen, input, calls } = makeScreen({}, ["oldest", "middle\nwith two lines", "newest"]);
+    screen.start();
+    input.write("\u001b[A\u001b[A\r");
+    await settle();
+    expect(calls.submit).toEqual(["middle\nwith two lines"]);
     screen.stop();
   });
 

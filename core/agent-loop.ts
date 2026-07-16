@@ -29,8 +29,10 @@ import { resolveAzureApiKey } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
+import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
+import { renderMarkdownLite } from "./lib/tui/markdown";
 import { applyProgressEvent, createProgressTracker } from "./lib/tui/progress";
 import {
   createGitDelegationSnapshot,
@@ -77,7 +79,7 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
     case "turn-queued":
       return `(queued) ${event.text}`;
     case "tool-call":
-      return `  · ${event.call.name}`;
+      return null; // superseded by live tool-activity lines
     case "assistant": {
       // Builder turns end in a JSON completion report; show its summary.
       try {
@@ -136,6 +138,7 @@ export const formatChatStatus = (state: {
 
 interface ChatComposition {
   root: string;
+  commonGitDir: string;
   ctx: PromptContext;
   agentFor(mode: ChatMode): Promise<Agent>;
   runBuildJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string; branch?: string }>;
@@ -158,6 +161,7 @@ async function composeChat(
 ): Promise<ChatComposition> {
   const projectSource = await resolveProjectSource(process.cwd());
   const root = projectSource.projectRoot;
+  const commonGitDir = projectSource.commonGitDir;
   const config = await loadConfig(configPath);
   const key = await resolveAzureApiKey({ store: createKeyringSecretStore({}) });
   if (key.status !== "resolved") {
@@ -329,7 +333,16 @@ async function composeChat(
   };
 
   const stateRoot = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
-  return { root, ctx, agentFor, runBuildJob, runPlanJob, environment, stateRoot };
+  return {
+    root,
+    commonGitDir,
+    ctx,
+    agentFor,
+    runBuildJob,
+    runPlanJob,
+    environment,
+    stateRoot,
+  };
 }
 
 /** The interactive chat session (the default command). */
@@ -348,13 +361,43 @@ export async function runAgentjChat(
     screen ? screen.askPermission(request) : Promise.resolve("deny"),
   );
 
-  // Live activity for the status line: what is running right now, since when.
+  // Live activity: what is running right now, since when. Running tools render
+  // as spinner lines in the progress block (like subagents) and freeze into
+  // the transcript with elapsed time when they finish.
   let currentActivity: ToolActivity | null = null;
   let turnStartedAt: number | null = null;
   let interruptRequested = false;
   let spinnerFrame = 0;
+  let dagLines: string[] = [];
+  const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
+  const SPINNER = ["◐", "◓", "◑", "◒"];
+
+  const toolLines = (): string[] =>
+    [...activeTools.values()].map(
+      ({ tool, detail }) =>
+        `  ${SPINNER[spinnerFrame % SPINNER.length] ?? "◐"} ${tool}${detail && tool !== "run_subagents" ? ` ${detail.slice(0, 40)}` : ""}`,
+    );
+
+  const refreshProgress = (): void => {
+    screen?.setProgressLines([...dagLines, ...toolLines()]);
+  };
+
   const onToolActivity = (activity: ToolActivity): void => {
-    currentActivity = activity.phase === "start" ? activity : null;
+    if (activity.phase === "start") {
+      currentActivity = activity;
+      activeTools.set(activity.id, {
+        tool: activity.tool,
+        detail: activity.detail,
+        startedAt: Date.now(),
+      });
+    } else {
+      const started = activeTools.get(activity.id);
+      activeTools.delete(activity.id);
+      currentActivity = null;
+      const elapsed = started ? ` ${((Date.now() - started.startedAt) / 1000).toFixed(1)}s` : "";
+      screen?.printAbove(`  ✓ ${activity.tool}${elapsed}`);
+    }
+    refreshProgress();
     updateStatus();
   };
 
@@ -371,8 +414,22 @@ export async function runAgentjChat(
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_FAILURE;
   }
-  const { root, ctx, agentFor, environment, stateRoot } = composition;
+  const { root, commonGitDir, ctx, agentFor, environment, stateRoot } = composition;
   const chatsRoot = join(stateRoot, "agentj", "chats");
+  const promptHistory = await createPromptHistory({
+    root: join(stateRoot, "agentj", "prompt-history"),
+    projectIdentity: commonGitDir,
+  });
+  let pendingHistoryWrites = Promise.resolve();
+  const rememberPrompt = (text: string): void => {
+    pendingHistoryWrites = pendingHistoryWrites
+      .then(() => promptHistory.append(text))
+      .catch((error) => {
+        screen?.printAbove(
+          `prompt history error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  };
 
   // Resume: --continue picks the newest session for this project.
   let resumeId = options.resume ?? null;
@@ -417,7 +474,21 @@ export async function runAgentjChat(
     if (event.type === "subagent-progress") {
       const update = applyProgressEvent(tracker, event.progress, spinnerFrame);
       if (update.completedLines.length > 0) screen?.printAbove(update.completedLines.join("\n"));
-      screen?.setProgressLines(update.lines);
+      dagLines = update.lines;
+      refreshProgress();
+    }
+    // Chat styling (interactive only): a blank line + colored prefix separates
+    // turns; assistant markdown renders lightly.
+    if (event.type === "turn-started") {
+      screen?.printAbove(`\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${event.text}\u001b[0m`);
+      updateStatus();
+      return;
+    }
+    if (event.type === "assistant") {
+      const body = formatChatEvent(event) ?? event.text;
+      screen?.printAbove(`\n${renderMarkdownLite(body)}`);
+      updateStatus();
+      return;
     }
     const text = formatChatEvent(event);
     if (text) screen?.printAbove(text);
@@ -458,7 +529,8 @@ export async function runAgentjChat(
   // Animate the spinner and elapsed time while anything is running.
   const ticker = setInterval(() => {
     spinnerFrame += 1;
-    if (tracker.live) screen?.setProgressLines(tracker.lines(spinnerFrame));
+    if (tracker.live) dagLines = tracker.lines(spinnerFrame);
+    if (tracker.live || activeTools.size > 0) refreshProgress();
     if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
   }, 250);
 
@@ -471,8 +543,10 @@ export async function runAgentjChat(
   };
 
   screen = createChatScreen({
+    initialHistory: promptHistory.entries,
     callbacks: {
       onSubmit: (text) => {
+        rememberPrompt(text);
         const parsed = parseInput(text);
         if (parsed.kind === "command") {
           void runChatCommand(commandContext, parsed.name, parsed.args);
@@ -519,7 +593,7 @@ export async function runAgentjChat(
     clearInterval(ticker);
     process.removeListener("SIGINT", handleSigint);
     jobs.dispose();
-    await undo.dispose().catch(() => {});
+    await Promise.all([pendingHistoryWrites, undo.dispose().catch(() => {})]);
     screen.stop();
   }
   return EXIT_SUCCESS;
