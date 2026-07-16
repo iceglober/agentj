@@ -98,7 +98,7 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
 
     abort(id) {
       const entry = jobs.get(id);
-      if (!entry || entry.view.status !== "running") return false;
+      if (entry?.view.status !== "running") return false;
       entry.abort.abort();
       return true;
     },
