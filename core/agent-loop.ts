@@ -4,8 +4,18 @@ import { stderr as processStderr, stdout as processStdout } from "node:process";
 
 import { type Agent, createAgent as createProductionAgent } from "./lib/agent";
 import type { CreatePlanningDagToolOptions } from "./lib/agent/planning-delegate";
+import { createSubagentsTool, type SubagentProgressEvent } from "./lib/agent/subagents";
 import type { ConversationDependencies } from "./lib/app/conversation";
 import { runAgentConversation } from "./lib/app/conversation";
+import {
+  type ChatCommandContext,
+  expandAtFiles,
+  parseInput,
+  runChatCommand,
+} from "./lib/chat/commands";
+import type { ChatEvent } from "./lib/chat/events";
+import { createJobRunner } from "./lib/chat/jobs";
+import { createChatSession } from "./lib/chat/session";
 import { type AgentjTaskRunnerOptions, runAgentjCli } from "./lib/cli";
 import { loadConfig } from "./lib/config";
 import { createConfigCliHandlers, createMaskedSecretPrompt } from "./lib/config-cli";
@@ -19,6 +29,8 @@ import { type SandboxProviderName, sandboxAdapters } from "./lib/sandbox/registr
 import { resolveAzureApiKey, type SecretStore } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession, createLocalSession, createSession, type Session } from "./lib/session";
+import { createChatLog } from "./lib/session/log";
+import { createUndoStack } from "./lib/session/undo";
 import type { StoredAgentSession } from "./lib/session-store";
 import { createFileSessionStore } from "./lib/session-store/file-adapter";
 import {
@@ -27,11 +39,14 @@ import {
   createTerminalPromptEditor,
   createTranscriptRenderer,
 } from "./lib/tui";
+import { createChatScreen } from "./lib/tui/chat-screen";
+import { createProgressTracker } from "./lib/tui/progress";
 import {
   createGitDelegationSnapshot,
   integrateGitDelegation,
 } from "./lib/workspace/git-integration";
 import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
+import { resolveProjectSource as resolveHostProjectSource } from "./lib/workspace/project-source";
 
 const COMMAND_VERSION = "0.0.0";
 
@@ -318,6 +333,10 @@ const formatUnexpectedError = (error: unknown): string => {
 
 const main = async (): Promise<void> => {
   const argv = process.argv.slice(2);
+  if (argv[0] === "chat") {
+    process.exitCode = await runAgentjChat();
+    return;
+  }
   const abortController = new AbortController();
   const promptUi = createPromptUi({
     editor: createTerminalPromptEditor(),
@@ -487,6 +506,339 @@ const main = async (): Promise<void> => {
     process.removeListener("SIGINT", handleSigint);
   }
 };
+
+/** Render a ChatEvent as transcript text (Phase 3 folds this into lib/tui). */
+const formatChatEvent = (event: ChatEvent): string | null => {
+  switch (event.type) {
+    case "turn-started":
+      return `> ${event.text}`;
+    case "turn-queued":
+      return `(queued) ${event.text}`;
+    case "tool-call":
+      return `  · ${event.call.name}`;
+    case "assistant": {
+      // Builder turns end in a JSON completion report; show its summary.
+      try {
+        const report = JSON.parse(event.text) as { summary?: string; status?: string };
+        if (report.summary) return `${report.status === "done" ? "✓" : "!"} ${report.summary}`;
+      } catch {}
+      return event.text;
+    }
+    case "turn-aborted":
+      return "(turn interrupted)";
+    case "turn-error":
+      return `error: ${event.error}`;
+    case "mode-changed":
+      return event.pending ? `(mode → ${event.mode} at next turn)` : `(mode → ${event.mode})`;
+    case "job-started":
+      return `[${event.job.id}] started (${event.job.mode}): ${event.job.prompt.slice(0, 60)}`;
+    case "job-finished":
+      return `[${event.job.id}] ${event.job.status}${event.job.branch ? ` — work on ${event.job.branch}` : ""}`;
+    case "notice":
+      return event.text;
+    default:
+      return null;
+  }
+};
+
+/**
+ * The interactive chat entrypoint (temporary `agentj chat` route; becomes the
+ * default in phase 3). Host-first: runs against the launch checkout with the
+ * permission gate wired to the screen.
+ */
+export async function runAgentjChat(
+  configPath: string = new URL("./agentj.json", import.meta.url).pathname,
+): Promise<number> {
+  const projectSource = await resolveHostProjectSource(process.cwd());
+  const root = projectSource.projectRoot;
+  const config = await loadConfig(configPath);
+  const key = await resolveAzureApiKey({ store: createKeyringSecretStore({}) });
+  if (key.status !== "resolved") {
+    processStderr.write(
+      "Azure API key missing; run: agentj config set --secret providers.azure.api_key\n",
+    );
+    return 1;
+  }
+  const metricsSink = createOtelMetricsSink({ enabled: process.env.AGENTJ_OTEL_METRICS === "1" });
+  const environment = await createHostExecutionEnvironment(root);
+
+  let agentsMd = "";
+  try {
+    agentsMd = await environment.readFile("AGENTS.md");
+  } catch {}
+  const agentConfig = {
+    ...config.agent,
+    rules: config.agent.rules || agentsMd || "",
+    llm: {
+      ...config.agent.llm,
+      providers: {
+        ...config.agent.llm.providers,
+        azure: { ...config.agent.llm.providers?.azure, apiKey: key.apiKey },
+      },
+    },
+  };
+  const ctx: PromptContext = {
+    cwd: root,
+    os: (await environment.executeCommand("uname -sr")).stdout.trim(),
+    date: new Date().toISOString().slice(0, 10),
+    gitBranch:
+      (await environment.executeCommand("git branch --show-current")).stdout.trim() || "HEAD",
+    gitStatusSummary: summarizeStatus(
+      (await environment.executeCommand("git status --porcelain")).stdout,
+    ),
+  };
+
+  const stateRoot = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
+  const log = await createChatLog({
+    root: join(stateRoot, "agentj", "chats"),
+    projectRoot: root,
+  });
+  const undo = createUndoStack(environment, root, log.id);
+  const tracker = createProgressTracker();
+
+  // Child worktrees for build delegation and build jobs live outside the repo.
+  const sessionConfig = {
+    ...config.session,
+    repoDir: root,
+    root: join(tmpdir(), "agentj-worktrees"),
+  };
+  const childIds = new Set<string>();
+  let childCounter = 0;
+  const nextChildId = (taskId: string): string => {
+    while (true) {
+      childCounter += 1;
+      const id = `chat-${childCounter.toString().padStart(4, "0")}-${safeChildIdSegment(taskId)}`;
+      if (!childIds.has(id)) {
+        childIds.add(id);
+        return id;
+      }
+    }
+  };
+  const delegation = {
+    parentRef: "HEAD",
+    maxConcurrency: config.agent.tools.subagents.concurrency,
+    createChildSession: async ({ id, parentRef }: { id: string; parentRef: string }) =>
+      createChildSession(environment, sessionConfig, { id: nextChildId(id), parentRef }),
+    prepareBatch: async () => {
+      const snapshot = await createGitDelegationSnapshot(environment, root, log.id);
+      return {
+        parentRef: snapshot.commit,
+        integrate: (
+          results: readonly {
+            index: number;
+            outcome: string;
+            commit: string | null;
+            branch: string | null;
+          }[],
+        ) =>
+          integrateGitDelegation(
+            environment,
+            root,
+            log.id,
+            snapshot,
+            results.map((result) => ({
+              index: result.index,
+              outcome:
+                result.outcome === "changed" || result.outcome === "clean"
+                  ? (result.outcome as "changed" | "clean")
+                  : result.outcome === "aborted"
+                    ? ("aborted" as const)
+                    : ("failure" as const),
+              commit: result.commit,
+              branch: result.branch,
+            })),
+          ),
+      };
+    },
+  };
+
+  // Screen and permission gate (the gate renders in the live region).
+  let quitResolve: (() => void) | undefined;
+  const done = new Promise<void>((resolve) => {
+    quitResolve = resolve;
+  });
+  const onDagProgress = (
+    progress:
+      | SubagentProgressEvent
+      | Parameters<NonNullable<CreatePlanningDagToolOptions["onProgress"]>>[0],
+  ) => {
+    // Planning-DAG events (lanes) render via the transcript for now; the
+    // unified tracker takes over fully in phase 4.
+    if ("tasks" in progress || progress.type !== "dag-started") {
+      tracker.apply(progress as SubagentProgressEvent);
+      screen.setProgressLines(tracker.lines());
+    }
+  };
+
+  const workerConfig = {
+    ...agentConfig,
+    llm: {
+      ...agentConfig.llm,
+      model: config.agent.tools.subagents.model ?? agentConfig.llm.model,
+    },
+  };
+  const createPlanningWorker = async () =>
+    createProductionAgent(environment, workerConfig, {
+      root,
+      ctx,
+      metricsSink,
+      purpose: "planning-worker",
+    });
+
+  const agents = new Map<string, Promise<Agent>>();
+  const agentFor = (mode: "plan" | "build"): Promise<Agent> => {
+    const cached = agents.get(mode);
+    if (cached) return cached;
+    const agent =
+      mode === "plan"
+        ? createProductionAgent(environment, agentConfig, {
+            root,
+            ctx,
+            metricsSink,
+            purpose: "planner",
+            planning: { createWorker: createPlanningWorker, onProgress: onDagProgress },
+          })
+        : createProductionAgent(environment, agentConfig, {
+            root,
+            ctx,
+            metricsSink,
+            purpose: "builder",
+            delegation,
+            permissions: {
+              config: config.permissions,
+              gate: (request: Parameters<typeof screen.askPermission>[0]) =>
+                screen.askPermission(request),
+            },
+          });
+    agents.set(mode, agent);
+    return agent;
+  };
+
+  const render = (event: ChatEvent): void => {
+    const text = formatChatEvent(event);
+    if (text) screen.printAbove(text);
+    updateStatus();
+  };
+
+  const chat = createChatSession({ agentFor, log, undo, onEvent: render });
+
+  // Background jobs: plan → read-only worker; build → one-task delegation batch.
+  const jobs = createJobRunner({
+    onEvent: render,
+    addTurnNotice: (text) => chat.addTurnNotice(text),
+    runJob: async ({ mode, prompt, abortSignal }) => {
+      if (mode === "plan") {
+        const worker = await createPlanningWorker();
+        const result = await worker.generate(prompt, { abortSignal });
+        return { text: result.text };
+      }
+      const tool = createSubagentsTool({
+        execution: {
+          kind: "delegation",
+          ...delegation,
+          createChildAgent: async ({ session }) => {
+            const child = await createProductionAgent(
+              environment,
+              { ...agentConfig, role: "delegate" },
+              {
+                root: session.path,
+                ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
+                metricsSink,
+                purpose: "builder",
+              },
+            );
+            return {
+              generate: (childPrompt, opts) =>
+                child.generate(childPrompt, { abortSignal: opts?.abortSignal }),
+            };
+          },
+        },
+        concurrency: 1,
+      });
+      const outcome = (await tool.execute(
+        { tasks: [{ title: prompt.slice(0, 72), prompt, waitsOn: [] }] },
+        { abortSignal },
+      )) as {
+        results: Array<{
+          text: string | null;
+          error: string | null;
+          branch: string | null;
+          outcome: string;
+        }>;
+        integration?: { outcome: string };
+      };
+      const result = outcome.results[0];
+      const blocked = outcome.integration?.outcome === "blocked";
+      return {
+        text: result?.text ?? result?.error ?? "no result",
+        ...(blocked && result?.branch ? { branch: result.branch } : {}),
+      };
+    },
+  });
+
+  const updateStatus = (): void => {
+    const running = jobs.list().filter((job) => job.status === "running").length;
+    const busy = chat.busy ? " · working (esc to interrupt)" : "";
+    screen.setStatus(
+      `⏵ ${chat.pendingMode} · session ${log.id} · ${running} job${running === 1 ? "" : "s"}${busy} · tab: mode · /help`,
+    );
+  };
+
+  const commandContext: ChatCommandContext = {
+    session: chat,
+    jobs,
+    undo,
+    emit: render,
+    quit: () => quitResolve?.(),
+  };
+
+  const screen = createChatScreen({
+    callbacks: {
+      onSubmit: (text) => {
+        const parsed = parseInput(text);
+        if (parsed.kind === "command") {
+          void runChatCommand(commandContext, parsed.name, parsed.args);
+          return;
+        }
+        if (parsed.kind === "job") {
+          jobs.start(chat.pendingMode, parsed.prompt);
+          updateStatus();
+          return;
+        }
+        void expandAtFiles(parsed.text, root).then((expanded) => {
+          void chat.send(expanded);
+          updateStatus();
+        });
+      },
+      onTab: () => {
+        chat.setMode();
+        updateStatus();
+      },
+      onEscape: () => {
+        chat.abort();
+      },
+      onQuit: () => quitResolve?.(),
+    },
+  });
+
+  screen.start();
+  updateStatus();
+  screen.printAbove(`agentj chat — ${root} (${ctx.gitBranch}) · plan mode · /help for keys`);
+
+  const handleSigint = (): void => {
+    if (!chat.abort()) quitResolve?.();
+  };
+  process.on("SIGINT", handleSigint);
+  try {
+    await done;
+  } finally {
+    process.removeListener("SIGINT", handleSigint);
+    jobs.dispose();
+    await undo.dispose().catch(() => {});
+    screen.stop();
+  }
+  return 0;
+}
 
 if (import.meta.main) {
   try {

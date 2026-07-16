@@ -1,5 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative } from "node:path";
 import { Sandbox as Microsandbox } from "microsandbox";
 import z from "zod";
 import type { Sandbox, SandboxCommandResult } from "./index";
@@ -26,58 +25,13 @@ type MicrosandboxBuilder = ReturnType<typeof Microsandbox.builder>;
 type MicrosandboxOptions = z.output<typeof microsandboxOptionsSchema>;
 
 /** The verified host paths required to make a project and its Git metadata visible to a guest. */
-export type ProjectSource = {
-  readonly projectRoot: string;
-  readonly commonGitDir: string;
-};
+export {
+  type ProjectSource,
+  resolveProjectDir,
+  resolveProjectSource,
+} from "../workspace/project-source";
 
-const gitOutput = async (projectRoot: string, args: string[]): Promise<string> => {
-  const process = Bun.spawn({
-    cmd: ["git", "-C", projectRoot, "rev-parse", ...args],
-    stdout: "pipe",
-    stderr: "ignore",
-  });
-  const [exitCode, stdout] = await Promise.all([
-    process.exited,
-    new Response(process.stdout).text(),
-  ]);
-  if (exitCode !== 0 || !stdout.trim()) throw new Error("Git preflight failed.");
-  return stdout.trim();
-};
-
-/**
- * Resolve a launch directory to the Git worktree and common Git directory it needs.
- * This must run before creating a sandbox so unverified host paths never reach its builder.
- */
-export const resolveProjectSource = async (projectDir: string): Promise<ProjectSource> => {
-  if (!isAbsolute(projectDir)) {
-    throw new Error("Microsandbox projectDir must be an absolute directory path.");
-  }
-
-  let canonicalDir: string;
-  try {
-    canonicalDir = await realpath(projectDir);
-    if (!(await stat(canonicalDir)).isDirectory()) throw new Error("not a directory");
-  } catch {
-    throw new Error("Microsandbox projectDir is not a directory.");
-  }
-
-  try {
-    const projectRoot = await realpath(await gitOutput(canonicalDir, ["--show-toplevel"]));
-    const commonGitOutput = await gitOutput(projectRoot, ["--git-common-dir"]);
-    const commonGitDir = await realpath(
-      isAbsolute(commonGitOutput) ? commonGitOutput : resolve(projectRoot, commonGitOutput),
-    );
-    if (!(await stat(commonGitDir)).isDirectory()) throw new Error("not a directory");
-    return { projectRoot, commonGitDir };
-  } catch {
-    throw new Error("Microsandbox projectDir is not inside a Git worktree.");
-  }
-};
-
-/** Compatibility seam for callers that need only the canonical worktree root. */
-export const resolveProjectDir = async (projectDir: string): Promise<string> =>
-  (await resolveProjectSource(projectDir)).projectRoot;
+import { type ProjectSource, resolveProjectSource } from "../workspace/project-source";
 
 const isNestedPath = (parent: string, child: string): boolean => {
   const pathFromParent = relative(parent, child);

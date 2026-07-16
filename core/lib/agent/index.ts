@@ -14,6 +14,7 @@ import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
 import { type CreateSubagentToolOptions, createSubagentTool } from "./delegate";
+import { type WithPermissionsOptions, withPermissions } from "./permissions";
 import {
   createPlanningDagTool,
   type PlanningDagProgressEvent,
@@ -75,6 +76,11 @@ export interface CreateAgentOptions {
   delegation?: CreateAgentDelegationOptions;
   /** Optional content-free telemetry; omitted keeps runtime metrics disabled. */
   metricsSink?: MetricsSink;
+  /**
+   * Host-first permission gating for the mutating tools. Omitted (sandboxed
+   * runs, evals) keeps the historical ungated toolset.
+   */
+  permissions?: WithPermissionsOptions;
   /**
    * Cap the tool loop at N steps. Routed through the runtime port's `stopSteps`
    * so the eval harness can set its per-task step budget once, without the
@@ -171,12 +177,13 @@ export async function createAgentTools(
     };
   }
 
-  return {
+  const builderTools: ToolSet = {
     ...(await createBashTools(fileSandbox, { root: opts.root })),
     ...createSearchTools(sb, { root: opts.root }),
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
   };
+  return opts.permissions ? withPermissions(builderTools, opts.permissions) : builderTools;
 }
 
 /**

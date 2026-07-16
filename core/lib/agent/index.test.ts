@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Sandbox } from "../sandbox";
 import { agentConfigSchema, type CreateAgentOptions, childAgentConfig, createAgentTools } from ".";
+import { permissionsConfigSchema } from "./permissions";
 
 const sandbox: Sandbox = {
   async executeCommand() {
@@ -44,6 +45,23 @@ describe("childAgentConfig", () => {
 });
 
 describe("createAgentTools", () => {
+  test("permission gating is strictly opt-in: no-gate builder tools behave as before", async () => {
+    const config = agentConfigSchema.parse({});
+    const plain = await createAgentTools(sandbox, config, baseOptions);
+    const gated = await createAgentTools(sandbox, config, {
+      ...baseOptions,
+      permissions: {
+        config: permissionsConfigSchema.parse({ bash: { default: "deny" } }),
+        gate: async () => "deny",
+      },
+    });
+    expect(Object.keys(gated).sort()).toEqual(Object.keys(plain).sort());
+    const denied = await gated.bash?.execute({ command: "ls" });
+    expect(String(denied)).toContain("Denied by user");
+    const allowed = await plain.bash?.execute({ command: "ls" });
+    expect(String(allowed)).not.toContain("Denied by user");
+  });
+
   test("planner and planning workers receive only read/search capabilities", async () => {
     const config = agentConfigSchema.parse({});
     const planner = await createAgentTools(sandbox, config, {
