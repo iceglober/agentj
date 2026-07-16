@@ -98,6 +98,8 @@ export interface PunchListOpts {
   sharedChecks?: CheckInput[];
   /** Reference report satisfying any report-based item checks. */
   referenceReport?: string;
+  /** Reference tool-call names satisfying any trajectory-based checks. */
+  referenceToolCalls?: string[];
   /** Reference file overrides for non-defect items (merged over the base). */
   referenceFiles?: Record<string, string>;
   tags?: string[];
@@ -118,6 +120,7 @@ export function punchList(opts: PunchListOpts): Task {
     items = [],
     sharedChecks = [],
     referenceReport,
+    referenceToolCalls,
     referenceFiles = {},
     tags = [],
   } = opts;
@@ -150,6 +153,7 @@ export function punchList(opts: PunchListOpts): Task {
     reference: {
       files: { ...restored, ...referenceFiles },
       ...(referenceReport ? { report: referenceReport } : {}),
+      ...(referenceToolCalls ? { toolCalls: referenceToolCalls } : {}),
     },
   });
 }

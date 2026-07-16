@@ -3,6 +3,11 @@ import type { RunConfig } from "../../lib/eval/config";
 import type { AgentAdapter, Env, Task, Trajectory } from "../../lib/eval/types";
 import type { PromptContext } from "../../lib/prompt";
 import type { Sandbox } from "../../lib/sandbox";
+import { createChildSession, sessionConfigSchema } from "../../lib/session";
+import {
+  createGitDelegationSnapshot,
+  integrateGitDelegation,
+} from "../../lib/workspace/git-integration";
 
 const EMPTY_USAGE = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
@@ -47,10 +52,37 @@ export function createInProcessAdapter(sb: Sandbox): AgentAdapter<RunConfig> {
           gitStatusSummary: "clean",
         };
 
+        // Delegation mirrors the production builder wiring: child sessions are
+        // git worktrees forked from a snapshot of the trial env (a git repo),
+        // integrated back on completion so env.diff() sees subagent work.
+        // Worker trees live OUTSIDE env.dir so they never pollute changedFiles.
+        const sessionId = `eval-${env.id}`;
+        const sessionConfig = sessionConfigSchema.parse({
+          repoDir: env.dir,
+          root: `${env.dir}-workers`,
+          branchPrefix: "eval-worker/",
+          base: "head",
+          identity: { name: "agentj-eval", email: "eval@sandbox.local" },
+        });
+
         const { generate, composed } = await createAgent(sb, config.agent, {
           root: env.dir,
           ctx,
           stopSteps: task.budget.steps,
+          delegation: {
+            parentRef: "HEAD",
+            maxConcurrency: config.agent.tools.subagents.concurrency,
+            createChildSession: ({ id, parentRef }) =>
+              createChildSession(sb, sessionConfig, { id, parentRef }),
+            prepareBatch: async () => {
+              const snapshot = await createGitDelegationSnapshot(sb, env.dir, sessionId);
+              return {
+                parentRef: snapshot.commit,
+                integrate: (results) =>
+                  integrateGitDelegation(sb, env.dir, sessionId, snapshot, results),
+              };
+            },
+          },
         });
         composedVersion = composed.version;
 

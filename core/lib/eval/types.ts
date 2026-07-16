@@ -62,6 +62,14 @@ export const checkSchema = z.discriminatedUnion("kind", [
     contains: z.array(z.string()).min(1),
   }), // observes the final report — embedded questions, synthesis tasks
   z.object({
+    kind: z.literal("tool_usage"),
+    id: z.string(),
+    required: z.boolean().default(false),
+    tool: z.string(),
+    min: z.number().int().default(1),
+    max: z.number().int().optional(),
+  }), // observes the trajectory — did the agent use a capability (e.g. run_subagents)?
+  z.object({
     kind: z.literal("judge"),
     id: z.string(),
     required: z.boolean().default(false),
@@ -95,6 +103,8 @@ export const taskSchema = z.object({
       command: z.string().optional(),
       /** Reference final report, so report-based checks stay covered by the QA gate. */
       report: z.string().optional(),
+      /** Reference tool-call names, so trajectory-based checks stay covered by the QA gate. */
+      toolCalls: z.array(z.string()).optional(),
     })
     .optional(),
 });

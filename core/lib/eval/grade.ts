@@ -5,6 +5,7 @@ import {
   gradeNoNewDeps,
   gradeNoPlaceholder,
   gradeReportContains,
+  gradeToolUsage,
 } from "./graders/property";
 import type {
   Check,
@@ -26,6 +27,7 @@ export const checkGraders = {
   no_placeholder: gradeNoPlaceholder,
   no_new_deps: gradeNoNewDeps,
   diff_size: gradeDiffSize,
+  tool_usage: gradeToolUsage,
   judge: gradeJudge,
 } satisfies Record<Check["kind"], CheckGrader>;
 

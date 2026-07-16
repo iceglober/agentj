@@ -144,11 +144,11 @@ async function main() {
 
     const synthTraj = async (
       env: { diff(): Promise<string>; changedFiles(): Promise<string[]> },
-      finalText = "",
+      reference?: Task["reference"],
     ): Promise<Trajectory> => ({
-      toolCalls: [],
+      toolCalls: (reference?.toolCalls ?? []).map((name) => ({ step: 0, name, input: {} })),
       toolResults: [],
-      finalText,
+      finalText: reference?.report ?? "",
       finalDiff: await env.diff(),
       filesTouched: await env.changedFiles(),
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
@@ -172,7 +172,7 @@ async function main() {
           const grade = await composeGrade(
             env,
             task,
-            await synthTraj(env, task.reference?.report ?? ""),
+            await synthTraj(env, task.reference),
             noJudge,
           );
           solvable = grade.verdict === "pass";

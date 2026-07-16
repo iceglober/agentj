@@ -67,6 +67,14 @@ export const gradeReportContains: CheckGrader = async (_env, _task, traj, check)
   };
 };
 
+export const gradeToolUsage: CheckGrader = async (_env, _task, traj, check) => {
+  if (check.kind !== "tool_usage") throw new Error("wrong grader");
+  const count = traj.toolCalls.filter((c) => c.name === check.tool).length;
+  const pass = count >= check.min && (check.max === undefined || count <= check.max);
+  const bound = check.max === undefined ? `>=${check.min}` : `${check.min}..${check.max}`;
+  return { pass, detail: `"${check.tool}" called ${count} time(s), wanted ${bound}` };
+};
+
 export const gradeDiffSize: CheckGrader = async (_env, _task, traj, check) => {
   if (check.kind !== "diff_size") throw new Error("wrong grader");
   let changed = 0;

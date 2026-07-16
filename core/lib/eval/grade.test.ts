@@ -230,6 +230,39 @@ describe("report_contains", () => {
   });
 });
 
+// --- tool_usage ------------------------------------------------------------
+
+describe("tool_usage", () => {
+  const calls = (...names: string[]) =>
+    makeTraj({ toolCalls: names.map((name, step) => ({ step, name, input: {} })) });
+
+  test("passes within bounds and fails outside them", async () => {
+    const task = makeTask([
+      { kind: "tool_usage", id: "tu", required: true, tool: "run_subagents", min: 1 },
+    ]);
+    const env = new FakeEnv();
+    const yes = await composeGrade(env, task, calls("bash", "run_subagents"), noJudge);
+    expect(yes.verdict).toBe("pass");
+
+    const no = await composeGrade(env, task, calls("bash", "bash"), noJudge);
+    expect(no.verdict).toBe("fail");
+    expect(no.checks[0]?.detail).toContain('"run_subagents" called 0 time(s)');
+
+    const capped = makeTask([
+      { kind: "tool_usage", id: "tu", required: true, tool: "bash", min: 0, max: 1 },
+    ]);
+    const over = await composeGrade(env, capped, calls("bash", "bash"), noJudge);
+    expect(over.verdict).toBe("fail");
+  });
+
+  test("defaults to a non-required subscore", async () => {
+    const task = makeTask([{ kind: "tool_usage", id: "tu", tool: "run_subagents" }]);
+    const res = await composeGrade(new FakeEnv(), task, calls("bash"), noJudge);
+    expect(res.verdict).toBe("pass");
+    expect(res.subscores.tu).toBe(0);
+  });
+});
+
 // --- no_placeholder ------------------------------------------------------
 
 describe("no_placeholder", () => {
