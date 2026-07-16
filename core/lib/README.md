@@ -24,7 +24,10 @@ provider touches exactly one folder.
    no vendor imports: `scm/` (git expressed as sandbox commands), `session/`
    (worktree lifecycle over scm), `tools/edit` + `tools/search` (agent tools
    defined with the port's `defineTool`, no SDK), `prompt/` (pure prompt
-   composition), `agent/` (assembly of llm-runtime + prompt + tools),
+   composition), `agent/` (assembly of llm-runtime + prompt + tools; mode ×
+   role selects toolsets, `subagents.ts` + `scheduler.ts` run the task DAG,
+   `permissions.ts` gates mutating tools), `chat/` (the interaction core:
+   session turns, jobs, command routing — pure, no TTY),
    `eval/` (eval contracts + graders; its Env/AgentAdapter implementations
    live in `core/eval/adapters/`, the app layer).
 
