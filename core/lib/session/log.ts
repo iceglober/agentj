@@ -14,7 +14,14 @@ export type ChatMode = "plan" | "build";
 
 export type ChatLogRecord =
   | { type: "meta"; id: string; projectRoot: string; createdAt: string; title: string }
-  | { type: "turn"; mode: ChatMode; user: string; assistant: string; ts: string }
+  | {
+      type: "turn";
+      mode: ChatMode;
+      user: string;
+      assistant: string;
+      ts: string;
+      transcriptText?: string;
+    }
   | { type: "state"; messages: unknown[]; mode: ChatMode; ts: string }
   | { type: "undo"; ref: string; label: string; ts: string };
 

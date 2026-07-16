@@ -74,6 +74,39 @@ describe("createChatSession", () => {
     });
   });
 
+  test("uses a transcript label without changing the model prompt or durable user text", async () => {
+    await withLog(async (log, root) => {
+      const prompts: string[] = [];
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            return result("built");
+          }),
+        log,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      await session.send("internal implementation prompt", { transcriptText: "Command: build" });
+
+      expect(prompts).toEqual(["internal implementation prompt"]);
+      expect(events.find((event) => event.type === "turn-started")).toEqual({
+        type: "turn-started",
+        mode: "plan",
+        text: "internal implementation prompt",
+        transcriptText: "Command: build",
+      });
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.turns[0]).toMatchObject({
+        user: "internal implementation prompt",
+        transcriptText: "Command: build",
+      });
+    });
+  });
+
   test("queues messages during a running turn and applies Tab at the next turn", async () => {
     await withLog(async (log) => {
       let release: (() => void) | undefined;
@@ -101,9 +134,13 @@ describe("createChatSession", () => {
       expect(session.mode).toBe("plan"); // running turn keeps its mode
       expect(session.pendingMode).toBe("build");
 
-      const second = session.send("queued task");
+      const second = session.send("queued task", { transcriptText: "Command: build" });
       await new Promise((r) => setTimeout(r, 5));
-      expect(events.some((event) => event.type === "turn-queued")).toBe(true);
+      expect(events.find((event) => event.type === "turn-queued")).toEqual({
+        type: "turn-queued",
+        text: "queued task",
+        transcriptText: "Command: build",
+      });
 
       release?.();
       await Promise.all([first, second]);
@@ -113,6 +150,46 @@ describe("createChatSession", () => {
           .filter((event) => event.type === "turn-started" || event.type === "turn-finished")
           .map((event) => event.type),
       ).toEqual(["turn-started", "turn-finished", "turn-started", "turn-finished"]);
+    });
+  });
+
+  test("dequeue removes the newest queued message, resolves its send, and emits the event", async () => {
+    await withLog(async (log) => {
+      let release: (() => void) | undefined;
+      const prompts: string[] = [];
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            if (prompts.length === 1) await new Promise<void>((r) => (release = r));
+            return result("ok");
+          }),
+        log,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      expect(session.dequeue()).toBeNull(); // idle: nothing queued
+
+      const first = session.send("slow question");
+      await new Promise((r) => setTimeout(r, 5));
+      const second = session.send("queued a");
+      const third = session.send("queued b");
+
+      expect(session.dequeue()).toBe("queued b"); // LIFO: newest intent first
+      await third; // its send resolves without ever running
+      expect(session.dequeue()).toBe("queued a");
+      expect(session.dequeue()).toBeNull(); // queue drained; the turn keeps running
+      await second;
+
+      release?.();
+      await first;
+      expect(prompts).toEqual(["slow question"]); // dequeued messages never reach the model
+      expect(
+        events.flatMap((event) => (event.type === "turn-dequeued" ? [event.text] : [])),
+      ).toEqual(["queued b", "queued a"]);
     });
   });
 

@@ -43,17 +43,22 @@ approval phrase.
 
 Keys and commands:
 
-- **Tab** — toggle plan/build (applies at the next turn if one is running).
-- **Esc** — interrupt the running turn. The session survives; the model is told it was cut short.
+- **Tab** — complete the selected slash-command suggestion, or toggle plan/build when no suggestions
+  are shown (applies at the next turn if one is running).
+- **Esc** — dismiss slash-command suggestions, or interrupt the running turn. The session survives;
+  the model is told it was cut short.
 - **Ctrl+C** — clear the input; on empty input it interrupts, and a double press quits.
-- **Enter** — send. **Shift+Return** — newline. Outer whitespace is trimmed when routing a
+- **Enter** — complete the selected slash command, or send when the command is exact or no
+  suggestions are shown. **Shift+Return** — newline. Outer whitespace is trimmed when routing a
   message; internal blank lines are preserved. Messages typed mid-turn are queued.
-- **↑/↓** or **Ctrl+P/N** — browse recent submitted prompts from an empty editor.
+- **↑/↓** or **Ctrl+P/N** — select a shown slash command, or browse recent submitted prompts from
+  an empty editor.
 - **`& <task>`** — run the task as a background job in the current mode. Jobs run in their own
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
   and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one.
 - **`@path/to/file`** — attach a file's contents to your message.
-- **`/build`** — switch to build mode and implement the plan and discussion so far.
+- **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
+  the first non-whitespace input token shows fuzzy-matched command suggestions.
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 

@@ -1,7 +1,14 @@
 import type { Readable, Writable } from "node:stream";
 import type { PermissionPromptDecision, PermissionRequest } from "../agent/permissions";
-import { applyEditorCommand, createEditorState, type EditorState } from "./editor";
+import {
+  applyEditorCommand,
+  createEditorState,
+  type EditorState,
+  replaceEditorRange,
+  splitGraphemes,
+} from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
+import { findSlashCommandToken, type SlashCommandToken } from "./slash-completion";
 import {
   displayWidth,
   escapeTerminalText,
@@ -36,6 +43,11 @@ export interface ChatScreenCallbacks {
   onQuit(): void;
 }
 
+export interface SlashCommandSuggestion {
+  name: string;
+  summary: string;
+}
+
 export interface CreateChatScreenOptions {
   stdin?: Readable;
   stdout?: Writable;
@@ -47,6 +59,8 @@ export interface CreateChatScreenOptions {
   quitWindowMs?: number;
   /** Previously submitted prompts, oldest first. */
   initialHistory?: readonly string[];
+  /** Suggestions for the initial slash-command token. */
+  slashCommandSuggestions?(query: string): readonly SlashCommandSuggestion[];
 }
 
 export interface ChatScreen {
@@ -90,6 +104,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   let previousRawMode = false;
   let escapeTimer: ReturnType<typeof setTimeout> | null = null;
   let quitArmedAt = 0;
+  let completionIndex = 0;
+  let dismissedCompletion: string | null = null;
   interface PendingAsk {
     request: PermissionRequest;
     resolve: (decision: PermissionPromptDecision) => void;
@@ -110,6 +126,30 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const safeLine = (line: string): string =>
     truncateToDisplayWidth(escapeTerminalText(line).replace(/\n+/gu, " "), contentWidth());
 
+  interface ActiveCompletion {
+    token: SlashCommandToken;
+    suggestions: readonly SlashCommandSuggestion[];
+    selectedIndex: number;
+    signature: string;
+  }
+
+  const editorSignature = (): string => `${editor.cursor}\u0000${editor.text}`;
+
+  const activeCompletion = (): ActiveCompletion | null => {
+    const token = findSlashCommandToken(editor);
+    const signature = editorSignature();
+    if (!token || dismissedCompletion === signature || !options.slashCommandSuggestions)
+      return null;
+    const suggestions = options.slashCommandSuggestions(token.query).slice(0, 7);
+    if (suggestions.length === 0) return null;
+    return {
+      token,
+      suggestions,
+      selectedIndex: Math.min(completionIndex, suggestions.length - 1),
+      signature,
+    };
+  };
+
   const liveLines = (): LiveLayout => {
     const progress = progressLines.map(safeLine);
     const safeStatus = safeLine(status);
@@ -129,8 +169,15 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       };
     }
     const layout = renderEditorLayout(editor, contentWidth());
+    const completion = activeCompletion();
+    const completionLines =
+      completion?.suggestions.map((suggestion, index) =>
+        safeLine(
+          `${index === completion.selectedIndex ? "›" : " "} /${suggestion.name} — ${suggestion.summary}`,
+        ),
+      ) ?? [];
     return {
-      lines: [...progress, ...layout.rows, safeStatus],
+      lines: [...progress, ...layout.rows, ...completionLines, safeStatus],
       cursorRow: progress.length + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
@@ -193,7 +240,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     if (escapeTimer) clearTimeout(escapeTimer);
     escapeTimer = setTimeout(() => {
       escapeTimer = null;
-      if (decoder.flush().length > 0) options.callbacks.onEscape();
+      for (const command of decoder.flush()) handleCommand(command);
     }, options.escapeFlushMs ?? 40);
   };
 
@@ -220,6 +267,23 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     if (decision) settleAsk(decision);
   };
 
+  const acceptCompletion = (completion: ActiveCompletion): void => {
+    const selected = completion.suggestions[completion.selectedIndex];
+    if (!selected) return;
+    const hasSeparator = completion.token.end < splitGraphemes(editor.text).length;
+    editor = replaceEditorRange(
+      editor,
+      completion.token.start,
+      completion.token.end,
+      `/${selected.name}${hasSeparator ? "" : " "}`,
+    );
+    if (hasSeparator) editor = { ...editor, cursor: editor.cursor + 1 };
+    historyIndex = null;
+    completionIndex = 0;
+    dismissedCompletion = editorSignature();
+    paint();
+  };
+
   const browseHistory = (direction: -1 | 1): boolean => {
     if (history.length === 0) return false;
     if (historyIndex === null) {
@@ -230,12 +294,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       if (next >= history.length) {
         historyIndex = null;
         editor = createEditorState();
+        dismissedCompletion = editorSignature();
         paint();
         return true;
       }
       historyIndex = Math.max(0, next);
     }
     editor = createEditorState(history[historyIndex] ?? "");
+    dismissedCompletion = editorSignature();
     paint();
     return true;
   };
@@ -245,20 +311,34 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       handleAskKey(command);
       return;
     }
+    const completion = activeCompletion();
     switch (command.type) {
       case "tab":
-        options.callbacks.onTab();
+        if (completion) acceptCompletion(completion);
+        else options.callbacks.onTab();
         return;
       case "escape":
-        options.callbacks.onEscape();
+        if (completion) {
+          dismissedCompletion = completion.signature;
+          paint();
+        } else options.callbacks.onEscape();
         return;
       case "submit": {
+        const exact = completion?.suggestions.some(
+          ({ name }) => name.toLowerCase() === completion.token.query.toLowerCase(),
+        );
+        if (completion && !exact) {
+          acceptCompletion(completion);
+          return;
+        }
         const text = editor.text;
         if (text.trim().length === 0) return;
         if (history.at(-1) !== text) history.push(text);
         if (history.length > 100) history.shift();
         historyIndex = null;
         editor = createEditorState();
+        completionIndex = 0;
+        dismissedCompletion = null;
         paint();
         options.callbacks.onSubmit(text);
         return;
@@ -267,6 +347,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         if (editor.text.length > 0) {
           historyIndex = null;
           editor = createEditorState();
+          completionIndex = 0;
+          dismissedCompletion = null;
           paint();
           return;
         }
@@ -280,9 +362,19 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         return;
       }
       default:
+        if (completion && (command.type === "move-up" || command.type === "move-down")) {
+          const direction = command.type === "move-up" ? -1 : 1;
+          completionIndex =
+            (completion.selectedIndex + direction + completion.suggestions.length) %
+            completion.suggestions.length;
+          paint();
+          return;
+        }
         if (command.type === "move-up" && browseHistory(-1)) return;
         if (command.type === "move-down" && historyIndex !== null && browseHistory(1)) return;
         historyIndex = null;
+        completionIndex = 0;
+        dismissedCompletion = null;
         editor = applyEditorCommand(editor, command);
         paint();
     }

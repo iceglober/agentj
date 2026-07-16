@@ -24,8 +24,10 @@ export interface JobView {
  * and decides nothing (same contract ConversationEvent had for the old loop).
  */
 export type ChatEvent =
-  | { type: "turn-started"; mode: ChatMode; text: string }
-  | { type: "turn-queued"; text: string }
+  | { type: "turn-started"; mode: ChatMode; text: string; transcriptText?: string }
+  | { type: "turn-queued"; text: string; transcriptText?: string }
+  | { type: "turn-dequeued"; text: string }
+  | { type: "command"; name: string }
   | { type: "tool-call"; call: ToolCall }
   | { type: "tool-result"; result: ToolResult }
   | { type: "assistant"; mode: ChatMode; text: string; stepLimitReached?: boolean }

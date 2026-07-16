@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
+import { suggestChatCommands } from "../chat/commands";
 import { type ChatScreenCallbacks, createChatScreen } from "./chat-screen";
 import { displayWidth } from "./terminal-editor";
 
@@ -29,6 +30,7 @@ function makeScreen(
     escapeFlushMs: 5,
     quitWindowMs: 100,
     initialHistory,
+    slashCommandSuggestions: suggestChatCommands,
     callbacks: {
       onSubmit: (text) => calls.submit.push(text),
       onTab: () => (calls.tab += 1),
@@ -119,6 +121,56 @@ describe("createChatScreen", () => {
     input.write("[D");
     await settle();
     expect(calls.escape).toBe(1);
+    screen.stop();
+  });
+
+  test("shows and fuzzy-completes slash commands before mode toggling", async () => {
+    const { screen, input, calls, text } = makeScreen();
+    screen.start();
+    input.write("/");
+    await settle();
+    const shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("› /help — List commands and keys");
+    expect(shown).toContain("/build — Switch to build mode");
+
+    input.write("bld\t\r");
+    await settle();
+    expect(calls.tab).toBe(0);
+    expect(calls.submit).toEqual(["/build "]);
+    screen.stop();
+  });
+
+  test("navigates suggestions and lets exact commands submit immediately", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+    input.write("/\u001b[B\r\r/help\r");
+    await settle();
+    expect(calls.submit).toEqual(["/build ", "/help"]);
+    screen.stop();
+  });
+
+  test("completes a slash inserted at the start of existing input but ignores inline slashes", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+    input.write("jobs\u0001/\t\r");
+    input.write("say /b\t");
+    await settle();
+    expect(calls.submit).toEqual(["/jobs "]);
+    expect(calls.tab).toBe(1);
+    screen.stop();
+  });
+
+  test("Escape dismisses command suggestions before interrupting", async () => {
+    const { screen, input, calls, text } = makeScreen();
+    screen.start();
+    input.write("/");
+    input.write("\u001b");
+    await settle();
+    expect(calls.escape).toBe(0);
+    expect(renderScreen(text()).join("\n")).not.toContain("List commands and keys");
+    input.write("\t");
+    await settle();
+    expect(calls.tab).toBe(1);
     screen.stop();
   });
 

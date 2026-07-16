@@ -94,7 +94,7 @@ const verticalTarget = (
   };
 };
 
-const replaceRange = (
+const replaceGraphemeRange = (
   value: string[],
   start: number,
   end: number,
@@ -107,6 +107,18 @@ const replaceRange = (
     cursor: splitGraphemes(prefix).length,
     preferredColumn: null,
   };
+};
+
+export const replaceEditorRange = (
+  state: EditorState,
+  start: number,
+  end: number,
+  replacement: string,
+): EditorState => {
+  const value = splitGraphemes(state.text);
+  const from = Math.max(0, Math.min(start, end, value.length));
+  const to = Math.max(from, Math.min(Math.max(start, end), value.length));
+  return replaceGraphemeRange(value, from, to, splitGraphemes(replacement));
 };
 
 export const applyEditorCommand = (state: EditorState, command: EditorCommand): EditorState => {
@@ -124,9 +136,9 @@ export const applyEditorCommand = (state: EditorState, command: EditorCommand): 
 
   switch (command.type) {
     case "insert":
-      return replaceRange(value, cursor, cursor, splitGraphemes(command.text));
+      return replaceGraphemeRange(value, cursor, cursor, splitGraphemes(command.text));
     case "newline":
-      return replaceRange(value, cursor, cursor, ["\n"]);
+      return replaceGraphemeRange(value, cursor, cursor, ["\n"]);
     case "move-left":
       return { ...state, cursor: Math.max(0, cursor - 1), preferredColumn: null };
     case "move-right":
@@ -148,16 +160,16 @@ export const applyEditorCommand = (state: EditorState, command: EditorCommand): 
     case "move-line-end":
       return { ...state, cursor: lineEnd(value, cursor), preferredColumn: null };
     case "delete-backward":
-      return cursor === 0 ? state : replaceRange(value, cursor - 1, cursor, []);
+      return cursor === 0 ? state : replaceGraphemeRange(value, cursor - 1, cursor, []);
     case "delete-forward":
-      return cursor === value.length ? state : replaceRange(value, cursor, cursor + 1, []);
+      return cursor === value.length ? state : replaceGraphemeRange(value, cursor, cursor + 1, []);
     case "delete-word-backward":
-      return replaceRange(value, previousWord(value, cursor), cursor, []);
+      return replaceGraphemeRange(value, previousWord(value, cursor), cursor, []);
     case "delete-word-forward":
-      return replaceRange(value, cursor, nextWord(value, cursor), []);
+      return replaceGraphemeRange(value, cursor, nextWord(value, cursor), []);
     case "delete-line-backward":
-      return replaceRange(value, lineStart(value, cursor), cursor, []);
+      return replaceGraphemeRange(value, lineStart(value, cursor), cursor, []);
     case "delete-line-forward":
-      return replaceRange(value, cursor, lineEnd(value, cursor), []);
+      return replaceGraphemeRange(value, cursor, lineEnd(value, cursor), []);
   }
 };

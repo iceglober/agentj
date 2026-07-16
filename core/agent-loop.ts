@@ -14,6 +14,7 @@ import {
   expandAtFiles,
   parseInput,
   runChatCommand,
+  suggestChatCommands,
 } from "./lib/chat/commands";
 import type { ChatEvent } from "./lib/chat/events";
 import { createJobRunner } from "./lib/chat/jobs";
@@ -31,6 +32,7 @@ import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
 import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
+import { truncateWithNotice } from "./lib/truncation";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
 import { applyProgressEvent, createProgressTracker, formatDuration } from "./lib/tui/progress";
@@ -56,6 +58,10 @@ const summarizeStatus = (porcelain: string): string => {
   return count === 0 ? "clean" : `${count} files changed`;
 };
 
+/** Keep a bounded single-line preview while making the omitted character count explicit. */
+export const truncateLineWithNotice = (value: string, maxLength: number): string =>
+  truncateWithNotice(value.replace(/\r\n?|\n/gu, " "), maxLength);
+
 export function createProductionEvalCliHandlers(): EvalCliHandlers {
   const spawn = async (script: string, args: string[] = []): Promise<number> => {
     const child = Bun.spawn({
@@ -76,9 +82,13 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
 export const formatChatEvent = (event: ChatEvent): string | null => {
   switch (event.type) {
     case "turn-started":
-      return `> ${event.text}`;
+      return event.transcriptText ?? `> ${event.text}`;
     case "turn-queued":
       return null; // shown as a live-region line until its turn starts
+    case "turn-dequeued":
+      return `(dequeued) ${event.text.split("\n")[0]?.slice(0, 60) ?? ""}`;
+    case "command":
+      return `Command: ${event.name}`;
     case "tool-call":
       return null; // superseded by live tool-activity lines
     case "assistant": {
@@ -87,7 +97,10 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
         const report = JSON.parse(event.text) as { summary?: string; status?: string };
         if (report.summary) return `${report.status === "done" ? "✓" : "!"} ${report.summary}`;
       } catch {}
-      return event.text;
+      // Trimmed, and null when empty (tool-only or interrupted turns) — a raw
+      // body would stack blank transcript rows around the turn separators.
+      const body = event.text.trim();
+      return body.length > 0 ? body : null;
     }
     case "turn-aborted":
       return "(turn interrupted)";
@@ -376,14 +389,17 @@ export async function runAgentjChat(
   const toolLines = (): string[] =>
     [...activeTools.values()].map(
       ({ tool, detail }) =>
-        `  ${SPINNER[spinnerFrame % SPINNER.length] ?? "◐"} ${tool}${detail && tool !== "run_subagents" ? ` ${detail.slice(0, 40)}` : ""}`,
+        `  ${SPINNER[spinnerFrame % SPINNER.length] ?? "◐"} ${tool}${detail && tool !== "run_subagents" ? ` ${truncateLineWithNotice(detail, 40)}` : ""}`,
     );
 
   // Messages queued mid-turn wait visibly in the live region, below running
   // tools and above the editor, until their own turn starts.
-  const queuedMessages: string[] = [];
+  const queuedMessages: Array<{ text: string; transcriptText?: string }> = [];
   const queuedLines = (): string[] =>
-    queuedMessages.map((text) => `  ↳ queued: ${text.split("\n")[0]?.slice(0, 60) ?? ""}`);
+    queuedMessages.map(
+      ({ text, transcriptText }) =>
+        `  ↳ queued: ${truncateLineWithNotice(transcriptText ?? text, 60)}`,
+    );
 
   const refreshProgress = (): void => {
     screen?.setProgressLines([...dagLines, ...toolLines(), ...queuedLines()]);
@@ -469,13 +485,16 @@ export async function runAgentjChat(
 
   const render = (event: ChatEvent): void => {
     if (event.type === "turn-queued") {
-      queuedMessages.push(event.text);
+      queuedMessages.push({
+        text: event.text,
+        ...(event.transcriptText ? { transcriptText: event.transcriptText } : {}),
+      });
       refreshProgress();
       updateStatus();
       return;
     }
     if (event.type === "turn-started") {
-      if (queuedMessages[0] === event.text) {
+      if (queuedMessages[0]?.text === event.text) {
         queuedMessages.shift();
         refreshProgress();
       }
@@ -483,6 +502,11 @@ export async function runAgentjChat(
       interruptRequested = false;
     }
     if (event.type === "turn-abort-requested") interruptRequested = true;
+    if (event.type === "turn-dequeued") {
+      const index = queuedMessages.findLastIndex((entry) => entry.text === event.text);
+      if (index !== -1) queuedMessages.splice(index, 1);
+      refreshProgress();
+    }
     if (event.type === "turn-finished") {
       turnStartedAt = null;
       currentActivity = null;
@@ -497,16 +521,22 @@ export async function runAgentjChat(
     // Chat styling (interactive only): a blank line + colored prefix separates
     // turns; assistant markdown renders lightly.
     if (event.type === "turn-started") {
-      screen?.printAbove(
-        `\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
-        { preStyled: true },
-      );
+      if (event.transcriptText) screen?.printAbove(event.transcriptText);
+      else {
+        screen?.printAbove(
+          `\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
+          { preStyled: true },
+        );
+      }
       updateStatus();
       return;
     }
     if (event.type === "assistant") {
-      const body = formatChatEvent(event) ?? event.text;
-      screen?.printAbove(`\n${renderMarkdownLite(escapeTerminalText(body))}`, { preStyled: true });
+      const body = formatChatEvent(event);
+      if (body !== null)
+        screen?.printAbove(`\n${renderMarkdownLite(escapeTerminalText(body))}`, {
+          preStyled: true,
+        });
       updateStatus();
       return;
     }
@@ -564,6 +594,7 @@ export async function runAgentjChat(
 
   screen = createChatScreen({
     initialHistory: promptHistory.entries,
+    slashCommandSuggestions: suggestChatCommands,
     callbacks: {
       onSubmit: (text) => {
         rememberPrompt(text);
@@ -587,6 +618,8 @@ export async function runAgentjChat(
         updateStatus();
       },
       onEscape: () => {
+        // Escalation ladder: undo the newest pending intent first, then interrupt.
+        if (chat.dequeue() !== null) return;
         chat.abort();
       },
       onQuit: () => quitResolve?.(),
@@ -599,11 +632,12 @@ export async function runAgentjChat(
     `agentj — ${root} (${ctx.gitBranch}) · ${chat.mode} mode${resumed ? ` · resumed ${log.id}` : ""} · /help for keys`,
   );
   for (const turn of (resumed?.turns ?? []).slice(-5)) {
-    screen.printAbove(`> ${turn.user}`);
+    screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
     screen.printAbove(turn.assistant);
   }
 
   const handleSigint = (): void => {
+    if (chat.dequeue() !== null) return;
     if (!chat.abort()) quitResolve?.();
   };
   process.on("SIGINT", handleSigint);
@@ -644,7 +678,9 @@ export async function runAgentjOnce(
       },
       (activity) => {
         if (activity.phase === "start") {
-          processStderr.write(`  · ${activity.tool}: ${activity.detail.slice(0, 80)}\n`);
+          processStderr.write(
+            `  · ${activity.tool}: ${truncateLineWithNotice(activity.detail, 80)}\n`,
+          );
         }
       },
     );
@@ -694,7 +730,7 @@ export async function runAgentjOnce(
 
   if (outcome === "done") {
     processStdout.write(
-      `${formatChatEvent({ type: "assistant", mode: chat.mode, text: resultText }) ?? resultText}\n`,
+      `${formatChatEvent({ type: "assistant", mode: chat.mode, text: resultText }) ?? ""}\n`,
     );
     return EXIT_SUCCESS;
   }

@@ -38,9 +38,15 @@ export interface ChatSession {
    * already running (queued messages run in order). Resolves when this
    * message's turn has completed.
    */
-  send(text: string): Promise<void>;
+  send(text: string, options?: { transcriptText?: string }): Promise<void>;
   /** Abort the running foreground turn. Returns false when idle. */
   abort(): boolean;
+  /**
+   * Remove the most recently queued message (LIFO — escape undoes the latest
+   * intent) and resolve its `send()` promise. Returns the removed text, or
+   * null when nothing is queued.
+   */
+  dequeue(): string | null;
   /** Queue a notice prepended to the next user turn (job completions). */
   addTurnNotice(text: string): void;
   /** The resumable continuation for the session log. */
@@ -58,17 +64,17 @@ export function createChatSession(
   let busy = false;
   let turnAbort: AbortController | null = null;
   const notices: string[] = [];
-  const queue: Array<{ text: string; resolve: () => void }> = [];
+  const queue: Array<{ text: string; transcriptText?: string; resolve: () => void }> = [];
 
   const emit = (event: ChatEvent): void => {
     void deps.onEvent?.(event);
   };
 
-  const runTurn = async (text: string): Promise<void> => {
+  const runTurn = async (text: string, transcriptText?: string): Promise<void> => {
     mode = pendingMode;
     busy = true;
     turnAbort = new AbortController();
-    emit({ type: "turn-started", mode, text });
+    emit({ type: "turn-started", mode, text, ...(transcriptText ? { transcriptText } : {}) });
 
     const drained = notices.splice(0);
     const content = drained.length > 0 ? `${drained.join("\n")}\n\n${text}` : text;
@@ -92,7 +98,14 @@ export function createChatSession(
         text: result.text,
         ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
       });
-      await deps.log.append({ type: "turn", mode, user: text, assistant: result.text, ts: now() });
+      await deps.log.append({
+        type: "turn",
+        mode,
+        user: text,
+        assistant: result.text,
+        ts: now(),
+        ...(transcriptText ? { transcriptText } : {}),
+      });
       await deps.log.append({ type: "state", messages, mode, ts: now() });
     } catch (error) {
       if (turnAbort.signal.aborted) {
@@ -117,7 +130,7 @@ export function createChatSession(
     while (queue.length > 0 && !busy) {
       const next = queue.shift();
       if (!next) break;
-      await runTurn(next.text);
+      await runTurn(next.text, next.transcriptText);
       next.resolve();
     }
   };
@@ -140,15 +153,20 @@ export function createChatSession(
       return pendingMode;
     },
 
-    async send(text) {
+    async send(text, options) {
+      const transcriptText = options?.transcriptText;
       if (busy) {
-        emit({ type: "turn-queued", text });
+        emit({
+          type: "turn-queued",
+          text,
+          ...(transcriptText ? { transcriptText } : {}),
+        });
         await new Promise<void>((resolve) => {
-          queue.push({ text, resolve });
+          queue.push({ text, ...(transcriptText ? { transcriptText } : {}), resolve });
         });
         return;
       }
-      await runTurn(text);
+      await runTurn(text, transcriptText);
       await drainQueue();
     },
 
@@ -159,6 +177,14 @@ export function createChatSession(
         emit({ type: "turn-abort-requested" });
       }
       return true;
+    },
+
+    dequeue() {
+      const entry = queue.pop();
+      if (!entry) return null;
+      emit({ type: "turn-dequeued", text: entry.text });
+      entry.resolve();
+      return entry.text;
     },
 
     addTurnNotice(text) {

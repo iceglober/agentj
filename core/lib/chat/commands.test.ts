@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { type ChatCommandContext, expandAtFiles, parseInput, runChatCommand } from "./commands";
+import {
+  type ChatCommandContext,
+  expandAtFiles,
+  parseInput,
+  runChatCommand,
+  suggestChatCommands,
+} from "./commands";
 import type { ChatEvent } from "./events";
 import type { JobRunner } from "./jobs";
 
@@ -25,6 +31,29 @@ describe("parseInput", () => {
       kind: "message",
       text: "first\n\n\n\nsecond",
     });
+  });
+});
+
+describe("suggestChatCommands", () => {
+  test("returns registry order for an empty query and matches case-insensitively", () => {
+    expect(suggestChatCommands("").map(({ name }) => name)).toEqual([
+      "help",
+      "build",
+      "jobs",
+      "undo",
+      "redo",
+      "clear",
+      "quit",
+    ]);
+    expect(suggestChatCommands("BU")[0]?.name).toBe("build");
+  });
+
+  test("ranks exact and prefix matches before compact ordered subsequences", () => {
+    expect(suggestChatCommands("redo")[0]?.name).toBe("redo");
+    expect(suggestChatCommands("cl")[0]?.name).toBe("clear");
+    expect(suggestChatCommands("bld").map(({ name }) => name)).toEqual(["build"]);
+    expect(suggestChatCommands("ud")[0]?.name).toBe("undo");
+    expect(suggestChatCommands("zzz")).toEqual([]);
   });
 });
 
@@ -88,10 +117,12 @@ describe("runChatCommand", () => {
   test("help lists every registered command", async () => {
     const { context, events } = makeContext();
     await runChatCommand(context, "help", "");
-    const text = (events[0] as { text: string }).text;
+    expect(events[0]).toEqual({ type: "command", name: "help" });
+    const text = (events[1] as { text: string }).text;
     for (const name of ["/help", "/build", "/jobs", "/undo", "/redo", "/clear", "/quit"]) {
       expect(text).toContain(name);
     }
+    expect(text).toContain("complete a shown command");
   });
 
   test("build switches mode before sending an implementation turn", async () => {
@@ -102,8 +133,8 @@ describe("runChatCommand", () => {
         calls.push(`mode:${mode}`);
         return mode ?? "plan";
       },
-      send: async (text) => {
-        calls.push(`send:${text}`);
+      send: async (text, options) => {
+        calls.push(`send:${options?.transcriptText}:${text}`);
       },
     } as ChatCommandContext["session"];
 
@@ -111,14 +142,15 @@ describe("runChatCommand", () => {
 
     expect(calls).toEqual([
       "mode:build",
-      "send:Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
+      "send:Command: build:Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
     ]);
   });
 
   test("jobs lists and aborts; undo/redo report labels; unknown suggests help", async () => {
     const { context, events, aborted } = makeContext();
     await runChatCommand(context, "jobs", "");
-    expect((events[0] as { text: string }).text).toContain("j1 [running]");
+    expect(events[0]).toEqual({ type: "command", name: "jobs" });
+    expect((events.at(-1) as { text: string }).text).toContain("j1 [running]");
 
     await runChatCommand(context, "jobs", "abort j1");
     expect(aborted).toEqual(["j1"]);

@@ -5,6 +5,7 @@ import {
   createEditorState,
   type EditorCommand,
   type EditorState,
+  replaceEditorRange,
   splitGraphemes,
 } from "./editor";
 
@@ -93,6 +94,19 @@ describe("prompt editor model", () => {
     expect(apply({ ...createEditorState(text), cursor: 1 }, { type: "delete-forward" }).text).toBe(
       "AéB",
     );
+  });
+
+  test("replaces a grapheme range and places the cursor after the replacement", () => {
+    const state = { ...createEditorState("🙂/bld tail"), cursor: 2 };
+    expect(replaceEditorRange(state, 1, 5, "/build ")).toEqual({
+      text: "🙂/build  tail",
+      cursor: 8,
+      preferredColumn: null,
+    });
+    expect(replaceEditorRange(createEditorState("abc"), 99, -2, "x")).toMatchObject({
+      text: "x",
+      cursor: 1,
+    });
   });
 
   test("submit and cancel leave model state unchanged", () => {
