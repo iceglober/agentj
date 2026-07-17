@@ -137,6 +137,46 @@ describe("task usage events", () => {
   });
 });
 
+describe("progress event ownership", () => {
+  const makeTool = (events: SubagentProgressEvent[], model?: string) =>
+    createSubagentsTool({
+      execution: {
+        kind: "research",
+        createWorker: async () => ({ generate: async () => run("done") }),
+      },
+      ...(model ? { model } : {}),
+      onProgress: (event) => {
+        events.push(event);
+      },
+    });
+
+  test("events carry the owning activity id and the child model label", async () => {
+    const events: SubagentProgressEvent[] = [];
+    const tool = makeTool(events, "azure/gpt-5-mini");
+    await (tool.execute(
+      { tasks: [{ id: "a", title: "A", prompt: "p", waitsOn: [] }] },
+      { activityId: 7 },
+    ) as Promise<SubagentsResult>);
+
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) expect(event.parentActivityId).toBe(7);
+    const started = events[0];
+    expect(started?.type === "dag-started" && started.tasks[0]?.model).toBe("azure/gpt-5-mini");
+  });
+
+  test("events omit ownership and model when neither is configured", async () => {
+    const events: SubagentProgressEvent[] = [];
+    const tool = makeTool(events);
+    await (tool.execute({
+      tasks: [{ id: "a", title: "A", prompt: "p", waitsOn: [] }],
+    }) as Promise<SubagentsResult>);
+
+    for (const event of events) expect("parentActivityId" in event).toBe(false);
+    const started = events[0];
+    expect(started?.type === "dag-started" && "model" in (started.tasks[0] ?? {})).toBe(false);
+  });
+});
+
 describe("delegation execution", () => {
   const makeSession = (
     id: string,

@@ -164,7 +164,9 @@ export interface ToolActivity {
   phase: "start" | "end";
 }
 
-/** Wrap every tool's execute with start/end activity callbacks. */
+/** Wrap every tool's execute with start/end activity callbacks. The minted id
+ *  rides along in execute options as `activityId`, so a tool that emits its own
+ *  progress events (run_subagents) can tag them with the owning activity. */
 const withToolActivity = (
   tools: ToolSet,
   onActivity: (activity: ToolActivity) => void,
@@ -181,7 +183,7 @@ const withToolActivity = (
         const target = resolveToolTarget(name, input, resolveTarget);
         onActivity({ id, ...target, phase: "start" });
         try {
-          return await def.execute(input, executeOptions);
+          return await def.execute(input, { ...(executeOptions as object), activityId: id });
         } finally {
           onActivity({ id, ...target, phase: "end" });
         }
@@ -213,6 +215,13 @@ export async function createAgentTools(
   opts: CreateAgentOptions,
 ): Promise<ToolSet> {
   const fileSandbox = confineSandboxFiles(sb, opts.root);
+  // Tier routing: surface the children's model on progress rows only when it
+  // differs from the parent's — same model needs no callout.
+  const tierModel = config.tools.subagents.model;
+  const childModelLabel =
+    tierModel && tierModel !== config.llm.model
+      ? { model: `${config.llm.provider}/${tierModel}` }
+      : {};
   const delegationTool: ToolSet = opts.delegation
     ? {
         run_subagents: createSubagentsTool({
@@ -243,6 +252,7 @@ export async function createAgentTools(
             },
           },
           concurrency: opts.delegation.maxConcurrency,
+          ...childModelLabel,
           onProgress: opts.onSubagentProgress,
         }),
       }
@@ -274,6 +284,7 @@ export async function createAgentTools(
             run_subagents: createSubagentsTool({
               execution: { kind: "research", createWorker: opts.research.createWorker },
               concurrency: config.tools.subagents.concurrency,
+              ...childModelLabel,
               onProgress: opts.research.onProgress,
             }),
           }

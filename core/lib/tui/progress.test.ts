@@ -97,6 +97,67 @@ test("usage columns align across tasks with different title lengths", () => {
   expect(clamped[0]).toContain("…");
 });
 
+test("started tasks render in execution order; unstarted trail in declaration order", () => {
+  const tracker = createProgressTracker();
+  tracker.apply({
+    type: "dag-started",
+    concurrency: 3,
+    startedAt: 0,
+    tasks: [
+      { id: "t1", title: "One", waitsOn: [] },
+      { id: "t2", title: "Two", waitsOn: [] },
+      { id: "t3", title: "Three", waitsOn: ["t1"] },
+    ],
+  });
+  tracker.apply({ type: "task-started", id: "t2", title: "Two", startedAt: 1 });
+  tracker.apply({ type: "task-started", id: "t1", title: "One", startedAt: 2 });
+  expect(tracker.lines().map((line) => line.trim().slice(2))).toEqual([
+    "t2 Two",
+    "t1 One",
+    "t3 Three · waits on t1",
+  ]);
+
+  // Finishing does not move a task; it holds its execution-order slot.
+  tracker.apply({ type: "task-completed", id: "t2", title: "Two", elapsedMs: 5 });
+  expect(
+    tracker
+      .lines()
+      .map((line) => line.trim().slice(2, 4))
+      .slice(0, 2),
+  ).toEqual(["t2", "t1"]);
+});
+
+test("indent widens the left column and still clamps at the same right edge", () => {
+  const tracker = createProgressTracker();
+  tracker.apply({
+    type: "dag-started",
+    concurrency: 1,
+    startedAt: 0,
+    tasks: [{ id: "t1", title: "x".repeat(120), waitsOn: [] }],
+  });
+  expect(tracker.lines(0)[0]?.startsWith("  · t1")).toBe(true);
+  const nested = tracker.lines(0, 4);
+  expect(nested[0]?.startsWith("    · t1")).toBe(true);
+  expect(nested[0]?.length).toBeLessThanOrEqual(48);
+  expect(nested[0]).toContain("…");
+});
+
+test("tasks launched on a different model carry the label in the right column", () => {
+  const tracker = createProgressTracker();
+  tracker.apply({
+    type: "dag-started",
+    concurrency: 2,
+    startedAt: 0,
+    tasks: [
+      { id: "a", title: "Routed", waitsOn: [], model: "azure/gpt-5-mini" },
+      { id: "b", title: "Plain", waitsOn: [] },
+    ],
+  });
+  const lines = tracker.lines();
+  expect(lines[0]).toContain("(azure/gpt-5-mini)");
+  expect(lines[1]).not.toContain("(azure/gpt-5-mini)");
+});
+
 test("formatDuration uses ms under a second", () => {
   expect(formatDuration(0)).toBe("0ms");
   expect(formatDuration(340)).toBe("340ms");
