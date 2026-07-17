@@ -35,7 +35,12 @@ import { createUndoStack } from "./lib/session/undo";
 import { truncateWithNotice } from "./lib/truncation";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
-import { applyProgressEvent, createProgressTracker, formatDuration } from "./lib/tui/progress";
+import {
+  applyProgressEvent,
+  createProgressTracker,
+  formatDuration,
+  type ProgressTracker,
+} from "./lib/tui/progress";
 import { escapeTerminalText } from "./lib/tui/terminal-editor";
 import {
   createGitDelegationSnapshot,
@@ -121,8 +126,12 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
   }
 };
 
+const SPINNER = ["◐", "◓", "◑", "◒"];
+
 export const formatChatStatus = (state: {
   mode: ChatMode;
+  /** Provider/model label, e.g. "azure/gpt-5.6-sol". */
+  model: string;
   sessionId: string;
   runningJobs: number;
   busy: boolean;
@@ -134,8 +143,7 @@ export const formatChatStatus = (state: {
 }): string => {
   let busy = "";
   if (state.busy) {
-    const spinner = ["◐", "◓", "◑", "◒"];
-    const frame = spinner[state.spinnerFrame % spinner.length] ?? "◐";
+    const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
     const elapsed =
       state.turnStartedAt !== null
         ? ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`
@@ -149,13 +157,45 @@ export const formatChatStatus = (state: {
         : "thinking";
     busy = ` · ${frame} ${doing}${elapsed}${state.interruptRequested ? "" : " (esc to interrupt)"}`;
   }
-  return `⏵ ${state.mode} · session ${state.sessionId} · ${state.runningJobs} job${state.runningJobs === 1 ? "" : "s"}${busy} · tab: mode · /help`;
+  return `⏵ ${state.mode} · ${state.model} · session ${state.sessionId} · ${state.runningJobs} job${state.runningJobs === 1 ? "" : "s"}${busy} · tab: mode · /help`;
+};
+
+/**
+ * Interleave running tool rows with the DAG blocks they own: each tool head
+ * line is followed by its nested subagent rows; blocks with no live owner
+ * (progress events that carried no activity id) render first, un-nested.
+ */
+export const composeProgressLines = (state: {
+  activeTools: Iterable<[number, { tool: string; detail: string }]>;
+  dagBlocks: ReadonlyMap<number, string[]>;
+  queued: string[];
+  spinnerFrame: number;
+}): string[] => {
+  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
+  const owned = new Set<number>();
+  const toolRows: string[] = [];
+  for (const [id, { tool, detail }] of state.activeTools) {
+    toolRows.push(
+      `  ${frame} ${tool}${detail && tool !== "run_subagents" ? ` ${truncateLineWithNotice(detail, 40)}` : ""}`,
+    );
+    const block = state.dagBlocks.get(id);
+    if (block) {
+      owned.add(id);
+      toolRows.push(...block);
+    }
+  }
+  const orphanRows = [...state.dagBlocks]
+    .filter(([id]) => !owned.has(id))
+    .flatMap(([, block]) => block);
+  return [...orphanRows, ...toolRows, ...state.queued];
 };
 
 interface ChatComposition {
   root: string;
   commonGitDir: string;
   ctx: PromptContext;
+  /** The main agent's configured model, for display. */
+  llm: { provider: string; model: string };
   agentFor(mode: ChatMode): Promise<Agent>;
   runBuildJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string; branch?: string }>;
   runPlanJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string }>;
@@ -353,6 +393,7 @@ async function composeChat(
     root,
     commonGitDir,
     ctx,
+    llm: { provider: agentConfig.llm.provider, model: agentConfig.llm.model },
     agentFor,
     runBuildJob,
     runPlanJob,
@@ -366,7 +407,6 @@ export async function runAgentjChat(
   options: { resume?: string; continueLatest?: boolean } = {},
   configPath: string = new URL("./agentj.json", import.meta.url).pathname,
 ): Promise<number> {
-  const tracker = createProgressTracker();
   let screen: ChatScreen | undefined;
   let emitChatEvent: ((event: ChatEvent) => void) | null = null;
   const onDagProgress = (progress: SubagentProgressEvent): void => {
@@ -384,15 +424,23 @@ export async function runAgentjChat(
   let turnStartedAt: number | null = null;
   let interruptRequested = false;
   let spinnerFrame = 0;
-  let dagLines: string[] = [];
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
-  const SPINNER = ["◐", "◓", "◑", "◒"];
 
-  const toolLines = (): string[] =>
-    [...activeTools.values()].map(
-      ({ tool, detail }) =>
-        `  ${SPINNER[spinnerFrame % SPINNER.length] ?? "◐"} ${tool}${detail && tool !== "run_subagents" ? ` ${truncateLineWithNotice(detail, 40)}` : ""}`,
-    );
+  // DAG progress nests under the tool activity that owns it, one tracker per
+  // owner so concurrent run_subagents calls stay apart. NO_ACTIVITY collects
+  // events that carried no owner id — they render un-nested, above the tools.
+  const NO_ACTIVITY = -1;
+  const dagTrackers = new Map<number, ProgressTracker>();
+  const frozenDagBlocks = new Map<number, string[]>();
+  const dagIndent = (owner: number): number => (owner === NO_ACTIVITY ? 2 : 4);
+  const dagBlockLines = (): Map<number, string[]> => {
+    const blocks = new Map<number, string[]>();
+    for (const [owner, dagTracker] of dagTrackers) {
+      const lines = dagTracker.lines(spinnerFrame, dagIndent(owner));
+      if (lines.length > 0) blocks.set(owner, lines);
+    }
+    return blocks;
+  };
 
   // Messages queued mid-turn wait visibly in the live region, below running
   // tools and above the editor, until their own turn starts.
@@ -404,7 +452,14 @@ export async function runAgentjChat(
     );
 
   const refreshProgress = (): void => {
-    screen?.setProgressLines([...dagLines, ...toolLines(), ...queuedLines()]);
+    screen?.setProgressLines(
+      composeProgressLines({
+        activeTools,
+        dagBlocks: dagBlockLines(),
+        queued: queuedLines(),
+        spinnerFrame,
+      }),
+    );
   };
 
   const onToolActivity = (activity: ToolActivity): void => {
@@ -420,7 +475,16 @@ export async function runAgentjChat(
       activeTools.delete(activity.id);
       currentActivity = null;
       const elapsed = started ? ` ${formatDuration(Date.now() - started.startedAt)}` : "";
-      screen?.printAbove(`  ✓ ${activity.tool}${elapsed}`);
+      // A tool that owned a DAG freezes as its head row with the children
+      // nested beneath; an aborted DAG (no dag-completed) freezes its last
+      // live state the same way instead of orphaning the rows.
+      const live = dagTrackers.get(activity.id);
+      const block =
+        frozenDagBlocks.get(activity.id) ??
+        (live?.live ? live.lines(spinnerFrame, dagIndent(activity.id)) : []);
+      frozenDagBlocks.delete(activity.id);
+      dagTrackers.delete(activity.id);
+      screen?.printAbove([`  ✓ ${activity.tool}${elapsed}`, ...block].join("\n"));
     }
     refreshProgress();
     updateStatus();
@@ -515,9 +579,20 @@ export async function runAgentjChat(
       interruptRequested = false;
     }
     if (event.type === "subagent-progress") {
-      const update = applyProgressEvent(tracker, event.progress, spinnerFrame);
-      if (update.completedLines.length > 0) screen?.printAbove(update.completedLines.join("\n"));
-      dagLines = update.lines;
+      const owner = event.progress.parentActivityId ?? NO_ACTIVITY;
+      let dagTracker = dagTrackers.get(owner);
+      if (!dagTracker) {
+        dagTracker = createProgressTracker();
+        dagTrackers.set(owner, dagTracker);
+      }
+      const update = applyProgressEvent(dagTracker, event.progress, spinnerFrame, dagIndent(owner));
+      if (update.completedLines.length > 0) {
+        // Owned blocks wait for the tool-end row so the transcript reads
+        // parent-then-children; ownerless blocks freeze immediately.
+        if (owner === NO_ACTIVITY) screen?.printAbove(update.completedLines.join("\n"));
+        else frozenDagBlocks.set(owner, update.completedLines);
+      }
+      if (!dagTracker.live) dagTrackers.delete(owner);
       refreshProgress();
     }
     // Chat styling (interactive only): a blank line + colored prefix separates
@@ -567,6 +642,7 @@ export async function runAgentjChat(
     screen?.setStatus(
       formatChatStatus({
         mode: chat.pendingMode,
+        model: `${composition.llm.provider}/${composition.llm.model}`,
         sessionId: log.id,
         runningJobs,
         busy: chat.busy,
@@ -581,8 +657,7 @@ export async function runAgentjChat(
   // Animate the spinner and elapsed time while anything is running.
   const ticker = setInterval(() => {
     spinnerFrame += 1;
-    if (tracker.live) dagLines = tracker.lines(spinnerFrame);
-    if (tracker.live || activeTools.size > 0) refreshProgress();
+    if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
     if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
   }, 250);
 

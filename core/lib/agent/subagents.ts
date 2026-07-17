@@ -85,12 +85,12 @@ export function toGitDelegationResults(results: readonly SubagentResult[]): Arra
   }));
 }
 
-export type SubagentProgressEvent =
+export type SubagentProgressEvent = (
   | {
       type: "dag-started";
       concurrency: number;
       startedAt: number;
-      tasks: Array<{ id: string; title: string; waitsOn: string[] }>;
+      tasks: Array<{ id: string; title: string; waitsOn: string[]; model?: string }>;
     }
   | { type: "task-started"; id: string; title: string; startedAt: number }
   | {
@@ -108,7 +108,13 @@ export type SubagentProgressEvent =
       elapsedMs: number;
       error?: string;
     }
-  | { type: "dag-completed"; elapsedMs: number };
+  | { type: "dag-completed"; elapsedMs: number }
+) & {
+  /** ToolActivity id of the run_subagents call that owns this DAG, when the
+   *  tool ran under an activity wrapper — lets a UI nest DAG rows under the
+   *  owning tool row and keep concurrent DAGs apart. */
+  parentActivityId?: number;
+};
 
 export interface SubagentRunner {
   generate(
@@ -149,6 +155,10 @@ export interface CreateSubagentsToolOptions {
   execution: SubagentExecution;
   /** Concurrent children ceiling. Default 4. */
   concurrency?: number;
+  /** Child model label (e.g. "azure/gpt-5-mini") stamped on dag-started task
+   *  entries — set by the composition root only when tier routing gives the
+   *  children a different model than the parent's. */
+  model?: string;
   onProgress?(event: SubagentProgressEvent): void | Promise<void>;
   now?: () => number;
 }
@@ -311,14 +321,23 @@ export function createSubagentsTool(options: CreateSubagentsToolOptions) {
       const tasks = normalizeSubagentTasks(input);
       const now = options.now ?? Date.now;
       const startedAt = now();
+      const { abortSignal, activityId: parentActivityId } =
+        (toolOptions as { abortSignal?: AbortSignal; activityId?: number } | undefined) ?? {};
       const emit = async (event: SubagentProgressEvent): Promise<void> => {
-        await options.onProgress?.(event);
+        await options.onProgress?.(
+          parentActivityId === undefined ? event : { ...event, parentActivityId },
+        );
       };
       await emit({
         type: "dag-started",
         concurrency: options.concurrency ?? DEFAULT_CONCURRENCY,
         startedAt,
-        tasks: tasks.map(({ id, title, waitsOn }) => ({ id, title, waitsOn })),
+        tasks: tasks.map(({ id, title, waitsOn }) => ({
+          id,
+          title,
+          waitsOn,
+          ...(options.model ? { model: options.model } : {}),
+        })),
       });
 
       const execution = options.execution;
@@ -336,7 +355,6 @@ export function createSubagentsTool(options: CreateSubagentsToolOptions) {
             }
           : null;
 
-      const abortSignal = (toolOptions as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
       const results = await scheduleTasks<NormalizedSubagentTask, SubagentResult>({
         tasks,
         concurrency: Math.min(tasks.length, options.concurrency ?? DEFAULT_CONCURRENCY),

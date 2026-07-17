@@ -12,6 +12,12 @@ interface TrackedTask {
   id: string;
   title: string;
   waitsOn: string[];
+  /** Child model label (provider/model), present only when it differs from the parent's. */
+  model?: string;
+  /** Position in the dag-started task list — ordering tiebreak for unstarted tasks. */
+  declarationIndex: number;
+  /** Mint order of task-started — started tasks render in execution order. */
+  startOrder?: number;
   state: "waiting" | "running" | "completed" | "failed" | "blocked";
   elapsedMs?: number;
   usage?: { inputTokens: number; outputTokens: number; contextTokens: number };
@@ -31,7 +37,7 @@ const formatUsage = (usage: NonNullable<TrackedTask["usage"]>): string =>
 export interface ProgressTracker {
   apply(event: SubagentProgressEvent): void;
   /** Current display block; empty when no DAG is live. */
-  lines(frame?: number): string[];
+  lines(frame?: number, indent?: number): string[];
   readonly live: boolean;
 }
 
@@ -47,15 +53,18 @@ export function applyProgressEvent(
   tracker: ProgressTracker,
   event: SubagentProgressEvent,
   frame = 0,
+  indent?: number,
 ): ProgressUpdate {
-  const completedLines = event.type === "dag-completed" && tracker.live ? tracker.lines(frame) : [];
+  const completedLines =
+    event.type === "dag-completed" && tracker.live ? tracker.lines(frame, indent) : [];
   tracker.apply(event);
-  return { lines: tracker.lines(frame), completedLines };
+  return { lines: tracker.lines(frame, indent), completedLines };
 }
 
 export function createProgressTracker(): ProgressTracker {
   let tasks: TrackedTask[] = [];
   let live = false;
+  let nextStartOrder = 0;
 
   return {
     get live() {
@@ -66,11 +75,19 @@ export function createProgressTracker(): ProgressTracker {
       switch (event.type) {
         case "dag-started":
           live = true;
-          tasks = event.tasks.map((task) => ({ ...task, state: "waiting" }));
+          nextStartOrder = 0;
+          tasks = event.tasks.map((task, index) => ({
+            ...task,
+            declarationIndex: index,
+            state: "waiting",
+          }));
           return;
         case "task-started": {
           const task = tasks.find((entry) => entry.id === event.id);
-          if (task) task.state = "running";
+          if (task) {
+            task.state = "running";
+            task.startOrder = nextStartOrder++;
+          }
           return;
         }
         case "task-usage": {
@@ -106,10 +123,17 @@ export function createProgressTracker(): ProgressTracker {
       }
     },
 
-    lines(frame = 0) {
+    lines(frame = 0, indent = 2) {
       if (!live) return [];
       const MAX_LEFT = 48;
-      const rows = tasks.map((task) => {
+      // Execution order: started tasks by start order, unstarted trail in
+      // declaration order.
+      const ordered = [...tasks].sort(
+        (a, b) =>
+          (a.startOrder ?? Infinity) - (b.startOrder ?? Infinity) ||
+          a.declarationIndex - b.declarationIndex,
+      );
+      const rows = ordered.map((task) => {
         const marker =
           task.state === "completed"
             ? "✓"
@@ -124,11 +148,13 @@ export function createProgressTracker(): ProgressTracker {
             : "";
         const outcome =
           task.state === "failed" || task.state === "blocked" ? ` (${task.state})` : "";
-        let left = `  ${marker} ${task.id} ${task.title}${outcome}${waits}`;
+        let left = `${" ".repeat(indent)}${marker} ${task.id} ${task.title}${outcome}${waits}`;
         if (left.length > MAX_LEFT) left = `${left.slice(0, MAX_LEFT - 1)}…`;
         const elapsed = task.elapsedMs !== undefined ? formatDuration(task.elapsedMs) : "";
         const usage = task.usage ? formatUsage(task.usage) : "";
-        const right = [usage, elapsed].filter(Boolean).join("  ");
+        // Model rides in the right column so long titles can't truncate it.
+        const model = task.model ? `(${task.model})` : "";
+        const right = [usage, elapsed, model].filter(Boolean).join("  ");
         return { left, right };
       });
       const width = Math.max(...rows.map((row) => row.left.length));

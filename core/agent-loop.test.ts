@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { formatChatEvent, truncateLineWithNotice } from "./agent-loop";
+import {
+  composeProgressLines,
+  formatChatEvent,
+  formatChatStatus,
+  truncateLineWithNotice,
+} from "./agent-loop";
 
 describe("truncateLineWithNotice", () => {
   test("reserves room for a consistent omitted-character notice", () => {
@@ -66,5 +71,78 @@ describe("formatChatEvent", () => {
     expect(formatChatEvent({ type: "turn-dequeued", text: "do the thing\nwith detail" })).toBe(
       "(dequeued) do the thing",
     );
+  });
+});
+
+describe("composeProgressLines", () => {
+  const tools = (
+    entries: Array<[number, string, string?]>,
+  ): Array<[number, { tool: string; detail: string }]> =>
+    entries.map(([id, tool, detail]) => [id, { tool, detail: detail ?? "" }]);
+
+  test("a tool's DAG block nests directly beneath its head row", () => {
+    const lines = composeProgressLines({
+      activeTools: tools([[1, "run_subagents", '{"tasks":[…]}']]),
+      dagBlocks: new Map([[1, ["    ◐ t1 One", "    · t2 Two"]]]),
+      queued: ["  ↳ queued: next"],
+      spinnerFrame: 0,
+    });
+    expect(lines).toEqual([
+      "  ◐ run_subagents",
+      "    ◐ t1 One",
+      "    · t2 Two",
+      "  ↳ queued: next",
+    ]);
+  });
+
+  test("concurrent owners keep their blocks separate, in tool start order", () => {
+    const lines = composeProgressLines({
+      activeTools: tools([
+        [1, "run_subagents"],
+        [2, "readFile", "a.ts"],
+        [3, "run_subagents"],
+      ]),
+      dagBlocks: new Map([
+        [3, ["    ◐ y1 Late"]],
+        [1, ["    ◐ x1 Early"]],
+      ]),
+      queued: [],
+      spinnerFrame: 0,
+    });
+    expect(lines).toEqual([
+      "  ◐ run_subagents",
+      "    ◐ x1 Early",
+      "  ◐ readFile a.ts",
+      "  ◐ run_subagents",
+      "    ◐ y1 Late",
+    ]);
+  });
+
+  test("ownerless blocks render first, un-nested", () => {
+    const lines = composeProgressLines({
+      activeTools: tools([[5, "bash", "ls"]]),
+      dagBlocks: new Map([[-1, ["  ◐ t1 Orphan"]]]),
+      queued: [],
+      spinnerFrame: 0,
+    });
+    expect(lines).toEqual(["  ◐ t1 Orphan", "  ◐ bash ls"]);
+  });
+});
+
+describe("formatChatStatus", () => {
+  test("shows the provider/model after the mode", () => {
+    expect(
+      formatChatStatus({
+        mode: "build",
+        model: "azure/gpt-5.6-sol",
+        sessionId: "s1",
+        runningJobs: 0,
+        busy: false,
+        interruptRequested: false,
+        spinnerFrame: 0,
+        turnStartedAt: null,
+        currentActivity: null,
+      }),
+    ).toBe("⏵ build · azure/gpt-5.6-sol · session s1 · 0 jobs · tab: mode · /help");
   });
 });
