@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
-
+import packageJson from "../package.json";
 import { type Agent, createAgent as createProductionAgent, type ToolActivity } from "./lib/agent";
 import { createSessionPermissionGate, type PermissionGate } from "./lib/agent/permissions";
 import {
@@ -51,7 +51,7 @@ import {
 import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
 import { resolveProjectSource } from "./lib/workspace/project-source";
 
-const COMMAND_VERSION = "0.0.0";
+const COMMAND_VERSION = packageJson.version;
 
 const safeChildIdSegment = (value: string): string =>
   value
