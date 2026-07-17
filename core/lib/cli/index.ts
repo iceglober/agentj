@@ -168,7 +168,11 @@ const writeResult = (
   }
 
   const { exitCode, into, message } = result.error.config;
-  (into === "stdout" ? writers.stdout : writers.stderr).write(message);
+  // cmd-ts messages (--help, --version) carry no trailing newline; writing
+  // them verbatim leaves the shell prompt glued to the output.
+  (into === "stdout" ? writers.stdout : writers.stderr).write(
+    message.endsWith("\n") ? message : `${message}\n`,
+  );
   return exitCode;
 };
 
