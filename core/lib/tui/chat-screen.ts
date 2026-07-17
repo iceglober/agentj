@@ -412,6 +412,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       stdin.removeListener("data", onData);
       stdout.removeListener("resize", onResize);
       if (stdin.setRawMode) stdin.setRawMode(previousRawMode);
+      // A resumed stdin is a live handle that keeps the runtime alive after
+      // the chat loop returns; without this, /quit tears down but never exits.
+      stdin.pause?.();
       clearLive();
       const asks = pendingAsk ? [pendingAsk, ...askQueue] : [...askQueue];
       pendingAsk = null;
