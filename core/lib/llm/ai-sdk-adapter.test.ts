@@ -7,6 +7,7 @@ type AgentOptions = Record<string, unknown>;
 
 const constructedAgents: AgentOptions[] = [];
 const generateCalls: Record<string, unknown>[] = [];
+const jsonSchemaCalls: unknown[] = [];
 let nextResult: Record<string, unknown>;
 
 class FakeToolLoopAgent {
@@ -22,6 +23,10 @@ class FakeToolLoopAgent {
 
 mock.module("ai", () => ({
   ToolLoopAgent: FakeToolLoopAgent,
+  jsonSchema: (schema: unknown) => {
+    jsonSchemaCalls.push(schema);
+    return { schema };
+  },
   stepCountIs: (count: number) => ({ count }),
   tool: <T>(definition: T) => definition,
 }));
@@ -46,6 +51,7 @@ function request(tools: ToolSet = {}): GenerateRequest {
 function resetResult(usage: Record<string, unknown>) {
   constructedAgents.length = 0;
   generateCalls.length = 0;
+  jsonSchemaCalls.length = 0;
   nextResult = { text: output, steps: [], usage };
 }
 
@@ -91,6 +97,44 @@ describe("createAiSdkRuntime", () => {
     expect(constructedAgents).toHaveLength(1);
     expect(constructedAgents[0].toolOrder).toEqual(["alpha", "middle", "zebra"]);
     expect(Object.keys(constructedAgents[0].tools as object)).toEqual(["alpha", "middle", "zebra"]);
+  });
+
+  test("maps provider-neutral JSON Schema through the AI SDK helper", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    const schema = {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    };
+    const tools = {
+      search: {
+        description: "search",
+        inputSchema: z.object({ query: z.string() }),
+        jsonSchema: schema,
+        execute: async () => "result",
+      },
+    } as ToolSet;
+
+    await createAiSdkRuntime(config).generate(request(tools));
+
+    expect(jsonSchemaCalls).toEqual([schema]);
+    expect(
+      (constructedAgents[0].tools as Record<string, { inputSchema: unknown }>).search.inputSchema,
+    ).toEqual({ schema });
+  });
+
+  test("passes Zod schemas directly without invoking the JSON Schema helper", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    const inputSchema = z.object({ query: z.string() });
+
+    await createAiSdkRuntime(config).generate(
+      request({ search: { description: "search", inputSchema, execute: async () => "result" } }),
+    );
+
+    expect(jsonSchemaCalls).toEqual([]);
+    expect(
+      (constructedAgents[0].tools as Record<string, { inputSchema: unknown }>).search.inputSchema,
+    ).toBe(inputSchema);
   });
 
   test("marks structured nonzero command results as tool errors", async () => {

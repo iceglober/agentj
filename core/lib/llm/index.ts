@@ -16,6 +16,8 @@ import { azureModelConfigSchema } from "./azure-adapter";
 export interface ToolDef<S extends z.ZodType = z.ZodType> {
   description: string;
   inputSchema: S;
+  /** Provider-neutral JSON Schema override for runtimes that support it. */
+  jsonSchema?: Record<string, unknown>;
   execute: (input: z.infer<S>, options?: unknown) => Promise<unknown> | unknown;
 }
 

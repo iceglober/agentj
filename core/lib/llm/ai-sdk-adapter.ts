@@ -1,5 +1,6 @@
 import {
   type ToolSet as AiToolSet,
+  jsonSchema,
   type LanguageModel,
   type ModelMessage,
   stepCountIs,
@@ -97,7 +98,10 @@ const mapStep = (step: AiStepLike): RunStep => ({
 const toAiTool = (def: ToolDef) =>
   tool({
     description: def.description,
-    inputSchema: def.inputSchema,
+    inputSchema:
+      def.jsonSchema !== undefined
+        ? jsonSchema(def.jsonSchema as Parameters<typeof jsonSchema>[0])
+        : def.inputSchema,
     execute: (input, options) => def.execute(input, options),
   });
 
