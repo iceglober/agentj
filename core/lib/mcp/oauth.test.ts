@@ -93,12 +93,12 @@ const createFakeOAuthServer = (options: { callbackState?: "echo" | "wrong" } = {
     registeredRedirects: [] as string[],
     tokenRequests: [] as URLSearchParams[],
   };
+  let origin = "";
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     async fetch(request) {
       const url = new URL(request.url);
-      const origin = `http://127.0.0.1:${server.port}`;
       if (url.pathname === "/mcp" || url.pathname === "/") {
         return new Response(JSON.stringify({ error: "invalid_token" }), {
           status: 401,
@@ -165,7 +165,8 @@ const createFakeOAuthServer = (options: { callbackState?: "echo" | "wrong" } = {
       return new Response("Not found", { status: 404 });
     },
   });
-  return { server, seen, url: `http://127.0.0.1:${server.port}/mcp` };
+  origin = `http://127.0.0.1:${server.port}`;
+  return { server, seen, url: `${origin}/mcp` };
 };
 
 /** Stands in for the human: follow the authorize redirect back to the loopback. */
