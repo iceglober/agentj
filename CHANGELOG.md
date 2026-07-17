@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.4
+
+### Patch Changes
+
+- f61bc0f: `aj --version` reports the real package version instead of a hardcoded `0.0.0`.
+
 ## 0.1.0-next.3
 
 ### Minor Changes

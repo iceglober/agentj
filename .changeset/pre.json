@@ -9,6 +9,7 @@
     "chat-first-rewrite",
     "initial-v0.1",
     "mcp-support",
-    "npm-bin-launcher"
+    "npm-bin-launcher",
+    "version-flag"
   ]
 }
