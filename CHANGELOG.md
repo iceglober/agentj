@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.5
+
+### Patch Changes
+
+- b4a5dbb: `--version` and `--help` output ends with a newline, so the shell prompt no longer glues to it.
+
 ## 0.1.0-next.4
 
 ### Patch Changes

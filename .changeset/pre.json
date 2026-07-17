@@ -10,6 +10,7 @@
     "initial-v0.1",
     "mcp-support",
     "npm-bin-launcher",
-    "version-flag"
+    "version-flag",
+    "version-newline"
   ]
 }
