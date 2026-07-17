@@ -131,6 +131,20 @@ describe("createConfigCliHandlers", () => {
     expect(config.calls).toMatchObject([
       [{ type: "set", path: ["mcp", "servers", "docs"], value: server }],
     ]);
+
+    await expect(
+      handlers.set({
+        key: "mcp.servers.docs.headers.Authorization",
+        value: '"Bearer token"',
+      }),
+    ).resolves.toMatchObject({ ok: true, changed: true });
+    expect(config.calls.at(-1)).toEqual([
+      {
+        type: "set",
+        path: ["mcp", "servers", "docs", "headers", "Authorization"],
+        value: "Bearer token",
+      },
+    ]);
   });
 
   test("validates schema paths and mutates scalar and array values generically", async () => {

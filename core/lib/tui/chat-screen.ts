@@ -8,7 +8,12 @@ import {
   splitGraphemes,
 } from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
-import { findSlashCommandToken, type SlashCommandToken } from "./slash-completion";
+import {
+  findSlashCommandToken,
+  type SlashCompletionProvider,
+  type SlashCompletionSuggestion,
+  type SlashCompletionToken,
+} from "./slash-completion";
 import {
   displayWidth,
   escapeTerminalText,
@@ -48,6 +53,14 @@ export interface SlashCommandSuggestion {
   summary: string;
 }
 
+export interface AskInputOptions {
+  label: string;
+  masked?: boolean;
+  choices?: readonly string[];
+  /** Return an error message to keep the prompt open. */
+  validate?(text: string): string | null | undefined;
+}
+
 export interface CreateChatScreenOptions {
   stdin?: Readable;
   stdout?: Writable;
@@ -59,8 +72,12 @@ export interface CreateChatScreenOptions {
   quitWindowMs?: number;
   /** Previously submitted prompts, oldest first. */
   initialHistory?: readonly string[];
-  /** Suggestions for the initial slash-command token. */
+  /** Context-aware options for any slash-command token. */
+  slashCommandOptions?: SlashCompletionProvider;
+  /** Legacy initial-command suggestions. Prefer `slashCommandOptions`. */
   slashCommandSuggestions?(query: string): readonly SlashCommandSuggestion[];
+  /** Controls whether a submitted chat input is retained in in-memory history. */
+  shouldRememberInput?(text: string): boolean;
 }
 
 export interface ChatScreen {
@@ -76,6 +93,8 @@ export interface ChatScreen {
   setStatus(text: string): void;
   /** Modal single-key permission prompt in the live region. */
   askPermission(request: PermissionRequest): Promise<PermissionPromptDecision>;
+  /** Modal editor prompt. Escape cancels without submitting or retaining the value. */
+  askInput(options: AskInputOptions): Promise<string | null>;
 }
 
 export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
@@ -95,7 +114,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const decoder = new TerminalKeyDecoder();
   let editor: EditorState = createEditorState();
   const history = (options.initialHistory ?? [])
-    .filter((entry) => entry.trim().length > 0)
+    .filter((entry) => entry.trim().length > 0 && options.shouldRememberInput?.(entry) !== false)
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: string[] = [];
@@ -106,12 +125,22 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   let quitArmedAt = 0;
   let completionIndex = 0;
   let dismissedCompletion: string | null = null;
-  interface PendingAsk {
+  interface PendingPermission {
+    kind: "permission";
     request: PermissionRequest;
     resolve: (decision: PermissionPromptDecision) => void;
   }
-  let pendingAsk: PendingAsk | null = null;
-  const askQueue: PendingAsk[] = [];
+  interface PendingInput {
+    kind: "input";
+    options: AskInputOptions;
+    editor: EditorState;
+    selectedIndex: number;
+    error: string | null;
+    resolve: (value: string | null) => void;
+  }
+  type PendingModal = PendingPermission | PendingInput;
+  let pendingModal: PendingModal | null = null;
+  const modalQueue: PendingModal[] = [];
 
   const write = (text: string): void => {
     stdout.write(text);
@@ -127,36 +156,71 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     truncateToDisplayWidth(escapeTerminalText(line).replace(/\n+/gu, " "), contentWidth());
 
   interface ActiveCompletion {
-    token: SlashCommandToken;
-    suggestions: readonly SlashCommandSuggestion[];
+    token: SlashCompletionToken;
+    suggestions: readonly SlashCompletionSuggestion[];
     selectedIndex: number;
     signature: string;
+    hint?: string;
+    legacy: boolean;
+    legacyMovePastSeparator: boolean;
   }
 
   const editorSignature = (): string => `${editor.cursor}\u0000${editor.text}`;
 
   const activeCompletion = (): ActiveCompletion | null => {
-    const token = findSlashCommandToken(editor);
     const signature = editorSignature();
-    if (!token || dismissedCompletion === signature || !options.slashCommandSuggestions)
-      return null;
-    const suggestions = options.slashCommandSuggestions(token.query).slice(0, 7);
+    if (dismissedCompletion === signature) return null;
+
+    if (options.slashCommandOptions) {
+      const completion = options.slashCommandOptions(editor);
+      if (!completion || (completion.suggestions.length === 0 && !completion.hint)) return null;
+      const length = splitGraphemes(editor.text).length;
+      const start = Math.max(0, Math.min(completion.token.start, completion.token.end, length));
+      const end = Math.max(
+        start,
+        Math.min(Math.max(completion.token.start, completion.token.end), length),
+      );
+      const suggestions = completion.suggestions.slice(0, 7);
+      return {
+        token: { start, end },
+        suggestions,
+        selectedIndex: Math.max(0, Math.min(completionIndex, suggestions.length - 1)),
+        signature,
+        hint: completion.hint,
+        legacy: false,
+        legacyMovePastSeparator: false,
+      };
+    }
+
+    const token = findSlashCommandToken(editor);
+    if (!token || !options.slashCommandSuggestions) return null;
+    const hasSeparator = token.end < splitGraphemes(editor.text).length;
+    const suggestions = options
+      .slashCommandSuggestions(token.query)
+      .slice(0, 7)
+      .map(({ name, summary }) => ({
+        value: `/${name}${hasSeparator ? "" : " "}`,
+        label: `/${name}`,
+        summary,
+      }));
     if (suggestions.length === 0) return null;
     return {
       token,
       suggestions,
       selectedIndex: Math.min(completionIndex, suggestions.length - 1),
       signature,
+      legacy: true,
+      legacyMovePastSeparator: hasSeparator,
     };
   };
 
   const liveLines = (): LiveLayout => {
     const progress = progressLines.map(safeLine);
     const safeStatus = safeLine(status);
-    if (pendingAsk) {
+    if (pendingModal?.kind === "permission") {
       const askLines = [
         ...wrapToDisplayWidth(
-          `Permission ${escapeTerminalText(pendingAsk.request.tool)} — review request above`,
+          `Permission ${escapeTerminalText(pendingModal.request.tool)} — review request above`,
           contentWidth(),
         ),
         ...wrapToDisplayWidth("[y]es once · [a]lways this session · [n]o", contentWidth()),
@@ -168,16 +232,56 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         cursorColumn: displayWidth(askLines.at(-1) ?? ""),
       };
     }
+    if (pendingModal?.kind === "input") {
+      const prompt = pendingModal;
+      const labelLines = wrapToDisplayWidth(
+        escapeTerminalText(prompt.options.label),
+        contentWidth(),
+      );
+      const displayed = prompt.options.masked
+        ? {
+            ...prompt.editor,
+            text: splitGraphemes(prompt.editor.text)
+              .map((grapheme) => (grapheme === "\n" ? "\n" : "•"))
+              .join(""),
+          }
+        : prompt.editor;
+      const layout = renderEditorLayout(displayed, contentWidth());
+      const choiceLines = (prompt.options.choices ?? [])
+        .slice(0, 7)
+        .map((choice, index) =>
+          safeLine(`${index === prompt.selectedIndex ? "›" : " "} ${choice}`),
+        );
+      const errorLines = prompt.error
+        ? wrapToDisplayWidth(escapeTerminalText(prompt.error), contentWidth())
+        : [];
+      return {
+        lines: [
+          ...progress,
+          ...labelLines,
+          ...layout.rows,
+          ...choiceLines,
+          ...errorLines,
+          safeStatus,
+        ],
+        cursorRow: progress.length + labelLines.length + layout.cursorRow,
+        cursorColumn: layout.cursorColumn,
+      };
+    }
     const layout = renderEditorLayout(editor, contentWidth());
     const completion = activeCompletion();
     const completionLines =
-      completion?.suggestions.map((suggestion, index) =>
-        safeLine(
-          `${index === completion.selectedIndex ? "›" : " "} /${suggestion.name} — ${suggestion.summary}`,
-        ),
-      ) ?? [];
+      completion?.suggestions.map((suggestion, index) => {
+        const summary = suggestion.summary ? ` — ${suggestion.summary}` : "";
+        return safeLine(
+          `${index === completion.selectedIndex ? "›" : " "} ${suggestion.label ?? suggestion.value}${summary}`,
+        );
+      }) ?? [];
+    const hintLines = completion?.hint
+      ? wrapToDisplayWidth(escapeTerminalText(completion.hint), contentWidth())
+      : [];
     return {
-      lines: [...progress, ...layout.rows, ...completionLines, safeStatus],
+      lines: [...progress, ...layout.rows, ...completionLines, ...hintLines, safeStatus],
       cursorRow: progress.length + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
@@ -244,17 +348,26 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     }, options.escapeFlushMs ?? 40);
   };
 
-  const settleAsk = (decision: PermissionPromptDecision): void => {
-    const ask = pendingAsk;
-    if (!ask) return;
-    pendingAsk = askQueue.shift() ?? null;
-    ask.resolve(decision);
-    if (pendingAsk) printPermissionRequest(pendingAsk.request);
+  const activateModal = (): void => {
+    if (pendingModal?.kind === "permission") printPermissionRequest(pendingModal.request);
     else paint();
   };
 
-  const handleAskKey = (command: { type: string; text?: string }): void => {
-    if (!pendingAsk) return;
+  const settleModal = (
+    modal: PendingModal,
+    value: PermissionPromptDecision | string | null,
+  ): void => {
+    if (pendingModal !== modal) return;
+    pendingModal = modalQueue.shift() ?? null;
+    if (modal.kind === "permission") modal.resolve(value as PermissionPromptDecision);
+    else modal.resolve(value as string | null);
+    activateModal();
+  };
+
+  const handlePermissionKey = (
+    modal: PendingPermission,
+    command: { type: string; text?: string },
+  ): void => {
     const key = command.type === "insert" ? command.text?.toLowerCase() : null;
     const decision =
       key === "y"
@@ -264,20 +377,57 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           : key === "n" || command.type === "cancel" || command.type === "escape"
             ? "deny"
             : null;
-    if (decision) settleAsk(decision);
+    if (decision) settleModal(modal, decision);
+  };
+
+  const handleInputKey = (
+    modal: PendingInput,
+    command: ReturnType<TerminalKeyDecoder["push"]>[number],
+  ): void => {
+    if (command.type === "escape" || command.type === "cancel") {
+      settleModal(modal, null);
+      return;
+    }
+    const choices = modal.options.choices ?? [];
+    if ((command.type === "move-up" || command.type === "move-down") && choices.length > 0) {
+      const direction = command.type === "move-up" ? -1 : 1;
+      modal.selectedIndex = (modal.selectedIndex + direction + choices.length) % choices.length;
+      paint();
+      return;
+    }
+    if (command.type === "tab" && choices.length > 0) {
+      modal.editor = createEditorState(choices[modal.selectedIndex] ?? "");
+      modal.error = null;
+      paint();
+      return;
+    }
+    if (command.type === "submit") {
+      const text =
+        modal.editor.text.length === 0 ? (choices[modal.selectedIndex] ?? "") : modal.editor.text;
+      const error = modal.options.validate?.(text);
+      if (error) {
+        modal.error = error;
+        paint();
+        return;
+      }
+      settleModal(modal, text);
+      return;
+    }
+    modal.error = null;
+    modal.editor = applyEditorCommand(modal.editor, command);
+    paint();
   };
 
   const acceptCompletion = (completion: ActiveCompletion): void => {
     const selected = completion.suggestions[completion.selectedIndex];
     if (!selected) return;
-    const hasSeparator = completion.token.end < splitGraphemes(editor.text).length;
     editor = replaceEditorRange(
       editor,
       completion.token.start,
       completion.token.end,
-      `/${selected.name}${hasSeparator ? "" : " "}`,
+      selected.value,
     );
-    if (hasSeparator) editor = { ...editor, cursor: editor.cursor + 1 };
+    if (completion.legacyMovePastSeparator) editor = { ...editor, cursor: editor.cursor + 1 };
     historyIndex = null;
     completionIndex = 0;
     dismissedCompletion = editorSignature();
@@ -307,15 +457,19 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   };
 
   const handleCommand = (command: ReturnType<TerminalKeyDecoder["push"]>[number]): void => {
-    if (pendingAsk) {
-      handleAskKey(command);
+    if (pendingModal?.kind === "permission") {
+      handlePermissionKey(pendingModal, command);
+      return;
+    }
+    if (pendingModal?.kind === "input") {
+      handleInputKey(pendingModal, command);
       return;
     }
     const completion = activeCompletion();
     switch (command.type) {
       case "tab":
-        if (completion) acceptCompletion(completion);
-        else options.callbacks.onTab();
+        if (completion?.suggestions.length) acceptCompletion(completion);
+        else if (!completion) options.callbacks.onTab();
         return;
       case "escape":
         if (completion) {
@@ -324,17 +478,23 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         } else options.callbacks.onEscape();
         return;
       case "submit": {
-        const exact = completion?.suggestions.some(
-          ({ name }) => name.toLowerCase() === completion.token.query.toLowerCase(),
-        );
-        if (completion && !exact) {
+        const tokenText = completion
+          ? splitGraphemes(editor.text).slice(completion.token.start, completion.token.end).join("")
+          : "";
+        const selectedValue = completion?.suggestions[completion.selectedIndex]?.value;
+        const exact = completion?.legacy
+          ? selectedValue?.trimEnd().toLowerCase() === tokenText.toLowerCase()
+          : selectedValue?.trimEnd() === tokenText;
+        if (completion?.suggestions.length && !exact) {
           acceptCompletion(completion);
           return;
         }
         const text = editor.text;
         if (text.trim().length === 0) return;
-        if (history.at(-1) !== text) history.push(text);
-        if (history.length > 100) history.shift();
+        if (options.shouldRememberInput?.(text) !== false) {
+          if (history.at(-1) !== text) history.push(text);
+          if (history.length > 100) history.shift();
+        }
         historyIndex = null;
         editor = createEditorState();
         completionIndex = 0;
@@ -362,7 +522,10 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         return;
       }
       default:
-        if (completion && (command.type === "move-up" || command.type === "move-down")) {
+        if (
+          completion?.suggestions.length &&
+          (command.type === "move-up" || command.type === "move-down")
+        ) {
           const direction = command.type === "move-up" ? -1 : 1;
           completionIndex =
             (completion.selectedIndex + direction + completion.suggestions.length) %
@@ -416,10 +579,13 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       // the chat loop returns; without this, /quit tears down but never exits.
       stdin.pause?.();
       clearLive();
-      const asks = pendingAsk ? [pendingAsk, ...askQueue] : [...askQueue];
-      pendingAsk = null;
-      askQueue.length = 0;
-      for (const ask of asks) ask.resolve("deny");
+      const modals = pendingModal ? [pendingModal, ...modalQueue] : [...modalQueue];
+      pendingModal = null;
+      modalQueue.length = 0;
+      for (const modal of modals) {
+        if (modal.kind === "permission") modal.resolve("deny");
+        else modal.resolve(null);
+      }
       write("\r\n");
     },
 
@@ -440,11 +606,30 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     askPermission(request) {
       if (!started) return Promise.resolve("deny");
       return new Promise((resolve) => {
-        const ask = { request, resolve };
-        if (pendingAsk) askQueue.push(ask);
+        const modal: PendingPermission = { kind: "permission", request, resolve };
+        if (pendingModal) modalQueue.push(modal);
         else {
-          pendingAsk = ask;
-          printPermissionRequest(request);
+          pendingModal = modal;
+          activateModal();
+        }
+      });
+    },
+
+    askInput(inputOptions) {
+      if (!started) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        const modal: PendingInput = {
+          kind: "input",
+          options: inputOptions,
+          editor: createEditorState(),
+          selectedIndex: 0,
+          error: null,
+          resolve,
+        };
+        if (pendingModal) modalQueue.push(modal);
+        else {
+          pendingModal = modal;
+          activateModal();
         }
       });
     },

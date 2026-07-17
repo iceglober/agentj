@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createEditorState } from "./editor";
-import { findSlashCommandToken } from "./slash-completion";
+import { findSlashCommandToken, type SlashCompletionProvider } from "./slash-completion";
 
 describe("findSlashCommandToken", () => {
   test("finds an initial command with leading whitespace and an empty query", () => {
@@ -25,5 +25,19 @@ describe("findSlashCommandToken", () => {
   test("ignores inline slashes and non-command text", () => {
     expect(findSlashCommandToken(createEditorState("say /bld"))).toBeNull();
     expect(findSlashCommandToken(createEditorState("build/"))).toBeNull();
+  });
+
+  test("completion providers can inspect the full editor and target nested tokens", () => {
+    const provider: SlashCompletionProvider = ({ text, cursor }) => ({
+      token: { start: text.lastIndexOf(" ") + 1, end: cursor },
+      suggestions: [{ value: "typescript", label: "TypeScript", summary: "Use TS" }],
+      hint: `Completing ${text.slice(0, cursor)}`,
+    });
+
+    expect(provider(createEditorState("/config language type"))).toEqual({
+      token: { start: 17, end: 21 },
+      suggestions: [{ value: "typescript", label: "TypeScript", summary: "Use TS" }],
+      hint: "Completing /config language type",
+    });
   });
 });

@@ -1,5 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
+import { mcpServerConfigSchema } from "../mcp";
+import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
 import type { ChatEvent } from "./events";
 import type { JobRunner } from "./jobs";
@@ -20,8 +23,12 @@ export type ParsedInput =
 export function parseInput(raw: string): ParsedInput {
   const text = raw.trim();
   if (text.startsWith("/")) {
-    const [name = "", ...rest] = text.slice(1).split(/\s+/);
-    return { kind: "command", name: name.toLowerCase(), args: rest.join(" ") };
+    const match = text.slice(1).match(/^(\S+)(?:\s+([\s\S]*))?$/u);
+    return {
+      kind: "command",
+      name: (match?.[1] ?? "").toLowerCase(),
+      args: match?.[2] ?? "",
+    };
   }
   if (text.startsWith("&")) return { kind: "job", prompt: text.slice(1).trim() };
   return { kind: "message", text };
@@ -60,6 +67,17 @@ export interface ChatCommandContext {
   quit(): void;
   /** Clears the visible transcript (screen-level concern). */
   clear?(): void;
+  config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
+  mcp?: {
+    statuses(): readonly McpRuntimeStatus[];
+    reload(name?: string): Promise<void>;
+  };
+  askInput?(options: {
+    label: string;
+    masked?: boolean;
+    choices?: readonly string[];
+    validate?(text: string): string | null | undefined;
+  }): Promise<string | null>;
 }
 
 type ChatCommand = {
@@ -73,6 +91,256 @@ export interface ChatCommandSuggestion {
   name: string;
   summary: string;
 }
+
+const mcpActions = {
+  add: "Guided setup for a new server",
+  auth: "Set a server Authorization header securely",
+  reload: "Reload one or all servers",
+  remove: "Remove a configured server",
+  set: "Set an advanced server JSON definition",
+} as const;
+
+const configActions = {
+  get: "Read a global configuration value",
+  set: "Set a global configuration value",
+  delete: "Delete a global configuration value",
+} as const;
+
+const splitHead = (value: string): [string, string] => {
+  const match = value.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/u);
+  return [match?.[1] ?? "", match?.[2] ?? ""];
+};
+
+const isSensitiveConfigPath = (key: string): boolean =>
+  /(?:^|\.)(?:headers|env)(?:\.|$)/u.test(key) ||
+  /(?:api[_-]?key|token|secret|password)/iu.test(key);
+
+const serverNameError = (name: string): string | null =>
+  /^[A-Za-z0-9_-]+$/u.test(name) ? null : "Use letters, numbers, underscores, or hyphens.";
+
+const successful = (result: ConfigCliResult): boolean => result.ok;
+
+const reloadConfigPath = async (context: ChatCommandContext, key: string): Promise<void> => {
+  if (!key.startsWith("mcp.")) return;
+  const match = key.match(/^mcp\.servers\.([A-Za-z0-9_-]+)/u);
+  await context.mcp?.reload(match?.[1]);
+};
+
+const formatMcpStatus = (status: McpRuntimeStatus): string => {
+  const label = `${status.name} [${status.transport}]`;
+  if (status.state === "connecting") return `${label} — connecting`;
+  if (status.state === "ready") return `${label} — ${status.detail}`;
+  if (status.state === "connected") return `${label} — connected`;
+  return `${label} — ${status.detail}${status.usingPrevious ? " (using previous connection)" : ""}${status.resolution ? `\n  ${status.resolution}` : ""}`;
+};
+
+const requireConfig = (context: ChatCommandContext): ConfigCliHandlers | null => {
+  if (!context.config) {
+    context.emit({ type: "notice", text: "Configuration is unavailable in this session." });
+    return null;
+  }
+  return context.config as ConfigCliHandlers;
+};
+
+const runConfigCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
+  const [action, remainder] = splitHead(args);
+  if (!(action in configActions)) {
+    context.emit({ type: "notice", text: "Usage: /config get|set|delete <path> [JSON value]" });
+    return;
+  }
+  const handlers = requireConfig(context);
+  if (!handlers) return;
+  const [key, suppliedValue] = splitHead(remainder);
+  if (!key) {
+    context.emit({
+      type: "notice",
+      text: `Usage: /config ${action} <path>${action === "set" ? " [JSON value]" : ""}`,
+    });
+    return;
+  }
+  if (action === "get") {
+    if (isSensitiveConfigPath(key) || key === "mcp" || key.startsWith("mcp.servers")) {
+      context.emit({ type: "notice", text: `${key} is sensitive and cannot be displayed.` });
+      return;
+    }
+    await handlers.get({ key });
+    return;
+  }
+  if (action === "delete") {
+    const result = await handlers.delete({ key });
+    if (successful(result)) await reloadConfigPath(context, key);
+    return;
+  }
+
+  if (key === "providers.azure.api_key" || key === "agent.llm.providers.azure.apiKey") {
+    const result = await handlers.set({ key, secret: true });
+    if (successful(result)) await reloadConfigPath(context, key);
+    return;
+  }
+  let value = suppliedValue;
+  if (!value) {
+    const entered = await context.askInput?.({
+      label: `Value for ${key}`,
+      masked: isSensitiveConfigPath(key),
+    });
+    if (entered === null || entered === undefined) {
+      context.emit({ type: "notice", text: "Configuration update cancelled." });
+      return;
+    }
+    value = isSensitiveConfigPath(key) ? JSON.stringify(entered) : entered;
+  }
+  const result = await handlers.set({ key, value });
+  if (successful(result)) await reloadConfigPath(context, key);
+};
+
+const setMcpServer = async (
+  context: ChatCommandContext,
+  name: string,
+  definition: unknown,
+): Promise<boolean> => {
+  const parsed = mcpServerConfigSchema.safeParse(definition);
+  if (!parsed.success) {
+    context.emit({ type: "notice", text: `Invalid MCP server definition for ${name}.` });
+    return false;
+  }
+  const handlers = requireConfig(context);
+  if (!handlers) return false;
+  const result = await handlers.set({
+    key: `mcp.servers.${name}`,
+    value: JSON.stringify(parsed.data),
+  });
+  if (!successful(result)) return false;
+  await context.mcp?.reload(name);
+  return true;
+};
+
+const addMcpServer = async (context: ChatCommandContext): Promise<void> => {
+  if (!context.askInput) {
+    context.emit({ type: "notice", text: "Guided input is unavailable in this session." });
+    return;
+  }
+  const name = await context.askInput({ label: "MCP server name", validate: serverNameError });
+  if (!name) return;
+  const transport = await context.askInput({
+    label: "Transport",
+    choices: ["http", "stdio"],
+    validate: (value) => (["http", "stdio"].includes(value) ? null : "Choose http or stdio."),
+  });
+  if (!transport) return;
+  if (transport === "http") {
+    const url = await context.askInput({
+      label: "MCP URL",
+      validate: (value) => {
+        try {
+          new URL(value);
+          return null;
+        } catch {
+          return "Enter a valid HTTP URL.";
+        }
+      },
+    });
+    if (!url) return;
+    await setMcpServer(context, name, { transport, url });
+    return;
+  }
+  const command = await context.askInput({
+    label: "Server command",
+    validate: (value) => (value.trim() ? null : "Command is required."),
+  });
+  if (!command) return;
+  const args = await context.askInput({
+    label: "Arguments as a JSON array (Enter for none)",
+    choices: ["[]"],
+    validate: (value) => {
+      try {
+        return Array.isArray(JSON.parse(value)) ? null : "Enter a JSON array.";
+      } catch {
+        return "Enter a JSON array.";
+      }
+    },
+  });
+  if (args === null) return;
+  await setMcpServer(context, name, { transport, command, args: JSON.parse(args) });
+};
+
+const runMcpCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
+  const [action, remainder] = splitHead(args);
+  if (!action) {
+    const statuses = context.mcp?.statuses() ?? [];
+    context.emit({
+      type: "notice",
+      text:
+        statuses.length === 0
+          ? "No MCP servers configured. Run /mcp add."
+          : statuses.map(formatMcpStatus).join("\n"),
+    });
+    return;
+  }
+  if (!(action in mcpActions)) {
+    context.emit({ type: "notice", text: "Usage: /mcp add|auth|reload|remove|set" });
+    return;
+  }
+  if (action === "add") {
+    await addMcpServer(context);
+    return;
+  }
+  const [name, value] = splitHead(remainder);
+  if (action === "reload") {
+    await context.mcp?.reload(name || undefined);
+    context.emit({
+      type: "notice",
+      text: `${name || "All MCP servers"} reloaded; successful changes apply on the next turn.`,
+    });
+    return;
+  }
+  if (!name || serverNameError(name)) {
+    context.emit({
+      type: "notice",
+      text: `Usage: /mcp ${action} <server>${action === "set" ? " <JSON>" : ""}`,
+    });
+    return;
+  }
+  if (action === "remove") {
+    const handlers = requireConfig(context);
+    if (!handlers) return;
+    const result = await handlers.delete({ key: `mcp.servers.${name}` });
+    if (successful(result)) await context.mcp?.reload(name);
+    return;
+  }
+  if (action === "auth") {
+    const server = context.mcp?.statuses().find((candidate) => candidate.name === name);
+    if (server && server.transport !== "http") {
+      context.emit({
+        type: "notice",
+        text: `${name} uses stdio. Configure its env or envFrom mapping with /config set.`,
+      });
+      return;
+    }
+    const secret = await context.askInput?.({
+      label: `Authorization header for ${name}`,
+      masked: true,
+      validate: (entered) => (entered.length > 0 ? null : "Value is required."),
+    });
+    if (!secret) return;
+    const handlers = requireConfig(context);
+    if (!handlers) return;
+    const result = await handlers.set({
+      key: `mcp.servers.${name}.headers.Authorization`,
+      value: JSON.stringify(secret),
+    });
+    if (successful(result)) await context.mcp?.reload(name);
+    return;
+  }
+  if (!value) {
+    context.emit({ type: "notice", text: "Usage: /mcp set <server> <JSON definition>" });
+    return;
+  }
+  try {
+    await setMcpServer(context, name, JSON.parse(value));
+  } catch {
+    context.emit({ type: "notice", text: "MCP server definition must be valid JSON." });
+  }
+};
 
 /** Registry keyed by command name — same idiom as checkGraders/editModes. */
 export const chatCommands: Record<string, ChatCommand> = {
@@ -90,6 +358,14 @@ export const chatCommands: Record<string, ChatCommand> = {
       );
       context.emit({ type: "notice", text: lines.join("\n") });
     },
+  },
+  mcp: {
+    summary: "Manage and reload MCP servers",
+    run: runMcpCommand,
+  },
+  config: {
+    summary: "Read or update global configuration",
+    run: runConfigCommand,
   },
   build: {
     summary: "Switch to build mode and implement the plan",
@@ -215,6 +491,182 @@ export function suggestChatCommands(query: string): ChatCommandSuggestion[] {
     .map(({ name, summary }) => ({ name, summary }));
 }
 
+export interface ChatInputCompletion {
+  token: { start: number; end: number };
+  suggestions: Array<{ value: string; label?: string; summary?: string }>;
+  hint?: string;
+}
+
+const configKeySummary: Record<string, string> = {
+  "agent.llm.model": "Model name",
+  "agent.llm.provider": "Model provider",
+  "agent.steps": "Per-turn step limit",
+  "agent.tools.edit.mode": "Edit strategy",
+  "agent.tools.subagents.concurrency": "Parallel subagents",
+  "agent.tools.subagents.model": "Subagent model",
+  "permissions.edit": "Edit permission policy",
+  "permissions.bash.default": "Default bash permission policy",
+  "mcp.maxOutputChars": "Maximum MCP result size",
+};
+const baseConfigKeys = [
+  ...new Set([...listConfigPaths(), "llm.model", "providers.azure.api_key"]),
+].map((key) => [key, configKeySummary[key] ?? "Configuration value"] as const);
+
+const choiceValues: Record<string, readonly string[]> = {
+  "agent.llm.provider": ["azure"],
+  "agent.tools.edit.mode": ["batch", "exact", "hash"],
+  "permissions.edit": ["allow", "ask", "deny"],
+  "permissions.bash.default": ["allow", "ask", "deny"],
+};
+
+const prefixedSuggestions = (
+  values: ReadonlyArray<readonly [string, string]>,
+  prefix: string,
+  suffix = " ",
+) =>
+  values
+    .filter(([value]) => value.toLowerCase().startsWith(prefix.toLowerCase()))
+    .map(([value, summary]) => ({ value: `${value}${suffix}`, label: value, summary }));
+
+/** Pure, synchronous command-palette completion. It reads only in-memory MCP status. */
+export function completeChatInput(
+  text: string,
+  cursor: number,
+  context?: Pick<ChatCommandContext, "mcp">,
+): ChatInputCompletion | null {
+  const graphemes = Array.from(text);
+  const boundedCursor = Math.max(0, Math.min(cursor, graphemes.length));
+  const first = graphemes.findIndex((value) => !/^\s$/u.test(value));
+  if (first < 0 || graphemes[first] !== "/" || boundedCursor <= first) return null;
+  let start = boundedCursor;
+  while (start > first && !/^\s$/u.test(graphemes[start - 1] ?? "")) start -= 1;
+  let end = boundedCursor;
+  while (end < graphemes.length && !/^\s$/u.test(graphemes[end] ?? "")) end += 1;
+  const prefix = graphemes.slice(start, boundedCursor).join("");
+  const prior = graphemes
+    .slice(first + 1, start)
+    .join("")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+  const token = { start, end };
+
+  if (start === first) {
+    return {
+      token,
+      suggestions: suggestChatCommands(prefix.slice(1)).map(({ name, summary }) => ({
+        value: `/${name} `,
+        label: `/${name}`,
+        summary,
+      })),
+    };
+  }
+
+  const [command, ...args] = prior;
+  if (command === "mcp") {
+    if (args.length === 0) {
+      return {
+        token,
+        suggestions: prefixedSuggestions(Object.entries(mcpActions), prefix),
+        hint: "Choose an MCP action; /mcp by itself shows status.",
+      };
+    }
+    const action = args[0];
+    const servers = context?.mcp?.statuses() ?? [];
+    const serverNames = servers.map(({ name }) => [name, "Configured MCP server"] as const);
+    if (["auth", "reload", "remove"].includes(action ?? "") && args.length === 1) {
+      const eligibleNames =
+        action === "auth"
+          ? servers
+              .filter(({ transport }) => transport === "http")
+              .map(({ name }) => [name, "HTTP MCP server"] as const)
+          : serverNames;
+      return {
+        token,
+        suggestions: prefixedSuggestions(eligibleNames, prefix),
+        hint:
+          action === "reload"
+            ? "Leave server blank to reload all servers."
+            : "Choose a configured server.",
+      };
+    }
+    if (action === "set" && args.length === 1) {
+      return {
+        token,
+        suggestions: prefixedSuggestions(serverNames, prefix),
+        hint: "Choose an existing server or type a new server name.",
+      };
+    }
+    return {
+      token,
+      suggestions: [],
+      hint:
+        action === "add"
+          ? "Press Enter to start guided server setup."
+          : action === "set"
+            ? "Expected: JSON server definition."
+            : action === "auth"
+              ? "Press Enter for masked Authorization entry."
+              : undefined,
+    };
+  }
+
+  if (command === "config") {
+    if (args.length === 0) {
+      return {
+        token,
+        suggestions: prefixedSuggestions(Object.entries(configActions), prefix),
+        hint: "Choose a configuration action.",
+      };
+    }
+    const action = args[0];
+    const serverKeys = (context?.mcp?.statuses() ?? []).flatMap(({ name }) => [
+      [`mcp.servers.${name}`, `${name} server definition`] as const,
+      [`mcp.servers.${name}.headers.Authorization`, `${name} Authorization header`] as const,
+      [`mcp.servers.${name}.url`, `${name} HTTP URL`] as const,
+      [`mcp.servers.${name}.command`, `${name} stdio command`] as const,
+    ]);
+    const keys = [...baseConfigKeys, ...serverKeys];
+    if (["get", "set", "delete"].includes(action ?? "") && args.length === 1) {
+      return {
+        token,
+        suggestions: prefixedSuggestions(keys, prefix),
+        hint: "Choose a configuration path.",
+      };
+    }
+    if (action === "set" && args.length === 2) {
+      const key = args[1] ?? "";
+      const values = choiceValues[key];
+      return {
+        token,
+        suggestions: values
+          ? prefixedSuggestions(
+              values.map((value) => [value, `Set ${key}`]),
+              prefix,
+              "",
+            )
+          : [],
+        hint: values
+          ? "Choose a value."
+          : isSensitiveConfigPath(key)
+            ? "Press Enter for masked entry."
+            : "Expected: JSON value.",
+      };
+    }
+  }
+  return null;
+}
+
+export const shouldRememberChatInput = (text: string): boolean => {
+  const parsed = parseInput(text);
+  if (parsed.kind !== "command") return true;
+  const [action] = splitHead(parsed.args);
+  return !(
+    (parsed.name === "config" && action === "set") ||
+    (parsed.name === "mcp" && action === "set")
+  );
+};
+
 export async function runChatCommand(
   context: ChatCommandContext,
   name: string,
@@ -226,5 +678,12 @@ export async function runChatCommand(
     context.emit({ type: "notice", text: `Unknown command /${name} — try /help.` });
     return;
   }
-  await command.run(context, args);
+  try {
+    await command.run(context, args);
+  } catch {
+    context.emit({
+      type: "notice",
+      text: `Command /${name} failed. Check the configuration and retry.`,
+    });
+  }
 }

@@ -85,7 +85,10 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
   const client = new Client({ name: `agentj-${name}`, version: "0.1.0" });
   let connected = false;
   try {
-    await client.connect(transport);
+    await client.connect(transport, {
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
+    });
     connected = true;
     const capabilities = client.getServerCapabilities();
     const listeners = new Set<(kind: "tools" | "resources") => void>();

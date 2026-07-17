@@ -4,7 +4,12 @@ import z from "zod";
 import { agentConfigSchema } from "../agent";
 import { permissionsConfigSchema } from "../agent/permissions";
 import { evalConfigSchema } from "../eval/config";
-import { mcpConfigSchema } from "../mcp";
+import {
+  type McpConfig,
+  type McpServerConfig,
+  mcpConfigSchema,
+  mcpServerConfigSchema,
+} from "../mcp";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
 import { sessionConfigSchema } from "../session";
 import { projectSetupConfigSchema } from "../workspace";
@@ -263,4 +268,87 @@ export async function loadConfig(path?: string, options: ConfigLoadOptions = {})
     : {};
 
   return configSchema.parse(mergeConfig(defaults, global, supplied));
+}
+
+export interface McpConfigIssue {
+  name: string;
+  detail: string;
+  resolution: string;
+}
+
+/** Load chat config without allowing one malformed MCP server to block the TUI. */
+export async function loadChatConfig(
+  path?: string,
+  options: ConfigLoadOptions = {},
+): Promise<{ config: Config; mcpIssues: McpConfigIssue[] }> {
+  const defaults = configSchema.parse({}) as ConfigObject;
+  const global = await readGlobalConfig(options);
+  const supplied = path
+    ? await readJsonObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
+    : {};
+  const merged = mergeConfig(defaults, global, supplied);
+  const rawMcp = merged.mcp;
+  const mcpDefaults = mcpConfigSchema.parse({});
+  const issues: McpConfigIssue[] = [];
+  let maxOutputChars = mcpDefaults.maxOutputChars;
+  let rawServers: ConfigObject = {};
+
+  if (!isObject(rawMcp)) {
+    issues.push({
+      name: "configuration",
+      detail: "mcp must be an object",
+      resolution: "Run /config delete mcp or fix the supplied config file.",
+    });
+  } else {
+    if (Object.hasOwn(rawMcp, "maxOutputChars")) {
+      const parsed = mcpConfigSchema.safeParse({
+        servers: {},
+        maxOutputChars: rawMcp.maxOutputChars,
+      });
+      if (parsed.success) maxOutputChars = parsed.data.maxOutputChars;
+      else {
+        issues.push({
+          name: "configuration",
+          detail: "mcp.maxOutputChars is invalid",
+          resolution: "Run /config set mcp.maxOutputChars <number>.",
+        });
+      }
+    }
+    if (rawMcp.servers === undefined) rawServers = {};
+    else if (isObject(rawMcp.servers)) rawServers = rawMcp.servers;
+    else {
+      issues.push({
+        name: "configuration",
+        detail: "mcp.servers must be an object",
+        resolution: "Run /config delete mcp.servers or fix the supplied config file.",
+      });
+    }
+  }
+
+  const servers: Record<string, McpServerConfig> = {};
+  for (const [name, server] of Object.entries(rawServers)) {
+    if (!/^[A-Za-z0-9_-]+$/u.test(name)) {
+      issues.push({
+        name,
+        detail: "server name must use letters, numbers, underscores, or hyphens",
+        resolution: "Rename or remove this server in the config file.",
+      });
+      continue;
+    }
+    const parsed = mcpServerConfigSchema.safeParse(server);
+    if (parsed.success) servers[name] = parsed.data;
+    else {
+      const first = parsed.error.issues[0];
+      const field = first?.path.length ? `.${first.path.join(".")}` : "";
+      issues.push({
+        name,
+        detail: `invalid mcp.servers.${name}${field}: ${first?.message ?? "invalid value"}`,
+        resolution: `Run /mcp set ${name} with a valid definition, or /mcp remove ${name}.`,
+      });
+    }
+  }
+
+  const config = configSchema.parse({ ...merged, mcp: {} });
+  config.mcp = { servers, maxOutputChars } satisfies McpConfig;
+  return { config, mcpIssues: issues };
 }

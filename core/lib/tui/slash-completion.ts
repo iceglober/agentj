@@ -7,6 +7,30 @@ export interface SlashCommandToken {
   query: string;
 }
 
+export interface SlashCompletionToken {
+  /** Grapheme offsets for the text replaced when a suggestion is accepted. */
+  start: number;
+  end: number;
+}
+
+export interface SlashCompletionSuggestion {
+  /** Exact text inserted in place of the token. */
+  value: string;
+  /** Display text when it should differ from the inserted value. */
+  label?: string;
+  summary?: string;
+}
+
+export interface SlashCompletion {
+  token: SlashCompletionToken;
+  suggestions: readonly SlashCompletionSuggestion[];
+  /** Context displayed beneath the suggestions. */
+  hint?: string;
+}
+
+/** Completion providers receive the complete editor text and grapheme cursor. */
+export type SlashCompletionProvider = (state: EditorState) => SlashCompletion | null;
+
 /** Find the initial slash-command token when the cursor is editing that token. */
 export function findSlashCommandToken(state: EditorState): SlashCommandToken | null {
   const value = splitGraphemes(state.text);

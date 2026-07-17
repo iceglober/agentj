@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   type ChatCommandContext,
+  completeChatInput,
   expandAtFiles,
   parseInput,
   runChatCommand,
+  shouldRememberChatInput,
   suggestChatCommands,
 } from "./commands";
 import type { ChatEvent } from "./events";
@@ -31,6 +33,23 @@ describe("parseInput", () => {
       kind: "message",
       text: "first\n\n\n\nsecond",
     });
+    expect(parseInput('/mcp set docs {\n  "label":"a  b"\n}')).toEqual({
+      kind: "command",
+      name: "mcp",
+      args: 'set docs {\n  "label":"a  b"\n}',
+    });
+  });
+});
+
+describe("command history policy", () => {
+  test("does not retain configuration payloads", () => {
+    expect(
+      shouldRememberChatInput('/config set mcp.servers.docs.headers.Authorization "secret"'),
+    ).toBe(false);
+    expect(shouldRememberChatInput('/mcp set docs {"headers":{"Authorization":"secret"}}')).toBe(
+      false,
+    );
+    expect(shouldRememberChatInput("/mcp reload docs")).toBe(true);
   });
 });
 
@@ -38,6 +57,8 @@ describe("suggestChatCommands", () => {
   test("returns registry order for an empty query and matches case-insensitively", () => {
     expect(suggestChatCommands("").map(({ name }) => name)).toEqual([
       "help",
+      "mcp",
+      "config",
       "build",
       "jobs",
       "undo",
@@ -54,6 +75,40 @@ describe("suggestChatCommands", () => {
     expect(suggestChatCommands("bld").map(({ name }) => name)).toEqual(["build"]);
     expect(suggestChatCommands("ud")[0]?.name).toBe("undo");
     expect(suggestChatCommands("zzz")).toEqual([]);
+  });
+});
+
+describe("completeChatInput", () => {
+  const context = {
+    mcp: {
+      statuses: () => [
+        { name: "github", transport: "http" as const, state: "connected" as const },
+        { name: "docs", transport: "stdio" as const, state: "connecting" as const },
+      ],
+      reload: async () => {},
+    },
+  };
+
+  test("guides nested MCP actions and dynamic server arguments", () => {
+    const actionInput = "/mcp re";
+    const action = completeChatInput(actionInput, actionInput.length, context);
+    expect(action?.suggestions[0]).toMatchObject({ value: "reload ", label: "reload" });
+    const serverInput = "/mcp reload g";
+    const server = completeChatInput(serverInput, serverInput.length, context);
+    expect(server?.suggestions[0]).toMatchObject({ value: "github ", label: "github" });
+    expect(server?.hint).toContain("reload all");
+  });
+
+  test("enumerates schema config paths and enum values with contextual hints", () => {
+    const keyInput = "/config set agent.tools.e";
+    const key = completeChatInput(keyInput, keyInput.length, context);
+    expect(key?.suggestions.map(({ label }) => label)).toContain("agent.tools.edit.mode");
+    const valueInput = "/config set agent.tools.edit.mode ";
+    const value = completeChatInput(valueInput, valueInput.length, context);
+    expect(value?.suggestions.map(({ label }) => label)).toEqual(["batch", "exact", "hash"]);
+    const secretInput = "/config set mcp.servers.github.headers.Authorization ";
+    const secret = completeChatInput(secretInput, secretInput.length, context);
+    expect(secret?.hint).toContain("masked");
   });
 });
 
@@ -119,7 +174,17 @@ describe("runChatCommand", () => {
     await runChatCommand(context, "help", "");
     expect(events[0]).toEqual({ type: "command", name: "help" });
     const text = (events[1] as { text: string }).text;
-    for (const name of ["/help", "/build", "/jobs", "/undo", "/redo", "/clear", "/quit"]) {
+    for (const name of [
+      "/help",
+      "/mcp",
+      "/config",
+      "/build",
+      "/jobs",
+      "/undo",
+      "/redo",
+      "/clear",
+      "/quit",
+    ]) {
       expect(text).toContain(name);
     }
     expect(text).toContain("complete a shown command");
@@ -163,6 +228,76 @@ describe("runChatCommand", () => {
 
     await runChatCommand(context, "wat", "");
     expect((events.at(-1) as { text: string }).text).toContain("/help");
+  });
+
+  test("manages MCP configuration and reloads the affected server", async () => {
+    const { context, events } = makeContext();
+    const sets: Array<{ key: string; value?: string }> = [];
+    const deletes: string[] = [];
+    const reloads: Array<string | undefined> = [];
+    context.config = {
+      get: async ({ key }) => ({ ok: true, key, storage: "global_config", value: null }),
+      set: async (input) => {
+        sets.push(input);
+        return { ok: true, key: input.key, storage: "global_config", changed: true };
+      },
+      delete: async ({ key }) => {
+        deletes.push(key);
+        return { ok: true, key, storage: "global_config", changed: true };
+      },
+    };
+    context.mcp = {
+      statuses: () => [{ name: "docs", transport: "http", state: "connected" }],
+      reload: async (name) => {
+        reloads.push(name);
+      },
+    };
+
+    await runChatCommand(
+      context,
+      "mcp",
+      'set docs {"transport":"http","url":"https://example.com/mcp"}',
+    );
+    expect(sets[0]?.key).toBe("mcp.servers.docs");
+    expect(reloads).toEqual(["docs"]);
+    await runChatCommand(context, "mcp", "remove docs");
+    expect(deletes).toEqual(["mcp.servers.docs"]);
+    expect(reloads).toEqual(["docs", "docs"]);
+
+    await runChatCommand(context, "mcp", "");
+    expect((events.at(-1) as { text: string }).text).toContain("docs [http] — connected");
+  });
+
+  test("guides MCP add and masked auth without placing values in command arguments", async () => {
+    const { context } = makeContext();
+    const answers = ["docs", "http", "https://example.com/mcp", "Bearer token"];
+    const asks: Array<{ label: string; masked?: boolean }> = [];
+    const sets: Array<{ key: string; value?: string }> = [];
+    context.askInput = async (options) => {
+      asks.push(options);
+      return answers.shift() ?? null;
+    };
+    context.config = {
+      get: async ({ key }) => ({ ok: true, key, storage: "global_config" }),
+      set: async (input) => {
+        sets.push(input);
+        return { ok: true, key: input.key, storage: "global_config", changed: true };
+      },
+      delete: async ({ key }) => ({ ok: true, key, storage: "global_config", changed: true }),
+    };
+    context.mcp = { statuses: () => [], reload: async () => {} };
+
+    await runChatCommand(context, "mcp", "add");
+    await runChatCommand(context, "mcp", "auth docs");
+    expect(JSON.parse(sets[0]?.value ?? "{}")).toMatchObject({
+      transport: "http",
+      url: "https://example.com/mcp",
+    });
+    expect(sets[1]).toEqual({
+      key: "mcp.servers.docs.headers.Authorization",
+      value: '"Bearer token"',
+    });
+    expect(asks.at(-1)?.masked).toBe(true);
   });
 
   test("quit ends the session", async () => {

@@ -3,6 +3,7 @@ import {
   type ConfigFileSystem,
   configSchema,
   deleteGlobalConfigValue,
+  loadChatConfig,
   loadConfig,
   mergeConfig,
   mutateGlobalConfig,
@@ -134,6 +135,32 @@ describe("global config reads and merges", () => {
       list: ["project"],
       scalar: "project",
     });
+  });
+
+  test("loads valid MCP servers while reporting malformed peers without weakening other config", async () => {
+    const fixture = makeFileSystem({
+      [globalPath]: JSON.stringify({
+        agent: { steps: 42 },
+        mcp: {
+          servers: {
+            good: { transport: "http", url: "https://example.com/mcp" },
+            bad: { transport: "http", url: "not a url" },
+          },
+        },
+      }),
+    });
+
+    const loaded = await loadChatConfig(undefined, globalOptions(fixture.fileSystem));
+
+    expect(loaded.config.agent.steps).toBe(42);
+    expect(Object.keys(loaded.config.mcp.servers)).toEqual(["good"]);
+    expect(loaded.mcpIssues).toEqual([
+      expect.objectContaining({
+        name: "bad",
+        detail: expect.stringContaining("mcp.servers.bad.url"),
+        resolution: expect.stringContaining("/mcp remove bad"),
+      }),
+    ]);
   });
 
   test("merges defaults, global, then project config recursively while project arrays and scalars replace", async () => {

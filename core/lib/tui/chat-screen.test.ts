@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { suggestChatCommands } from "../chat/commands";
-import { type ChatScreenCallbacks, createChatScreen } from "./chat-screen";
+import {
+  type ChatScreenCallbacks,
+  type CreateChatScreenOptions,
+  createChatScreen,
+} from "./chat-screen";
 import { displayWidth } from "./terminal-editor";
 
 class FakeInput extends PassThrough {
@@ -17,6 +21,9 @@ class FakeInput extends PassThrough {
 function makeScreen(
   over: Partial<ChatScreenCallbacks> = {},
   initialHistory: readonly string[] = [],
+  screenOptions: Partial<
+    Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput">
+  > = {},
 ) {
   const input = new FakeInput();
   const output = new PassThrough() as PassThrough & { columns: number };
@@ -31,6 +38,7 @@ function makeScreen(
     quitWindowMs: 100,
     initialHistory,
     slashCommandSuggestions: suggestChatCommands,
+    ...screenOptions,
     callbacks: {
       onSubmit: (text) => calls.submit.push(text),
       onTab: () => (calls.tab += 1),
@@ -140,12 +148,42 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("replaces a nested token and renders its contextual hint", async () => {
+    const seen: Array<{ text: string; cursor: number }> = [];
+    const { screen, input, calls, text } = makeScreen({}, [], {
+      slashCommandOptions: (state) => {
+        seen.push({ text: state.text, cursor: state.cursor });
+        if (!state.text.startsWith("/config set ")) return null;
+        return {
+          token: { start: 12, end: state.text.length },
+          suggestions: [
+            { value: "dark", label: "dark theme", summary: "Use dark colors" },
+            { value: "light", summary: "Use light colors" },
+          ],
+          hint: "Choose the nested theme value",
+        };
+      },
+    });
+    screen.start();
+    input.write("/config set da");
+    await settle();
+    const shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("› dark theme — Use dark colors");
+    expect(shown).toContain("Choose the nested theme value");
+    expect(seen.at(-1)).toEqual({ text: "/config set da", cursor: 14 });
+
+    input.write("\t\r/config set x\u001b[B\r\r");
+    await settle();
+    expect(calls.submit).toEqual(["/config set dark", "/config set light"]);
+    screen.stop();
+  });
+
   test("navigates suggestions and lets exact commands submit immediately", async () => {
     const { screen, input, calls } = makeScreen();
     screen.start();
     input.write("/\u001b[B\r\r/help\r");
     await settle();
-    expect(calls.submit).toEqual(["/build ", "/help"]);
+    expect(calls.submit).toEqual(["/mcp ", "/help"]);
     screen.stop();
   });
 
@@ -243,6 +281,64 @@ describe("createChatScreen", () => {
     await expect(ask).resolves.toBe("deny");
   });
 
+  test("masks modal input without submitting or retaining it", async () => {
+    const { screen, input, calls, text } = makeScreen({}, ["remembered"]);
+    screen.start();
+    const secret = screen.askInput({ label: "API key", masked: true });
+    input.write("s3cret");
+    await settle();
+    const shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("API key");
+    expect(shown).toContain("••••••");
+    expect(text()).not.toContain("s3cret");
+    input.write("\r");
+    await expect(secret).resolves.toBe("s3cret");
+    expect(calls.submit).toEqual([]);
+
+    input.write("\u001b[A\r");
+    await settle();
+    expect(calls.submit).toEqual(["remembered"]);
+    screen.stop();
+  });
+
+  test("keeps invalid modal input open and cancels with Escape", async () => {
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    const answer = screen.askInput({
+      label: "Profile name",
+      choices: ["work", "personal"],
+      validate: (value) => (value.length < 4 ? "Enter at least four characters" : null),
+    });
+    input.write("x\r");
+    await settle();
+    expect(renderScreen(text()).join("\n")).toContain("Enter at least four characters");
+    input.write("\u0001\u000bwork\r");
+    await expect(answer).resolves.toBe("work");
+
+    const cancelled = screen.askInput({ label: "Optional value" });
+    input.write("ignored\u001b");
+    await settle();
+    await expect(cancelled).resolves.toBeNull();
+    screen.stop();
+  });
+
+  test("serializes input prompts with permission prompts", async () => {
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    const answer = screen.askInput({ label: "First value" });
+    const permission = screen.askPermission({ tool: "bash", kind: "bash", detail: "echo queued" });
+    await settle();
+    expect(renderScreen(text()).join("\n")).toContain("First value");
+    expect(text()).not.toContain("echo queued");
+    input.write("done\r");
+    await expect(answer).resolves.toBe("done");
+    await settle();
+    expect(text()).toContain("echo queued");
+    input.write("y");
+    await expect(permission).resolves.toBe("allow");
+    screen.stop();
+  });
+
   test("queues concurrent permission asks and denies pending asks on stop", async () => {
     const { screen, input, text } = makeScreen();
     screen.start();
@@ -259,6 +355,19 @@ describe("createChatScreen", () => {
     expect(text()).toContain("second path");
     screen.stop();
     await expect(second).resolves.toBe("deny");
+  });
+
+  test("can exclude sensitive submitted commands from in-memory history", async () => {
+    const { screen, input, calls } = makeScreen({}, ["old", "/config set persisted-secret"], {
+      shouldRememberInput: (text) => !text.startsWith("/config set "),
+    });
+    screen.start();
+    input.write("\u001b[A\rsafe\r/config set secret\r");
+    await settle();
+    input.write("\u001b[A\r");
+    await settle();
+    expect(calls.submit).toEqual(["old", "safe", "/config set secret", "safe"]);
+    screen.stop();
   });
 
   test("recalls submitted prompts with arrows and Ctrl+P/N from an empty editor", async () => {

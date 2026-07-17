@@ -123,6 +123,7 @@ type InternalSchema = z.ZodType & {
       shape?: Record<string, InternalSchema>;
       element?: InternalSchema;
       valueType?: InternalSchema;
+      options?: InternalSchema[];
     };
   };
 };
@@ -187,9 +188,36 @@ const schemaAtPath = (path: ValidatedConfigPath): InternalSchema | null => {
       current = def.valueType;
       continue;
     }
+    if (def?.type === "union" && def.options) {
+      const next = def.options
+        .map((option) => unwrap(option)._zod?.def?.shape?.[segment])
+        .find((option): option is InternalSchema => option !== undefined);
+      if (!next) return null;
+      current = next;
+      continue;
+    }
     return null;
   }
   return unwrap(current);
+};
+
+/** Enumerate schema-backed configuration paths for deterministic TUI completion. */
+export const listConfigPaths = (): string[] => {
+  const paths = new Set<string>();
+  const visit = (schema: InternalSchema, path: string[]): void => {
+    const def = unwrap(schema)._zod?.def;
+    if (def?.type === "object" && def.shape) {
+      for (const [segment, child] of Object.entries(def.shape)) visit(child, [...path, segment]);
+      return;
+    }
+    if (def?.type === "union" && def.options) {
+      for (const option of def.options) visit(option, path);
+      return;
+    }
+    if (path.length > 0) paths.add(path.join("."));
+  };
+  visit(configSchema, []);
+  return [...paths].sort();
 };
 
 const isSecretPath = (path: readonly string[]): boolean =>

@@ -59,6 +59,11 @@ Keys and commands:
 - **`@path/to/file`** — attach a file's contents to your message.
 - **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
   the first non-whitespace input token shows fuzzy-matched command suggestions.
+- **`/mcp`** — inspect MCP status; guided completions provide `add`, `auth`, `reload`, `remove`,
+  and advanced `set` actions. Successful configuration changes reload automatically and become
+  available on the next foreground turn.
+- **`/config get|set|delete`** — inspect or update global configuration with path/value completion.
+  Omitting a sensitive value opens a masked prompt.
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 
@@ -87,9 +92,10 @@ denial is returned to the model as a tool result, so it adapts instead of crashi
 
 ## MCP tools and resources
 
-Agentj connects configured [Model Context Protocol](https://modelcontextprotocol.io/) servers once
-per chat session over stdio or Streamable HTTP. MCP capabilities are available only to the primary
-agent; subagents and background jobs do not inherit the connection.
+Agentj connects configured [Model Context Protocol](https://modelcontextprotocol.io/) servers over
+stdio or Streamable HTTP. Interactive startup does not wait for MCP: servers connect independently
+in the background, and one failed server cannot block Agentj or another server. MCP capabilities are
+available only to the primary agent; subagents and background jobs do not inherit the connection.
 
 Configure a local stdio server by setting one server object in the global config:
 
@@ -126,7 +132,10 @@ read-only planning. Tools in `tools.direct` are exposed with their native JSON s
 eligible tools stay in a bounded catalog accessed through `find_mcp_tools` and `call_mcp_tool`,
 which avoids sending every server schema to the model. Resources similarly use
 `find_mcp_resources` and `read_mcp_resource`, including URI templates. Catalogs refresh lazily when
-a server sends a list-change notification; direct tools remain fixed until the next session.
+a server sends a list-change notification. `/mcp reload [name]` reconnects one or all servers;
+successful replacements (including direct-tool changes) activate at the next foreground turn. If a
+reload fails, an existing working connection stays active and `/mcp` shows a deterministic recovery
+hint when Agentj can identify one. External file or environment changes require a manual reload.
 
 Build-mode MCP calls default to `ask` and are authorized by canonical names such as
 `mcp_github_search_code`, including calls routed through the generic catalog tool:
@@ -137,7 +146,9 @@ Build-mode MCP calls default to `ask` and are authorized by canonical names such
 ```
 
 Credentials can also be supplied as static `env` or `headers`, but environment mappings avoid
-persisting them in config. Initial MCP support does not include OAuth, server prompts, legacy HTTP
+persisting them in config. `/mcp auth <http-server>` writes an Authorization header through a masked
+prompt; the value is omitted from terminal and prompt history but remains plaintext in the existing
+configuration file format. Initial MCP support does not include OAuth, server prompts, legacy HTTP
 + SSE, or MCP access from delegates/background jobs.
 
 ## Parallel subagents

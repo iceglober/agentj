@@ -11,20 +11,22 @@ import {
 } from "./lib/agent/subagents";
 import {
   type ChatCommandContext,
+  completeChatInput,
   expandAtFiles,
   parseInput,
   runChatCommand,
-  suggestChatCommands,
+  shouldRememberChatInput,
 } from "./lib/chat/commands";
 import type { ChatEvent } from "./lib/chat/events";
 import { createJobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
-import { loadConfig } from "./lib/config";
+import { loadChatConfig } from "./lib/config";
 import { createConfigCliHandlers, createMaskedSecretPrompt } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { connectMcp } from "./lib/mcp";
 import { connectModelContextProtocolServer } from "./lib/mcp/model-context-protocol-adapter";
+import type { McpRuntimeStatus } from "./lib/mcp/runtime";
+import { createMcpRuntime } from "./lib/mcp/runtime";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
 import type { PromptContext } from "./lib/prompt";
@@ -203,6 +205,9 @@ interface ChatComposition {
   runPlanJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string }>;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
+  startMcp(): Promise<void>;
+  reloadMcp(name?: string): Promise<void>;
+  mcpStatuses(): readonly McpRuntimeStatus[];
   close(): Promise<void>;
 }
 
@@ -217,11 +222,14 @@ async function composeChat(
   gate: PermissionGate,
   onDagProgress: (progress: SubagentProgressEvent) => void,
   onToolActivity?: (activity: ToolActivity) => void,
+  onMcpStatus?: (status: McpRuntimeStatus) => void,
 ): Promise<ChatComposition> {
   const projectSource = await resolveProjectSource(process.cwd());
   const root = projectSource.projectRoot;
   const commonGitDir = projectSource.commonGitDir;
-  const config = await loadConfig(configPath);
+  const loadedConfig = await loadChatConfig(configPath);
+  const config = loadedConfig.config;
+  let mcpConfigIssues = loadedConfig.mcpIssues;
   const key = await resolveAzureApiKey({ store: createKeyringSecretStore({}) });
   if (key.status !== "resolved") {
     throw new Error(
@@ -312,13 +320,21 @@ async function composeChat(
       { root, ctx, metricsSink, mode: "plan" },
     );
 
-  const mcp = await connectMcp(config.mcp, {
+  const mcp = createMcpRuntime(config.mcp, {
     root,
     connectServer: connectModelContextProtocolServer,
+    onStatus: onMcpStatus,
   });
 
   const agents = new Map<ChatMode, Promise<Agent>>();
-  const agentFor = (mode: ChatMode): Promise<Agent> => {
+  let agentMcpVersion = mcp.snapshot().version;
+  const agentFor = async (mode: ChatMode): Promise<Agent> => {
+    await mcp.activatePending();
+    const mcpSnapshot = mcp.snapshot();
+    if (mcpSnapshot.version !== agentMcpVersion) {
+      agents.clear();
+      agentMcpVersion = mcpSnapshot.version;
+    }
     const cached = agents.get(mode);
     if (cached) return cached;
     const agent =
@@ -328,7 +344,7 @@ async function composeChat(
             ctx,
             metricsSink,
             mode: "plan",
-            externalTools: mcp.externalTools,
+            externalTools: mcpSnapshot.externalTools,
             research: { createWorker: createResearchWorker, onProgress: onDagProgress },
             onToolActivity,
           })
@@ -338,13 +354,43 @@ async function composeChat(
             metricsSink,
             delegation,
             mode: "build",
-            externalTools: mcp.externalTools,
+            externalTools: mcpSnapshot.externalTools,
             permissions: { config: config.permissions, gate },
             onSubagentProgress: onDagProgress,
             onToolActivity,
           });
     agents.set(mode, agent);
     return agent;
+  };
+
+  const invalidServerNames = (): Set<string> =>
+    new Set(mcpConfigIssues.filter(({ name }) => name !== "configuration").map(({ name }) => name));
+  const issueStatuses = (): McpRuntimeStatus[] => {
+    const runtimeStatuses = mcp.statuses();
+    return mcpConfigIssues.map((issue) => ({
+      name: issue.name,
+      transport: "unknown",
+      state: "failed",
+      code: "invalid_config",
+      detail: issue.detail,
+      resolution: issue.resolution,
+      usingPrevious: runtimeStatuses.some(
+        (status) =>
+          status.name === issue.name &&
+          (status.state === "connected" ||
+            status.state === "ready" ||
+            (status.state === "failed" && status.usingPrevious)),
+      ),
+    }));
+  };
+  const publishConfigIssues = (): void => {
+    for (const issue of issueStatuses()) onMcpStatus?.(issue);
+  };
+  const reloadMcp = async (name?: string): Promise<void> => {
+    const latest = await loadChatConfig(configPath);
+    mcpConfigIssues = latest.mcpIssues;
+    publishConfigIssues();
+    await mcp.reload(latest.config.mcp, name, { skip: [...invalidServerNames()] });
   };
 
   const runPlanJob = async (prompt: string, abortSignal: AbortSignal) => {
@@ -410,6 +456,15 @@ async function composeChat(
     runPlanJob,
     environment,
     stateRoot,
+    startMcp: async () => {
+      publishConfigIssues();
+      await mcp.reload(config.mcp, undefined, { skip: [...invalidServerNames()] });
+    },
+    reloadMcp,
+    mcpStatuses: () => {
+      const invalid = invalidServerNames();
+      return [...mcp.statuses().filter(({ name }) => !invalid.has(name)), ...issueStatuses()];
+    },
     close: () => mcp.close(),
   };
 }
@@ -428,6 +483,14 @@ export async function runAgentjChat(
   const permissionGate = createSessionPermissionGate((request) =>
     screen ? screen.askPermission(request) : Promise.resolve("deny"),
   );
+  const onMcpStatus = (status: McpRuntimeStatus): void => {
+    if (status.state === "failed") {
+      emitChatEvent?.({
+        type: "notice",
+        text: `MCP ${status.name}: ${status.detail}${status.usingPrevious ? " (using previous connection)" : ""}${status.resolution ? `\n${status.resolution}` : ""}`,
+      });
+    }
+  };
 
   // Live activity: what is running right now, since when. Running tools render
   // as spinner lines in the progress block (like subagents) and freeze into
@@ -511,6 +574,7 @@ export async function runAgentjChat(
       permissionGate,
       onDagProgress,
       onToolActivity,
+      onMcpStatus,
     );
   } catch (error) {
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -680,23 +744,48 @@ export async function runAgentjChat(
       if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
     }, 250);
 
+    const configOutput = (message: string): void => {
+      const text = message.trim();
+      if (text) render({ type: "notice", text });
+    };
+    const interactiveConfig = createConfigCliHandlers({
+      secretStore: createKeyringSecretStore({}),
+      prompt: {
+        askSecret: () =>
+          screen?.askInput({ label: "Secret value", masked: true }) ?? Promise.resolve(null),
+      },
+      writers: {
+        stdout: { write: configOutput },
+        stderr: { write: configOutput },
+      },
+    });
     const commandContext: ChatCommandContext = {
       session: chat,
       jobs,
       undo,
       emit: render,
       quit: () => quitResolve?.(),
+      config: interactiveConfig,
+      mcp: {
+        statuses: composition.mcpStatuses,
+        reload: composition.reloadMcp,
+      },
+      askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
     };
 
+    let pendingCommands = Promise.resolve();
     screen = createChatScreen({
       initialHistory: promptHistory.entries,
-      slashCommandSuggestions: suggestChatCommands,
+      slashCommandOptions: (state) => completeChatInput(state.text, state.cursor, commandContext),
+      shouldRememberInput: shouldRememberChatInput,
       callbacks: {
         onSubmit: (text) => {
-          rememberPrompt(text);
+          if (shouldRememberChatInput(text)) rememberPrompt(text);
           const parsed = parseInput(text);
           if (parsed.kind === "command") {
-            void runChatCommand(commandContext, parsed.name, parsed.args);
+            pendingCommands = pendingCommands.then(() =>
+              runChatCommand(commandContext, parsed.name, parsed.args),
+            );
             return;
           }
           if (parsed.kind === "job") {
@@ -731,6 +820,12 @@ export async function runAgentjChat(
       screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
       screen.printAbove(turn.assistant);
     }
+    void composition.startMcp().catch((error) => {
+      render({
+        type: "notice",
+        text: `Unable to load MCP configuration: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    });
 
     const handleSigint = (): void => {
       if (chat.dequeue() !== null) return;
@@ -743,7 +838,7 @@ export async function runAgentjChat(
       clearInterval(ticker);
       process.removeListener("SIGINT", handleSigint);
       jobs.dispose();
-      await Promise.all([pendingHistoryWrites, undo.dispose().catch(() => {})]);
+      await Promise.all([pendingCommands, pendingHistoryWrites, undo.dispose().catch(() => {})]);
       screen.stop();
     }
     return EXIT_SUCCESS;
@@ -782,6 +877,13 @@ export async function runAgentjOnce(
           );
         }
       },
+      (status) => {
+        if (status.state === "failed") {
+          processStderr.write(
+            `MCP ${status.name}: ${status.detail}${status.resolution ? ` — ${status.resolution}` : ""}\n`,
+          );
+        }
+      },
     );
   } catch (error) {
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -789,6 +891,7 @@ export async function runAgentjOnce(
   }
 
   try {
+    await composition.startMcp();
     const log = await createChatLog({
       root: join(composition.stateRoot, "agentj", "chats"),
       projectRoot: composition.root,

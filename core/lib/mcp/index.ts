@@ -128,13 +128,19 @@ export interface McpServerClient {
   close(): Promise<void>;
 }
 
+export interface McpServerConnectorOptions {
+  root: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export type McpServerConnector = (
   name: string,
   config: McpServerConfig,
-  options: { root: string },
+  options: McpServerConnectorOptions,
 ) => Promise<McpServerClient>;
 
-interface ServerState {
+export interface McpServerConnection {
   name: string;
   config: McpServerConfig;
   client: McpServerClient;
@@ -275,7 +281,11 @@ const callToolInput = z.object({ tool: z.string().min(1), arguments: zodObjectIn
 const findResourcesInput = findToolsInput;
 const readResourceInput = z.object({ server: z.string().min(1), uri: z.string().min(1) });
 
-function directTool(state: ServerState, remote: McpRemoteTool, maxOutputChars: number): ToolDef {
+function directTool(
+  state: McpServerConnection,
+  remote: McpRemoteTool,
+  maxOutputChars: number,
+): ToolDef {
   return {
     description:
       remote.description ?? remote.title ?? `Call ${remote.name} on MCP server ${state.name}.`,
@@ -293,7 +303,20 @@ function directTool(state: ServerState, remote: McpRemoteTool, maxOutputChars: n
   };
 }
 
-const validateUniqueDirectNames = (states: readonly ServerState[]): void => {
+export class McpToolCollisionError extends Error {
+  readonly serverNames: readonly string[];
+
+  constructor(first: string, second: string, canonical: string) {
+    super(`MCP tool name collision: ${first} and ${second} both map to ${canonical}`);
+    this.name = "McpToolCollisionError";
+    this.serverNames = Object.freeze([
+      first.split("/", 1)[0] ?? first,
+      second.split("/", 1)[0] ?? second,
+    ]);
+  }
+}
+
+export const validateMcpToolNames = (states: readonly McpServerConnection[]): void => {
   const names = new Map<string, string>();
   for (const state of states) {
     for (const tool of state.tools) {
@@ -301,61 +324,67 @@ const validateUniqueDirectNames = (states: readonly ServerState[]): void => {
       const source = `${state.name}/${tool.name}`;
       const existing = names.get(canonical);
       if (existing && existing !== source) {
-        throw new Error(
-          `MCP tool name collision: ${existing} and ${source} both map to ${canonical}`,
-        );
+        throw new McpToolCollisionError(existing, source, canonical);
       }
       names.set(canonical, source);
     }
   }
 };
 
-export async function connectMcp(
-  config: McpConfig,
-  options: { root: string; connectServer: McpServerConnector },
-): Promise<McpConnection> {
-  const states: ServerState[] = [];
+export async function connectMcpServer(
+  name: string,
+  config: McpServerConfig,
+  options: McpServerConnectorOptions & { connectServer: McpServerConnector },
+): Promise<McpServerConnection> {
+  const client = await options.connectServer(name, config, {
+    root: options.root,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  });
+  const state: McpServerConnection = {
+    name,
+    config,
+    client,
+    tools: [],
+    resources: [],
+    templates: [],
+    toolsStale: false,
+    resourcesStale: false,
+  };
   try {
-    for (const [name, serverConfig] of Object.entries(config.servers)) {
-      const client = await options.connectServer(name, serverConfig, { root: options.root });
-      const state: ServerState = {
-        name,
-        config: serverConfig,
-        client,
-        tools: [],
-        resources: [],
-        templates: [],
-        toolsStale: false,
-        resourcesStale: false,
-      };
-      states.push(state);
-      state.tools = client.capabilities.tools
-        ? await allPages((cursor) => client.listTools(cursor))
-        : [];
-      if (client.capabilities.resources) {
-        [state.resources, state.templates] = await Promise.all([
-          allPages((cursor) => client.listResources(cursor)),
-          allPages((cursor) => client.listResourceTemplates(cursor)),
-        ]);
-      }
-      client.onListChanged?.((kind) => {
-        if (kind === "tools") state.toolsStale = true;
-        else state.resourcesStale = true;
-      });
+    state.tools = client.capabilities.tools
+      ? await allPages((cursor) => client.listTools(cursor, options.signal))
+      : [];
+    if (client.capabilities.resources) {
+      [state.resources, state.templates] = await Promise.all([
+        allPages((cursor) => client.listResources(cursor, options.signal)),
+        allPages((cursor) => client.listResourceTemplates(cursor, options.signal)),
+      ]);
     }
-    validateUniqueDirectNames(states);
+    client.onListChanged?.((kind) => {
+      if (kind === "tools") state.toolsStale = true;
+      else state.resourcesStale = true;
+    });
+    validateMcpToolNames([state]);
+    return state;
   } catch (error) {
-    await Promise.allSettled(states.map((state) => state.client.close()));
+    await client.close().catch(() => undefined);
     throw error;
   }
+}
 
-  const refreshTools = async (state: ServerState): Promise<void> => {
+export function createMcpExternalTools(
+  states: readonly McpServerConnection[],
+  maxOutputChars: number,
+): Record<AgentMode, ExternalAgentTools> {
+  validateMcpToolNames(states);
+  const refreshTools = async (state: McpServerConnection): Promise<void> => {
     if (!state.toolsStale) return;
     state.tools = await allPages((cursor) => state.client.listTools(cursor));
     state.toolsStale = false;
-    validateUniqueDirectNames(states);
+    validateMcpToolNames(states);
   };
-  const refreshResources = async (state: ServerState): Promise<void> => {
+  const refreshResources = async (state: McpServerConnection): Promise<void> => {
     if (!state.resourcesStale) return;
     [state.resources, state.templates] = await Promise.all([
       allPages((cursor) => state.client.listResources(cursor)),
@@ -369,7 +398,7 @@ export async function connectMcp(
       const tools: ToolSet = {};
       const permissionTargets: Record<string, ExternalToolPermissionTargetResolver> = {};
       const eligibleTools = (): Array<{
-        state: ServerState;
+        state: McpServerConnection;
         remote: McpRemoteTool;
         canonical: string;
       }> =>
@@ -385,7 +414,7 @@ export async function connectMcp(
 
       for (const entry of eligibleTools()) {
         if (!matchesAny(entry.state.config.tools.direct, entry.remote.name)) continue;
-        tools[entry.canonical] = directTool(entry.state, entry.remote, config.maxOutputChars);
+        tools[entry.canonical] = directTool(entry.state, entry.remote, maxOutputChars);
         permissionTargets[entry.canonical] = () => entry.canonical;
       }
 
@@ -422,7 +451,7 @@ export async function connectMcp(
                   description: remote.description ?? remote.title,
                   inputSchema: remote.inputSchema,
                 })),
-              config.maxOutputChars,
+              maxOutputChars,
             );
           },
         });
@@ -441,7 +470,7 @@ export async function connectMcp(
                 args,
                 requestSignal(executeOptions),
               ),
-              config.maxOutputChars,
+              maxOutputChars,
             );
           },
         });
@@ -501,7 +530,7 @@ export async function connectMcp(
                   description: entry.resource.description ?? entry.resource.title,
                   mimeType: entry.resource.mimeType,
                 })),
-              config.maxOutputChars,
+              maxOutputChars,
             );
           },
         });
@@ -526,7 +555,7 @@ export async function connectMcp(
             }
             return normalizeMcpResourceResult(
               await state.client.readResource(uri, requestSignal(executeOptions)),
-              config.maxOutputChars,
+              maxOutputChars,
             );
           },
         });
@@ -536,14 +565,62 @@ export async function connectMcp(
     }),
   ) as Record<AgentMode, ExternalAgentTools>;
 
-  return {
-    externalTools,
-    async close() {
-      const outcomes = await Promise.allSettled(states.map((state) => state.client.close()));
-      const failed = outcomes.find(
-        (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected",
+  return externalTools;
+}
+
+export interface McpSnapshot {
+  readonly version: number;
+  readonly externalTools: Readonly<Record<AgentMode, ExternalAgentTools>>;
+}
+
+export const createMcpSnapshot = (
+  states: readonly McpServerConnection[],
+  maxOutputChars: number,
+  version: number,
+): McpSnapshot => {
+  const externalTools = createMcpExternalTools(
+    [...states].sort((left, right) => left.name.localeCompare(right.name)),
+    maxOutputChars,
+  );
+  for (const mode of ["plan", "build"] as const) {
+    Object.freeze(externalTools[mode].tools);
+    if (externalTools[mode].permissionTargets) {
+      Object.freeze(externalTools[mode].permissionTargets);
+    }
+    Object.freeze(externalTools[mode]);
+  }
+  return Object.freeze({ version, externalTools: Object.freeze(externalTools) });
+};
+
+export async function connectMcp(
+  config: McpConfig,
+  options: { root: string; connectServer: McpServerConnector },
+): Promise<McpConnection> {
+  const states: McpServerConnection[] = [];
+  try {
+    for (const name of Object.keys(config.servers).sort()) {
+      const serverConfig = config.servers[name];
+      if (!serverConfig) continue;
+      states.push(
+        await connectMcpServer(name, serverConfig, {
+          root: options.root,
+          connectServer: options.connectServer,
+        }),
       );
-      if (failed) throw failed.reason;
-    },
-  };
+    }
+    const externalTools = createMcpSnapshot(states, config.maxOutputChars, 0).externalTools;
+    return {
+      externalTools: externalTools as Record<AgentMode, ExternalAgentTools>,
+      async close() {
+        const outcomes = await Promise.allSettled(states.map((state) => state.client.close()));
+        const failed = outcomes.find(
+          (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected",
+        );
+        if (failed) throw failed.reason;
+      },
+    };
+  } catch (error) {
+    await Promise.allSettled(states.map((state) => state.client.close()));
+    throw error;
+  }
 }
