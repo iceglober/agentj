@@ -1,5 +1,12 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.6
+
+### Minor Changes
+
+- ee04a06: `/mcp` management commands in chat: status, guided `add`, `auth` (Authorization header), `reload`, `remove`, and `set`, with masked modal input and slash completion.
+- 8ccc51e: `/mcp auth` runs a real OAuth 2.1 browser flow for HTTP MCP servers (discovery, dynamic client registration, PKCE, loopback callback), storing tokens in the OS keyring with automatic refresh on reconnect; the pasted-header path remains as a fallback.
+
 ## 0.1.0-next.5
 
 ### Patch Changes

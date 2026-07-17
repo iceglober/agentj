@@ -8,6 +8,8 @@
     "biome-quality",
     "chat-first-rewrite",
     "initial-v0.1",
+    "mcp-commands",
+    "mcp-oauth",
     "mcp-support",
     "npm-bin-launcher",
     "version-flag",
