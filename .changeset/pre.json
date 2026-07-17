@@ -4,5 +4,11 @@
   "initialVersions": {
     "@glrs-dev/aj": "0.0.0"
   },
-  "changesets": ["biome-quality", "initial-v0.1", "npm-bin-launcher"]
+  "changesets": [
+    "biome-quality",
+    "chat-first-rewrite",
+    "initial-v0.1",
+    "mcp-support",
+    "npm-bin-launcher"
+  ]
 }
