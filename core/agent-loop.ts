@@ -24,7 +24,15 @@ import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cl
 import { loadChatConfig } from "./lib/config";
 import { createConfigCliHandlers, createMaskedSecretPrompt } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { connectModelContextProtocolServer } from "./lib/mcp/model-context-protocol-adapter";
+import {
+  connectModelContextProtocolServer,
+  resolveMcpTransportConfig,
+} from "./lib/mcp/model-context-protocol-adapter";
+import {
+  createKeyringMcpOAuthStorage,
+  type McpOAuthFlowResult,
+  runMcpOAuthFlow,
+} from "./lib/mcp/oauth";
 import type { McpRuntimeStatus } from "./lib/mcp/runtime";
 import { createMcpRuntime } from "./lib/mcp/runtime";
 import type { MetricsSink } from "./lib/metrics";
@@ -208,6 +216,11 @@ interface ChatComposition {
   startMcp(): Promise<void>;
   reloadMcp(name?: string): Promise<void>;
   mcpStatuses(): readonly McpRuntimeStatus[];
+  /** Interactive OAuth for one HTTP server; reload separately on success. */
+  authorizeMcp(
+    name: string,
+    hooks?: { onAuthorizationUrl?(url: string): void },
+  ): Promise<McpOAuthFlowResult>;
   close(): Promise<void>;
 }
 
@@ -230,12 +243,14 @@ async function composeChat(
   const loadedConfig = await loadChatConfig(configPath);
   const config = loadedConfig.config;
   let mcpConfigIssues = loadedConfig.mcpIssues;
-  const key = await resolveAzureApiKey({ store: createKeyringSecretStore({}) });
+  const secretStore = createKeyringSecretStore({});
+  const key = await resolveAzureApiKey({ store: secretStore });
   if (key.status !== "resolved") {
     throw new Error(
       "Azure API key missing; run: agentj config set --secret providers.azure.api_key",
     );
   }
+  const mcpOAuth = createKeyringMcpOAuthStorage(secretStore);
   const metricsSink: MetricsSink = createOtelMetricsSink({
     enabled: process.env.AGENTJ_OTEL_METRICS === "1",
   });
@@ -324,6 +339,7 @@ async function composeChat(
     root,
     connectServer: connectModelContextProtocolServer,
     onStatus: onMcpStatus,
+    oauth: mcpOAuth,
   });
 
   const agents = new Map<ChatMode, Promise<Agent>>();
@@ -391,6 +407,27 @@ async function composeChat(
     mcpConfigIssues = latest.mcpIssues;
     publishConfigIssues();
     await mcp.reload(latest.config.mcp, name, { skip: [...invalidServerNames()] });
+  };
+
+  const authorizeMcp = async (
+    name: string,
+    hooks?: { onAuthorizationUrl?(url: string): void },
+  ): Promise<McpOAuthFlowResult> => {
+    const latest = await loadChatConfig(configPath);
+    const server = latest.config.mcp.servers[name];
+    if (!server) return { ok: false, reason: `no MCP server named ${name} is configured` };
+    if (server.transport !== "http") {
+      return { ok: false, reason: `${name} uses stdio; OAuth applies to HTTP servers` };
+    }
+    try {
+      return await runMcpOAuthFlow(name, server.url, {
+        storage: mcpOAuth,
+        headers: resolveMcpTransportConfig(server).headers ?? {},
+        ...(hooks?.onAuthorizationUrl ? { onAuthorizationUrl: hooks.onAuthorizationUrl } : {}),
+      });
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
   };
 
   const runPlanJob = async (prompt: string, abortSignal: AbortSignal) => {
@@ -461,6 +498,7 @@ async function composeChat(
       await mcp.reload(config.mcp, undefined, { skip: [...invalidServerNames()] });
     },
     reloadMcp,
+    authorizeMcp,
     mcpStatuses: () => {
       const invalid = invalidServerNames();
       return [...mcp.statuses().filter(({ name }) => !invalid.has(name)), ...issueStatuses()];
@@ -769,6 +807,7 @@ export async function runAgentjChat(
       mcp: {
         statuses: composition.mcpStatuses,
         reload: composition.reloadMcp,
+        authorize: composition.authorizeMcp,
       },
       askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
     };

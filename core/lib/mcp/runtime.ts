@@ -47,6 +47,8 @@ export interface McpRuntimeOptions {
   connectServer: McpServerConnector;
   onStatus?(status: McpRuntimeStatus): void;
   timeoutMs?: number;
+  /** OAuth credential storage passed through to every server connect. */
+  oauth?: import("./oauth").McpOAuthStorage;
 }
 
 const EMPTY_TOOLS = { plan: { tools: {} }, build: { tools: {} } } as Readonly<
@@ -171,6 +173,7 @@ export function createMcpRuntime(initialConfig: McpConfig, options: McpRuntimeOp
         connectServer: options.connectServer,
         signal: controller.signal,
         timeoutMs,
+        ...(options.oauth ? { oauth: options.oauth } : {}),
       });
       if (closed || attempts.get(name)?.id !== id) {
         await candidate.client.close().catch(() => undefined);

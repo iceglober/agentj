@@ -71,6 +71,11 @@ export interface ChatCommandContext {
   mcp?: {
     statuses(): readonly McpRuntimeStatus[];
     reload(name?: string): Promise<void>;
+    /** Interactive OAuth flow for an HTTP server (browser round-trip). */
+    authorize?(
+      name: string,
+      hooks?: { onAuthorizationUrl?(url: string): void },
+    ): Promise<{ ok: true } | { ok: false; reason: string }>;
   };
   askInput?(options: {
     label: string;
@@ -94,7 +99,7 @@ export interface ChatCommandSuggestion {
 
 const mcpActions = {
   add: "Guided setup for a new server",
-  auth: "Set a server Authorization header securely",
+  auth: "Authorize a server (OAuth browser flow, or a header)",
   reload: "Reload one or all servers",
   remove: "Remove a configured server",
   set: "Set an advanced server JSON definition",
@@ -316,8 +321,30 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
       });
       return;
     }
+    // OAuth first: most hosted MCP servers (Linear, Notion, …) advertise it on
+    // their 401 challenge. A failed flow falls back to a pasted header so
+    // API-key-only servers still have a path.
+    if (context.mcp?.authorize) {
+      context.emit({
+        type: "notice",
+        text: `Opening your browser to authorize ${name}…`,
+      });
+      const flow = await context.mcp.authorize(name, {
+        onAuthorizationUrl: (url) =>
+          context.emit({ type: "notice", text: `Authorize ${name} at: ${url}` }),
+      });
+      if (flow.ok) {
+        await context.mcp.reload(name);
+        context.emit({ type: "notice", text: `${name} authorized; reloading.` });
+        return;
+      }
+      context.emit({
+        type: "notice",
+        text: `OAuth for ${name} did not complete (${flow.reason}). Falling back to a pasted Authorization header — Esc to cancel.`,
+      });
+    }
     const secret = await context.askInput?.({
-      label: `Authorization header for ${name}`,
+      label: `Authorization header for ${name} (e.g. "Bearer <token>")`,
       masked: true,
       validate: (entered) => (entered.length > 0 ? null : "Value is required."),
     });

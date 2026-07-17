@@ -20,6 +20,7 @@ import type {
   McpServerConfig,
   McpServerConnector,
 } from ".";
+import { createMcpOAuthProvider } from "./oauth";
 
 const resolveEnvironmentValues = (
   direct: Record<string, string>,
@@ -71,6 +72,16 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
   options,
 ): Promise<McpServerClient> => {
   const resolved = resolveMcpTransportConfig(config);
+  // Background connects attach an OAuth provider only when tokens are already
+  // saved: refresh then works, while a never-authorized server fails with a
+  // plain 401 the runtime classifies as authentication_failed. Interactive
+  // authorization is /mcp auth's job (runMcpOAuthFlow), never a connect's.
+  const oauthState =
+    config.transport === "http" && options.oauth ? await options.oauth.load(name) : undefined;
+  const authProvider =
+    options.oauth && oauthState?.tokens
+      ? createMcpOAuthProvider({ server: name, storage: options.oauth })
+      : undefined;
   const transport =
     config.transport === "stdio"
       ? new StdioClientTransport({
@@ -81,6 +92,7 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
         })
       : new StreamableHTTPClientTransport(new URL(config.url), {
           requestInit: { headers: resolved.headers },
+          ...(authProvider ? { authProvider } : {}),
         });
   const client = new Client({ name: `agentj-${name}`, version: "0.1.0" });
   let connected = false;

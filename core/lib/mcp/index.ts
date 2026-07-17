@@ -132,6 +132,8 @@ export interface McpServerConnectorOptions {
   root: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** OAuth credential storage; HTTP connects attach saved tokens and refresh. */
+  oauth?: import("./oauth").McpOAuthStorage;
 }
 
 export type McpServerConnector = (
@@ -340,6 +342,7 @@ export async function connectMcpServer(
     root: options.root,
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.oauth ? { oauth: options.oauth } : {}),
   });
   const state: McpServerConnection = {
     name,
