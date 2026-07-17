@@ -23,6 +23,8 @@ import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cl
 import { loadConfig } from "./lib/config";
 import { createConfigCliHandlers, createMaskedSecretPrompt } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
+import { connectMcp } from "./lib/mcp";
+import { connectModelContextProtocolServer } from "./lib/mcp/model-context-protocol-adapter";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
 import type { PromptContext } from "./lib/prompt";
@@ -161,6 +163,7 @@ interface ChatComposition {
   runPlanJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string }>;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
+  close(): Promise<void>;
 }
 
 /**
@@ -269,6 +272,11 @@ async function composeChat(
       { root, ctx, metricsSink, mode: "plan" },
     );
 
+  const mcp = await connectMcp(config.mcp, {
+    root,
+    connectServer: connectModelContextProtocolServer,
+  });
+
   const agents = new Map<ChatMode, Promise<Agent>>();
   const agentFor = (mode: ChatMode): Promise<Agent> => {
     const cached = agents.get(mode);
@@ -280,6 +288,7 @@ async function composeChat(
             ctx,
             metricsSink,
             mode: "plan",
+            externalTools: mcp.externalTools,
             research: { createWorker: createResearchWorker, onProgress: onDagProgress },
             onToolActivity,
           })
@@ -288,6 +297,8 @@ async function composeChat(
             ctx,
             metricsSink,
             delegation,
+            mode: "build",
+            externalTools: mcp.externalTools,
             permissions: { config: config.permissions, gate },
             onSubagentProgress: onDagProgress,
             onToolActivity,
@@ -358,6 +369,7 @@ async function composeChat(
     runPlanJob,
     environment,
     stateRoot,
+    close: () => mcp.close(),
   };
 }
 
@@ -385,6 +397,7 @@ export async function runAgentjChat(
   let interruptRequested = false;
   let spinnerFrame = 0;
   let dagLines: string[] = [];
+  let updateStatus = (): void => {};
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
   const SPINNER = ["◐", "◓", "◑", "◒"];
 
@@ -439,220 +452,224 @@ export async function runAgentjChat(
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_FAILURE;
   }
-  const { root, commonGitDir, ctx, agentFor, environment, stateRoot } = composition;
-  const chatsRoot = join(stateRoot, "agentj", "chats");
-  const promptHistory = await createPromptHistory({
-    root: join(stateRoot, "agentj", "prompt-history"),
-    projectIdentity: commonGitDir,
-  });
-  let pendingHistoryWrites = Promise.resolve();
-  const rememberPrompt = (text: string): void => {
-    pendingHistoryWrites = pendingHistoryWrites
-      .then(() => promptHistory.append(text))
-      .catch((error) => {
-        screen?.printAbove(
-          `prompt history error: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-  };
+  try {
+    const { root, commonGitDir, ctx, agentFor, environment, stateRoot } = composition;
+    const chatsRoot = join(stateRoot, "agentj", "chats");
+    const promptHistory = await createPromptHistory({
+      root: join(stateRoot, "agentj", "prompt-history"),
+      projectIdentity: commonGitDir,
+    });
+    let pendingHistoryWrites = Promise.resolve();
+    const rememberPrompt = (text: string): void => {
+      pendingHistoryWrites = pendingHistoryWrites
+        .then(() => promptHistory.append(text))
+        .catch((error) => {
+          screen?.printAbove(
+            `prompt history error: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+    };
 
-  // Resume: --continue picks the newest session for this project.
-  let resumeId = options.resume ?? null;
-  if (!resumeId && options.continueLatest) {
-    resumeId = await latestChatLogId({ root: chatsRoot, projectRoot: root });
-    if (!resumeId) {
-      processStderr.write("No previous chat session for this project.\n");
+    // Resume: --continue picks the newest session for this project.
+    let resumeId = options.resume ?? null;
+    if (!resumeId && options.continueLatest) {
+      resumeId = await latestChatLogId({ root: chatsRoot, projectRoot: root });
+      if (!resumeId) {
+        processStderr.write("No previous chat session for this project.\n");
+        return EXIT_FAILURE;
+      }
+    }
+    const resumed = resumeId
+      ? await loadChatLog({ root: chatsRoot, projectRoot: root, id: resumeId })
+      : null;
+    if (resumeId && !resumed) {
+      processStderr.write(`Unknown chat session: ${resumeId}\n`);
       return EXIT_FAILURE;
     }
-  }
-  const resumed = resumeId
-    ? await loadChatLog({ root: chatsRoot, projectRoot: root, id: resumeId })
-    : null;
-  if (resumeId && !resumed) {
-    processStderr.write(`Unknown chat session: ${resumeId}\n`);
-    return EXIT_FAILURE;
-  }
 
-  const log = await createChatLog({
-    root: chatsRoot,
-    projectRoot: root,
-    ...(resumeId ? { id: resumeId } : {}),
-  });
-  const undo = createUndoStack(environment, root, log.id);
+    const log = await createChatLog({
+      root: chatsRoot,
+      projectRoot: root,
+      ...(resumeId ? { id: resumeId } : {}),
+    });
+    const undo = createUndoStack(environment, root, log.id);
 
-  let quitResolve: (() => void) | undefined;
-  const done = new Promise<void>((resolve) => {
-    quitResolve = resolve;
-  });
+    let quitResolve: (() => void) | undefined;
+    const done = new Promise<void>((resolve) => {
+      quitResolve = resolve;
+    });
 
-  const render = (event: ChatEvent): void => {
-    if (event.type === "turn-queued") {
-      queuedMessages.push({
-        text: event.text,
-        ...(event.transcriptText ? { transcriptText: event.transcriptText } : {}),
-      });
-      refreshProgress();
-      updateStatus();
-      return;
-    }
-    if (event.type === "turn-started") {
-      if (queuedMessages[0]?.text === event.text) {
-        queuedMessages.shift();
+    const render = (event: ChatEvent): void => {
+      if (event.type === "turn-queued") {
+        queuedMessages.push({
+          text: event.text,
+          ...(event.transcriptText ? { transcriptText: event.transcriptText } : {}),
+        });
+        refreshProgress();
+        updateStatus();
+        return;
+      }
+      if (event.type === "turn-started") {
+        if (queuedMessages[0]?.text === event.text) {
+          queuedMessages.shift();
+          refreshProgress();
+        }
+        turnStartedAt = Date.now();
+        interruptRequested = false;
+      }
+      if (event.type === "turn-abort-requested") interruptRequested = true;
+      if (event.type === "turn-dequeued") {
+        const index = queuedMessages.findLastIndex((entry) => entry.text === event.text);
+        if (index !== -1) queuedMessages.splice(index, 1);
         refreshProgress();
       }
-      turnStartedAt = Date.now();
-      interruptRequested = false;
-    }
-    if (event.type === "turn-abort-requested") interruptRequested = true;
-    if (event.type === "turn-dequeued") {
-      const index = queuedMessages.findLastIndex((entry) => entry.text === event.text);
-      if (index !== -1) queuedMessages.splice(index, 1);
-      refreshProgress();
-    }
-    if (event.type === "turn-finished") {
-      turnStartedAt = null;
-      currentActivity = null;
-      interruptRequested = false;
-    }
-    if (event.type === "subagent-progress") {
-      const update = applyProgressEvent(tracker, event.progress, spinnerFrame);
-      if (update.completedLines.length > 0) screen?.printAbove(update.completedLines.join("\n"));
-      dagLines = update.lines;
-      refreshProgress();
-    }
-    // Chat styling (interactive only): a blank line + colored prefix separates
-    // turns; assistant markdown renders lightly.
-    if (event.type === "turn-started") {
-      if (event.transcriptText) screen?.printAbove(event.transcriptText);
-      else {
-        screen?.printAbove(
-          `\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
-          { preStyled: true },
-        );
+      if (event.type === "turn-finished") {
+        turnStartedAt = null;
+        currentActivity = null;
+        interruptRequested = false;
       }
-      updateStatus();
-      return;
-    }
-    if (event.type === "assistant") {
-      const body = formatChatEvent(event);
-      if (body !== null)
-        screen?.printAbove(`\n${renderMarkdownLite(escapeTerminalText(body))}`, {
-          preStyled: true,
-        });
-      updateStatus();
-      return;
-    }
-    const text = formatChatEvent(event);
-    if (text) screen?.printAbove(text);
-    updateStatus();
-  };
-  emitChatEvent = render;
-
-  const chat: ChatSession = createChatSession(
-    { agentFor, log, undo, onEvent: render },
-    resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
-  );
-
-  const jobs = createJobRunner({
-    onEvent: render,
-    addTurnNotice: (text) => chat.addTurnNotice(text),
-    runJob: ({ mode, prompt, abortSignal }) =>
-      mode === "plan"
-        ? composition.runPlanJob(prompt, abortSignal)
-        : composition.runBuildJob(prompt, abortSignal),
-  });
-
-  const updateStatus = (): void => {
-    const runningJobs = jobs.list().filter((job) => job.status === "running").length;
-    screen?.setStatus(
-      formatChatStatus({
-        mode: chat.pendingMode,
-        sessionId: log.id,
-        runningJobs,
-        busy: chat.busy,
-        interruptRequested,
-        spinnerFrame,
-        turnStartedAt,
-        currentActivity,
-      }),
-    );
-  };
-
-  // Animate the spinner and elapsed time while anything is running.
-  const ticker = setInterval(() => {
-    spinnerFrame += 1;
-    if (tracker.live) dagLines = tracker.lines(spinnerFrame);
-    if (tracker.live || activeTools.size > 0) refreshProgress();
-    if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
-  }, 250);
-
-  const commandContext: ChatCommandContext = {
-    session: chat,
-    jobs,
-    undo,
-    emit: render,
-    quit: () => quitResolve?.(),
-  };
-
-  screen = createChatScreen({
-    initialHistory: promptHistory.entries,
-    slashCommandSuggestions: suggestChatCommands,
-    callbacks: {
-      onSubmit: (text) => {
-        rememberPrompt(text);
-        const parsed = parseInput(text);
-        if (parsed.kind === "command") {
-          void runChatCommand(commandContext, parsed.name, parsed.args);
-          return;
+      if (event.type === "subagent-progress") {
+        const update = applyProgressEvent(tracker, event.progress, spinnerFrame);
+        if (update.completedLines.length > 0) screen?.printAbove(update.completedLines.join("\n"));
+        dagLines = update.lines;
+        refreshProgress();
+      }
+      // Chat styling (interactive only): a blank line + colored prefix separates
+      // turns; assistant markdown renders lightly.
+      if (event.type === "turn-started") {
+        if (event.transcriptText) screen?.printAbove(event.transcriptText);
+        else {
+          screen?.printAbove(
+            `\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
+            { preStyled: true },
+          );
         }
-        if (parsed.kind === "job") {
-          jobs.start(chat.pendingMode, parsed.prompt);
-          updateStatus();
-          return;
-        }
-        void expandAtFiles(parsed.text, root).then((expanded) => {
-          void chat.send(expanded);
-          updateStatus();
-        });
-      },
-      onTab: () => {
-        chat.setMode();
         updateStatus();
-      },
-      onEscape: () => {
-        // Escalation ladder: undo the newest pending intent first, then interrupt.
-        if (chat.dequeue() !== null) return;
-        chat.abort();
-      },
-      onQuit: () => quitResolve?.(),
-    },
-  });
+        return;
+      }
+      if (event.type === "assistant") {
+        const body = formatChatEvent(event);
+        if (body !== null)
+          screen?.printAbove(`\n${renderMarkdownLite(escapeTerminalText(body))}`, {
+            preStyled: true,
+          });
+        updateStatus();
+        return;
+      }
+      const text = formatChatEvent(event);
+      if (text) screen?.printAbove(text);
+      updateStatus();
+    };
+    emitChatEvent = render;
 
-  screen.start();
-  updateStatus();
-  screen.printAbove(
-    `agentj — ${root} (${ctx.gitBranch}) · ${chat.mode} mode${resumed ? ` · resumed ${log.id}` : ""} · /help for keys`,
-  );
-  for (const turn of (resumed?.turns ?? []).slice(-5)) {
-    screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
-    screen.printAbove(turn.assistant);
-  }
+    const chat: ChatSession = createChatSession(
+      { agentFor, log, undo, onEvent: render },
+      resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
+    );
 
-  const handleSigint = (): void => {
-    if (chat.dequeue() !== null) return;
-    if (!chat.abort()) quitResolve?.();
-  };
-  process.on("SIGINT", handleSigint);
-  try {
-    await done;
+    const jobs = createJobRunner({
+      onEvent: render,
+      addTurnNotice: (text) => chat.addTurnNotice(text),
+      runJob: ({ mode, prompt, abortSignal }) =>
+        mode === "plan"
+          ? composition.runPlanJob(prompt, abortSignal)
+          : composition.runBuildJob(prompt, abortSignal),
+    });
+
+    updateStatus = (): void => {
+      const runningJobs = jobs.list().filter((job) => job.status === "running").length;
+      screen?.setStatus(
+        formatChatStatus({
+          mode: chat.pendingMode,
+          sessionId: log.id,
+          runningJobs,
+          busy: chat.busy,
+          interruptRequested,
+          spinnerFrame,
+          turnStartedAt,
+          currentActivity,
+        }),
+      );
+    };
+
+    // Animate the spinner and elapsed time while anything is running.
+    const ticker = setInterval(() => {
+      spinnerFrame += 1;
+      if (tracker.live) dagLines = tracker.lines(spinnerFrame);
+      if (tracker.live || activeTools.size > 0) refreshProgress();
+      if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
+    }, 250);
+
+    const commandContext: ChatCommandContext = {
+      session: chat,
+      jobs,
+      undo,
+      emit: render,
+      quit: () => quitResolve?.(),
+    };
+
+    screen = createChatScreen({
+      initialHistory: promptHistory.entries,
+      slashCommandSuggestions: suggestChatCommands,
+      callbacks: {
+        onSubmit: (text) => {
+          rememberPrompt(text);
+          const parsed = parseInput(text);
+          if (parsed.kind === "command") {
+            void runChatCommand(commandContext, parsed.name, parsed.args);
+            return;
+          }
+          if (parsed.kind === "job") {
+            jobs.start(chat.pendingMode, parsed.prompt);
+            updateStatus();
+            return;
+          }
+          void expandAtFiles(parsed.text, root).then((expanded) => {
+            void chat.send(expanded);
+            updateStatus();
+          });
+        },
+        onTab: () => {
+          chat.setMode();
+          updateStatus();
+        },
+        onEscape: () => {
+          // Escalation ladder: undo the newest pending intent first, then interrupt.
+          if (chat.dequeue() !== null) return;
+          chat.abort();
+        },
+        onQuit: () => quitResolve?.(),
+      },
+    });
+
+    screen.start();
+    updateStatus();
+    screen.printAbove(
+      `agentj — ${root} (${ctx.gitBranch}) · ${chat.mode} mode${resumed ? ` · resumed ${log.id}` : ""} · /help for keys`,
+    );
+    for (const turn of (resumed?.turns ?? []).slice(-5)) {
+      screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
+      screen.printAbove(turn.assistant);
+    }
+
+    const handleSigint = (): void => {
+      if (chat.dequeue() !== null) return;
+      if (!chat.abort()) quitResolve?.();
+    };
+    process.on("SIGINT", handleSigint);
+    try {
+      await done;
+    } finally {
+      clearInterval(ticker);
+      process.removeListener("SIGINT", handleSigint);
+      jobs.dispose();
+      await Promise.all([pendingHistoryWrites, undo.dispose().catch(() => {})]);
+      screen.stop();
+    }
+    return EXIT_SUCCESS;
   } finally {
-    clearInterval(ticker);
-    process.removeListener("SIGINT", handleSigint);
-    jobs.dispose();
-    await Promise.all([pendingHistoryWrites, undo.dispose().catch(() => {})]);
-    screen.stop();
+    await composition.close().catch(() => undefined);
   }
-  return EXIT_SUCCESS;
 }
 
 /** Non-interactive one-shot: one turn, transcript to stderr, result to stdout. */
@@ -691,52 +708,56 @@ export async function runAgentjOnce(
     return EXIT_FAILURE;
   }
 
-  const log = await createChatLog({
-    root: join(composition.stateRoot, "agentj", "chats"),
-    projectRoot: composition.root,
-    title: task,
-  });
-  const undo = createUndoStack(composition.environment, composition.root, log.id);
-
-  let outcome: "done" | "aborted" | "error" = "done";
-  let resultText = "";
-  const chat = createChatSession(
-    {
-      agentFor: composition.agentFor,
-      log,
-      undo,
-      onEvent: (event) => {
-        if (event.type === "assistant") {
-          resultText = event.text;
-          return;
-        }
-        if (event.type === "turn-aborted") outcome = "aborted";
-        if (event.type === "turn-error") outcome = "error";
-        const text = formatChatEvent(event);
-        if (text) processStderr.write(`${text}\n`);
-      },
-    },
-    { mode: options.plan ? "plan" : "build" },
-  );
-
-  const onAbort = (): void => {
-    chat.abort();
-  };
-  options.signal.addEventListener("abort", onAbort);
   try {
-    await chat.send(task);
-  } finally {
-    options.signal.removeEventListener("abort", onAbort);
-    await undo.dispose().catch(() => {});
-  }
+    const log = await createChatLog({
+      root: join(composition.stateRoot, "agentj", "chats"),
+      projectRoot: composition.root,
+      title: task,
+    });
+    const undo = createUndoStack(composition.environment, composition.root, log.id);
 
-  if (outcome === "done") {
-    processStdout.write(
-      `${formatChatEvent({ type: "assistant", mode: chat.mode, text: resultText }) ?? ""}\n`,
+    let outcome: "done" | "aborted" | "error" = "done";
+    let resultText = "";
+    const chat = createChatSession(
+      {
+        agentFor: composition.agentFor,
+        log,
+        undo,
+        onEvent: (event) => {
+          if (event.type === "assistant") {
+            resultText = event.text;
+            return;
+          }
+          if (event.type === "turn-aborted") outcome = "aborted";
+          if (event.type === "turn-error") outcome = "error";
+          const text = formatChatEvent(event);
+          if (text) processStderr.write(`${text}\n`);
+        },
+      },
+      { mode: options.plan ? "plan" : "build" },
     );
-    return EXIT_SUCCESS;
+
+    const onAbort = (): void => {
+      chat.abort();
+    };
+    options.signal.addEventListener("abort", onAbort);
+    try {
+      await chat.send(task);
+    } finally {
+      options.signal.removeEventListener("abort", onAbort);
+      await undo.dispose().catch(() => {});
+    }
+
+    if (outcome === "done") {
+      processStdout.write(
+        `${formatChatEvent({ type: "assistant", mode: chat.mode, text: resultText }) ?? ""}\n`,
+      );
+      return EXIT_SUCCESS;
+    }
+    return outcome === "aborted" ? EXIT_ABORTED : EXIT_FAILURE;
+  } finally {
+    await composition.close().catch(() => undefined);
   }
-  return outcome === "aborted" ? EXIT_ABORTED : EXIT_FAILURE;
 }
 
 const formatUnexpectedError = (error: unknown): string => {

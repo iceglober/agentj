@@ -85,6 +85,61 @@ approval applies only to policy outcomes of `ask`; configured denies remain auth
 In `agentj run` there is no TTY: asks resolve to deny with a notice unless `--allow-all` is passed. A
 denial is returned to the model as a tool result, so it adapts instead of crashing the turn.
 
+## MCP tools and resources
+
+Agentj connects configured [Model Context Protocol](https://modelcontextprotocol.io/) servers once
+per chat session over stdio or Streamable HTTP. MCP capabilities are available only to the primary
+agent; subagents and background jobs do not inherit the connection.
+
+Configure a local stdio server by setting one server object in the global config:
+
+```sh
+./bin/agentj config set mcp.servers.github '{
+  "transport":"stdio",
+  "command":"github-mcp-server",
+  "args":[],
+  "envFrom":{"GITHUB_TOKEN":"GITHUB_TOKEN"},
+  "tools":{"plan":["search_*","get_*"],"build":["*"],"direct":["search_code"]},
+  "resources":{"plan":["docs*"],"build":["*"]}
+}'
+```
+
+`envFrom` maps a child-process variable to a source variable in agentj's environment. Relative
+`cwd` values resolve from the project root. Stdio servers inherit only the MCP SDK's safe baseline
+environment plus configured values.
+
+For a remote server, use Streamable HTTP and environment-derived headers:
+
+```sh
+./bin/agentj config set mcp.servers.docs '{
+  "transport":"http",
+  "url":"https://mcp.example.com/mcp",
+  "headersFromEnv":{"Authorization":"MCP_AUTH_HEADER"},
+  "tools":{"build":["*"]},
+  "resources":{"build":["*"]}
+}'
+```
+
+Tool and resource patterns are exact names with an optional trailing `*`. Plan lists default to
+empty; build lists default to all. Adding a tool to `tools.plan` explicitly certifies it as safe for
+read-only planning. Tools in `tools.direct` are exposed with their native JSON schemas. All other
+eligible tools stay in a bounded catalog accessed through `find_mcp_tools` and `call_mcp_tool`,
+which avoids sending every server schema to the model. Resources similarly use
+`find_mcp_resources` and `read_mcp_resource`, including URI templates. Catalogs refresh lazily when
+a server sends a list-change notification; direct tools remain fixed until the next session.
+
+Build-mode MCP calls default to `ask` and are authorized by canonical names such as
+`mcp_github_search_code`, including calls routed through the generic catalog tool:
+
+```sh
+./bin/agentj config add permissions.mcp.allow "mcp_github_search_*"
+./bin/agentj config add permissions.mcp.deny "mcp_github_delete_*"
+```
+
+Credentials can also be supplied as static `env` or `headers`, but environment mappings avoid
+persisting them in config. Initial MCP support does not include OAuth, server prompts, legacy HTTP
++ SSE, or MCP access from delegates/background jobs.
+
 ## Parallel subagents
 
 In both modes the agent has `run_subagents`: a task DAG (`waitsOn` between tasks) executed with

@@ -114,6 +114,25 @@ describe("createConfigCliHandlers", () => {
     expect(stderr.text()).toBe("");
   });
 
+  test("sets a complete MCP server through a dynamic record key", async () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const handlers = createConfigCliHandlers(createDependencies(config, fake.store));
+    const server = {
+      transport: "http",
+      url: "https://example.com/mcp",
+      headersFromEnv: { Authorization: "MCP_TOKEN" },
+      tools: { plan: ["search*"], direct: ["search_docs"] },
+    };
+
+    await expect(
+      handlers.set({ key: "mcp.servers.docs", value: JSON.stringify(server) }),
+    ).resolves.toMatchObject({ ok: true, changed: true });
+    expect(config.calls).toMatchObject([
+      [{ type: "set", path: ["mcp", "servers", "docs"], value: server }],
+    ]);
+  });
+
   test("validates schema paths and mutates scalar and array values generically", async () => {
     const config = createConfigPort();
     const fake = createStore();

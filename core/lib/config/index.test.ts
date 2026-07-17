@@ -79,11 +79,32 @@ describe("global config paths", () => {
 });
 
 describe("global config reads and merges", () => {
-  test("defaults project setup to an empty post-workspace command list", () => {
+  test("defaults project setup and MCP servers to empty", () => {
     expect(configSchema.parse({}).project.setup).toEqual([]);
+    expect(configSchema.parse({}).mcp).toEqual({ servers: {}, maxOutputChars: 30_000 });
     expect(configSchema.parse({ project: { setup: ["bun install"] } }).project.setup).toEqual([
       "bun install",
     ]);
+  });
+
+  test("composes MCP server configuration into the root schema", () => {
+    const config = configSchema.parse({
+      mcp: {
+        servers: {
+          docs: {
+            transport: "http",
+            url: "https://example.com/mcp",
+            headersFromEnv: { Authorization: "DOCS_TOKEN" },
+            tools: { plan: ["search*"], direct: ["search_docs"] },
+            resources: { plan: ["docs*"] },
+          },
+        },
+      },
+      permissions: { mcp: { allow: ["mcp_docs_search*"] } },
+    });
+    expect(config.mcp.servers.docs?.tools.build).toEqual(["*"]);
+    expect(config.mcp.servers.docs?.resources.plan).toEqual(["docs*"]);
+    expect(config.permissions.mcp.allow).toEqual(["mcp_docs_search*"]);
   });
 
   test("treats a missing global config as empty and rejects malformed or non-object files", async () => {

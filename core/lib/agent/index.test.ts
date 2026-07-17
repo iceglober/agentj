@@ -175,6 +175,46 @@ describe("createAgentTools", () => {
     await expect(build.mcp_build?.execute({})).resolves.toBe("build");
   });
 
+  test("authorizes and reports generic external calls under their resolved target before activity", async () => {
+    const events: string[] = [];
+    const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), {
+      ...baseOptions,
+      externalTools: {
+        build: {
+          tools: {
+            call_mcp_tool: {
+              description: "call",
+              inputSchema: z.object({ tool: z.string() }),
+              execute: async () => {
+                events.push("execute");
+                return "called";
+              },
+            },
+          },
+          permissionTargets: {
+            call_mcp_tool: (input) => (input as { tool: string }).tool,
+          },
+        },
+      },
+      permissions: {
+        config: permissionsConfigSchema.parse({}),
+        gate: async (request) => {
+          events.push(`gate:${request.tool}`);
+          return "allow";
+        },
+      },
+      onToolActivity: (activity) => events.push(`${activity.phase}:${activity.tool}`),
+    });
+
+    await tools.call_mcp_tool?.execute({ tool: "mcp_github_create_issue" });
+    expect(events).toEqual([
+      "gate:mcp_github_create_issue",
+      "start:mcp_github_create_issue",
+      "execute",
+      "end:mcp_github_create_issue",
+    ]);
+  });
+
   test("rejects external tool collisions instead of replacing built-in capabilities", async () => {
     const config = agentConfigSchema.parse({});
     await expect(

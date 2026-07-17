@@ -13,7 +13,7 @@ import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
-import { describeToolInput, type WithPermissionsOptions, withPermissions } from "./permissions";
+import { resolveToolTarget, type WithPermissionsOptions, withPermissions } from "./permissions";
 import {
   createSubagentsTool,
   type DelegationWiring,
@@ -168,6 +168,7 @@ export interface ToolActivity {
 const withToolActivity = (
   tools: ToolSet,
   onActivity: (activity: ToolActivity) => void,
+  resolveTarget?: (tool: string, input: unknown) => string | undefined,
 ): ToolSet => {
   let sequence = 0;
   const wrapped: ToolSet = {};
@@ -177,12 +178,12 @@ const withToolActivity = (
       async execute(input, executeOptions) {
         sequence += 1;
         const id = sequence;
-        const detail = describeToolInput(input);
-        onActivity({ id, tool: name, detail, phase: "start" });
+        const target = resolveToolTarget(name, input, resolveTarget);
+        onActivity({ id, ...target, phase: "start" });
         try {
           return await def.execute(input, executeOptions);
         } finally {
-          onActivity({ id, tool: name, detail, phase: "end" });
+          onActivity({ id, ...target, phase: "end" });
         }
       },
     };
@@ -251,12 +252,17 @@ export async function createAgentTools(
   const external = config.role === "primary" ? opts.externalTools?.[mode] : undefined;
   const finalize = (builtIn: ToolSet): ToolSet => {
     const merged = mergeExternalTools(builtIn, external);
-    const active = opts.onToolActivity ? withToolActivity(merged, opts.onToolActivity) : merged;
+    const resolveExternalTarget = external?.permissionTargets
+      ? (tool: string, input: unknown) => external.permissionTargets?.[tool]?.(input)
+      : undefined;
+    const active = opts.onToolActivity
+      ? withToolActivity(merged, opts.onToolActivity, resolveExternalTarget)
+      : merged;
     if (!opts.permissions) return active;
-    const permissionOptions = external?.permissionTargets
-      ? { ...opts.permissions, permissionTargets: external.permissionTargets }
-      : opts.permissions;
-    return withPermissions(active, permissionOptions);
+    return withPermissions(active, {
+      ...opts.permissions,
+      ...(resolveExternalTarget ? { resolveTarget: resolveExternalTarget } : {}),
+    });
   };
 
   if (mode === "plan") {
