@@ -98,6 +98,8 @@ export function createChatSession(
         text: result.text,
         ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
       });
+      if (result.stepLimitReached)
+        notices.push("[note] The previous turn stopped at the step limit before finishing.");
       await deps.log.append({
         type: "turn",
         mode,

@@ -42,6 +42,13 @@ describe("childAgentConfig", () => {
     const config = agentConfigSchema.parse({ llm: { model: "gpt-5.6-terra" } });
     expect(childAgentConfig(config, "delegate").llm.model).toBe("gpt-5.6-terra");
   });
+
+  test("the per-turn step ceiling defaults well above the SDK's 20 and flows to children", () => {
+    const config = agentConfigSchema.parse({});
+    expect(config.steps).toBe(100);
+    expect(childAgentConfig(config, "delegate").steps).toBe(100);
+    expect(agentConfigSchema.parse({ steps: 250 }).steps).toBe(250);
+  });
 });
 
 describe("createAgentTools", () => {

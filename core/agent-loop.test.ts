@@ -44,6 +44,24 @@ describe("formatChatEvent", () => {
     expect(formatChatEvent({ type: "assistant", mode: "plan", text: "\na\n\nb\n" })).toBe("a\n\nb");
   });
 
+  test("a step-limited turn is announced instead of ending silently", () => {
+    expect(
+      formatChatEvent({ type: "assistant", mode: "build", text: "", stepLimitReached: true }),
+    ).toBe(
+      '(step limit reached — turn stopped mid-work; send "continue" to resume, or raise agent.steps)',
+    );
+    expect(
+      formatChatEvent({
+        type: "assistant",
+        mode: "build",
+        text: "partial\n",
+        stepLimitReached: true,
+      }),
+    ).toBe(
+      'partial\n(step limit reached — turn stopped mid-work; send "continue" to resume, or raise agent.steps)',
+    );
+  });
+
   test("labels dequeued messages with their first line only", () => {
     expect(formatChatEvent({ type: "turn-dequeued", text: "do the thing\nwith detail" })).toBe(
       "(dequeued) do the thing",

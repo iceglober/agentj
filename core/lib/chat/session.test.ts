@@ -259,6 +259,33 @@ describe("createChatSession", () => {
     });
   });
 
+  test("a step-limited turn queues a notice so the next turn knows it stopped early", async () => {
+    await withLog(async (log) => {
+      const prompts: string[] = [];
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            return prompts.length === 1 ? result("", { stepLimitReached: true }) : result("done");
+          }),
+        log,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      await session.send("big task");
+      expect(
+        events.find((event) => event.type === "assistant" && event.stepLimitReached),
+      ).toBeDefined();
+
+      await session.send("continue");
+      expect(prompts[1]).toContain("stopped at the step limit");
+      expect(prompts[1]).toContain("continue");
+    });
+  });
+
   test("turn errors surface as events and never kill the session", async () => {
     await withLog(async (log) => {
       let failures = 0;

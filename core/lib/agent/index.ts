@@ -35,6 +35,12 @@ export const agentConfigSchema = z.object({
   /** Project rules ({{PROJECT_RULES}}); the composition root may merge in
    *  AGENTS.md read from the sandbox repo (explicit config wins). */
   rules: z.string().default(""),
+  /**
+   * Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a
+   * work budget. Without it the AI SDK's implicit 20-step default silently
+   * truncates long build turns. Turns that hit the ceiling surface a notice.
+   */
+  steps: z.number().int().min(1).default(100),
   llm: llmConfigSchema.prefault({}),
   prompt: promptConfigSchema.prefault({}),
   tools: z
@@ -91,7 +97,7 @@ export interface CreateAgentOptions {
    * Cap the tool loop at N steps. Routed through the runtime port's `stopSteps`
    * so the eval harness can set its per-task step budget once, without the
    * caller knowing how any particular runtime enforces the cap. Omitted → the
-   * runtime's default stands.
+   * config's `steps` ceiling stands.
    */
   stopSteps?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
@@ -279,7 +285,7 @@ export async function createAgent(
         temperature: config.llm.temperature ?? composed.params.temperature,
         topP: config.llm.topP ?? composed.params.topP,
         providerOptions: composed.params.providerOptions,
-        stopSteps: opts.stopSteps,
+        stopSteps: opts.stopSteps ?? config.steps,
         abortSignal: generateOpts?.abortSignal,
         onStep: generateOpts?.onStep,
       }),
