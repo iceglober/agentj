@@ -70,6 +70,17 @@ export interface CreateAgentDelegationOptions
   maxConcurrency?: number;
 }
 
+export type AgentMode = "plan" | "build";
+
+/** Resolves an external permission target from one model tool call. */
+export type ExternalToolPermissionTargetResolver = (input: unknown) => string | undefined;
+
+export interface ExternalAgentTools {
+  tools: ToolSet;
+  /** External tools omitted from this map remain ungated. */
+  permissionTargets?: Readonly<Record<string, ExternalToolPermissionTargetResolver>>;
+}
+
 export interface CreateAgentOptions {
   /** The session worktree the agent's tools operate in. */
   root: string;
@@ -101,7 +112,12 @@ export interface CreateAgentOptions {
    */
   stopSteps?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
-  mode?: "plan" | "build";
+  mode?: AgentMode;
+  /**
+   * Primary-only, mode-specific tools supplied by an external integration such
+   * as MCP. Delegates and background children never inherit these capabilities.
+   */
+  externalTools?: Partial<Record<AgentMode, ExternalAgentTools>>;
   /** Plan-mode run_subagents wiring: read-only research workers. */
   research?: {
     createWorker(task: NormalizedSubagentTask): Promise<SubagentRunner>;
@@ -174,6 +190,21 @@ const withToolActivity = (
   return wrapped;
 };
 
+const mergeExternalTools = (builtIn: ToolSet, external?: ExternalAgentTools): ToolSet => {
+  if (!external) return builtIn;
+  const collisions = Object.keys(external.tools).filter((name) => Object.hasOwn(builtIn, name));
+  if (collisions.length > 0) {
+    throw new Error(`External tool name collision: ${collisions.sort().join(", ")}`);
+  }
+  const unknownTargets = Object.keys(external.permissionTargets ?? {}).filter(
+    (name) => !Object.hasOwn(external.tools, name),
+  );
+  if (unknownTargets.length > 0) {
+    throw new Error(`External permission target has no tool: ${unknownTargets.sort().join(", ")}`);
+  }
+  return { ...builtIn, ...external.tools };
+};
+
 /** Assemble the capability boundary independently from model construction. */
 export async function createAgentTools(
   sb: Sandbox,
@@ -216,11 +247,20 @@ export async function createAgentTools(
       }
     : {};
 
-  const activity = (tools: ToolSet): ToolSet =>
-    opts.onToolActivity ? withToolActivity(tools, opts.onToolActivity) : tools;
+  const mode = opts.mode ?? "build";
+  const external = config.role === "primary" ? opts.externalTools?.[mode] : undefined;
+  const finalize = (builtIn: ToolSet): ToolSet => {
+    const merged = mergeExternalTools(builtIn, external);
+    const active = opts.onToolActivity ? withToolActivity(merged, opts.onToolActivity) : merged;
+    if (!opts.permissions) return active;
+    const permissionOptions = external?.permissionTargets
+      ? { ...opts.permissions, permissionTargets: external.permissionTargets }
+      : opts.permissions;
+    return withPermissions(active, permissionOptions);
+  };
 
-  if ((opts.mode ?? "build") === "plan") {
-    return activity({
+  if (mode === "plan") {
+    return finalize({
       ...createReadTools(fileSandbox, { root: opts.root }),
       ...createSearchTools(sb, { root: opts.root }),
       ...(opts.research
@@ -235,13 +275,12 @@ export async function createAgentTools(
     });
   }
 
-  const builderTools: ToolSet = activity({
+  return finalize({
     ...(await createBashTools(fileSandbox, { root: opts.root })),
     ...createSearchTools(sb, { root: opts.root }),
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
   });
-  return opts.permissions ? withPermissions(builderTools, opts.permissions) : builderTools;
 }
 
 /**

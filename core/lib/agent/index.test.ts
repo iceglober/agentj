@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { z } from "zod";
+import type { ToolSet } from "../llm";
 import type { Sandbox } from "../sandbox";
 import { agentConfigSchema, type CreateAgentOptions, childAgentConfig, createAgentTools } from ".";
 import { permissionsConfigSchema } from "./permissions";
@@ -23,6 +25,12 @@ const baseOptions: CreateAgentOptions = {
     gitStatusSummary: "clean",
   },
 };
+
+const externalTool = (name: string): ToolSet[string] => ({
+  description: name,
+  inputSchema: z.object({ value: z.string().optional() }),
+  execute: async () => name,
+});
 
 describe("childAgentConfig", () => {
   test("routes children to the configured subagent model, preserving providers", () => {
@@ -71,9 +79,9 @@ describe("createAgentTools", () => {
 
   test("tool activity fires around execution, after permission grants, never on deny", async () => {
     const config = agentConfigSchema.parse({});
-    const activities: string[] = [];
+    const events: string[] = [];
     const record = (activity: { tool: string; detail: string; phase: string }) =>
-      activities.push(`${activity.phase}:${activity.tool}:${activity.detail}`);
+      events.push(`${activity.phase}:${activity.tool}:${activity.detail}`);
 
     const denied = await createAgentTools(sandbox, config, {
       ...baseOptions,
@@ -85,14 +93,21 @@ describe("createAgentTools", () => {
     });
     const deniedResult = await denied.bash?.execute({ command: "ls" });
     expect(String(deniedResult)).toContain("Denied by user");
-    expect(activities).toEqual([]); // denial short-circuits before activity
+    expect(events).toEqual([]); // denial short-circuits before activity
 
     const allowed = await createAgentTools(sandbox, config, {
       ...baseOptions,
       onToolActivity: record,
+      permissions: {
+        config: permissionsConfigSchema.parse({ bash: { default: "ask" } }),
+        gate: async () => {
+          events.push("permission:bash");
+          return "allow";
+        },
+      },
     });
     await allowed.bash?.execute({ command: "ls" });
-    expect(activities).toEqual(["start:bash:ls", "end:bash:ls"]);
+    expect(events).toEqual(["permission:bash", "start:bash:ls", "end:bash:ls"]);
   });
 
   test("plan mode receives only read/search capabilities; research adds run_subagents", async () => {
@@ -133,5 +148,64 @@ describe("createAgentTools", () => {
     expect(tools).toHaveProperty("writeFile");
     expect(tools).toHaveProperty("edit");
     expect(tools).not.toHaveProperty("run_subagents");
+  });
+
+  test("injects only the external tools selected for the primary agent's mode", async () => {
+    const config = agentConfigSchema.parse({});
+    const externalTools: CreateAgentOptions["externalTools"] = {
+      plan: { tools: { mcp_plan: externalTool("plan") } },
+      build: {
+        tools: { mcp_build: externalTool("build") },
+        permissionTargets: { mcp_build: () => "server::build" },
+      },
+    };
+
+    const plan = await createAgentTools(sandbox, config, {
+      ...baseOptions,
+      mode: "plan",
+      externalTools,
+    });
+    const build = await createAgentTools(sandbox, config, { ...baseOptions, externalTools });
+
+    expect(plan).toHaveProperty("mcp_plan");
+    expect(plan).not.toHaveProperty("mcp_build");
+    expect(build).toHaveProperty("mcp_build");
+    expect(build).not.toHaveProperty("mcp_plan");
+    await expect(plan.mcp_plan?.execute({})).resolves.toBe("plan");
+    await expect(build.mcp_build?.execute({})).resolves.toBe("build");
+  });
+
+  test("rejects external tool collisions instead of replacing built-in capabilities", async () => {
+    const config = agentConfigSchema.parse({});
+    await expect(
+      createAgentTools(sandbox, config, {
+        ...baseOptions,
+        mode: "plan",
+        externalTools: { plan: { tools: { readFile: externalTool("replacement") } } },
+      }),
+    ).rejects.toThrow("External tool name collision: readFile");
+    await expect(
+      createAgentTools(sandbox, config, {
+        ...baseOptions,
+        externalTools: { build: { tools: { bash: externalTool("replacement") } } },
+      }),
+    ).rejects.toThrow("External tool name collision: bash");
+  });
+
+  test("never injects external tools into delegates or background-child configs", async () => {
+    const primary = agentConfigSchema.parse({});
+    const externalTools: CreateAgentOptions["externalTools"] = {
+      plan: { tools: { mcp_plan: externalTool("plan") } },
+      build: { tools: { mcp_build: externalTool("build") } },
+    };
+    for (const mode of ["plan", "build"] as const) {
+      const delegate = await createAgentTools(sandbox, childAgentConfig(primary, "delegate"), {
+        ...baseOptions,
+        mode,
+        externalTools,
+      });
+      expect(delegate).not.toHaveProperty("mcp_plan");
+      expect(delegate).not.toHaveProperty("mcp_build");
+    }
   });
 });
