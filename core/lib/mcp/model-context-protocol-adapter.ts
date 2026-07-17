@@ -128,6 +128,7 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
             ...(tool.title ? { title: tool.title } : {}),
             ...(tool.description ? { description: tool.description } : {}),
             inputSchema: tool.inputSchema,
+            ...(tool.annotations?.readOnlyHint === true ? { readOnly: true } : {}),
           })),
           result.nextCursor,
         );

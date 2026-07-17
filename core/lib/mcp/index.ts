@@ -12,7 +12,9 @@ const patternListSchema = z.array(patternSchema);
 
 const toolSelectionSchema = z
   .object({
-    plan: patternListSchema.default([]),
+    /** Plan additionally requires the server's readOnlyHint annotation, so the
+     *  wildcard default stays within plan mode's read-only contract. */
+    plan: patternListSchema.default(["*"]),
     build: patternListSchema.default(["*"]),
     /** Eligible tools matching these patterns are exposed with their native schema. */
     direct: patternListSchema.default([]),
@@ -21,7 +23,8 @@ const toolSelectionSchema = z
 
 const resourceSelectionSchema = z
   .object({
-    plan: patternListSchema.default([]),
+    /** Resources are reads; plan gets them by default. */
+    plan: patternListSchema.default(["*"]),
     build: patternListSchema.default(["*"]),
   })
   .prefault({});
@@ -81,6 +84,8 @@ export interface McpRemoteTool {
   title?: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  /** The server's readOnlyHint annotation — an untrusted hint, absent = false. */
+  readOnly?: boolean;
 }
 
 export interface McpRemoteResource {
@@ -407,7 +412,13 @@ export function createMcpExternalTools(
       }> =>
         states.flatMap((state) =>
           state.tools
-            .filter((remote) => matchesAny(state.config.tools[mode], remote.name))
+            // Plan mode is read-only: beyond the configured pattern, a tool
+            // must carry the server's readOnlyHint annotation to be exposed.
+            .filter(
+              (remote) =>
+                matchesAny(state.config.tools[mode], remote.name) &&
+                (mode !== "plan" || remote.readOnly === true),
+            )
             .map((remote) => ({
               state,
               remote,

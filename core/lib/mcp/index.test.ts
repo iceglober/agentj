@@ -63,9 +63,10 @@ class FakeClient implements McpServerClient {
   }
 }
 
-const tool = (name: string, description = name): McpRemoteTool => ({
+const tool = (name: string, description = name, readOnly?: boolean): McpRemoteTool => ({
   name,
   description,
+  ...(readOnly ? { readOnly } : {}),
   inputSchema: {
     type: "object",
     properties: { query: { type: "string" } },
@@ -79,8 +80,8 @@ describe("mcpConfigSchema", () => {
     const parsed = mcpConfigSchema.parse({
       servers: { local: { transport: "stdio", command: "server" } },
     });
-    expect(parsed.servers.local?.tools).toEqual({ plan: [], build: ["*"], direct: [] });
-    expect(parsed.servers.local?.resources).toEqual({ plan: [], build: ["*"] });
+    expect(parsed.servers.local?.tools).toEqual({ plan: ["*"], build: ["*"], direct: [] });
+    expect(parsed.servers.local?.resources).toEqual({ plan: ["*"], build: ["*"] });
   });
 
   test("rejects ambiguous wildcards and unsafe server identifiers", () => {
@@ -103,7 +104,7 @@ describe("connectMcp", () => {
   test("paginates discovery and exposes mode-filtered direct and catalog tools", async () => {
     const client = new FakeClient();
     client.tools = [
-      tool("search-code", "Search source code"),
+      tool("search-code", "Search source code", true),
       tool("delete_issue", "Delete issue"),
     ];
     const config = mcpConfigSchema.parse({
@@ -156,6 +157,29 @@ describe("connectMcp", () => {
     ).toBe("mcp_github_delete_issue");
     await connection.close();
     expect(client.closes).toBe(1);
+  });
+
+  test("plan mode exposes only tools the server annotates read-only", async () => {
+    const client = new FakeClient();
+    client.tools = [
+      tool("list_issues", "List issues", true),
+      tool("save_issue", "Create or update an issue"),
+    ];
+    const connection = await connectMcp(
+      mcpConfigSchema.parse({
+        servers: {
+          linear: { transport: "stdio", command: "server", tools: { direct: ["*"] } },
+        },
+      }),
+      { root: "/repo", connectServer: async () => client },
+    );
+
+    // Defaults are wildcard for both modes; the annotation is the plan gate.
+    expect(connection.externalTools.plan.tools).toHaveProperty("mcp_linear_list_issues");
+    expect(connection.externalTools.plan.tools).not.toHaveProperty("mcp_linear_save_issue");
+    expect(connection.externalTools.build.tools).toHaveProperty("mcp_linear_list_issues");
+    expect(connection.externalTools.build.tools).toHaveProperty("mcp_linear_save_issue");
+    await connection.close();
   });
 
   test("finds and reads eligible resources and expanded templates", async () => {
