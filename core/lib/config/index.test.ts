@@ -84,6 +84,7 @@ describe("global config reads and merges", () => {
     expect(configSchema.parse({}).project.setup).toEqual([]);
     expect(configSchema.parse({}).mcp).toEqual({ servers: {}, maxOutputChars: 30_000 });
     expect(configSchema.parse({}).metrics.enabled).toBe(false);
+    expect(configSchema.parse({}).update).toEqual({ auto: true, channel: "auto" });
     expect(configSchema.parse({}).agent.tools.maxOutputChars).toBe(30_000);
     expect(configSchema.parse({ project: { setup: ["bun install"] } }).project.setup).toEqual([
       "bun install",

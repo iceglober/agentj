@@ -85,8 +85,8 @@ describe("runAgentjCli", () => {
     await expect(runAgentjCli(["run", "task"], deps)).resolves.toBe(130);
   });
 
-  test("update routes the selected channel and defaults to latest", async () => {
-    const calls: Array<{ channel: "next" | "latest" }> = [];
+  test("update routes the selected channel and defaults to automatic channel selection", async () => {
+    const calls: Array<{ channel: "auto" | "next" | "latest" }> = [];
     const { deps } = makeDeps({
       update: async (options) => {
         calls.push(options);
@@ -96,7 +96,7 @@ describe("runAgentjCli", () => {
 
     await expect(runAgentjCli(["update"], deps)).resolves.toBe(EXIT_SUCCESS);
     await expect(runAgentjCli(["update", "--channel", "next"], deps)).resolves.toBe(EXIT_SUCCESS);
-    expect(calls).toEqual([{ channel: "latest" }, { channel: "next" }]);
+    expect(calls).toEqual([{ channel: "auto" }, { channel: "next" }]);
   });
 
   test("update rejects an invalid channel without invoking the handler", async () => {
@@ -104,9 +104,9 @@ describe("runAgentjCli", () => {
     const update = async () => EXIT_SUCCESS;
     const { deps } = makeDeps({ update });
 
-    await expect(runAgentjCli(["update", "--channel", "stable"], deps, { stderr })).resolves.not.toBe(
-      EXIT_SUCCESS,
-    );
+    await expect(
+      runAgentjCli(["update", "--channel", "stable"], deps, { stderr }),
+    ).resolves.not.toBe(EXIT_SUCCESS);
     expect(stderr.text()).toContain("stable");
   });
 

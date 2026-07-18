@@ -5,6 +5,7 @@ import { providerNames } from "../llm";
 import { mcpServerConfigSchema } from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
+import type { UpdateChannel } from "../update";
 import type { ChatEvent } from "./events";
 import type { GuidedInputPort } from "./guided-input";
 import type { JobRunner } from "./jobs";
@@ -73,8 +74,6 @@ export interface ModelController {
   modelSuggestions(provider: string): readonly string[];
   configure(target: ModelTarget, selection: ModelSelection | null): Promise<boolean>;
 }
-
-export type UpdateChannel = "next" | "latest";
 
 export interface ChatCommandContext {
   session: ChatSession;
@@ -401,8 +400,8 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
 };
 
 const runUpdateCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
-  const channel = args.trim() || "latest";
-  if (channel !== "next" && channel !== "latest") {
+  const channel = args.trim() || "auto";
+  if (channel !== "auto" && channel !== "next" && channel !== "latest") {
     context.emit({ type: "notice", text: "Usage: /update [next|latest]" });
     return;
   }
@@ -410,7 +409,7 @@ const runUpdateCommand = async (context: ChatCommandContext, args: string): Prom
     context.emit({ type: "notice", text: "Updates are unavailable in this session." });
     return;
   }
-  await context.requestUpdate(channel);
+  await context.requestUpdate(channel as UpdateChannel);
   context.quit();
 };
 
@@ -654,6 +653,8 @@ const configKeySummary: Record<string, string> = {
   "permissions.edit": "Edit permission policy",
   "permissions.bash.default": "Default bash permission policy",
   "mcp.maxOutputChars": "Maximum MCP result size",
+  "update.auto": "Automatically check for updates",
+  "update.channel": "Release channel to follow",
 };
 const baseConfigKeys = [
   ...new Set([...listConfigPaths(), "llm.model", "providers.azure.api_key"]),
@@ -665,6 +666,8 @@ const choiceValues: Record<string, readonly string[]> = {
   "agent.tools.edit.mode": ["batch", "exact", "hash"],
   "permissions.edit": ["allow", "ask", "deny"],
   "permissions.bash.default": ["allow", "ask", "deny"],
+  "update.auto": ["true", "false"],
+  "update.channel": ["auto", "next", "latest"],
 };
 
 const prefixedSuggestions = (
@@ -763,7 +766,10 @@ export function completeChatInput(
     return {
       token,
       suggestions: prefixedSuggestions(
-        [["next", "Update to the next release"], ["latest", "Update to the latest stable release"]],
+        [
+          ["next", "Update to the next release"],
+          ["latest", "Update to the latest stable release"],
+        ],
         prefix,
         "",
       ),

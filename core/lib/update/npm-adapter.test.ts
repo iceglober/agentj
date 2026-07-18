@@ -2,20 +2,28 @@ import { describe, expect, test } from "bun:test";
 import { createNpmInstaller, createNpmRegistryAdapter, detectPackageManager } from "./npm-adapter";
 
 describe("npm update adapter", () => {
-  test("reads a dist-tag without executing a shell", async () => {
-    const adapter = createNpmRegistryAdapter({
-      fetchImpl: async () => new Response(JSON.stringify({ version: "1.2.3" }), { status: 200 }),
-    });
+  test("reads a scoped dist-tag without executing a shell", async () => {
+    const adapter = createNpmRegistryAdapter(
+      async () => new Response(JSON.stringify({ version: "1.2.3" }), { status: 200 }),
+    );
     expect(await adapter.latest("@scope/pkg", "next")).toBe("1.2.3");
   });
-  test("selects bun on unix and passes argv", async () => {
-    expect(detectPackageManager("darwin")).toBe("bun");
+
+  test("only updates recognized global installs with argv", async () => {
+    expect(detectPackageManager("/Users/a/.bun/install/global/node_modules/@glrs-dev/aj")).toBe(
+      "bun",
+    );
+    expect(detectPackageManager("/usr/local/lib/node_modules/@glrs-dev/aj")).toBe("npm");
+    expect(detectPackageManager("/repo/agentj")).toBeUndefined();
     const calls: unknown[] = [];
-    const installer = createNpmInstaller({ command: async (file, args) => {
-      calls.push([file, args]);
-      return { stdout: "", stderr: "", exitCode: 0 };
-    }, platform: "darwin" });
-    await installer.install("@scope/pkg", "next");
-    expect(calls).toEqual([["bun", ["add", "-g", "@scope/pkg@next"]]]);
+    const installer = createNpmInstaller({
+      packageRoot: "/usr/local/lib/node_modules/@glrs-dev/aj",
+      command: async (file, args) => {
+        calls.push([file, args]);
+        return { stderr: "", exitCode: 0 };
+      },
+    });
+    await installer?.install("@scope/pkg", "next");
+    expect(calls).toEqual([["npm", ["install", "--global", "@scope/pkg@next"]]]);
   });
 });

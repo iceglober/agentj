@@ -366,7 +366,7 @@ describe("runChatCommand", () => {
     };
     await runChatCommand(context, "update", "next");
     await runChatCommand(context, "update", "");
-    expect(channels).toEqual(["next", "latest"]);
+    expect(channels).toEqual(["next", "auto"]);
     expect(quitCalls()).toBe(2);
   });
 

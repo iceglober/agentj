@@ -34,6 +34,22 @@ describe("interactive chat shutdown", () => {
     ]);
   });
 
+  test("runs a requested update only after terminal teardown", async () => {
+    const events: string[] = [];
+    await finalizeInteractiveChat({
+      sessionId: undefined,
+      settle: Promise.resolve(),
+      stopScreen: () => events.push("screen stopped"),
+      closeComposition: async () => {
+        events.push("composition closed");
+      },
+      afterClose: async () => {
+        events.push("updated");
+      },
+    });
+    expect(events).toEqual(["screen stopped", "composition closed", "updated"]);
+  });
+
   test("still cleans up and prints when session work fails", async () => {
     const events: string[] = [];
     const failure = new Error("TUI crashed");

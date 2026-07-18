@@ -4,6 +4,7 @@ import { command, flag, oneOf, option, optional, positional, runSafely, string }
 
 import type { ConfigCliHandlers } from "../config-cli";
 import type { EvalCliHandlers } from "../eval-cli";
+import type { UpdateChannel } from "../update";
 
 export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
@@ -20,8 +21,6 @@ export interface RunOnceOptions {
   allowAll: boolean;
   signal: AbortSignal;
 }
-
-export type UpdateChannel = "next" | "latest";
 
 export interface AgentjCommandDependencies {
   version: string;
@@ -77,7 +76,7 @@ const createUpdateCommand = (deps: AgentjCommandDependencies) =>
         description: "Release channel to install.",
       }),
     },
-    handler: ({ channel }) => deps.update!({ channel: channel ?? "latest" }),
+    handler: ({ channel }) => deps.update!({ channel: channel ?? "auto" }),
   });
 
 const createRunCommand = (deps: AgentjCommandDependencies) =>

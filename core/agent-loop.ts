@@ -1,6 +1,7 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
+import { fileURLToPath } from "node:url";
 import packageJson from "../package.json";
 import {
   type Agent,
@@ -34,7 +35,7 @@ import type { ChatEvent } from "./lib/chat/events";
 import { createJobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
-import { loadChatConfig } from "./lib/config";
+import { loadChatConfig, loadConfig } from "./lib/config";
 import {
   createConfigCliHandlers,
   createMaskedSecretPrompt,
@@ -75,6 +76,12 @@ import {
   type ProgressTracker,
 } from "./lib/tui/progress";
 import { escapeTerminalText } from "./lib/tui/terminal-editor";
+import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
+import {
+  createNpmInstaller,
+  createNpmRegistryAdapter,
+  createUpdateStateStore,
+} from "./lib/update/npm-adapter";
 import {
   createGitDelegationSnapshot,
   integrateGitDelegation,
@@ -170,6 +177,8 @@ export async function finalizeInteractiveChat(options: {
   settle: Promise<unknown>;
   stopScreen(): void;
   closeComposition(): Promise<void>;
+  /** Runs only after raw terminal and composition resources are closed. */
+  afterClose?(): Promise<void>;
   write?(text: string): void;
 }): Promise<void> {
   try {
@@ -180,6 +189,7 @@ export async function finalizeInteractiveChat(options: {
     } finally {
       try {
         await options.closeComposition();
+        await options.afterClose?.();
       } finally {
         if (options.sessionId) {
           (options.write ?? ((text) => processStdout.write(text)))(
@@ -734,7 +744,9 @@ async function composeChat(
 export async function runAgentjChat(
   options: { resume?: string; continueLatest?: boolean } = {},
   configPath: string = new URL("./agentj.json", import.meta.url).pathname,
+  update?: (channel: UpdateChannel) => Promise<void>,
 ): Promise<number> {
+  let requestedUpdate: UpdateChannel | undefined;
   let screen: ChatScreen | undefined;
   let emitChatEvent: ((event: ChatEvent) => void) | null = null;
   const onDagProgress = (progress: SubagentProgressEvent): void => {
@@ -1076,6 +1088,9 @@ export async function runAgentjChat(
       undo: undoStack,
       emit: render,
       quit: () => quitResolve?.(),
+      requestUpdate: (channel) => {
+        requestedUpdate = channel;
+      },
       config: interactiveConfig,
       models: {
         current: composition.modelSelections,
@@ -1174,6 +1189,7 @@ export async function runAgentjChat(
     if (ticker) clearInterval(ticker);
     if (handleSigint) process.removeListener("SIGINT", handleSigint);
     jobs?.dispose();
+    const updateChannel = requestedUpdate;
     await finalizeInteractiveChat({
       sessionId: resumeSessionId,
       settle: Promise.all([
@@ -1183,6 +1199,7 @@ export async function runAgentjChat(
       ]),
       stopScreen: () => screen?.stop(),
       closeComposition: () => composition.close().catch(() => undefined),
+      afterClose: updateChannel && update ? () => update(updateChannel) : undefined,
     });
   }
 }
@@ -1283,6 +1300,80 @@ export async function runAgentjOnce(
   }
 }
 
+const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+
+const createProductionUpdateService = async (): Promise<{
+  service: UpdateService;
+  supported: boolean;
+  auto: boolean;
+}> => {
+  const config = await loadConfig();
+  const installer = createNpmInstaller({ packageRoot });
+  return {
+    service: createUpdateService({
+      config: config.update,
+      packageName: "@glrs-dev/aj",
+      registry: createNpmRegistryAdapter(),
+      ...(installer ? { installer } : {}),
+      state: createUpdateStateStore(),
+    }),
+    supported: installer !== undefined,
+    auto: config.update.auto,
+  };
+};
+
+const runProductionUpdate = async (channel: UpdateChannel): Promise<number> => {
+  try {
+    const { service } = await createProductionUpdateService();
+    const result = await service.update(COMMAND_VERSION, channel);
+    if (result.available) {
+      processStdout.write(`Updated agentj to ${result.available} (${result.channel}).\n`);
+    } else {
+      processStdout.write(`agentj ${COMMAND_VERSION} is current on ${result.channel}.\n`);
+    }
+    return EXIT_SUCCESS;
+  } catch (error) {
+    processStderr.write(
+      `Unable to update agentj: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return EXIT_FAILURE;
+  }
+};
+
+const shouldAutoUpdate = (argv: string[]): boolean =>
+  process.env.AGENTJ_UPDATE_RESTARTED !== "1" &&
+  argv[0] !== "update" &&
+  argv[0] !== "config" &&
+  argv[0] !== "eval" &&
+  !argv.includes("--help") &&
+  !argv.includes("-h") &&
+  !argv.includes("--version") &&
+  !argv.includes("-v");
+
+const autoUpdate = async (argv: string[]): Promise<number | undefined> => {
+  if (!shouldAutoUpdate(argv)) return undefined;
+  try {
+    const { service, supported, auto } = await createProductionUpdateService();
+    if (!auto || !supported) return undefined;
+    const result = await service.check(COMMAND_VERSION);
+    if (!result.available) return undefined;
+    processStderr.write(`Updating agentj to ${result.available} (${result.channel})...\n`);
+    await service.update(COMMAND_VERSION);
+    const child = Bun.spawn({
+      cmd: [process.execPath, process.argv[1]!, ...argv],
+      stdout: "inherit",
+      stderr: "inherit",
+      env: { ...process.env, AGENTJ_UPDATE_RESTARTED: "1" },
+    });
+    return await child.exited;
+  } catch (error) {
+    processStderr.write(
+      `AgentJ auto-update skipped: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return undefined;
+  }
+};
+
 const formatUnexpectedError = (error: unknown): string => {
   if (error instanceof Error) {
     return `${error.name}: ${error.message}`;
@@ -1293,6 +1384,12 @@ const formatUnexpectedError = (error: unknown): string => {
 
 const main = async (): Promise<void> => {
   const argv = process.argv.slice(2);
+  const autoUpdateExitCode = await autoUpdate(argv);
+  if (autoUpdateExitCode !== undefined) {
+    process.exitCode = autoUpdateExitCode;
+    return;
+  }
+
   const abortController = new AbortController();
   const handleSigint = (): void => {
     abortController.abort();
@@ -1314,8 +1411,14 @@ const main = async (): Promise<void> => {
       argv,
       {
         version: COMMAND_VERSION,
-        runChat: (options) => runAgentjChat(options),
+        runChat: (options) =>
+          runAgentjChat(options, undefined, async (channel) => {
+            if ((await runProductionUpdate(channel)) !== EXIT_SUCCESS) {
+              throw new Error("AgentJ update failed.");
+            }
+          }),
         runOnce: (task, options) => runAgentjOnce(task, options),
+        update: ({ channel }) => runProductionUpdate(channel),
         createAbortSignal: () => abortController.signal,
         configHandlers,
         createEvalHandlers: () => createProductionEvalCliHandlers(),

@@ -16,7 +16,8 @@ The implementation lives in [`core/`](core/) — a Bun TypeScript agent.
 ## Run it
 
 ```sh
-git clone git@github.com:iceglober/agentj.git && cd agentj
+bun add --global @glrs-dev/aj@next       # install the prerelease channel
+git clone git@github.com:iceglober/agentj.git && cd agentj  # or develop from source
 ```
 
 ```sh
@@ -29,6 +30,7 @@ bun run agentj -- run --allow-all "fix the tests"      # asks auto-resolve to al
 ./bin/agentj config set agent.llm.model gpt-5.6-sol
 ./bin/agentj config set agent.tools.subagents.model gpt-5.6-luna  # tier-route fan-out work
 ./bin/agentj config set --secret providers.azure.api_key
+agentj update --channel next             # update an installed CLI now
 ./bin/agentj eval | eval report | eval selfcheck
 ./bin/agentj --help
 ```
@@ -66,6 +68,8 @@ Keys and commands:
   Omitting a sensitive value opens a masked prompt.
 - **`/model [primary|subagents]`** — choose a provider and model in a guided prompt. Changes are
   saved globally and apply to new turns/jobs immediately; subagents can instead inherit the primary.
+- **`/update [next|latest]`** — exit cleanly and update the installed CLI. Omit the channel to keep
+  the current release track.
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 
@@ -73,6 +77,13 @@ Editor shortcuts: Option+←/→ word hop, Option+Backspace/Delete word delete, 
 Cmd+Backspace/Delete delete to bound; Home/End, Ctrl+A/E/U/K, and Esc+B/F/D fallbacks work in any
 terminal. Shift+Return and Cmd combinations need a modifier-aware terminal protocol (CSI-u — kitty,
 WezTerm, Ghostty, or mapped keys in iTerm2).
+
+## Updates
+
+Installed CLIs check once per day before starting. Prerelease versions follow the `next` tag and
+stable versions follow `latest`; `agentj update --channel next|latest` and `/update` override that
+choice. Disable automatic checks with `agentj config set update.auto false`, or select a persistent
+channel with `agentj config set update.channel next`. Source checkouts are never modified.
 
 ## Permissions
 
