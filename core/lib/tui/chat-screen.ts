@@ -224,11 +224,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     const progress = progressLines.map(safeLine);
     const safeStatus = statusLines.map(safeLine);
     if (pendingModal?.kind === "permission") {
+      const detail = permissionDetailLines(pendingModal.request);
       const askLines = [
         ...wrapToDisplayWidth(
-          `Permission ${escapeTerminalText(pendingModal.request.tool)} — review request above`,
+          `Permission ${escapeTerminalText(pendingModal.request.tool)}`,
           contentWidth(),
         ),
+        ...detail.lines,
+        ...(detail.omitted > 0
+          ? wrapToDisplayWidth(`  … +${detail.omitted} more lines`, contentWidth())
+          : []),
         ...wrapToDisplayWidth("[y]es once · [a]lways this session · [n]o", contentWidth()),
       ];
       const askCursorRow = progress.length + askLines.length - 1;
@@ -347,6 +352,21 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     printTranscript(`Permission ${request.tool}:\n${request.detail}`);
   };
 
+  /** The request rendered inside the modal: indented, wrapped, clamped. The
+   *  full text goes to the transcript only when the clamp actually omits. */
+  const PERMISSION_DETAIL_LINES = 6;
+  const permissionDetailLines = (
+    request: PermissionRequest,
+  ): { lines: string[]; omitted: number } => {
+    const wrapped = request.detail
+      .split("\n")
+      .flatMap((line) =>
+        wrapToDisplayWidth(escapeTerminalText(line), Math.max(1, contentWidth() - 2)),
+      );
+    const shown = wrapped.slice(0, PERMISSION_DETAIL_LINES);
+    return { lines: shown.map((line) => `  ${line}`), omitted: wrapped.length - shown.length };
+  };
+
   const armEscapeFlush = (): void => {
     if (escapeTimer) clearTimeout(escapeTimer);
     escapeTimer = setTimeout(() => {
@@ -356,8 +376,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   };
 
   const activateModal = (): void => {
-    if (pendingModal?.kind === "permission") printPermissionRequest(pendingModal.request);
-    else paint();
+    // Short requests live entirely in the modal; only a clamped request is
+    // also printed above so its full text stays reviewable.
+    if (
+      pendingModal?.kind === "permission" &&
+      permissionDetailLines(pendingModal.request).omitted > 0
+    ) {
+      printPermissionRequest(pendingModal.request);
+    } else paint();
   };
 
   const settleModal = (

@@ -243,16 +243,30 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("permission asks show the complete request and distinguish once, always, and deny", async () => {
+  test("permission asks show the request inside the modal and distinguish once, always, and deny", async () => {
     const { screen, input, text } = makeScreen();
     screen.start();
     const detail = `git push origin a-very-long-branch-name-that-exceeds-the-terminal-width\necho done`;
     const first = screen.askPermission({ tool: "bash", kind: "bash", detail });
     await settle();
-    expect(text()).toContain(`Permission bash:\r\n${detail.replace("\n", "\r\n")}`);
-    expect(text()).toContain("Permission bash — review request above");
+    // The command renders in the modal itself — wrapped, indented — without a
+    // duplicate transcript copy for a request this short.
+    expect(text()).toContain("Permission bash\r\n  git push origin");
+    expect(text()).toContain("  echo done");
+    expect(text()).not.toContain("Permission bash:");
+    expect(text()).not.toContain("review request above");
     input.write("y");
     await expect(first).resolves.toBe("allow");
+
+    // A request beyond the modal clamp keeps a full transcript copy and says
+    // how much the modal omitted.
+    const longDetail = Array.from({ length: 12 }, (_, i) => `line-${i}`).join("\n");
+    const long = screen.askPermission({ tool: "bash", kind: "bash", detail: longDetail });
+    await settle();
+    expect(text()).toContain(`Permission bash:\r\n${longDetail.split("\n").join("\r\n")}`);
+    expect(text()).toContain("… +6 more lines");
+    input.write("n");
+    await expect(long).resolves.toBe("deny");
 
     const second = screen.askPermission({ tool: "edit", kind: "edit", detail: "src/a.ts" });
     input.write("x"); // ignored — not an answer key
