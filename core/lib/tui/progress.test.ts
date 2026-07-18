@@ -30,12 +30,14 @@ describe("subagent progress", () => {
       id: "t1",
       title: "Map modules",
       elapsedMs: 2100,
+      message: "mapped modules",
     });
     apply(tracker, {
       type: "task-failed",
       id: "t2",
       title: "Run tests",
       elapsedMs: 4300,
+      message: "failed",
       error: "failed",
     });
     apply(tracker, {
@@ -43,6 +45,7 @@ describe("subagent progress", () => {
       id: "t3",
       title: "Integrate",
       elapsedMs: 0,
+      message: "blocked",
       error: "blocked",
     });
 
@@ -52,8 +55,11 @@ describe("subagent progress", () => {
     const width = "  x t3 Integrate (blocked)".length + 2;
     expect(completed.completedLines).toEqual([
       `${"  ✓ t1 Map modules".padEnd(width)}in:1.2k, out:300, ctx:900  2.1s`,
+      "    ↳ mapped modules",
       `${"  x t2 Run tests (failed)".padEnd(width)}4.3s`,
+      "    ↳ failed",
       `${"  x t3 Integrate (blocked)".padEnd(width)}0ms`,
+      "    ↳ blocked",
     ]);
     expect(tracker.live).toBe(false);
 
@@ -118,10 +124,17 @@ test("started tasks render in execution order; unstarted trail in declaration or
   ]);
 
   // Finishing does not move a task; it holds its execution-order slot.
-  tracker.apply({ type: "task-completed", id: "t2", title: "Two", elapsedMs: 5 });
+  tracker.apply({
+    type: "task-completed",
+    id: "t2",
+    title: "Two",
+    elapsedMs: 5,
+    message: "done",
+  });
   expect(
     tracker
       .lines()
+      .filter((line) => !line.includes("↳"))
       .map((line) => line.trim().slice(2, 4))
       .slice(0, 2),
   ).toEqual(["t2", "t1"]);

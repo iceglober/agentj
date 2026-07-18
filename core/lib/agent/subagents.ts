@@ -106,6 +106,8 @@ export type SubagentProgressEvent = (
       id: string;
       title: string;
       elapsedMs: number;
+      /** Final worker response on success, or the failure/blocking reason. */
+      message: string;
       error?: string;
     }
   | { type: "dag-completed"; elapsedMs: number }
@@ -367,7 +369,14 @@ export function createSubagentsTool(options: CreateSubagentsToolOptions) {
           result.outcome === "clean",
         blocked: async (task, failedDependencies) => {
           const error = `Blocked by: ${failedDependencies.join(", ")}`;
-          await emit({ type: "task-blocked", id: task.id, title: task.title, elapsedMs: 0, error });
+          await emit({
+            type: "task-blocked",
+            id: task.id,
+            title: task.title,
+            elapsedMs: 0,
+            message: error,
+            error,
+          });
           return baseResult(task, "blocked", { error });
         },
         abortedBeforeStart: (task) =>
@@ -421,6 +430,10 @@ export function createSubagentsTool(options: CreateSubagentsToolOptions) {
             id: task.id,
             title: task.title,
             elapsedMs,
+            message:
+              result.error ??
+              result.text ??
+              (eventType === "task-completed" ? "Completed." : "Task failed."),
             ...(result.error ? { error: result.error } : {}),
           });
           return result;
