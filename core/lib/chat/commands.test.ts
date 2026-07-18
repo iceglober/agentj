@@ -59,6 +59,7 @@ describe("suggestChatCommands", () => {
       "help",
       "mcp",
       "config",
+      "model",
       "build",
       "jobs",
       "undo",
@@ -97,6 +98,16 @@ describe("completeChatInput", () => {
     const server = completeChatInput(serverInput, serverInput.length, context);
     expect(server?.suggestions[0]).toMatchObject({ value: "github ", label: "github" });
     expect(server?.hint).toContain("reload all");
+  });
+
+  test("completes model targets and guided handoff", () => {
+    const targetInput = "/model sub";
+    const target = completeChatInput(targetInput, targetInput.length, context);
+    expect(target?.suggestions[0]).toMatchObject({ value: "subagents ", label: "subagents" });
+    const selectedInput = "/model primary ";
+    expect(completeChatInput(selectedInput, selectedInput.length, context)?.hint).toContain(
+      "choose a provider",
+    );
   });
 
   test("enumerates schema config paths and enum values with contextual hints", () => {
@@ -178,6 +189,7 @@ describe("runChatCommand", () => {
       "/help",
       "/mcp",
       "/config",
+      "/model",
       "/build",
       "/jobs",
       "/undo",
@@ -273,9 +285,11 @@ describe("runChatCommand", () => {
     const answers = ["docs", "http", "https://example.com/mcp", "Bearer token"];
     const asks: Array<{ label: string; masked?: boolean }> = [];
     const sets: Array<{ key: string; value?: string }> = [];
-    context.askInput = async (options) => {
-      asks.push(options);
-      return answers.shift() ?? null;
+    context.guided = {
+      askInput: async (options) => {
+        asks.push(options);
+        return answers.shift() ?? null;
+      },
     };
     context.config = {
       get: async ({ key }) => ({ ok: true, key, storage: "global_config" }),
@@ -298,6 +312,40 @@ describe("runChatCommand", () => {
       value: '"Bearer token"',
     });
     expect(asks.at(-1)?.masked).toBe(true);
+  });
+
+  test("guides primary selection and lets subagents return to inheritance", async () => {
+    const { context, events } = makeContext();
+    const answers = ["primary", "azure", "gpt-5.6-luna", "inherit"];
+    const configured: Array<{
+      target: "primary" | "subagents";
+      selection: { provider: string; model: string } | null;
+    }> = [];
+    context.guided = { askInput: async () => answers.shift() ?? null };
+    context.models = {
+      current: () => ({
+        primary: { provider: "azure", model: "gpt-5.6-sol" },
+        subagents: { provider: "azure", model: "gpt-5.6-terra" },
+      }),
+      providers: () => ["azure"],
+      modelSuggestions: () => ["gpt-5.6-sol", "gpt-5.6-luna"],
+      configure: async (target, selection) => {
+        configured.push({ target, selection });
+        return true;
+      },
+    };
+
+    await runChatCommand(context, "model", "");
+    await runChatCommand(context, "model", "subagents");
+
+    expect(configured).toEqual([
+      {
+        target: "primary",
+        selection: { provider: "azure", model: "gpt-5.6-luna" },
+      },
+      { target: "subagents", selection: null },
+    ]);
+    expect((events.at(-1) as { text: string }).text).toContain("inherit the primary");
   });
 
   test("quit ends the session", async () => {

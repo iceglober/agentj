@@ -115,6 +115,38 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("keeps unwrapped and bracketed multiline pastes in the editor until Return", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+
+    input.write("first\nsecond\r\nthird");
+    await settle();
+    expect(calls.submit).toEqual([]);
+    input.write("\r");
+    await settle();
+    expect(calls.submit).toEqual(["first\nsecond\nthird"]);
+
+    input.write("\u001b[200~fourth\r");
+    input.write("\nfifth\u001b[201~");
+    await settle();
+    expect(calls.submit).toHaveLength(1);
+    input.write("\r");
+    await settle();
+    expect(calls.submit).toEqual(["first\nsecond\nthird", "fourth\nfifth"]);
+    screen.stop();
+  });
+
+  test("restores a dequeued prompt ahead of a draft and focuses it for editing", async () => {
+    const { screen, input, calls } = makeScreen();
+    screen.start();
+    input.write("existing draft");
+    screen.restoreInput("queued\nprompt");
+    input.write(" updated\r");
+    await settle();
+    expect(calls.submit).toEqual(["queued\nprompt updated\n\nexisting draft"]);
+    screen.stop();
+  });
+
   test("Tab toggles mode, bare Escape flushes to an interrupt", async () => {
     const { screen, input, calls } = makeScreen();
     screen.start();

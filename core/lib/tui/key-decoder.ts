@@ -92,8 +92,9 @@ const decodeCsi = (parameters: string, final: string): EditorCommand | undefined
 const decodeControl = (character: string): EditorCommand | undefined => {
   switch (character) {
     case "\r":
-    case "\n":
       return { type: "submit" };
+    case "\n":
+      return { type: "newline" };
     case "\t":
       return { type: "tab" };
     case "\u0003":
@@ -132,6 +133,7 @@ export class TerminalKeyDecoder {
   private readonly textDecoder = new TextDecoder();
   private pending = "";
   private pasted = false;
+  private pastedCarriageReturn = false;
 
   push(chunk: string | Uint8Array): EditorCommand[] {
     this.pending +=
@@ -175,12 +177,20 @@ export class TerminalKeyDecoder {
         this.pushPasted(this.pending.slice(0, end), commands);
         this.pending = this.pending.slice(end + PASTE_END.length);
         this.pasted = false;
+        this.pastedCarriageReturn = false;
         continue;
       }
 
       if (this.pending.startsWith(PASTE_START)) {
         this.pending = this.pending.slice(PASTE_START.length);
         this.pasted = true;
+        this.pastedCarriageReturn = false;
+        continue;
+      }
+
+      if (this.pending.startsWith("\r\n")) {
+        this.pending = this.pending.slice(2);
+        commands.push({ type: "newline" });
         continue;
       }
 
@@ -255,8 +265,18 @@ export class TerminalKeyDecoder {
   }
 
   private pushPasted(value: string, commands: EditorCommand[]): void {
-    for (const character of value.replace(/\r\n/gu, "\n")) {
-      if (character === "\n" || character === "\r") commands.push({ type: "newline" });
+    for (const character of value) {
+      if (character === "\n" && this.pastedCarriageReturn) {
+        this.pastedCarriageReturn = false;
+        continue;
+      }
+      if (character === "\r") {
+        commands.push({ type: "newline" });
+        this.pastedCarriageReturn = true;
+        continue;
+      }
+      this.pastedCarriageReturn = false;
+      if (character === "\n") commands.push({ type: "newline" });
       else commands.push({ type: "insert", text: character });
     }
   }

@@ -41,6 +41,14 @@ describe("configHash", () => {
     expect(configHash(explicitConcurrencyOnly)).toBe(configHash(plain));
   });
 
+  test("an explicit subagent provider moves the hash", () => {
+    const routed = runConfigSchema.parse({
+      id: "sol",
+      agent: { tools: { subagents: { provider: "azure" } } },
+    });
+    expect(configHash(routed)).not.toBe(configHash(base()));
+  });
+
   test("a flag change moves the hash", () => {
     const off = base();
     const on = runConfigSchema.parse({

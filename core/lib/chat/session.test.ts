@@ -176,9 +176,9 @@ describe("createChatSession", () => {
       const first = session.send("slow question");
       await new Promise((r) => setTimeout(r, 5));
       const second = session.send("queued a");
-      const third = session.send("queued b");
+      const third = session.send("expanded queued b", { restoreText: "@queued-b.md" });
 
-      expect(session.dequeue()).toBe("queued b"); // LIFO: newest intent first
+      expect(session.dequeue()).toBe("expanded queued b"); // LIFO: newest intent first
       await third; // its send resolves without ever running
       expect(session.dequeue()).toBe("queued a");
       expect(session.dequeue()).toBeNull(); // queue drained; the turn keeps running
@@ -187,9 +187,10 @@ describe("createChatSession", () => {
       release?.();
       await first;
       expect(prompts).toEqual(["slow question"]); // dequeued messages never reach the model
-      expect(
-        events.flatMap((event) => (event.type === "turn-dequeued" ? [event.text] : [])),
-      ).toEqual(["queued b", "queued a"]);
+      expect(events.filter((event) => event.type === "turn-dequeued")).toEqual([
+        { type: "turn-dequeued", text: "expanded queued b", restoreText: "@queued-b.md" },
+        { type: "turn-dequeued", text: "queued a" },
+      ]);
     });
   });
 

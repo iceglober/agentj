@@ -2,7 +2,14 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 import packageJson from "../package.json";
-import { type Agent, createAgent as createProductionAgent, type ToolActivity } from "./lib/agent";
+import {
+  type Agent,
+  type AgentConfig,
+  childAgentConfig,
+  createAgent as createProductionAgent,
+  type ToolActivity,
+  withAgentModelSelection,
+} from "./lib/agent";
 import {
   createSessionPermissionGate,
   type PermissionGate,
@@ -17,6 +24,8 @@ import {
   type ChatCommandContext,
   completeChatInput,
   expandAtFiles,
+  type ModelSelection,
+  type ModelTarget,
   parseInput,
   runChatCommand,
   shouldRememberChatInput,
@@ -26,8 +35,14 @@ import { createJobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig } from "./lib/config";
-import { createConfigCliHandlers, createMaskedSecretPrompt } from "./lib/config-cli";
+import {
+  createConfigCliHandlers,
+  createMaskedSecretPrompt,
+  LLM_MODEL_KEY,
+  SUBAGENT_LLM_MODEL_KEY,
+} from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
+import { providerNames } from "./lib/llm";
 import {
   connectModelContextProtocolServer,
   resolveMcpTransportConfig,
@@ -41,7 +56,7 @@ import type { McpRuntimeStatus } from "./lib/mcp/runtime";
 import { createMcpRuntime } from "./lib/mcp/runtime";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
-import type { PromptContext } from "./lib/prompt";
+import { type PromptContext, profileNames } from "./lib/prompt";
 import { resolveAzureApiKey } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession } from "./lib/session";
@@ -143,6 +158,36 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
 };
 
 const SPINNER = ["◐", "◓", "◑", "◒"];
+
+/** Command shown after an interactive session has restored the terminal. */
+export const formatResumeCommand = (sessionId: string): string =>
+  `Resume with: agentj --resume ${sessionId}\n`;
+
+export async function finalizeInteractiveChat(options: {
+  sessionId: string | undefined;
+  settle: Promise<unknown>;
+  stopScreen(): void;
+  closeComposition(): Promise<void>;
+  write?(text: string): void;
+}): Promise<void> {
+  try {
+    options.stopScreen();
+  } finally {
+    try {
+      await options.settle;
+    } finally {
+      try {
+        await options.closeComposition();
+      } finally {
+        if (options.sessionId) {
+          (options.write ?? ((text) => processStdout.write(text)))(
+            formatResumeCommand(options.sessionId),
+          );
+        }
+      }
+    }
+  }
+}
 
 /** Session clock: 9s → "9s", 74s → "1m14s", 3.5h → "3h30m", 30h → "1d6h0m". */
 export const formatClock = (ms: number): string => {
@@ -283,7 +328,9 @@ interface ChatComposition {
   commonGitDir: string;
   ctx: PromptContext;
   /** The main agent's configured model, for display. */
-  llm: { provider: string; model: string };
+  readonly llm: ModelSelection;
+  modelSelections(): { primary: ModelSelection; subagents: ModelSelection | null };
+  configureModel(target: ModelTarget, selection: ModelSelection | null): void;
   agentFor(mode: ChatMode): Promise<Agent>;
   runBuildJob(
     prompt: string,
@@ -340,7 +387,7 @@ async function composeChat(
   try {
     agentsMd = await environment.readFile("AGENTS.md");
   } catch {}
-  const agentConfig = {
+  let agentConfig: AgentConfig = {
     ...config.agent,
     rules: config.agent.rules || agentsMd || "",
     llm: {
@@ -401,19 +448,13 @@ async function composeChat(
     },
   };
 
-  const workerConfig = {
-    ...agentConfig,
-    llm: {
-      ...agentConfig.llm,
-      model: config.agent.tools.subagents.model ?? agentConfig.llm.model,
-    },
-  };
   const createResearchWorker = async () =>
-    createProductionAgent(
-      environment,
-      { ...workerConfig, role: "delegate" },
-      { root, ctx, metricsSink, mode: "plan" },
-    );
+    createProductionAgent(environment, childAgentConfig(agentConfig, "delegate"), {
+      root,
+      ctx,
+      metricsSink,
+      mode: "plan",
+    });
 
   const mcp = createMcpRuntime(config.mcp, {
     root,
@@ -423,6 +464,29 @@ async function composeChat(
   });
 
   const agents = new Map<ChatMode, Promise<Agent>>();
+  const modelSelections = (): { primary: ModelSelection; subagents: ModelSelection | null } => {
+    const child = childAgentConfig(agentConfig, "delegate");
+    const overridden =
+      agentConfig.tools.subagents.provider !== undefined ||
+      agentConfig.tools.subagents.model !== undefined;
+    return {
+      primary: { provider: agentConfig.llm.provider, model: agentConfig.llm.model },
+      subagents: overridden ? { provider: child.llm.provider, model: child.llm.model } : null,
+    };
+  };
+  const configureModel = (target: ModelTarget, selection: ModelSelection | null): void => {
+    agentConfig = withAgentModelSelection(
+      agentConfig,
+      target,
+      selection
+        ? {
+            provider: selection.provider as AgentConfig["llm"]["provider"],
+            model: selection.model,
+          }
+        : null,
+    );
+    agents.clear();
+  };
   let agentMcpVersion = mcp.snapshot().version;
   const agentFor = async (mode: ChatMode): Promise<Agent> => {
     await mcp.activatePending();
@@ -524,7 +588,7 @@ async function composeChat(
         createChildAgent: async ({ session }) => {
           const child = await createProductionAgent(
             environment,
-            { ...agentConfig, role: "delegate" },
+            childAgentConfig(agentConfig, "delegate"),
             {
               root: session.path,
               ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
@@ -572,7 +636,11 @@ async function composeChat(
     root,
     commonGitDir,
     ctx,
-    llm: { provider: agentConfig.llm.provider, model: agentConfig.llm.model },
+    get llm() {
+      return modelSelections().primary;
+    },
+    modelSelections,
+    configureModel,
     agentFor,
     runBuildJob,
     runPlanJob,
@@ -705,6 +773,14 @@ export async function runAgentjChat(
     processStderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_FAILURE;
   }
+
+  let resumeSessionId: string | undefined;
+  let ticker: ReturnType<typeof setInterval> | undefined;
+  let handleSigint: (() => void) | undefined;
+  let jobs: ReturnType<typeof createJobRunner> | undefined;
+  let undo: ReturnType<typeof createUndoStack> | undefined;
+  let pendingCommands = Promise.resolve();
+  let pendingHistoryWrites = Promise.resolve();
   try {
     const { root, commonGitDir, ctx, agentFor, environment, stateRoot } = composition;
     const chatsRoot = join(stateRoot, "agentj", "chats");
@@ -712,7 +788,6 @@ export async function runAgentjChat(
       root: join(stateRoot, "agentj", "prompt-history"),
       projectIdentity: commonGitDir,
     });
-    let pendingHistoryWrites = Promise.resolve();
     const rememberPrompt = (text: string): void => {
       pendingHistoryWrites = pendingHistoryWrites
         .then(() => promptHistory.append(text))
@@ -745,7 +820,9 @@ export async function runAgentjChat(
       projectRoot: root,
       ...(resumeId ? { id: resumeId } : {}),
     });
-    const undo = createUndoStack(environment, root, log.id);
+    resumeSessionId = log.id;
+    const undoStack = createUndoStack(environment, root, log.id);
+    undo = undoStack;
 
     let quitResolve: (() => void) | undefined;
     const done = new Promise<void>((resolve) => {
@@ -840,11 +917,11 @@ export async function runAgentjChat(
     emitChatEvent = render;
 
     const chat: ChatSession = createChatSession(
-      { agentFor, log, undo, onEvent: render },
+      { agentFor, log, undo: undoStack, onEvent: render },
       resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
     );
 
-    const jobs = createJobRunner({
+    const jobRunner = createJobRunner({
       onEvent: render,
       addTurnNotice: (text) => chat.addTurnNotice(text),
       runJob: ({ id, mode, prompt, abortSignal }) =>
@@ -852,6 +929,7 @@ export async function runAgentjChat(
           ? composition.runPlanJob(prompt, abortSignal)
           : composition.runBuildJob(prompt, abortSignal, `job ${id}`),
     });
+    jobs = jobRunner;
 
     const home = homedir();
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;
@@ -871,7 +949,7 @@ export async function runAgentjChat(
             currentActivity,
             usage: turnTokens,
             sessionStartedAt,
-            jobs: jobs.list().filter((job) => job.status === "running"),
+            jobs: jobRunner.list().filter((job) => job.status === "running"),
           },
           screen.width(),
         ),
@@ -880,7 +958,7 @@ export async function runAgentjChat(
 
     // Animate spinners and clocks. The screen skips repaints when the status
     // section is unchanged, so idle ticks cost one comparison.
-    const ticker = setInterval(() => {
+    ticker = setInterval(() => {
       spinnerFrame += 1;
       if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
       updateStatus();
@@ -903,20 +981,46 @@ export async function runAgentjChat(
     });
     const commandContext: ChatCommandContext = {
       session: chat,
-      jobs,
-      undo,
+      jobs: jobRunner,
+      undo: undoStack,
       emit: render,
       quit: () => quitResolve?.(),
       config: interactiveConfig,
+      models: {
+        current: composition.modelSelections,
+        providers: () => providerNames,
+        modelSuggestions: (provider) => {
+          const selections = composition.modelSelections();
+          return [
+            ...(selections.primary.provider === provider ? [selections.primary.model] : []),
+            ...(selections.subagents?.provider === provider ? [selections.subagents.model] : []),
+            ...profileNames,
+          ].filter((value, index, values) => values.indexOf(value) === index);
+        },
+        configure: async (target, selection) => {
+          const key = target === "primary" ? LLM_MODEL_KEY : SUBAGENT_LLM_MODEL_KEY;
+          const result = selection
+            ? await interactiveConfig.set({
+                key,
+                value: `${selection.provider}/${selection.model}`,
+              })
+            : await interactiveConfig.delete({ key });
+          if (!result.ok) return false;
+          composition.configureModel(target, selection);
+          updateStatus();
+          return true;
+        },
+      },
       mcp: {
         statuses: composition.mcpStatuses,
         reload: composition.reloadMcp,
         authorize: composition.authorizeMcp,
       },
-      askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
+      guided: {
+        askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
+      },
     };
 
-    let pendingCommands = Promise.resolve();
     screen = createChatScreen({
       initialHistory: promptHistory.entries,
       slashCommandOptions: (state) => completeChatInput(state.text, state.cursor, commandContext),
@@ -932,7 +1036,7 @@ export async function runAgentjChat(
             return;
           }
           if (parsed.kind === "job") {
-            jobs.start(chat.pendingMode, parsed.prompt);
+            jobRunner.start(chat.pendingMode, parsed.prompt);
             updateStatus();
             return;
           }
@@ -967,23 +1071,28 @@ export async function runAgentjChat(
       });
     });
 
-    const handleSigint = (): void => {
+    handleSigint = (): void => {
       if (chat.dequeue() !== null) return;
       if (!chat.abort()) quitResolve?.();
     };
     process.on("SIGINT", handleSigint);
-    try {
-      await done;
-    } finally {
-      clearInterval(ticker);
-      process.removeListener("SIGINT", handleSigint);
-      jobs.dispose();
-      await Promise.all([pendingCommands, pendingHistoryWrites, undo.dispose().catch(() => {})]);
-      screen.stop();
-    }
+    await done;
     return EXIT_SUCCESS;
   } finally {
-    await composition.close().catch(() => undefined);
+    emitChatEvent = null;
+    if (ticker) clearInterval(ticker);
+    if (handleSigint) process.removeListener("SIGINT", handleSigint);
+    jobs?.dispose();
+    await finalizeInteractiveChat({
+      sessionId: resumeSessionId,
+      settle: Promise.all([
+        pendingCommands,
+        pendingHistoryWrites,
+        undo?.dispose().catch(() => {}) ?? Promise.resolve(),
+      ]),
+      stopScreen: () => screen?.stop(),
+      closeComposition: () => composition.close().catch(() => undefined),
+    });
   }
 }
 

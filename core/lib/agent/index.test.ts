@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { ToolSet } from "../llm";
 import type { Sandbox } from "../sandbox";
-import { agentConfigSchema, type CreateAgentOptions, childAgentConfig, createAgentTools } from ".";
+import {
+  agentConfigSchema,
+  type CreateAgentOptions,
+  childAgentConfig,
+  createAgentTools,
+  withAgentModelSelection,
+} from ".";
 import { permissionsConfigSchema } from "./permissions";
 
 const sandbox: Sandbox = {
@@ -46,9 +52,42 @@ describe("childAgentConfig", () => {
     expect(config.llm.model).toBe("gpt-5.6-terra");
   });
 
+  test("routes both provider and model overrides without mutating the parent", () => {
+    const config = agentConfigSchema.parse({
+      llm: { provider: "azure", model: "primary" },
+      tools: { subagents: { provider: "azure", model: "child" } },
+    });
+    const child = childAgentConfig(config, "delegate");
+    expect(child.llm).toMatchObject({ provider: "azure", model: "child" });
+    expect(config.llm).toMatchObject({ provider: "azure", model: "primary" });
+    expect(agentConfigSchema.safeParse({ tools: { subagents: { model: "   " } } }).success).toBe(
+      false,
+    );
+  });
+
   test("without tier routing, children inherit the parent model", () => {
     const config = agentConfigSchema.parse({ llm: { model: "gpt-5.6-terra" } });
     expect(childAgentConfig(config, "delegate").llm.model).toBe("gpt-5.6-terra");
+  });
+
+  test("applies live primary and subagent selections immutably", () => {
+    const original = agentConfigSchema.parse({ llm: { model: "primary" } });
+    const primary = withAgentModelSelection(original, "primary", {
+      provider: "azure",
+      model: "next-primary",
+    });
+    const routed = withAgentModelSelection(primary, "subagents", {
+      provider: "azure",
+      model: "child",
+    });
+    const inherited = withAgentModelSelection(routed, "subagents", null);
+
+    expect(original.llm.model).toBe("primary");
+    expect(primary.llm.model).toBe("next-primary");
+    expect(childAgentConfig(routed, "delegate").llm.model).toBe("child");
+    expect(inherited.tools.subagents).toMatchObject({ concurrency: 2 });
+    expect(inherited.tools.subagents.model).toBeUndefined();
+    expect(childAgentConfig(inherited, "delegate").llm.model).toBe("next-primary");
   });
 
   test("the per-turn step ceiling defaults well above the SDK's 20 and flows to children", () => {

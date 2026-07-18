@@ -1,5 +1,6 @@
 import type { Readable, Writable } from "node:stream";
 import type { PermissionPromptDecision, PermissionRequest } from "../agent/permissions";
+import type { GuidedInputOptions, GuidedInputPort } from "../chat/guided-input";
 import {
   applyEditorCommand,
   createEditorState,
@@ -53,14 +54,6 @@ export interface SlashCommandSuggestion {
   summary: string;
 }
 
-export interface AskInputOptions {
-  label: string;
-  masked?: boolean;
-  choices?: readonly string[];
-  /** Return an error message to keep the prompt open. */
-  validate?(text: string): string | null | undefined;
-}
-
 export interface CreateChatScreenOptions {
   stdin?: Readable;
   stdout?: Writable;
@@ -80,7 +73,7 @@ export interface CreateChatScreenOptions {
   shouldRememberInput?(text: string): boolean;
 }
 
-export interface ChatScreen {
+export interface ChatScreen extends GuidedInputPort {
   start(): void;
   stop(): void;
   /** Append transcript output above the live region. */
@@ -100,7 +93,7 @@ export interface ChatScreen {
   /** Modal single-key permission prompt in the live region. */
   askPermission(request: PermissionRequest): Promise<PermissionPromptDecision>;
   /** Modal editor prompt. Escape cancels without submitting or retaining the value. */
-  askInput(options: AskInputOptions): Promise<string | null>;
+  askInput(options: GuidedInputOptions): Promise<string | null>;
 }
 
 export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
@@ -138,7 +131,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   }
   interface PendingInput {
     kind: "input";
-    options: AskInputOptions;
+    options: GuidedInputOptions;
     editor: EditorState;
     selectedIndex: number;
     error: string | null;
@@ -633,7 +626,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     },
 
     restoreInput(text) {
-      editor = createEditorState(editor.text.length > 0 ? `${text}\n\n${editor.text}` : text);
+      const draft = editor.text;
+      editor = createEditorState(draft.length > 0 ? `${text}\n\n${draft}` : text);
+      editor.cursor = splitGraphemes(text).length;
       historyIndex = null;
       completionIndex = 0;
       dismissedCompletion = null;
