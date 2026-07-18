@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.21
+
+### Patch Changes
+
+- f13c8de: Show finished subagent result messages in progress output, reserve transcript spacing above the editor, and only show thinking while the model is generating.
+
 ## 0.1.0-next.20
 
 ### Patch Changes
