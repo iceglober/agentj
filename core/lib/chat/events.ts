@@ -14,6 +14,8 @@ export interface JobView {
   status: "running" | "done" | "failed" | "aborted";
   startedAt: number;
   endedAt?: number;
+  /** When set, `ping` fires at this time if the job is still running. */
+  softTimeoutAt?: number;
   resultText?: string;
   /** Branch preserving the job's work when integration was blocked. */
   branch?: string;

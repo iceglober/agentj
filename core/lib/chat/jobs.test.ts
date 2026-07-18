@@ -65,6 +65,77 @@ describe("createJobRunner", () => {
     expect(notices).toHaveLength(2);
   });
 
+  test("soft timeout pings only while running, and renew re-arms the ping", async () => {
+    const pings: string[] = [];
+    let release: (() => void) | undefined;
+    const runner = createJobRunner({
+      runJob: async ({ onStep }) => {
+        onStep?.({
+          toolCalls: [{ name: "bash", input: { command: "bun test core" } }],
+          toolResults: [],
+        });
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { text: "ok" };
+      },
+      addTurnNotice: () => {},
+      ping: (job) => pings.push(job.id),
+    });
+
+    runner.start("build", "run the tests", { softTimeoutMs: 30 });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(pings).toEqual(["j1"]);
+
+    const inspected = runner.inspect("j1");
+    expect(inspected?.status).toBe("running");
+    expect(inspected?.recentActivity).toEqual(["bash bun test core"]);
+    expect(inspected?.softTimeoutAt).toBeNumber();
+
+    expect(runner.renewSoftTimeout("j1", 30)).toBe(true);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(pings).toEqual(["j1", "j1"]);
+
+    release?.();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(runner.inspect("j1")?.status).toBe("done");
+    expect(runner.renewSoftTimeout("j1", 30)).toBe(false);
+  });
+
+  test("a job that finishes before its soft timeout never pings", async () => {
+    const pings: string[] = [];
+    const runner = createJobRunner({
+      runJob: async () => ({ text: "fast" }),
+      addTurnNotice: () => {},
+      ping: (job) => pings.push(job.id),
+    });
+    runner.start("plan", "quick check", { softTimeoutMs: 30 });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(pings).toEqual([]);
+  });
+
+  test("the activity trail is bounded and counts what it dropped", async () => {
+    const runner = createJobRunner({
+      runJob: async ({ onStep }) => {
+        for (let call = 0; call < 40; call += 1) {
+          onStep?.({
+            toolCalls: [{ name: "bash", input: { command: `step ${call}` } }],
+            toolResults: [],
+          });
+        }
+        return { text: "ok" };
+      },
+      addTurnNotice: () => {},
+    });
+    runner.start("plan", "busy job");
+    await new Promise((r) => setTimeout(r, 5));
+    const trail = runner.inspect("j1")?.recentActivity ?? [];
+    expect(trail).toHaveLength(31);
+    expect(trail[0]).toBe("… 10 earlier tool calls omitted");
+    expect(trail.at(-1)).toBe("bash step 39");
+    expect(runner.inspect("j9")).toBeUndefined();
+  });
+
   test("preserved branches surface in the notice", async () => {
     const notices: string[] = [];
     const runner = createJobRunner({

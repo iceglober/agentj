@@ -167,6 +167,8 @@ describe("runChatCommand", () => {
             startedAt: 0,
           },
         ],
+        inspect: () => undefined,
+        renewSoftTimeout: () => false,
         abort: (id: string) => {
           aborted.push(id);
           return id === "j1";

@@ -1,3 +1,5 @@
+import { describeToolInput } from "../agent/permissions";
+import type { RunStep } from "../llm";
 import type { ChatMode } from "../session/log";
 import type { ChatEvent, JobView } from "./events";
 
@@ -11,8 +13,11 @@ import type { ChatEvent, JobView } from "./events";
  * subagents, so they cannot race the checkout or the foreground turn.
  * Completions surface twice: a transcript event now, and a notice prepended
  * to the next user turn so the model learns the outcome without any push
- * mechanism. No persistence across restarts — preserved branches are the
- * durable artifact of an interrupted build job.
+ * mechanism. A job may also carry a soft timeout: when it is still running at
+ * the deadline, `ping` fires once — the job keeps running, and the agent
+ * decides whether to renew the deadline or abort. No persistence across
+ * restarts — preserved branches are the durable artifact of an interrupted
+ * build job.
  */
 
 export interface RunJobArgs {
@@ -21,6 +26,9 @@ export interface RunJobArgs {
   mode: ChatMode;
   prompt: string;
   abortSignal: AbortSignal;
+  /** Feed the runner the job's live steps so `inspect` can show its recent
+   *  tool activity. Executors that cannot stream steps may omit calls. */
+  onStep?(step: RunStep): void;
 }
 
 export interface JobOutcome {
@@ -34,12 +42,29 @@ export interface JobRunnerDependencies {
   onEvent?(event: ChatEvent): void | Promise<void>;
   /** Receives one summary line per finished job for the next user turn. */
   addTurnNotice(text: string): void;
+  /** Fires once when a job passes its soft timeout while still running. */
+  ping?(job: JobView): void;
   now?: () => number;
 }
 
+export interface JobStartOptions {
+  /** Fire `ping` if the job is still running after this long. Advisory: the
+   *  job keeps running; `renewSoftTimeout` re-arms the deadline. */
+  softTimeoutMs?: number;
+}
+
+export interface JobInspection extends JobView {
+  /** Bounded tail of the job's tool calls, oldest first. */
+  recentActivity: string[];
+}
+
 export interface JobRunner {
-  start(mode: ChatMode, prompt: string): JobView;
+  start(mode: ChatMode, prompt: string, options?: JobStartOptions): JobView;
   list(): JobView[];
+  /** The job plus its recent tool activity — enough to judge a slow job. */
+  inspect(id: string): JobInspection | undefined;
+  /** Re-arm the soft-timeout ping this far from now. False unless running. */
+  renewSoftTimeout(id: string, softTimeoutMs: number): boolean;
   abort(id: string): boolean;
   /** Abort everything still running (session exit). */
   dispose(): void;
@@ -53,17 +78,49 @@ const summarize = (job: JobView): string => {
   return `${head}${firstLine ? `: ${firstLine.slice(0, 120)}` : ""}${branch}`;
 };
 
+/** Tool calls kept per job for `inspect`; older calls collapse to a count. */
+const ACTIVITY_LIMIT = 30;
+
+interface JobEntry {
+  view: JobView;
+  abort: AbortController;
+  activity: string[];
+  droppedActivity: number;
+  softTimer?: ReturnType<typeof setTimeout>;
+}
+
 export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
   const now = deps.now ?? Date.now;
-  const jobs = new Map<string, { view: JobView; abort: AbortController }>();
+  const jobs = new Map<string, JobEntry>();
   let counter = 0;
 
   const emit = (event: ChatEvent): void => {
     void deps.onEvent?.(event);
   };
 
+  const recordStep = (entry: JobEntry, step: RunStep): void => {
+    for (const call of step.toolCalls) {
+      const detail = describeToolInput(call.input);
+      entry.activity.push(detail ? `${call.name} ${detail.slice(0, 120)}` : call.name);
+    }
+    const excess = entry.activity.length - ACTIVITY_LIMIT;
+    if (excess > 0) {
+      entry.activity.splice(0, excess);
+      entry.droppedActivity += excess;
+    }
+  };
+
+  const armSoftTimeout = (entry: JobEntry, softTimeoutMs: number): void => {
+    clearTimeout(entry.softTimer);
+    entry.view.softTimeoutAt = now() + softTimeoutMs;
+    entry.softTimer = setTimeout(() => {
+      if (entry.view.status === "running") deps.ping?.({ ...entry.view });
+    }, softTimeoutMs);
+    entry.softTimer.unref?.();
+  };
+
   return {
-    start(mode, prompt) {
+    start(mode, prompt, options) {
       counter += 1;
       const abort = new AbortController();
       const view: JobView = {
@@ -73,11 +130,19 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
         status: "running",
         startedAt: now(),
       };
-      jobs.set(view.id, { view, abort });
+      const entry: JobEntry = { view, abort, activity: [], droppedActivity: 0 };
+      jobs.set(view.id, entry);
+      if (options?.softTimeoutMs !== undefined) armSoftTimeout(entry, options.softTimeoutMs);
       emit({ type: "job-started", job: { ...view } });
 
       void deps
-        .runJob({ id: view.id, mode, prompt, abortSignal: abort.signal })
+        .runJob({
+          id: view.id,
+          mode,
+          prompt,
+          abortSignal: abort.signal,
+          onStep: (step) => recordStep(entry, step),
+        })
         .then((outcome) => {
           view.status = abort.signal.aborted ? "aborted" : "done";
           view.resultText = outcome.text;
@@ -88,6 +153,7 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
           view.resultText = error instanceof Error ? error.message : String(error);
         })
         .finally(() => {
+          clearTimeout(entry.softTimer);
           view.endedAt = now();
           emit({ type: "job-finished", job: { ...view } });
           deps.addTurnNotice(summarize(view));
@@ -100,6 +166,27 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
       return [...jobs.values()].map((entry) => ({ ...entry.view }));
     },
 
+    inspect(id) {
+      const entry = jobs.get(id);
+      if (!entry) return undefined;
+      return {
+        ...entry.view,
+        recentActivity: [
+          ...(entry.droppedActivity > 0
+            ? [`… ${entry.droppedActivity} earlier tool calls omitted`]
+            : []),
+          ...entry.activity,
+        ],
+      };
+    },
+
+    renewSoftTimeout(id, softTimeoutMs) {
+      const entry = jobs.get(id);
+      if (entry?.view.status !== "running") return false;
+      armSoftTimeout(entry, softTimeoutMs);
+      return true;
+    },
+
     abort(id) {
       const entry = jobs.get(id);
       if (entry?.view.status !== "running") return false;
@@ -109,6 +196,7 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
 
     dispose() {
       for (const entry of jobs.values()) {
+        clearTimeout(entry.softTimer);
         if (entry.view.status === "running") entry.abort.abort();
       }
     },

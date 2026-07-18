@@ -125,12 +125,17 @@ describe("childAgentConfig", () => {
 });
 
 describe("createAgentTools", () => {
-  test("run_job exists only for a primary agent given a jobs port", async () => {
+  test("run_job and check_job exist only for a primary agent given a jobs port", async () => {
     const config = agentConfigSchema.parse({});
-    const jobs = { start: () => ({ id: "j1" }) };
-    expect(await createAgentTools(sandbox, config, { ...baseOptions, jobs })).toHaveProperty(
-      "run_job",
-    );
+    const jobs = {
+      start: () => ({ id: "j1" }),
+      inspect: () => undefined,
+      renewSoftTimeout: () => false,
+      abort: () => false,
+    };
+    const withJobs = await createAgentTools(sandbox, config, { ...baseOptions, jobs });
+    expect(withJobs).toHaveProperty("run_job");
+    expect(withJobs).toHaveProperty("check_job");
     expect(
       await createAgentTools(sandbox, config, { ...baseOptions, mode: "plan", jobs }),
     ).toHaveProperty("run_job");
