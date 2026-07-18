@@ -614,6 +614,24 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("keeps two blank transcript rows before activity and places thinking above the editor", async () => {
+    const { screen, text } = makeScreen();
+    screen.start();
+    screen.printAbove("latest transcript item");
+    screen.setProgressLines(["  ◐ tool running"]);
+    screen.setThinkingLine("◐ thinking 1s (esc)");
+    await settle();
+
+    expect(text()).toContain("latest transcript item\r\n\r\n\r\n");
+    const rendered = renderScreen(text());
+    const tool = rendered.findIndex((line) => line.includes("tool running"));
+    const thinking = rendered.findIndex((line) => line.includes("thinking 1s"));
+    const editor = rendered.findIndex((line) => line.startsWith("> "));
+    expect(tool).toBeLessThan(thinking);
+    expect(thinking).toBeLessThan(editor);
+    screen.stop();
+  });
+
   test("status and progress lines render in the live region", async () => {
     const { screen, text } = makeScreen();
     screen.start();

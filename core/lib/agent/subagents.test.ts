@@ -95,6 +95,19 @@ describe("research execution", () => {
     expect(events[0]?.type).toBe("dag-started");
     expect(events.at(-1)?.type).toBe("dag-completed");
     expect(events.filter((event) => event.type === "task-blocked")).toHaveLength(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "task-completed", id: "a", message: "finding of a" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "task-failed", id: "bad", message: "worker exploded" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "task-blocked",
+        id: "after-bad",
+        message: "Blocked by: bad",
+      }),
+    );
   });
 });
 

@@ -242,11 +242,7 @@ export interface StatusSectionState {
   /** Provider/model label, e.g. "azure/gpt-5.6-sol". */
   model: string;
   mode: ChatMode;
-  busy: boolean;
-  interruptRequested: boolean;
   spinnerFrame: number;
-  turnStartedAt: number | null;
-  currentActivity: ToolActivity | null;
   /** Cumulative request/response tokens; ctx is the latest request's size and
    *  cacheReadRatio the latest request's provider-cache hit share (0–1). */
   usage: { in: number; out: number; ctx: number; cacheReadRatio?: number };
@@ -259,10 +255,31 @@ export interface StatusSectionState {
 }
 
 /**
- * The status section below the editor: identity line, root-path line with the
- * busy indicator on its right end, then one row per running background job.
- * Foreground turn activity renders above the editor, not here.
+ * The status section below the editor: identity line, root-path line, then one
+ * row per running background job. Foreground activity renders above the editor.
  */
+export const composeThinkingLine = (
+  state: {
+    thinking: boolean;
+    interruptRequested: boolean;
+    spinnerFrame: number;
+    turnStartedAt: number | null;
+    now?: number;
+  },
+  width: number,
+): string | null => {
+  if (!state.thinking) return null;
+  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
+  const elapsed =
+    state.turnStartedAt === null
+      ? ""
+      : ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`;
+  return truncateLineWithNotice(
+    `${frame} ${state.interruptRequested ? "interrupting…" : "thinking"}${elapsed}${state.interruptRequested ? "" : " (esc)"}`,
+    width,
+  );
+};
+
 /**
  * One-shot context warning: fire the first time the latest request's context
  * reaches the configured soft limit, then stay quiet for the session — the
@@ -297,25 +314,7 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
   const right = left.length + 2 + labeled.length <= width ? labeled : compact;
   const identity = splitEnds(left, right, width);
 
-  let busySegment = "";
-  if (state.busy) {
-    const doing = state.interruptRequested
-      ? "interrupting…"
-      : state.currentActivity
-        ? state.currentActivity.tool === "run_subagents"
-          ? `run_subagents (${state.currentActivity.detail})`
-          : state.currentActivity.tool
-        : "thinking";
-    const elapsed =
-      state.turnStartedAt !== null ? ` ${Math.round((now - state.turnStartedAt) / 1000)}s` : "";
-    busySegment = `${frame} ${doing}${elapsed}${state.interruptRequested ? "" : " (esc)"}`;
-  }
-  const pathRoom = busySegment.length > 0 ? width - busySegment.length - 2 : width;
-  const location = splitEnds(
-    middleEllipsis(state.root, Math.max(pathRoom, 12)),
-    busySegment,
-    width,
-  );
+  const location = middleEllipsis(state.root, width);
 
   const jobRows = state.jobs.map((job) => {
     const firstLine = job.prompt.split("\n")[0] ?? "";
@@ -753,9 +752,18 @@ export async function runAgentjChat(
     emitChatEvent?.({ type: "subagent-progress", progress });
   };
 
-  const permissionGate = createSessionPermissionGate((request) =>
-    screen ? screen.askPermission(request) : Promise.resolve("deny"),
-  );
+  let updateStatus = (): void => {};
+  let permissionPending = false;
+  const permissionGate = createSessionPermissionGate(async (request) => {
+    permissionPending = true;
+    updateStatus();
+    try {
+      return await (screen ? screen.askPermission(request) : Promise.resolve("deny"));
+    } finally {
+      permissionPending = false;
+      updateStatus();
+    }
+  });
   const onMcpStatus = (status: McpRuntimeStatus): void => {
     if (status.state === "failed") {
       emitChatEvent?.({
@@ -768,11 +776,9 @@ export async function runAgentjChat(
   // Live activity: what is running right now, since when. Running tools render
   // as spinner lines in the progress block (like subagents) and freeze into
   // the transcript with elapsed time when they finish.
-  let currentActivity: ToolActivity | null = null;
   let turnStartedAt: number | null = null;
   let interruptRequested = false;
   let spinnerFrame = 0;
-  let updateStatus = (): void => {};
   const sessionStartedAt = Date.now();
   const turnTokens: { in: number; out: number; ctx: number; cacheReadRatio?: number } = {
     in: 0,
@@ -820,7 +826,6 @@ export async function runAgentjChat(
 
   const onToolActivity = (activity: ToolActivity): void => {
     if (activity.phase === "start") {
-      currentActivity = activity;
       activeTools.set(activity.id, {
         tool: activity.tool,
         detail: activity.detail,
@@ -829,7 +834,6 @@ export async function runAgentjChat(
     } else {
       const started = activeTools.get(activity.id);
       activeTools.delete(activity.id);
-      currentActivity = null;
       const elapsed = started ? ` ${formatDuration(Date.now() - started.startedAt)}` : "";
       // A tool that owned a DAG freezes as its head row with the children
       // nested beneath; an aborted DAG (no dag-completed) freezes its last
@@ -963,7 +967,6 @@ export async function runAgentjChat(
       }
       if (event.type === "turn-finished") {
         turnStartedAt = null;
-        currentActivity = null;
         interruptRequested = false;
       }
       if (event.type === "subagent-progress") {
@@ -1035,6 +1038,17 @@ export async function runAgentjChat(
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;
     updateStatus = (): void => {
       if (!screen) return;
+      screen.setThinkingLine(
+        composeThinkingLine(
+          {
+            thinking: chat.busy && activeTools.size === 0 && !permissionPending,
+            interruptRequested,
+            spinnerFrame,
+            turnStartedAt,
+          },
+          screen.width(),
+        ),
+      );
       screen.setStatusLines(
         composeStatusSection(
           {
@@ -1044,11 +1058,7 @@ export async function runAgentjChat(
               composition.modelFor(chat.pendingMode),
             ),
             mode: chat.pendingMode,
-            busy: chat.busy,
-            interruptRequested,
             spinnerFrame,
-            turnStartedAt,
-            currentActivity,
             usage: turnTokens,
             contextSoftLimit: composition.contextSoftLimit,
             sessionStartedAt,

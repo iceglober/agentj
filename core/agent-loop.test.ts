@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   composeProgressLines,
   composeStatusSection,
+  composeThinkingLine,
   finalizeInteractiveChat,
   formatChatEvent,
   formatClock,
@@ -219,11 +220,7 @@ describe("composeStatusSection", () => {
     root: "~/repos/agentj",
     model: "azure/gpt-5.6-sol",
     mode: "plan" as const,
-    busy: false,
-    interruptRequested: false,
     spinnerFrame: 0,
-    turnStartedAt: null,
-    currentActivity: null,
     usage: { in: 12_400, out: 3_100, ctx: 8_700 },
     sessionStartedAt: 0,
     jobs: [],
@@ -269,20 +266,27 @@ describe("composeStatusSection", () => {
     expect(over[0]).toContain("ctx 8.7k!");
   });
 
-  test("busy: the indicator takes line 2's right end and the path yields", () => {
-    const lines = composeStatusSection(
+  test("thinking renders above the editor rather than in the status section", () => {
+    const line = composeThinkingLine(
       {
-        ...base,
-        busy: true,
+        thinking: true,
+        interruptRequested: false,
+        spinnerFrame: 0,
         turnStartedAt: 62_000,
-        currentActivity: { id: 1, tool: "run_subagents", detail: "3 tasks", phase: "start" },
-        root: `~/${"deep/".repeat(30)}repo`,
+        now: 74_000,
       },
       80,
     );
-    expect(lines[1]).toContain("◐ run_subagents (3 tasks) 12s (esc)");
-    expect(lines[1]?.length).toBeLessThanOrEqual(80);
-    expect(lines[1]).toContain("…");
+    expect(line).toBe("◐ thinking 12s (esc)");
+    expect(
+      composeStatusSection({ ...base, root: `~/${"deep/".repeat(30)}repo` }, 80)[1],
+    ).not.toContain("thinking");
+    expect(
+      composeThinkingLine(
+        { thinking: false, interruptRequested: false, spinnerFrame: 0, turnStartedAt: null },
+        80,
+      ),
+    ).toBeNull();
   });
 
   test("running jobs each get a row below the section", () => {

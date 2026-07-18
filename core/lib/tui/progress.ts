@@ -20,6 +20,7 @@ interface TrackedTask {
   startOrder?: number;
   state: "waiting" | "running" | "completed" | "failed" | "blocked";
   elapsedMs?: number;
+  message?: string;
   usage?: { inputTokens: number; outputTokens: number; contextTokens: number };
 }
 
@@ -113,6 +114,7 @@ export function createProgressTracker(): ProgressTracker {
                   ? "failed"
                   : "blocked";
             task.elapsedMs = event.elapsedMs;
+            task.message = event.message;
           }
           return;
         }
@@ -158,9 +160,18 @@ export function createProgressTracker(): ProgressTracker {
         return { left, right };
       });
       const width = Math.max(...rows.map((row) => row.left.length));
-      return rows.map((row) =>
-        row.right ? `${row.left.padEnd(width + 2)}${row.right}` : row.left,
-      );
+      return rows.flatMap((row, index) => {
+        const task = ordered[index];
+        const line = row.right ? `${row.left.padEnd(width + 2)}${row.right}` : row.left;
+        if (!task?.message) return [line];
+        const message = task.message.replace(/\r\n?|\n/gu, " ");
+        const maxMessageLength = 120;
+        const preview =
+          message.length > maxMessageLength
+            ? `${message.slice(0, maxMessageLength - 1)}…`
+            : message;
+        return [line, `${" ".repeat(indent + 2)}↳ ${preview}`];
+      });
     },
   };
 }

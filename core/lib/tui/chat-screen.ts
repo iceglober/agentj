@@ -91,6 +91,8 @@ export interface ChatScreen extends GuidedInputPort {
   restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: string[]): void;
+  /** Ephemeral model-generation indicator, immediately above the editor. */
+  setThinkingLine(line: string | null): void;
   /** Replace the status section below the editor (idle repaints are skipped). */
   setStatusLines(lines: string[]): void;
   /** Usable line width (columns minus the repaint-safety margin) for
@@ -130,6 +132,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: string[] = [];
+  let thinkingLine: string | null = null;
   let statusLines: string[] = [];
   let started = false;
   let previousRawMode = false;
@@ -279,13 +282,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       return {
         lines: [
           ...progress,
+          ...(thinkingLine ? [safeLine(thinkingLine)] : []),
           ...labelLines,
           ...layout.rows,
           ...choiceLines,
           ...errorLines,
           ...safeStatus,
         ],
-        cursorRow: progress.length + labelLines.length + layout.cursorRow,
+        cursorRow: progress.length + (thinkingLine ? 1 : 0) + labelLines.length + layout.cursorRow,
         cursorColumn: layout.cursorColumn,
       };
     }
@@ -310,8 +314,15 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       ? wrapToDisplayWidth(escapeTerminalText(completion.hint), contentWidth())
       : [];
     return {
-      lines: [...progress, ...layout.rows, ...completionLines, ...hintLines, ...safeStatus],
-      cursorRow: progress.length + layout.cursorRow,
+      lines: [
+        ...progress,
+        ...(thinkingLine ? [safeLine(thinkingLine)] : []),
+        ...layout.rows,
+        ...completionLines,
+        ...hintLines,
+        ...safeStatus,
+      ],
+      cursorRow: progress.length + (thinkingLine ? 1 : 0) + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
   };
@@ -387,7 +398,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
   const printTranscript = (text: string, preStyled = false): void => {
     clearLive();
-    write(`${(preStyled ? text : escapeTerminalText(text)).split("\n").join("\r\n")}\r\n`);
+    // Keep two blank transcript rows between the newest output and the live editor.
+    write(`${(preStyled ? text : escapeTerminalText(text)).split("\n").join("\r\n")}\r\n\r\n\r\n`);
     paint();
   };
 
@@ -740,6 +752,12 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     setProgressLines(lines) {
       progressLines = lines;
+      paint();
+    },
+
+    setThinkingLine(line) {
+      if (thinkingLine === line) return;
+      thinkingLine = line;
       paint();
     },
 
