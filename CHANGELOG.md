@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.17
+
+### Patch Changes
+
+- 4bb7fbd: Add `agentj update`, `/update`, and safe automatic updates for installed CLIs.
+
 ## 0.1.0-next.16
 
 ### Patch Changes
