@@ -25,8 +25,8 @@ export interface JobView {
  */
 export type ChatEvent =
   | { type: "turn-started"; mode: ChatMode; text: string; transcriptText?: string }
-  | { type: "turn-queued"; text: string; transcriptText?: string }
-  | { type: "turn-dequeued"; text: string }
+  | { type: "turn-queued"; text: string; transcriptText?: string; restoreText?: string }
+  | { type: "turn-dequeued"; text: string; restoreText?: string }
   | { type: "command"; name: string }
   | { type: "tool-call"; call: ToolCall }
   | { type: "tool-result"; result: ToolResult }

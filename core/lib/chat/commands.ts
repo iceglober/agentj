@@ -401,7 +401,7 @@ export const chatCommands: Record<string, ChatCommand> = {
       context.session.setMode("build");
       await context.session.send(
         "Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
-        { transcriptText: "Command: build" },
+        { transcriptText: "Command: build", restoreText: "/build" },
       );
     },
   },

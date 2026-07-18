@@ -38,7 +38,7 @@ export interface ChatSession {
    * already running (queued messages run in order). Resolves when this
    * message's turn has completed.
    */
-  send(text: string, options?: { transcriptText?: string }): Promise<void>;
+  send(text: string, options?: { transcriptText?: string; restoreText?: string }): Promise<void>;
   /** Abort the running foreground turn. Returns false when idle. */
   abort(): boolean;
   /**
@@ -64,7 +64,12 @@ export function createChatSession(
   let busy = false;
   let turnAbort: AbortController | null = null;
   const notices: string[] = [];
-  const queue: Array<{ text: string; transcriptText?: string; resolve: () => void }> = [];
+  const queue: Array<{
+    text: string;
+    transcriptText?: string;
+    restoreText?: string;
+    resolve: () => void;
+  }> = [];
 
   const emit = (event: ChatEvent): void => {
     void deps.onEvent?.(event);
@@ -158,14 +163,21 @@ export function createChatSession(
 
     async send(text, options) {
       const transcriptText = options?.transcriptText;
+      const restoreText = options?.restoreText;
       if (busy) {
         emit({
           type: "turn-queued",
           text,
           ...(transcriptText ? { transcriptText } : {}),
+          ...(restoreText ? { restoreText } : {}),
         });
         await new Promise<void>((resolve) => {
-          queue.push({ text, ...(transcriptText ? { transcriptText } : {}), resolve });
+          queue.push({
+            text,
+            ...(transcriptText ? { transcriptText } : {}),
+            ...(restoreText ? { restoreText } : {}),
+            resolve,
+          });
         });
         return;
       }
@@ -185,7 +197,11 @@ export function createChatSession(
     dequeue() {
       const entry = queue.pop();
       if (!entry) return null;
-      emit({ type: "turn-dequeued", text: entry.text });
+      emit({
+        type: "turn-dequeued",
+        text: entry.text,
+        ...(entry.restoreText ? { restoreText: entry.restoreText } : {}),
+      });
       entry.resolve();
       return entry.text;
     },

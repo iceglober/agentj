@@ -103,7 +103,7 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
     case "turn-queued":
       return null; // shown as a live-region line until its turn starts
     case "turn-dequeued":
-      return `(dequeued) ${event.text.split("\n")[0]?.slice(0, 60) ?? ""}`;
+      return `(dequeued) ${(event.restoreText ?? event.text).split("\n")[0]?.slice(0, 60) ?? ""}`;
     case "command":
       return `Command: ${event.name}`;
     case "tool-call":
@@ -769,6 +769,7 @@ export async function runAgentjChat(
         const index = queuedMessages.findLastIndex((entry) => entry.text === event.text);
         if (index !== -1) queuedMessages.splice(index, 1);
         refreshProgress();
+        screen?.restoreInput(event.restoreText ?? event.text);
       }
       if (event.type === "turn-finished") {
         turnStartedAt = null;
@@ -923,7 +924,7 @@ export async function runAgentjChat(
             return;
           }
           void expandAtFiles(parsed.text, root).then((expanded) => {
-            void chat.send(expanded);
+            void chat.send(expanded, { restoreText: parsed.text });
             updateStatus();
           });
         },

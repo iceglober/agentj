@@ -88,6 +88,8 @@ export interface ChatScreen {
    *  injection unless `preStyled` — then the CALLER must have sanitized any
    *  interpolated content before adding its own trusted ANSI styling. */
   printAbove(text: string, options?: { preStyled?: boolean }): void;
+  /** Restore a dequeued prompt, ahead of any draft already being edited. */
+  restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: string[]): void;
   /** Replace the status section below the editor (idle repaints are skipped). */
@@ -292,6 +294,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   };
 
   const csi = (sequence: string): string => `\u001b[${sequence}`;
+  const bracketedPaste = (enabled: boolean): string => csi(`?2004${enabled ? "h" : "l"}`);
 
   /** The previous logical layout is retained so a resize can account for
    * terminal reflow before climbing back to the live region's first row. */
@@ -569,6 +572,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       stdout.on("resize", onResize);
       if (stdin.setRawMode && !previousRawMode) stdin.setRawMode(true);
       stdin.resume?.();
+      write(bracketedPaste(true));
       paint();
     },
 
@@ -578,6 +582,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       if (escapeTimer) clearTimeout(escapeTimer);
       stdin.removeListener("data", onData);
       stdout.removeListener("resize", onResize);
+      write(bracketedPaste(false));
       if (stdin.setRawMode) stdin.setRawMode(previousRawMode);
       // A resumed stdin is a live handle that keeps the runtime alive after
       // the chat loop returns; without this, /quit tears down but never exits.
@@ -595,6 +600,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     printAbove(text, options) {
       printTranscript(text, options?.preStyled === true);
+    },
+
+    restoreInput(text) {
+      editor = createEditorState(editor.text.length > 0 ? `${text}\n\n${editor.text}` : text);
+      historyIndex = null;
+      completionIndex = 0;
+      dismissedCompletion = null;
+      paint();
     },
 
     setProgressLines(lines) {
