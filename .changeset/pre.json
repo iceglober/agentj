@@ -7,6 +7,7 @@
   "changesets": [
     "biome-quality",
     "chat-first-rewrite",
+    "cost-optimization",
     "initial-v0.1",
     "list-window-scroll",
     "mcp-commands",
