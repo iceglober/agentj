@@ -83,6 +83,8 @@ describe("global config reads and merges", () => {
   test("defaults project setup and MCP servers to empty", () => {
     expect(configSchema.parse({}).project.setup).toEqual([]);
     expect(configSchema.parse({}).mcp).toEqual({ servers: {}, maxOutputChars: 30_000 });
+    expect(configSchema.parse({}).metrics.enabled).toBe(false);
+    expect(configSchema.parse({}).agent.tools.maxOutputChars).toBe(30_000);
     expect(configSchema.parse({ project: { setup: ["bun install"] } }).project.setup).toEqual([
       "bun install",
     ]);

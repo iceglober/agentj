@@ -5,6 +5,7 @@ import {
   providerNames,
   type RunResult,
   type RunStep,
+  resolveTierModel,
   type ToolSet,
 } from "../llm";
 import type { MetricsSink } from "../metrics";
@@ -20,6 +21,7 @@ import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
+import type { SpillWriter } from "../truncation";
 import {
   resolveToolTarget,
   type WithPermissionsOptions,
@@ -53,21 +55,46 @@ export const agentConfigSchema = z.object({
    * truncates long build turns. Turns that hit the ceiling surface a notice.
    */
   steps: z.number().int().min(1).default(100),
+  /**
+   * Context-size ceiling. `softLimit` is the request input-token threshold
+   * (e.g. 240_000 to stay under a 272k long-context billing tier); unset →
+   * no ceiling. The primary agent warns and keeps going (`onLimit: "warn"`);
+   * children — who cannot receive warnings — stop their tool loop instead.
+   */
+  context: z
+    .object({
+      softLimit: z.number().int().min(1).optional(),
+      onLimit: z.enum(["warn"]).default("warn"),
+    })
+    .prefault({}),
   llm: llmConfigSchema.prefault({}),
   prompt: promptConfigSchema.prefault({}),
   tools: z
     .object({
+      /**
+       * Char cap on bash stdout/stderr and readFile content returned to the
+       * model (MCP results have their own `mcp.maxOutputChars`, same default).
+       * Over-cap output spills to a session file when spilling is wired, so
+       * the cap bounds context growth without losing data.
+       */
+      maxOutputChars: z.number().int().min(1_000).max(1_000_000).default(30_000),
       edit: editConfigSchema.prefault({}),
       subagents: z
         .object({
           concurrency: z.number().int().min(1).max(8).default(2),
           /**
-           * Tier routing: when set, planning workers and build subagents use
-           * these provider/model overrides instead of the parent's. The prompt
-           * profile re-resolves from the child model.
+           * Explicit provider/model overrides for planning workers and build
+           * subagents; these win over `tier`. The prompt profile re-resolves
+           * from the child model, so its own template/params apply.
            */
           provider: z.enum(providerNames).optional(),
           model: z.string().trim().min(1).optional(),
+          /**
+           * Ladder tier (index into `llm.tiers`) children run on — the
+           * provider-agnostic way to route fan-out work to a cheaper rung.
+           * Unset (and no `model`) → children inherit the parent's model.
+           */
+          tier: z.number().int().min(0).optional(),
         })
         .prefault({}),
     })
@@ -106,6 +133,12 @@ export interface CreateAgentOptions {
   /** Optional content-free telemetry; omitted keeps runtime metrics disabled. */
   metricsSink?: MetricsSink;
   /**
+   * Session spill store for over-cap tool output: `write` persists the full
+   * value, `dir` becomes an extra readable root so the model can slice the
+   * spilled file back in. Omitted → over-cap output is plainly truncated.
+   */
+  spill?: { dir: string; write: SpillWriter };
+  /**
    * Host-first permission gating for the mutating tools. Omitted (sandboxed
    * runs, evals) keeps the historical ungated toolset.
    */
@@ -123,6 +156,13 @@ export interface CreateAgentOptions {
    * config's `steps` ceiling stands.
    */
   stopSteps?: number;
+  /**
+   * Stop the tool loop once a request's context reaches this many input
+   * tokens (routed to the runtime port's `stopContextTokens`). Set for
+   * children/jobs so fresh contexts respect the session's context ceiling;
+   * the interactive primary warns via turn notice instead of stopping.
+   */
+  stopContextTokens?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
   mode?: AgentMode;
   /**
@@ -155,11 +195,23 @@ export interface Agent {
 }
 
 /**
+ * The model children (subagents / planning workers) run: an explicit
+ * `subagents.model` wins, else `subagents.tier` resolved against the ladder,
+ * else undefined — inherit the parent's model.
+ */
+export function subagentModel(config: AgentConfig): string | undefined {
+  const { model, tier } = config.tools.subagents;
+  if (model) return model;
+  return tier === undefined ? undefined : resolveTierModel(config.llm, tier);
+}
+
+/**
  * The config a child (subagent / planning worker) runs under: the parent's,
  * with the given role and any configured subagent provider/model overrides.
  */
 export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"]): AgentConfig {
-  const { provider, model } = config.tools.subagents;
+  const { provider } = config.tools.subagents;
+  const model = subagentModel(config);
   return {
     ...config,
     role,
@@ -277,7 +329,9 @@ export async function createAgentTools(
                   gitStatusSummary: await session.status(),
                 },
                 metricsSink: opts.metricsSink,
+                spill: opts.spill,
                 stopSteps: opts.stopSteps,
+                stopContextTokens: config.context.softLimit,
                 // Children answer to the same session gate as the parent —
                 // worktree isolation confines their edits, not their bash.
                 ...(opts.permissions
@@ -324,7 +378,13 @@ export async function createAgentTools(
 
   if (mode === "plan") {
     return finalize({
-      ...createReadTools(fileSandbox, { root: opts.root }),
+      // The raw sandbox, not the confined one: the read tool does its own
+      // root-confined resolution, extended with the spill dir.
+      ...createReadTools(sb, {
+        root: opts.root,
+        maxOutputChars: config.tools.maxOutputChars,
+        ...(opts.spill ? { extraRoots: [opts.spill.dir] } : {}),
+      }),
       ...createSearchTools(sb, { root: opts.root }),
       ...(opts.research
         ? {
@@ -340,7 +400,11 @@ export async function createAgentTools(
   }
 
   return finalize({
-    ...(await createBashTools(fileSandbox, { root: opts.root })),
+    ...(await createBashTools(fileSandbox, {
+      root: opts.root,
+      maxOutputChars: config.tools.maxOutputChars,
+      spill: opts.spill?.write,
+    })),
     ...createSearchTools(sb, { root: opts.root }),
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
@@ -389,6 +453,7 @@ export async function createAgent(
         topP: config.llm.topP ?? composed.params.topP,
         providerOptions: composed.params.providerOptions,
         stopSteps: opts.stopSteps ?? config.steps,
+        stopContextTokens: opts.stopContextTokens,
         abortSignal: generateOpts?.abortSignal,
         onStep: generateOpts?.onStep,
       }),

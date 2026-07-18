@@ -49,6 +49,8 @@ export interface McpRuntimeOptions {
   timeoutMs?: number;
   /** OAuth credential storage passed through to every server connect. */
   oauth?: import("./oauth").McpOAuthStorage;
+  /** Persists over-cap MCP results in full so truncation never loses data. */
+  spill?: import("../truncation").SpillWriter;
 }
 
 const EMPTY_TOOLS = { plan: { tools: {} }, build: { tools: {} } } as Readonly<
@@ -241,7 +243,12 @@ export function createMcpRuntime(initialConfig: McpConfig, options: McpRuntimeOp
         const test = new Map(next);
         test.set(name, candidate);
         try {
-          createMcpSnapshot([...test.values()], pendingMaxOutputChars, current.version + 1);
+          createMcpSnapshot(
+            [...test.values()],
+            pendingMaxOutputChars,
+            current.version + 1,
+            options.spill,
+          );
           next.set(name, candidate);
           if (previous && previous !== candidate) retired.push(previous);
           pending.delete(name);
@@ -267,6 +274,7 @@ export function createMcpRuntime(initialConfig: McpConfig, options: McpRuntimeOp
           [...active.values()],
           activeMaxOutputChars,
           current.version + 1,
+          options.spill,
         );
       }
       await Promise.allSettled(retired.map((server) => server.client.close()));

@@ -4,6 +4,31 @@
  * but cannot derive or report a USD cost without their own pricing policy.
  */
 
+import z from "zod";
+
+/** The metrics.* section of the agent config. */
+export const metricsConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /**
+     * Self-contained OTLP/HTTP export. Without `endpoint`, enabled metrics
+     * fall back to whatever global OTel meter provider an external SDK
+     * bootstrap registered (a no-op when there is none).
+     */
+    otlp: z
+      .object({
+        endpoint: z.string().url().optional(),
+        headers: z.record(z.string(), z.string()).default({}),
+        /** Header name → process-env var; auth tokens stay out of config. */
+        headersFromEnv: z.record(z.string(), z.string().min(1)).default({}),
+        intervalMs: z.number().int().min(1_000).max(3_600_000).default(60_000),
+      })
+      .prefault({}),
+  })
+  .prefault({});
+
+export type MetricsConfig = z.infer<typeof metricsConfigSchema>;
+
 export const metricAttributeKeys = ["provider", "model", "outcome"] as const;
 
 export type MetricAttributeKey = (typeof metricAttributeKeys)[number];

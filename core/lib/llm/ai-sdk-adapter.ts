@@ -62,14 +62,35 @@ interface AiStepLike {
 
 const mapStepUsage = (step: AiStepLike): { usage?: RunStep["usage"] } => {
   const usage = (
-    step as { usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } }
+    step as {
+      usage?: {
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+        inputTokenDetails?: {
+          noCacheTokens?: number;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
+        };
+      };
+    }
   ).usage;
   if (!usage) return {};
+  const details = usage.inputTokenDetails;
   return {
     usage: {
       inputTokens: usage.inputTokens ?? 0,
       outputTokens: usage.outputTokens ?? 0,
       totalTokens: usage.totalTokens ?? 0,
+      ...(details?.noCacheTokens !== undefined
+        ? { noCacheInputTokens: details.noCacheTokens }
+        : {}),
+      ...(details?.cacheReadTokens !== undefined
+        ? { cacheReadInputTokens: details.cacheReadTokens }
+        : {}),
+      ...(details?.cacheWriteTokens !== undefined
+        ? { cacheWriteInputTokens: details.cacheWriteTokens }
+        : {}),
     },
   };
 };
@@ -93,6 +114,22 @@ const mapStep = (step: AiStepLike): RunStep => ({
     };
   }),
 });
+
+/**
+ * Stop once the latest step's request context reached the token ceiling. The
+ * SDK's StopCondition is generic over the toolset; the check only touches
+ * step usage, so the structural type is asserted at this vendor boundary.
+ */
+const contextTokensAtLeast = (limit: number) =>
+  (({ steps }: { steps: ReadonlyArray<{ usage?: { inputTokens?: number } }> }) => {
+    const inputTokens = steps.at(-1)?.usage?.inputTokens;
+    return inputTokens !== undefined && inputTokens >= limit;
+  }) as unknown as ReturnType<typeof stepCountIs>;
+
+const stopConditions = (req: GenerateRequest): ReturnType<typeof stepCountIs>[] => [
+  ...(req.stopSteps !== undefined ? [stepCountIs(req.stopSteps)] : []),
+  ...(req.stopContextTokens !== undefined ? [contextTokensAtLeast(req.stopContextTokens)] : []),
+];
 
 /** Wrap one ToolDef as an ai `tool()`, forwarding call options verbatim. */
 const toAiTool = (def: ToolDef) =>
@@ -159,7 +196,7 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
                 providerOptions: req.providerOptions as Record<string, Record<string, never>>,
               }
             : {}),
-          ...(req.stopSteps !== undefined ? { stopWhen: stepCountIs(req.stopSteps) } : {}),
+          ...(stopConditions(req).length > 0 ? { stopWhen: stopConditions(req) } : {}),
           toolOrder: Object.keys(req.tools).sort(),
           tools: mapTools(req.tools),
         });

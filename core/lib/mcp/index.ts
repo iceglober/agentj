@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import z from "zod";
 import type { AgentMode, ExternalAgentTools, ExternalToolPermissionTargetResolver } from "../agent";
 import { defineTool, type ToolDef, type ToolSet } from "../llm";
-import { truncateWithNotice } from "../truncation";
+import { type SpillWriter, truncateWithSpill } from "../truncation";
 
 const patternSchema = z
   .string()
@@ -227,8 +227,8 @@ const searchScore = (query: string, name: string, text: string): number => {
   return score;
 };
 
-const boundedJson = (value: unknown, maxChars: number): string =>
-  truncateWithNotice(JSON.stringify(value, null, 2) ?? "null", maxChars);
+const boundedJson = (value: unknown, maxChars: number, spill?: SpillWriter): string =>
+  truncateWithSpill(JSON.stringify(value, null, 2) ?? "null", maxChars, spill, "mcp");
 
 const summarizeContent = (content: unknown): unknown => {
   if (typeof content !== "object" || content === null) return content;
@@ -258,20 +258,22 @@ const summarizeContent = (content: unknown): unknown => {
 export const normalizeMcpToolResult = (
   result: McpCallToolResult,
   maxChars = 30_000,
+  spill?: SpillWriter,
 ): string | { error: string } => {
   const value = {
     ...(result.content ? { content: result.content.map(summarizeContent) } : {}),
     ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
     ...(result.toolResult !== undefined ? { toolResult: result.toolResult } : {}),
   };
-  const output = boundedJson(value, maxChars);
+  const output = boundedJson(value, maxChars, spill);
   return result.isError ? { error: output } : output;
 };
 
 export const normalizeMcpResourceResult = (
   result: McpReadResourceResult,
   maxChars = 30_000,
-): string => boundedJson({ contents: result.contents.map(summarizeContent) }, maxChars);
+  spill?: SpillWriter,
+): string => boundedJson({ contents: result.contents.map(summarizeContent) }, maxChars, spill);
 
 const uriTemplateMatches = (template: string, uri: string): boolean => {
   const escaped = template.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -292,6 +294,7 @@ function directTool(
   state: McpServerConnection,
   remote: McpRemoteTool,
   maxOutputChars: number,
+  spill?: SpillWriter,
 ): ToolDef {
   return {
     description:
@@ -306,6 +309,7 @@ function directTool(
           requestSignal(options),
         ),
         maxOutputChars,
+        spill,
       ),
   };
 }
@@ -384,6 +388,7 @@ export async function connectMcpServer(
 export function createMcpExternalTools(
   states: readonly McpServerConnection[],
   maxOutputChars: number,
+  spill?: SpillWriter,
 ): Record<AgentMode, ExternalAgentTools> {
   validateMcpToolNames(states);
   const refreshTools = async (state: McpServerConnection): Promise<void> => {
@@ -428,7 +433,7 @@ export function createMcpExternalTools(
 
       for (const entry of eligibleTools()) {
         if (!matchesAny(entry.state.config.tools.direct, entry.remote.name)) continue;
-        tools[entry.canonical] = directTool(entry.state, entry.remote, maxOutputChars);
+        tools[entry.canonical] = directTool(entry.state, entry.remote, maxOutputChars, spill);
         permissionTargets[entry.canonical] = () => entry.canonical;
       }
 
@@ -466,6 +471,7 @@ export function createMcpExternalTools(
                   inputSchema: remote.inputSchema,
                 })),
               maxOutputChars,
+              spill,
             );
           },
         });
@@ -485,6 +491,7 @@ export function createMcpExternalTools(
                 requestSignal(executeOptions),
               ),
               maxOutputChars,
+              spill,
             );
           },
         });
@@ -545,6 +552,7 @@ export function createMcpExternalTools(
                   mimeType: entry.resource.mimeType,
                 })),
               maxOutputChars,
+              spill,
             );
           },
         });
@@ -570,6 +578,7 @@ export function createMcpExternalTools(
             return normalizeMcpResourceResult(
               await state.client.readResource(uri, requestSignal(executeOptions)),
               maxOutputChars,
+              spill,
             );
           },
         });
@@ -591,10 +600,12 @@ export const createMcpSnapshot = (
   states: readonly McpServerConnection[],
   maxOutputChars: number,
   version: number,
+  spill?: SpillWriter,
 ): McpSnapshot => {
   const externalTools = createMcpExternalTools(
     [...states].sort((left, right) => left.name.localeCompare(right.name)),
     maxOutputChars,
+    spill,
   );
   for (const mode of ["plan", "build"] as const) {
     Object.freeze(externalTools[mode].tools);

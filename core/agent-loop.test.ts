@@ -6,6 +6,7 @@ import {
   formatChatEvent,
   formatClock,
   formatResumeCommand,
+  shouldWarnContext,
   truncateLineWithNotice,
 } from "./agent-loop";
 
@@ -187,6 +188,15 @@ describe("formatClock", () => {
   });
 });
 
+describe("shouldWarnContext", () => {
+  test("fires once at the threshold, never below it, never without a limit", () => {
+    expect(shouldWarnContext(239_999, 240_000, false)).toBe(false);
+    expect(shouldWarnContext(240_000, 240_000, false)).toBe(true);
+    expect(shouldWarnContext(300_000, 240_000, true)).toBe(false);
+    expect(shouldWarnContext(300_000, undefined, false)).toBe(false);
+  });
+});
+
 describe("composeStatusSection", () => {
   const base = {
     sessionId: "204ed50c",
@@ -217,6 +227,30 @@ describe("composeStatusSection", () => {
     const lines = composeStatusSection(base, 66);
     expect(lines[0]).toContain("12.4k▸3.1k·8.7k·1m14s");
     expect(lines[0]).not.toContain("in 12.4k");
+  });
+
+  test("the latest request's cache-read ratio rides next to ctx in the labeled form", () => {
+    const lines = composeStatusSection(
+      { ...base, usage: { ...base.usage, cacheReadRatio: 0.923 } },
+      100,
+    );
+    expect(lines[0]).toContain("ctx 8.7k (92%⚡)");
+  });
+
+  test("the compact form drops the cache ratio, width wins", () => {
+    const lines = composeStatusSection(
+      { ...base, usage: { ...base.usage, cacheReadRatio: 0.923 } },
+      66,
+    );
+    expect(lines[0]).toContain("12.4k▸3.1k·8.7k·1m14s");
+    expect(lines[0]).not.toContain("⚡");
+  });
+
+  test("ctx renders flagged once it reaches the configured soft limit", () => {
+    const under = composeStatusSection({ ...base, contextSoftLimit: 10_000 }, 90);
+    expect(under[0]).toContain("ctx 8.7k ·");
+    const over = composeStatusSection({ ...base, contextSoftLimit: 8_000 }, 90);
+    expect(over[0]).toContain("ctx 8.7k!");
   });
 
   test("busy: the indicator takes line 2's right end and the path yields", () => {

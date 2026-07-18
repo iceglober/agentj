@@ -1,10 +1,15 @@
 import type { ToolSet } from "../../llm";
 import type { Sandbox } from "../../sandbox";
+import type { SpillWriter } from "../../truncation";
 import { createBashToolAdapter } from "./bash-tool-adapter";
 
 export interface BashToolsOptions {
   /** The session worktree the tools' commands and file IO operate in. */
   root: string;
+  /** Char cap on stdout/stderr returned to the model. */
+  maxOutputChars: number;
+  /** Persists over-cap output in full so truncation never loses data. */
+  spill?: SpillWriter;
 }
 
 /**
