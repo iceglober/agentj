@@ -7,6 +7,7 @@ import {
   createConfigCliHandlers,
   LLM_MODEL_KEY,
   type MaskedSecretPrompt,
+  SUBAGENT_LLM_MODEL_KEY,
 } from "./config-cli";
 import type { SecretStore } from "./secrets";
 
@@ -112,6 +113,39 @@ describe("createConfigCliHandlers", () => {
     ]);
     expect(stdout.text()).toBe("Saved llm.model in global configuration.\n");
     expect(stderr.text()).toBe("");
+  });
+
+  test("sets and deletes a subagent provider/model in atomic transactions", async () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const handlers = createConfigCliHandlers(createDependencies(config, fake.store));
+
+    await expect(
+      handlers.set({ key: SUBAGENT_LLM_MODEL_KEY, value: "azure/gpt-5.6-luna" }),
+    ).resolves.toMatchObject({ ok: true, changed: true });
+    await expect(handlers.delete({ key: SUBAGENT_LLM_MODEL_KEY })).resolves.toMatchObject({
+      ok: true,
+      changed: true,
+    });
+
+    expect(config.calls).toEqual([
+      [
+        {
+          type: "set",
+          path: ["agent", "tools", "subagents", "provider"],
+          value: "azure",
+        },
+        {
+          type: "set",
+          path: ["agent", "tools", "subagents", "model"],
+          value: "gpt-5.6-luna",
+        },
+      ],
+      [
+        { type: "delete", path: ["agent", "tools", "subagents", "provider"] },
+        { type: "delete", path: ["agent", "tools", "subagents", "model"] },
+      ],
+    ]);
   });
 
   test("sets a complete MCP server through a dynamic record key", async () => {

@@ -3,6 +3,8 @@ import type { MetricsSink } from "../metrics";
 import { createAiSdkRuntime, providerNames } from "./ai-sdk-adapter";
 import { azureModelConfigSchema } from "./azure-adapter";
 
+export { providerNames };
+
 /**
  * A tool the agent can call. Our own vendor-free shape, structurally close to
  * the AI SDK's `tool()` on purpose so the ai-sdk adapter maps it 1:1.

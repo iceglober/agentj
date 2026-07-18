@@ -1,5 +1,12 @@
 import z from "zod";
-import { createRuntime, llmConfigSchema, type RunResult, type RunStep, type ToolSet } from "../llm";
+import {
+  createRuntime,
+  llmConfigSchema,
+  providerNames,
+  type RunResult,
+  type RunStep,
+  type ToolSet,
+} from "../llm";
 import type { MetricsSink } from "../metrics";
 import {
   type ComposedPrompt,
@@ -55,12 +62,12 @@ export const agentConfigSchema = z.object({
         .object({
           concurrency: z.number().int().min(1).max(8).default(2),
           /**
-           * Tier routing: when set, planning workers and build subagents run
-           * this model instead of the parent's (e.g. a high-volume tier for
-           * fan-out work). The prompt profile re-resolves from the child
-           * model, so its own template/params apply.
+           * Tier routing: when set, planning workers and build subagents use
+           * these provider/model overrides instead of the parent's. The prompt
+           * profile re-resolves from the child model.
            */
-          model: z.string().optional(),
+          provider: z.enum(providerNames).optional(),
+          model: z.string().trim().min(1).optional(),
         })
         .prefault({}),
     })
@@ -149,15 +156,40 @@ export interface Agent {
 
 /**
  * The config a child (subagent / planning worker) runs under: the parent's,
- * with the given role and — when tier routing is configured — the subagent
- * model swapped in.
+ * with the given role and any configured subagent provider/model overrides.
  */
 export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"]): AgentConfig {
-  const model = config.tools.subagents.model;
+  const { provider, model } = config.tools.subagents;
   return {
     ...config,
     role,
-    llm: model ? { ...config.llm, model } : config.llm,
+    llm:
+      provider || model
+        ? { ...config.llm, ...(provider ? { provider } : {}), ...(model ? { model } : {}) }
+        : config.llm,
+  };
+}
+
+export function withAgentModelSelection(
+  config: AgentConfig,
+  target: "primary" | "subagents",
+  selection: { provider: AgentConfig["llm"]["provider"]; model: string } | null,
+): AgentConfig {
+  if (target === "primary") {
+    return selection
+      ? { ...config, llm: { ...config.llm, provider: selection.provider, model: selection.model } }
+      : config;
+  }
+  return {
+    ...config,
+    tools: {
+      ...config.tools,
+      subagents: {
+        ...config.tools.subagents,
+        provider: selection?.provider,
+        model: selection?.model,
+      },
+    },
   };
 }
 
@@ -222,10 +254,10 @@ export async function createAgentTools(
   const fileSandbox = confineSandboxFiles(sb, opts.root);
   // Tier routing: surface the children's model on progress rows only when it
   // differs from the parent's — same model needs no callout.
-  const tierModel = config.tools.subagents.model;
+  const childConfig = childAgentConfig(config, "delegate");
   const childModelLabel =
-    tierModel && tierModel !== config.llm.model
-      ? { model: `${config.llm.provider}/${tierModel}` }
+    childConfig.llm.provider !== config.llm.provider || childConfig.llm.model !== config.llm.model
+      ? { model: `${childConfig.llm.provider}/${childConfig.llm.model}` }
       : {};
   const delegationTool: ToolSet = opts.delegation
     ? {

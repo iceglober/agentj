@@ -17,12 +17,24 @@ describe("terminal key decoder", () => {
     ]);
   });
 
-  test("distinguishes Return from supported Shift+Return encodings", () => {
-    expect(decode("\r", "\u001b[13;2u", "\u001b[27;2;13~", "\u001b[13;2~")).toEqual([
+  test("distinguishes Return from line endings and supported Shift+Return encodings", () => {
+    expect(decode("\r", "\n", "\r\n", "\u001b[13;2u", "\u001b[27;2;13~", "\u001b[13;2~")).toEqual([
       { type: "submit" },
       { type: "newline" },
       { type: "newline" },
       { type: "newline" },
+      { type: "newline" },
+      { type: "newline" },
+    ]);
+  });
+
+  test("turns unwrapped multiline text into editor input without submitting", () => {
+    expect(decode("first\nsecond\r\nthird")).toEqual([
+      ...[..."first"].map((text) => ({ type: "insert" as const, text })),
+      { type: "newline" },
+      ...[..."second"].map((text) => ({ type: "insert" as const, text })),
+      { type: "newline" },
+      ...[..."third"].map((text) => ({ type: "insert" as const, text })),
     ]);
   });
 
@@ -116,7 +128,7 @@ describe("terminal key decoder", () => {
   });
 
   test("turns bracketed paste into multiline input without submitting", () => {
-    expect(decode("\u001b[20", "0~first\r\nsecond\u001b[201~")).toEqual([
+    expect(decode("\u001b[20", "0~first\r", "\nsecond\u001b[201~")).toEqual([
       { type: "insert", text: "f" },
       { type: "insert", text: "i" },
       { type: "insert", text: "r" },

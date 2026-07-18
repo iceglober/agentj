@@ -9,11 +9,13 @@ import {
   readGlobalConfig,
   type ValidatedConfigPath,
 } from "./config";
-import { providerNames } from "./llm/ai-sdk-adapter";
+import { providerNames } from "./llm";
 import { AZURE_API_KEY_ACCOUNT, AZURE_SECRET_SERVICE, type SecretStore } from "./secrets";
 
-/** Legacy public aliases retained for existing scripts. */
+/** Compound public keys that update a provider/model pair atomically. */
 export const LLM_MODEL_KEY = "llm.model";
+export const SUBAGENT_LLM_MODEL_KEY = "subagents.model";
+/** Legacy public secret alias retained for existing scripts. */
 export const AZURE_API_KEY_KEY = "providers.azure.api_key";
 
 export interface ConfigCliWriters {
@@ -246,20 +248,35 @@ const getAtPath = (value: unknown, path: readonly string[]): unknown => {
   return current;
 };
 
-const normalModelMutations = (value: string): readonly GlobalConfigMutation[] => {
+const modelPaths = {
+  [LLM_MODEL_KEY]: {
+    provider: ["agent", "llm", "provider"],
+    model: ["agent", "llm", "model"],
+  },
+  [SUBAGENT_LLM_MODEL_KEY]: {
+    provider: ["agent", "tools", "subagents", "provider"],
+    model: ["agent", "tools", "subagents", "model"],
+  },
+} as const satisfies Record<string, { provider: ValidatedConfigPath; model: ValidatedConfigPath }>;
+
+type ModelConfigKey = keyof typeof modelPaths;
+
+const isModelConfigKey = (key: string): key is ModelConfigKey => Object.hasOwn(modelPaths, key);
+
+const modelMutations = (key: ModelConfigKey, value: string): readonly GlobalConfigMutation[] => {
   const slash = value.indexOf("/");
   if (slash <= 0 || slash === value.length - 1 || value.indexOf("/", slash + 1) !== -1) return [];
   const provider = value.slice(0, slash);
   if (!(providerNames as readonly string[]).includes(provider)) return [];
   return [
-    { type: "set", path: ["agent", "llm", "provider"], value: provider },
-    { type: "set", path: ["agent", "llm", "model"], value: value.slice(slash + 1) },
+    { type: "set", path: modelPaths[key].provider, value: provider },
+    { type: "set", path: modelPaths[key].model, value: value.slice(slash + 1) },
   ];
 };
 
-const normalModelDeleteMutations: readonly GlobalConfigMutation[] = [
-  { type: "delete", path: ["agent", "llm", "provider"] },
-  { type: "delete", path: ["agent", "llm", "model"] },
+const modelDeleteMutations = (key: ModelConfigKey): readonly GlobalConfigMutation[] => [
+  { type: "delete", path: modelPaths[key].provider },
+  { type: "delete", path: modelPaths[key].model },
 ];
 
 /** Build config operations without depending on command parsing, filesystem, or keyring adapters. */
@@ -314,11 +331,11 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
     },
 
     async set(input) {
-      if (input.key === LLM_MODEL_KEY) {
+      if (isModelConfigKey(input.key)) {
         if (input.secret)
           return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
         if (!input.value) return writeError(dependencies.writers, "missing_value", input.key);
-        const mutations = normalModelMutations(input.value);
+        const mutations = modelMutations(input.key, input.value);
         if (mutations.length === 0)
           return writeError(dependencies.writers, "invalid_model", input.key);
         return write(input.key, mutations);
@@ -403,12 +420,12 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
     },
 
     async delete(input) {
-      if (input.key === LLM_MODEL_KEY) {
+      if (isModelConfigKey(input.key)) {
         if (input.secret)
           return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
         try {
-          const changed = await mutateConfig(normalModelDeleteMutations, dependencies.config);
-          dependencies.writers.stdout.write("Deleted llm.model from global configuration.\n");
+          const changed = await mutateConfig(modelDeleteMutations(input.key), dependencies.config);
+          dependencies.writers.stdout.write(`Deleted ${input.key} from global configuration.\n`);
           return { ok: true, key: input.key, storage: "global_config", changed };
         } catch {
           return writeError(dependencies.writers, "config_write_failed", input.key);

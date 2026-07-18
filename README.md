@@ -45,8 +45,8 @@ Keys and commands:
 
 - **Tab** — complete the selected slash-command suggestion, or toggle plan/build when no suggestions
   are shown (applies at the next turn if one is running).
-- **Esc** — dismiss slash-command suggestions, or interrupt the running turn. The session survives;
-  the model is told it was cut short.
+- **Esc** — dismiss slash-command suggestions, dequeue the newest waiting message back into the
+  editor, or interrupt the running turn. The session survives; the model is told it was cut short.
 - **Ctrl+C** — clear the input; on empty input it interrupts, and a double press quits.
 - **Enter** — complete the selected slash command, or send when the command is exact or no
   suggestions are shown. **Shift+Return** — newline. Outer whitespace is trimmed when routing a
@@ -64,6 +64,8 @@ Keys and commands:
   available on the next foreground turn.
 - **`/config get|set|delete`** — inspect or update global configuration with path/value completion.
   Omitting a sensitive value opens a masked prompt.
+- **`/model [primary|subagents]`** — choose a provider and model in a guided prompt. Changes are
+  saved globally and apply to new turns/jobs immediately; subagents can instead inherit the primary.
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 
@@ -157,7 +159,9 @@ In both modes the agent has `run_subagents`: a task DAG (`waitsOn` between tasks
 bounded concurrency. Plan mode fans out read-only researchers; build mode gives each child an
 isolated git worktree and integrates the results back as a batch — a child failure preserves its
 branch instead of losing work. Running DAG state stays in the live region, then a final task summary
-is retained in the transcript. `agent.tools.subagents.model` routes children to a cheaper tier.
+is retained in the transcript. `/model subagents` routes children to another provider/model or
+restores primary-model inheritance; the equivalent config paths are
+`agent.tools.subagents.provider` and `agent.tools.subagents.model`.
 
 ## Sessions and persistence
 

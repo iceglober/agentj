@@ -1,10 +1,12 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
+import { providerNames } from "../llm";
 import { mcpServerConfigSchema } from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
 import type { ChatEvent } from "./events";
+import type { GuidedInputPort } from "./guided-input";
 import type { JobRunner } from "./jobs";
 import type { ChatSession } from "./session";
 
@@ -58,6 +60,20 @@ export async function expandAtFiles(text: string, cwd: string): Promise<string> 
   return attachments.length > 0 ? `${text}\n\n${attachments.join("\n\n")}` : text;
 }
 
+export type ModelTarget = "primary" | "subagents";
+
+export interface ModelSelection {
+  provider: string;
+  model: string;
+}
+
+export interface ModelController {
+  current(): { primary: ModelSelection; subagents: ModelSelection | null };
+  providers(): readonly string[];
+  modelSuggestions(provider: string): readonly string[];
+  configure(target: ModelTarget, selection: ModelSelection | null): Promise<boolean>;
+}
+
 export interface ChatCommandContext {
   session: ChatSession;
   jobs: JobRunner;
@@ -68,6 +84,7 @@ export interface ChatCommandContext {
   /** Clears the visible transcript (screen-level concern). */
   clear?(): void;
   config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
+  models?: ModelController;
   mcp?: {
     statuses(): readonly McpRuntimeStatus[];
     reload(name?: string): Promise<void>;
@@ -77,12 +94,7 @@ export interface ChatCommandContext {
       hooks?: { onAuthorizationUrl?(url: string): void },
     ): Promise<{ ok: true } | { ok: false; reason: string }>;
   };
-  askInput?(options: {
-    label: string;
-    masked?: boolean;
-    choices?: readonly string[];
-    validate?(text: string): string | null | undefined;
-  }): Promise<string | null>;
+  guided?: GuidedInputPort;
 }
 
 type ChatCommand = {
@@ -103,6 +115,11 @@ const mcpActions = {
   reload: "Reload one or all servers",
   remove: "Remove a configured server",
   set: "Set an advanced server JSON definition",
+} as const;
+
+const modelTargets = {
+  primary: "Primary agent",
+  subagents: "Subagents and background jobs",
 } as const;
 
 const configActions = {
@@ -137,6 +154,14 @@ const formatMcpStatus = (status: McpRuntimeStatus): string => {
   if (status.state === "ready") return `${label} — ${status.detail}`;
   if (status.state === "connected") return `${label} — connected`;
   return `${label} — ${status.detail}${status.usingPrevious ? " (using previous connection)" : ""}${status.resolution ? `\n  ${status.resolution}` : ""}`;
+};
+
+const requireGuidedInput = (context: ChatCommandContext): GuidedInputPort | null => {
+  if (!context.guided) {
+    context.emit({ type: "notice", text: "Guided input is unavailable in this session." });
+    return null;
+  }
+  return context.guided;
 };
 
 const requireConfig = (context: ChatCommandContext): ConfigCliHandlers | null => {
@@ -184,11 +209,13 @@ const runConfigCommand = async (context: ChatCommandContext, args: string): Prom
   }
   let value = suppliedValue;
   if (!value) {
-    const entered = await context.askInput?.({
+    const guided = requireGuidedInput(context);
+    if (!guided) return;
+    const entered = await guided.askInput({
       label: `Value for ${key}`,
       masked: isSensitiveConfigPath(key),
     });
-    if (entered === null || entered === undefined) {
+    if (entered === null) {
       context.emit({ type: "notice", text: "Configuration update cancelled." });
       return;
     }
@@ -220,20 +247,18 @@ const setMcpServer = async (
 };
 
 const addMcpServer = async (context: ChatCommandContext): Promise<void> => {
-  if (!context.askInput) {
-    context.emit({ type: "notice", text: "Guided input is unavailable in this session." });
-    return;
-  }
-  const name = await context.askInput({ label: "MCP server name", validate: serverNameError });
+  const guided = requireGuidedInput(context);
+  if (!guided) return;
+  const name = await guided.askInput({ label: "MCP server name", validate: serverNameError });
   if (!name) return;
-  const transport = await context.askInput({
+  const transport = await guided.askInput({
     label: "Transport",
     choices: ["http", "stdio"],
     validate: (value) => (["http", "stdio"].includes(value) ? null : "Choose http or stdio."),
   });
   if (!transport) return;
   if (transport === "http") {
-    const url = await context.askInput({
+    const url = await guided.askInput({
       label: "MCP URL",
       validate: (value) => {
         try {
@@ -248,12 +273,12 @@ const addMcpServer = async (context: ChatCommandContext): Promise<void> => {
     await setMcpServer(context, name, { transport, url });
     return;
   }
-  const command = await context.askInput({
+  const command = await guided.askInput({
     label: "Server command",
     validate: (value) => (value.trim() ? null : "Command is required."),
   });
   if (!command) return;
-  const args = await context.askInput({
+  const args = await guided.askInput({
     label: "Arguments as a JSON array (Enter for none)",
     choices: ["[]"],
     validate: (value) => {
@@ -343,7 +368,9 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
         text: `OAuth for ${name} did not complete (${flow.reason}). Falling back to a pasted Authorization header — Esc to cancel.`,
       });
     }
-    const secret = await context.askInput?.({
+    const guided = requireGuidedInput(context);
+    if (!guided) return;
+    const secret = await guided.askInput({
       label: `Authorization header for ${name} (e.g. "Bearer <token>")`,
       masked: true,
       validate: (entered) => (entered.length > 0 ? null : "Value is required."),
@@ -366,6 +393,72 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
     await setMcpServer(context, name, JSON.parse(value));
   } catch {
     context.emit({ type: "notice", text: "MCP server definition must be valid JSON." });
+  }
+};
+
+const runModelCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
+  if (!context.models) {
+    context.emit({ type: "notice", text: "Model selection is unavailable in this session." });
+    return;
+  }
+  const guided = requireGuidedInput(context);
+  if (!guided) return;
+
+  let target = args.trim();
+  if (!target) {
+    const selected = await guided.askInput({
+      label: "Configure which agents?",
+      choices: Object.keys(modelTargets),
+      validate: (value) => (value in modelTargets ? null : "Choose primary or subagents."),
+    });
+    if (selected === null) return;
+    target = selected;
+  }
+  if (!(target in modelTargets)) {
+    context.emit({ type: "notice", text: "Usage: /model [primary|subagents]" });
+    return;
+  }
+  const modelTarget = target as ModelTarget;
+  const current = context.models.current();
+  const selected = modelTarget === "primary" ? current.primary : current.subagents;
+  const providerChoices = [
+    ...(selected ? [selected.provider] : []),
+    ...(modelTarget === "subagents" ? ["inherit"] : []),
+    ...context.models.providers(),
+  ].filter((value, index, values) => values.indexOf(value) === index);
+  const provider = await guided.askInput({
+    label: `${modelTargets[modelTarget]} provider`,
+    choices: providerChoices,
+    validate: (value) =>
+      providerChoices.includes(value) ? null : `Choose ${providerChoices.join(" or ")}.`,
+  });
+  if (provider === null) return;
+  if (provider === "inherit") {
+    if (await context.models.configure("subagents", null)) {
+      context.emit({
+        type: "notice",
+        text: "Subagents now inherit the primary provider and model on new work.",
+      });
+    }
+    return;
+  }
+
+  const modelChoices = [
+    ...(selected?.provider === provider ? [selected.model] : []),
+    ...context.models.modelSuggestions(provider),
+  ].filter((value, index, values) => value.length > 0 && values.indexOf(value) === index);
+  const model = await guided.askInput({
+    label: `${modelTargets[modelTarget]} model ID`,
+    choices: modelChoices,
+    validate: (value) => (value.trim().length > 0 ? null : "Model ID is required."),
+  });
+  if (model === null) return;
+  const selection = { provider, model: model.trim() };
+  if (await context.models.configure(modelTarget, selection)) {
+    context.emit({
+      type: "notice",
+      text: `${modelTargets[modelTarget]} will use ${selection.provider}/${selection.model} on new work.`,
+    });
   }
 };
 
@@ -393,6 +486,10 @@ export const chatCommands: Record<string, ChatCommand> = {
   config: {
     summary: "Read or update global configuration",
     run: runConfigCommand,
+  },
+  model: {
+    summary: "Choose primary or subagent models",
+    run: runModelCommand,
   },
   build: {
     summary: "Switch to build mode and implement the plan",
@@ -531,6 +628,7 @@ const configKeySummary: Record<string, string> = {
   "agent.tools.edit.mode": "Edit strategy",
   "agent.tools.subagents.concurrency": "Parallel subagents",
   "agent.tools.subagents.model": "Subagent model",
+  "agent.tools.subagents.provider": "Subagent model provider",
   "permissions.edit": "Edit permission policy",
   "permissions.bash.default": "Default bash permission policy",
   "mcp.maxOutputChars": "Maximum MCP result size",
@@ -540,7 +638,8 @@ const baseConfigKeys = [
 ].map((key) => [key, configKeySummary[key] ?? "Configuration value"] as const);
 
 const choiceValues: Record<string, readonly string[]> = {
-  "agent.llm.provider": ["azure"],
+  "agent.llm.provider": providerNames,
+  "agent.tools.subagents.provider": providerNames,
   "agent.tools.edit.mode": ["batch", "exact", "hash"],
   "permissions.edit": ["allow", "ask", "deny"],
   "permissions.bash.default": ["allow", "ask", "deny"],
@@ -559,7 +658,7 @@ const prefixedSuggestions = (
 export function completeChatInput(
   text: string,
   cursor: number,
-  context?: Pick<ChatCommandContext, "mcp">,
+  context?: Pick<ChatCommandContext, "mcp" | "models">,
 ): ChatInputCompletion | null {
   const graphemes = Array.from(text);
   const boundedCursor = Math.max(0, Math.min(cursor, graphemes.length));
@@ -635,6 +734,23 @@ export function completeChatInput(
             : action === "auth"
               ? "Press Enter for masked Authorization entry."
               : undefined,
+    };
+  }
+
+  if (command === "model") {
+    if (args.length === 0) {
+      return {
+        token,
+        suggestions: prefixedSuggestions(Object.entries(modelTargets), prefix),
+        hint: "Choose what to configure, or press Enter for guided selection.",
+      };
+    }
+    return {
+      token,
+      suggestions: [],
+      hint: modelTargets[args[0] as ModelTarget]
+        ? "Press Enter to choose a provider and model."
+        : "Expected: primary or subagents.",
     };
   }
 

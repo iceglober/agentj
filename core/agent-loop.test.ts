@@ -2,10 +2,58 @@ import { describe, expect, test } from "bun:test";
 import {
   composeProgressLines,
   composeStatusSection,
+  finalizeInteractiveChat,
   formatChatEvent,
   formatClock,
+  formatResumeCommand,
   truncateLineWithNotice,
 } from "./agent-loop";
+
+describe("interactive chat shutdown", () => {
+  test("formats the exact resume command", () => {
+    expect(formatResumeCommand("204ed50c")).toBe("Resume with: agentj --resume 204ed50c\n");
+  });
+
+  test("prints the resume command after terminal and composition cleanup", async () => {
+    const events: string[] = [];
+    await finalizeInteractiveChat({
+      sessionId: "204ed50c",
+      settle: Promise.resolve(),
+      stopScreen: () => events.push("screen stopped"),
+      closeComposition: async () => {
+        events.push("composition closed");
+      },
+      write: (text) => events.push(text.trim()),
+    });
+
+    expect(events).toEqual([
+      "screen stopped",
+      "composition closed",
+      "Resume with: agentj --resume 204ed50c",
+    ]);
+  });
+
+  test("still cleans up and prints when session work fails", async () => {
+    const events: string[] = [];
+    const failure = new Error("TUI crashed");
+    const result = finalizeInteractiveChat({
+      sessionId: "204ed50c",
+      settle: Promise.reject(failure),
+      stopScreen: () => events.push("screen stopped"),
+      closeComposition: async () => {
+        events.push("composition closed");
+      },
+      write: (text) => events.push(text.trim()),
+    });
+
+    await expect(result).rejects.toBe(failure);
+    expect(events).toEqual([
+      "screen stopped",
+      "composition closed",
+      "Resume with: agentj --resume 204ed50c",
+    ]);
+  });
+});
 
 describe("truncateLineWithNotice", () => {
   test("reserves room for a consistent omitted-character notice", () => {
