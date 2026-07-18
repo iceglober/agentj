@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LIST_WINDOW_ROWS, listOverflowMarkers, windowList } from "./list-window";
+import { LIST_WINDOW_ROWS, listOverflowFooter, windowList } from "./list-window";
 
 const items = (count: number): string[] => Array.from({ length: count }, (_, i) => `item-${i}`);
 
@@ -50,16 +50,17 @@ describe("windowList", () => {
   });
 });
 
-describe("listOverflowMarkers", () => {
-  test("markers appear only for the sides that actually overflow", () => {
-    expect(listOverflowMarkers(windowList(items(5), 0))).toEqual({ above: null, below: null });
-    expect(listOverflowMarkers(windowList(items(20), 0))).toEqual({
-      above: null,
-      below: "  … ↓ 13 more",
-    });
-    expect(listOverflowMarkers(windowList(items(20), 10))).toEqual({
-      above: "  … ↑ 7 more",
-      below: "  … ↓ 6 more",
-    });
+describe("listOverflowFooter", () => {
+  test("one footer row whenever the list is windowed, never otherwise", () => {
+    expect(listOverflowFooter(windowList(items(5), 0))).toBeNull();
+    expect(listOverflowFooter(windowList(items(20), 0))).toBe("  … ↓ 13 more");
+    expect(listOverflowFooter(windowList(items(20), 10))).toBe("  … ↑ 7 · ↓ 6 more");
+    expect(listOverflowFooter(windowList(items(20), 19))).toBe("  … ↑ 13 more");
+  });
+
+  test("a windowed list keeps its footer at every position — height never changes", () => {
+    for (let selected = 0; selected < 20; selected += 1) {
+      expect(listOverflowFooter(windowList(items(20), selected))).not.toBeNull();
+    }
   });
 });

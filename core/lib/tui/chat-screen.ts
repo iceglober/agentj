@@ -9,7 +9,7 @@ import {
   splitGraphemes,
 } from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
-import { listOverflowMarkers, windowList } from "./list-window";
+import { listOverflowFooter, windowList } from "./list-window";
 import {
   findSlashCommandToken,
   type SlashCompletionProvider,
@@ -265,13 +265,12 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         : prompt.editor;
       const layout = renderEditorLayout(displayed, contentWidth());
       const choiceWindow = windowList(prompt.options.choices ?? [], prompt.selectedIndex);
-      const choiceMarkers = listOverflowMarkers(choiceWindow);
+      const choiceFooter = listOverflowFooter(choiceWindow);
       const choiceLines = [
-        ...(choiceMarkers.above ? [safeLine(choiceMarkers.above)] : []),
         ...choiceWindow.items.map((choice, index) =>
           safeLine(`${choiceWindow.start + index === prompt.selectedIndex ? "›" : " "} ${choice}`),
         ),
-        ...(choiceMarkers.below ? [safeLine(choiceMarkers.below)] : []),
+        ...(choiceFooter ? [safeLine(choiceFooter)] : []),
       ];
       const errorLines = prompt.error
         ? wrapToDisplayWidth(escapeTerminalText(prompt.error), contentWidth())
@@ -294,16 +293,15 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     const suggestionWindow = completion
       ? windowList(completion.suggestions, completion.selectedIndex)
       : null;
-    const suggestionMarkers = suggestionWindow ? listOverflowMarkers(suggestionWindow) : null;
+    const suggestionFooter = suggestionWindow ? listOverflowFooter(suggestionWindow) : null;
     const completionLines = suggestionWindow
       ? [
-          ...(suggestionMarkers?.above ? [safeLine(suggestionMarkers.above)] : []),
           ...suggestionWindow.items.map((suggestion, index) => {
             const summary = suggestion.summary ? ` — ${suggestion.summary}` : "";
             const marker = suggestionWindow.start + index === completion?.selectedIndex ? "›" : " ";
             return safeLine(`${marker} ${suggestion.label ?? suggestion.value}${summary}`);
           }),
-          ...(suggestionMarkers?.below ? [safeLine(suggestionMarkers.below)] : []),
+          ...(suggestionFooter ? [safeLine(suggestionFooter)] : []),
         ]
       : [];
     const hintLines = completion?.hint
