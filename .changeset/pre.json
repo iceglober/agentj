@@ -12,6 +12,7 @@
     "mcp-oauth",
     "mcp-support",
     "npm-bin-launcher",
+    "permission-inline",
     "plan-readonly-mcp",
     "status-section",
     "version-flag",

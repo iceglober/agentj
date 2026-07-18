@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.9
+
+### Patch Changes
+
+- 9935080: Permission prompts show the actual command inside the modal (wrapped, indented) instead of pointing at a transcript line that may have scrolled away; only requests longer than six wrapped lines also print a full transcript copy, with the modal noting how many lines it omitted.
+
 ## 0.1.0-next.8
 
 ### Minor Changes
