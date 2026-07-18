@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.18
+
+### Patch Changes
+
+- b08f1b1: Status line: replace the `(NN%⚡)` cache marker on the ctx counter with a `cached {tokens}({share}%)` stat next to the input counter — the latest request's provider-cache read tokens and their share of that request's input.
+
 ## 0.1.0-next.17
 
 ### Patch Changes
