@@ -248,7 +248,7 @@ export interface StatusSectionState {
   turnStartedAt: number | null;
   currentActivity: ToolActivity | null;
   /** Cumulative request/response tokens; ctx is the latest request's size and
-   *  cacheRead the latest request's provider-cache read tokens. */
+   *  cacheRead the session's cumulative provider-cache read tokens. */
   usage: { in: number; out: number; ctx: number; cacheRead?: number };
   /** When set and ctx has reached it, the ctx counter renders flagged. */
   contextSoftLimit?: number;
@@ -287,14 +287,14 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
     formatStatusTokens(state.usage.out),
     `${formatStatusTokens(state.usage.ctx)}${overLimit ? "!" : ""}`,
   ] as const;
-  // The latest request's cache reads, shown as a share of that request's
-  // input (ctx): a live canary for prefix-cache regressions. Dropped in the
-  // compact form — width wins there.
+  // Session-cumulative cache reads as a share of cumulative input: how much
+  // of everything sent so far was served from the provider's prefix cache.
+  // Dropped in the compact form — width wins there.
   const cacheRead = state.usage.cacheRead;
   const cached =
-    cacheRead === undefined || state.usage.ctx <= 0
+    cacheRead === undefined || state.usage.in <= 0
       ? ""
-      : ` · cached ${formatStatusTokens(cacheRead)}(${Math.round((cacheRead / state.usage.ctx) * 100)}%)`;
+      : ` · cached ${formatStatusTokens(cacheRead)}(${Math.round((cacheRead / state.usage.in) * 100)}%)`;
   const labeled = `in ${counters[0]}${cached} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
   const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
   const right = left.length + 2 + labeled.length <= width ? labeled : compact;
@@ -924,8 +924,9 @@ export async function runAgentjChat(
         turnTokens.in += event.usage.inputTokens;
         turnTokens.out += event.usage.outputTokens;
         turnTokens.ctx = event.usage.inputTokens;
-        turnTokens.cacheRead =
-          event.usage.inputTokens > 0 ? event.usage.cacheReadInputTokens : undefined;
+        if (event.usage.cacheReadInputTokens !== undefined) {
+          turnTokens.cacheRead = (turnTokens.cacheRead ?? 0) + event.usage.cacheReadInputTokens;
+        }
         // Only the foreground session's requests land here — subagent and job
         // usage flows through task-usage progress events — so the soft limit
         // measures exactly the context that grows this conversation.
