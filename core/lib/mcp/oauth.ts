@@ -78,6 +78,14 @@ export interface McpOAuthRedirect {
   onAuthorize(url: URL): void | Promise<void>;
 }
 
+/** The SDK reads a missing redirectUrl as a non-interactive grant (it then
+ *  calls the token endpoint with no authorization code, which cannot work
+ *  here). Background providers declare this placeholder instead so token
+ *  refresh takes its normal path; anything that actually needs the browser
+ *  lands in redirectToAuthorization, which throws the typed 401. The URL
+ *  never serves traffic. */
+const BACKGROUND_REDIRECT_PLACEHOLDER = "http://127.0.0.1/agentj-oauth-unavailable";
+
 /** SDK-facing provider. With `redirect` it can run the full interactive flow;
  *  without, it only serves saved credentials (token attach + refresh) and
  *  turns any interactive requirement into McpAuthorizationRequiredError. */
@@ -92,7 +100,7 @@ export const createMcpOAuthProvider = (args: {
   };
   const provider: OAuthClientProvider = {
     get redirectUrl() {
-      return args.redirect?.url;
+      return args.redirect?.url ?? BACKGROUND_REDIRECT_PLACEHOLDER;
     },
     get clientMetadata() {
       return {
@@ -262,6 +270,11 @@ export async function runMcpOAuthFlow(
           clearTimeout(timer);
           resolve(null);
         };
+        // A listener added to an already-aborted signal never fires.
+        if (options.signal?.aborted) {
+          onAbort();
+          return;
+        }
         options.signal?.addEventListener("abort", onAbort, { once: true });
         void callbackArrived.then((result) => {
           clearTimeout(timer);

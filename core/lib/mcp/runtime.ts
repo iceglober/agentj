@@ -73,11 +73,15 @@ const classifyFailure = (name: string, error: unknown, timedOut: boolean) => {
   const message = chain
     .map((entry) => (entry instanceof Error ? entry.message : String(entry)))
     .join(" ");
-  const code = chain
+  // Codes are strings from Node (ENOENT, REQUEST_TIMEOUT) but numeric HTTP
+  // statuses from the MCP SDK's StreamableHTTPError, whose message omits them.
+  const codes = chain
     .map((entry) =>
       typeof entry === "object" && entry !== null ? (entry as { code?: unknown }).code : undefined,
     )
-    .find((value) => typeof value === "string");
+    .filter((value) => typeof value === "string" || typeof value === "number");
+  const code = codes.find((value) => typeof value === "string");
+  const statusCode = codes.find((value) => typeof value === "number");
   const missingVariable = message.match(
     /requires environment variable ([A-Za-z_][A-Za-z0-9_]*)/u,
   )?.[1];
@@ -106,7 +110,11 @@ const classifyFailure = (name: string, error: unknown, timedOut: boolean) => {
       resolution: `Update mcp.servers.${name}.command, then run /mcp reload ${name}.`,
     };
   }
-  if (/\b(401|403|unauthorized|forbidden)\b/iu.test(message)) {
+  if (
+    statusCode === 401 ||
+    statusCode === 403 ||
+    /\b(401|403|unauthorized|forbidden)\b/iu.test(message)
+  ) {
     return {
       code: "authentication_failed" as const,
       detail: "authentication was rejected",

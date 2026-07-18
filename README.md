@@ -148,10 +148,18 @@ Build-mode MCP calls default to `ask` and are authorized by canonical names such
 ```
 
 Credentials can also be supplied as static `env` or `headers`, but environment mappings avoid
-persisting them in config. `/mcp auth <http-server>` writes an Authorization header through a masked
-prompt; the value is omitted from terminal and prompt history but remains plaintext in the existing
-configuration file format. Initial MCP support does not include OAuth, server prompts, legacy HTTP
-+ SSE, or MCP access from delegates/background jobs.
+persisting them in config. For hosted servers that advertise OAuth on their 401 challenge,
+`/mcp auth <http-server>` runs the OAuth 2.1 flow: metadata discovery, dynamic client registration,
+PKCE, and a browser round-trip to a localhost callback. Access and refresh tokens live in the OS
+keychain, never in the configuration file, and expired tokens refresh automatically on later
+connects. Non-interactive contexts — `agentj run` and every background connect — never open a
+browser: saved tokens are used and refreshed, and a server that was never authorized fails with a
+notice pointing at `/mcp auth`, so authorize once interactively before non-interactive use. When a
+server does not support OAuth or dynamic client registration, the same command falls back to a
+masked Authorization-header prompt; that value is omitted from terminal and prompt history but
+remains plaintext in the existing configuration file format, so prefer `headersFromEnv` for
+long-lived keys. Initial MCP support does not include server prompts, legacy HTTP + SSE, or MCP
+access from delegates/background jobs.
 
 ## Parallel subagents
 

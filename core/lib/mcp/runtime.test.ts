@@ -74,6 +74,31 @@ describe("createMcpRuntime", () => {
     expect(closed).toContain("good");
   });
 
+  test("classifies the SDK's numeric 401 code, whose message never says 401", async () => {
+    const sdkError = Object.assign(
+      new Error('Streamable HTTP error: Error POSTing to endpoint: {"error":"invalid_token"}'),
+      { code: 401 },
+    );
+    const runtime = createMcpRuntime(config({ hosted: stdio("hosted") }), {
+      root: "/repo",
+      connectServer: async (name) => {
+        throw new Error(`Unable to connect MCP server ${name}`, { cause: sdkError });
+      },
+      onStatus: () => undefined,
+    });
+    await runtime.reload(config({ hosted: stdio("hosted") }));
+    expect(runtime.statuses()).toContainEqual({
+      name: "hosted",
+      transport: "stdio",
+      state: "failed",
+      code: "authentication_failed",
+      detail: "authentication was rejected",
+      resolution: "Run /mcp auth hosted; reload is automatic.",
+      usingPrevious: false,
+    });
+    await runtime.close();
+  });
+
   test("keeps a working server when reload fails and removes it only after activation", async () => {
     const closed: string[] = [];
     let fail = false;
