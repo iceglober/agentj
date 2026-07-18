@@ -6,6 +6,7 @@
   },
   "changesets": [
     "biome-quality",
+    "chained-slash-completion",
     "chat-first-rewrite",
     "cost-optimization",
     "initial-v0.1",
