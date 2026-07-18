@@ -29,3 +29,37 @@ test("kills commands that exceed the timeout and reports exit 124", async () => 
   expect(result.exitCode).toBe(124);
   expect(result.stderr).toContain("timed out");
 });
+
+test("kills the whole process group: a compound command's child cannot outlive the kill", async () => {
+  const environment = await createHostExecutionEnvironment(process.cwd(), {
+    commandTimeoutMs: 200,
+  });
+  const started = Date.now();
+  // `true && sleep` forks sleep as a child of bash; killing only the parent
+  // would leave sleep holding the stdio pipes open until it exits on its own.
+  const result = await environment.executeCommand("true && sleep 30");
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(result.exitCode).toBe(124);
+});
+
+test("an abort signal kills the running command and reports exit 130", async () => {
+  const environment = await createHostExecutionEnvironment(process.cwd());
+  const abort = new AbortController();
+  const started = Date.now();
+  const pending = environment.executeCommand("sleep 30", { signal: abort.signal });
+  setTimeout(() => abort.abort(), 100);
+  const result = await pending;
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(result.exitCode).toBe(130);
+  expect(result.stderr).toContain("interrupted");
+});
+
+test("an already-aborted signal kills the command without waiting", async () => {
+  const environment = await createHostExecutionEnvironment(process.cwd());
+  const abort = new AbortController();
+  abort.abort();
+  const started = Date.now();
+  const result = await environment.executeCommand("sleep 30", { signal: abort.signal });
+  expect(Date.now() - started).toBeLessThan(5_000);
+  expect(result.exitCode).toBe(130);
+});
