@@ -27,6 +27,7 @@
     "status-cached-tokens",
     "status-section",
     "subagent-permissions",
+    "subagent-result-prompt-ui",
     "version-flag",
     "version-newline"
   ]
