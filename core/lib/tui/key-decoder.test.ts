@@ -127,21 +127,22 @@ describe("terminal key decoder", () => {
     expect(decoder.end()).toEqual([]);
   });
 
-  test("turns bracketed paste into multiline input without submitting", () => {
-    expect(decode("\u001b[20", "0~first\r", "\nsecond\u001b[201~")).toEqual([
-      { type: "insert", text: "f" },
-      { type: "insert", text: "i" },
-      { type: "insert", text: "r" },
-      { type: "insert", text: "s" },
-      { type: "insert", text: "t" },
-      { type: "newline" },
-      { type: "insert", text: "s" },
-      { type: "insert", text: "e" },
-      { type: "insert", text: "c" },
-      { type: "insert", text: "o" },
-      { type: "insert", text: "n" },
-      { type: "insert", text: "d" },
-    ]);
+  test("turns bracketed paste into newline-normalized paste spans without submitting", () => {
+    const commands = decode("\u001b[20", "0~first\r", "\nsecond\u001b[201~");
+    expect(commands.length).toBeGreaterThan(0);
+    expect(commands.every((command) => command.type === "paste")).toBe(true);
+    expect(
+      commands.map((command) => (command as { type: "paste"; text: string }).text).join(""),
+    ).toBe("first\nsecond");
+  });
+
+  test("midPaste holds until the end marker arrives, so spans can coalesce", () => {
+    const decoder = new TerminalKeyDecoder();
+    decoder.push("\u001b[200~partial content");
+    expect(decoder.midPaste).toBe(true);
+    decoder.push(" more\u001b[201~");
+    expect(decoder.midPaste).toBe(false);
+    expect(decoder.end()).toEqual([]);
   });
 
   test("Tab decodes as a screen-level tab command", () => {

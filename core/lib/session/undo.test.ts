@@ -98,3 +98,28 @@ test("dispose prunes refs beyond the keep window", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a resumed session continues the undo ref counter instead of colliding", async () => {
+  const root = await makeRepo();
+  try {
+    const environment = await createHostExecutionEnvironment(root);
+    const first = createUndoStack(environment, root, "resumed");
+    await first.snapshot("turn 1");
+    await writeFile(path.join(root, "file.txt"), "two\n");
+    await first.snapshot("turn 2");
+
+    // Same session id, fresh process: the previous run's refs still exist.
+    // Before the fix this threw "cannot lock ref ... reference already exists".
+    const second = createUndoStack(environment, root, "resumed");
+    await writeFile(path.join(root, "file.txt"), "three\n");
+    await expect(second.snapshot("turn 3")).resolves.toMatchObject({
+      ref: "refs/agentj/undo/resumed/3",
+    });
+
+    // Prior-run snapshots are loaded and stay undoable across the resume.
+    await expect(second.undo()).resolves.toBe("turn 2");
+    await expect(readFile(path.join(root, "file.txt"), "utf8")).resolves.toBe("two\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

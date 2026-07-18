@@ -22,7 +22,7 @@ function makeScreen(
   over: Partial<ChatScreenCallbacks> = {},
   initialHistory: readonly string[] = [],
   screenOptions: Partial<
-    Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput">
+    Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput" | "terminalHeight">
   > = {},
 ) {
   const input = new FakeInput();
@@ -133,6 +133,45 @@ describe("createChatScreen", () => {
     input.write("\r");
     await settle();
     expect(calls.submit).toEqual(["first\nsecond\nthird", "fourth\nfifth"]);
+    screen.stop();
+  });
+
+  test("large pastes collapse to a placeholder and expand on submit", async () => {
+    const big = Array.from({ length: 40 }, (_, i) => `line-${i}`).join("\n");
+    const { screen, input, calls, text } = makeScreen();
+    screen.start();
+    input.write(`\u001b[200~${big}\u001b[201~`);
+    await settle();
+    const shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("[pasted content #1:");
+    expect(shown).not.toContain("line-39");
+
+    input.write(" trailing\r");
+    await settle();
+    expect(calls.submit).toEqual([`${big} trailing`]);
+    screen.stop();
+  });
+
+  test("small pastes land verbatim in the editor, no placeholder", async () => {
+    const { screen, input, calls, text } = makeScreen();
+    screen.start();
+    input.write("\u001b[200~alpha\nbeta\u001b[201~\r");
+    await settle();
+    expect(calls.submit).toEqual(["alpha\nbeta"]);
+    expect(renderScreen(text()).join("\n")).not.toContain("[pasted content");
+    screen.stop();
+  });
+
+  test("a live region taller than the viewport clamps so repaints stay in place", async () => {
+    const { screen, input, text } = makeScreen({}, [], { terminalHeight: 8 });
+    screen.start();
+    const rows = Array.from({ length: 20 }, (_, i) => `row-${String(i).padStart(2, "0")}`);
+    input.write(rows.join("\u001b[13;2u"));
+    await settle();
+    const rendered = renderScreen(text());
+    expect(rendered.join("\n")).toContain("row-19");
+    expect(rendered.join("\n")).not.toContain("row-00");
+    expect(rendered.filter((line) => line.length > 0).length).toBeLessThanOrEqual(8);
     screen.stop();
   });
 

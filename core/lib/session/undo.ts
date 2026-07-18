@@ -51,6 +51,38 @@ export function createUndoStack(
   let pointer = -1;
   let counter = 0;
 
+  /**
+   * Resume support: a resumed session reuses its id, and `update-ref … ''`
+   * asserts each ref is new — so the counter must continue from the refs a
+   * previous run left behind, and those snapshots stay undoable.
+   */
+  let initialized: Promise<void> | null = null;
+  const init = (): Promise<void> => {
+    initialized ??= (async () => {
+      const output = await run(
+        git(
+          `for-each-ref --format=${shq("%(refname)|%(objectname)|%(contents:subject)")} ${shq(`refs/agentj/undo/${sessionId}/`)}`,
+        ),
+      );
+      if (!output) return;
+      const found: Array<{ index: number; entry: UndoSnapshot }> = [];
+      for (const line of output.split("\n")) {
+        const [ref, commit, ...subject] = line.split("|");
+        if (!ref || !commit) continue;
+        const index = Number(ref.slice(ref.lastIndexOf("/") + 1));
+        if (!Number.isInteger(index) || index <= 0) continue;
+        const tree = await run(git(`rev-parse ${shq(`${commit}^{tree}`)}`));
+        const label = subject.join("|").replace(/^agentj undo: /u, "");
+        found.push({ index, entry: { ref, commit, tree, label } });
+      }
+      found.sort((a, b) => a.index - b.index);
+      counter = found.at(-1)?.index ?? 0;
+      entries.push(...found.map(({ entry }) => entry));
+      pointer = entries.length - 1;
+    })();
+    return initialized;
+  };
+
   const currentTree = async (): Promise<string> => {
     const index = `${scratch}/tree.index`;
     await run(`mkdir -p ${shq(scratch)}`);
@@ -74,6 +106,7 @@ export function createUndoStack(
   };
 
   const snapshot = async (label: string): Promise<UndoSnapshot | null> => {
+    await init();
     const tree = await currentTree();
     if (pointer >= 0 && entries[pointer]?.tree === tree) return null;
     const head = await run(git("rev-parse -q --verify 'HEAD^{commit}'"));
@@ -105,6 +138,7 @@ export function createUndoStack(
     },
 
     async redo() {
+      await init();
       if (pointer < 0 || pointer >= entries.length - 1) return null;
       const from = entries[pointer];
       const to = entries[pointer + 1];

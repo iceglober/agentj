@@ -1,5 +1,9 @@
 export type EditorCommand =
   | { type: "insert"; text: string }
+  /** A bracketed-paste span (may be one of several for a single user paste;
+   *  newlines already normalized). The screen coalesces spans and may replace
+   *  a large paste with a placeholder before it reaches the editor. */
+  | { type: "paste"; text: string }
   | { type: "newline" }
   | { type: "move-left" }
   | { type: "move-right" }
@@ -136,6 +140,7 @@ export const applyEditorCommand = (state: EditorState, command: EditorCommand): 
 
   switch (command.type) {
     case "insert":
+    case "paste":
       return replaceGraphemeRange(value, cursor, cursor, splitGraphemes(command.text));
     case "newline":
       return replaceGraphemeRange(value, cursor, cursor, ["\n"]);
