@@ -12,6 +12,7 @@
     "initial-v0.1",
     "list-window-scroll",
     "mcp-commands",
+    "mcp-oauth-refresh-and-401",
     "mcp-oauth",
     "mcp-support",
     "model-configuration",
