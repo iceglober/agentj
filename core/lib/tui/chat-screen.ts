@@ -9,6 +9,7 @@ import {
   splitGraphemes,
 } from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
+import { listOverflowMarkers, windowList } from "./list-window";
 import {
   findSlashCommandToken,
   type SlashCompletionProvider,
@@ -179,7 +180,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         start,
         Math.min(Math.max(completion.token.start, completion.token.end), length),
       );
-      const suggestions = completion.suggestions.slice(0, 7);
+      const suggestions = completion.suggestions;
       return {
         token: { start, end },
         suggestions,
@@ -194,14 +195,11 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     const token = findSlashCommandToken(editor);
     if (!token || !options.slashCommandSuggestions) return null;
     const hasSeparator = token.end < splitGraphemes(editor.text).length;
-    const suggestions = options
-      .slashCommandSuggestions(token.query)
-      .slice(0, 7)
-      .map(({ name, summary }) => ({
-        value: `/${name}${hasSeparator ? "" : " "}`,
-        label: `/${name}`,
-        summary,
-      }));
+    const suggestions = options.slashCommandSuggestions(token.query).map(({ name, summary }) => ({
+      value: `/${name}${hasSeparator ? "" : " "}`,
+      label: `/${name}`,
+      summary,
+    }));
     if (suggestions.length === 0) return null;
     return {
       token,
@@ -254,11 +252,15 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           }
         : prompt.editor;
       const layout = renderEditorLayout(displayed, contentWidth());
-      const choiceLines = (prompt.options.choices ?? [])
-        .slice(0, 7)
-        .map((choice, index) =>
-          safeLine(`${index === prompt.selectedIndex ? "›" : " "} ${choice}`),
-        );
+      const choiceWindow = windowList(prompt.options.choices ?? [], prompt.selectedIndex);
+      const choiceMarkers = listOverflowMarkers(choiceWindow);
+      const choiceLines = [
+        ...(choiceMarkers.above ? [safeLine(choiceMarkers.above)] : []),
+        ...choiceWindow.items.map((choice, index) =>
+          safeLine(`${choiceWindow.start + index === prompt.selectedIndex ? "›" : " "} ${choice}`),
+        ),
+        ...(choiceMarkers.below ? [safeLine(choiceMarkers.below)] : []),
+      ];
       const errorLines = prompt.error
         ? wrapToDisplayWidth(escapeTerminalText(prompt.error), contentWidth())
         : [];
@@ -277,13 +279,21 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     }
     const layout = renderEditorLayout(editor, contentWidth());
     const completion = activeCompletion();
-    const completionLines =
-      completion?.suggestions.map((suggestion, index) => {
-        const summary = suggestion.summary ? ` — ${suggestion.summary}` : "";
-        return safeLine(
-          `${index === completion.selectedIndex ? "›" : " "} ${suggestion.label ?? suggestion.value}${summary}`,
-        );
-      }) ?? [];
+    const suggestionWindow = completion
+      ? windowList(completion.suggestions, completion.selectedIndex)
+      : null;
+    const suggestionMarkers = suggestionWindow ? listOverflowMarkers(suggestionWindow) : null;
+    const completionLines = suggestionWindow
+      ? [
+          ...(suggestionMarkers?.above ? [safeLine(suggestionMarkers.above)] : []),
+          ...suggestionWindow.items.map((suggestion, index) => {
+            const summary = suggestion.summary ? ` — ${suggestion.summary}` : "";
+            const marker = suggestionWindow.start + index === completion?.selectedIndex ? "›" : " ";
+            return safeLine(`${marker} ${suggestion.label ?? suggestion.value}${summary}`);
+          }),
+          ...(suggestionMarkers?.below ? [safeLine(suggestionMarkers.below)] : []),
+        ]
+      : [];
     const hintLines = completion?.hint
       ? wrapToDisplayWidth(escapeTerminalText(completion.hint), contentWidth())
       : [];
