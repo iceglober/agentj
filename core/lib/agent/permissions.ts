@@ -41,12 +41,21 @@ export interface PermissionRequest {
   kind: "bash" | "edit" | "mcp";
   /** The command line, target path, or effective MCP tool plus its input. */
   detail: string;
+  /** Who is asking when not the primary agent — e.g. "subagent t2", "job j1". */
+  origin?: string;
 }
 
 export type PermissionPromptDecision = "allow" | "always" | "deny";
 
 /** Settles "ask" outcomes. Injected; the TUI implementation prompts the user. */
 export type PermissionGate = (request: PermissionRequest) => Promise<"allow" | "deny">;
+
+/** The same gate, with every request labeled as coming from `origin` — how a
+ *  child agent's asks stay attributable in a shared session gate. */
+export const withRequestOrigin =
+  (gate: PermissionGate, origin: string): PermissionGate =>
+  (request) =>
+    gate({ ...request, origin });
 
 /**
  * Serializes interactive asks and remembers an "always" answer for this gate's

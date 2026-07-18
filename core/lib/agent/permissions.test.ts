@@ -4,12 +4,14 @@ import type { ToolSet } from "../llm";
 import {
   createSessionPermissionGate,
   describeToolInput,
+  type PermissionGate,
   type PermissionPromptDecision,
   type PermissionRequest,
   permissionsConfigSchema,
   resolvePermission,
   resolveToolTarget,
   withPermissions,
+  withRequestOrigin,
 } from "./permissions";
 
 const bashRequest = (detail: string): PermissionRequest => ({ tool: "bash", kind: "bash", detail });
@@ -298,6 +300,24 @@ describe("describeToolInput", () => {
     ).toEqual({
       tool: "linear::create_issue",
       detail: 'linear::create_issue: {"title":"Bug"}',
+    });
+  });
+});
+
+describe("withRequestOrigin", () => {
+  test("labels every request without altering the decision", async () => {
+    const seen: PermissionRequest[] = [];
+    const gate: PermissionGate = async (request) => {
+      seen.push(request);
+      return "allow";
+    };
+    const child = withRequestOrigin(gate, "subagent t2");
+    await expect(child({ tool: "bash", kind: "bash", detail: "git push" })).resolves.toBe("allow");
+    expect(seen[0]).toEqual({
+      tool: "bash",
+      kind: "bash",
+      detail: "git push",
+      origin: "subagent t2",
     });
   });
 });

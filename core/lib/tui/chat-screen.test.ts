@@ -276,6 +276,18 @@ describe("createChatScreen", () => {
     const third = screen.askPermission({ tool: "bash", kind: "bash", detail: "curl example.com" });
     input.write("n");
     await expect(third).resolves.toBe("deny");
+
+    // Child-agent asks carry their origin into the modal heading.
+    const child = screen.askPermission({
+      tool: "bash",
+      kind: "bash",
+      detail: "git push",
+      origin: "subagent t2",
+    });
+    await settle();
+    expect(text()).toContain("Permission bash — subagent t2");
+    input.write("n");
+    await expect(child).resolves.toBe("deny");
     screen.stop();
   });
 

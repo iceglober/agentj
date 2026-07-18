@@ -13,7 +13,12 @@ import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
-import { resolveToolTarget, type WithPermissionsOptions, withPermissions } from "./permissions";
+import {
+  resolveToolTarget,
+  type WithPermissionsOptions,
+  withPermissions,
+  withRequestOrigin,
+} from "./permissions";
 import {
   createSubagentsTool,
   type DelegationWiring,
@@ -230,7 +235,7 @@ export async function createAgentTools(
             parentRef: opts.delegation.parentRef,
             createChildSession: opts.delegation.createChildSession,
             prepareBatch: opts.delegation.prepareBatch,
-            createChildAgent: async ({ session, root }) => {
+            createChildAgent: async ({ task, session, root }) => {
               const child = await createAgent(sb, childAgentConfig(config, "delegate"), {
                 root,
                 ctx: {
@@ -241,6 +246,16 @@ export async function createAgentTools(
                 },
                 metricsSink: opts.metricsSink,
                 stopSteps: opts.stopSteps,
+                // Children answer to the same session gate as the parent —
+                // worktree isolation confines their edits, not their bash.
+                ...(opts.permissions
+                  ? {
+                      permissions: {
+                        ...opts.permissions,
+                        gate: withRequestOrigin(opts.permissions.gate, `subagent ${task.id}`),
+                      },
+                    }
+                  : {}),
               });
               return {
                 generate: (prompt, generateOpts) =>

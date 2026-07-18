@@ -14,6 +14,8 @@ import type { ChatEvent, JobView } from "./events";
  */
 
 export interface RunJobArgs {
+  /** The job's id ("j1", …) — lets executors label permission asks. */
+  id: string;
   mode: ChatMode;
   prompt: string;
   abortSignal: AbortSignal;
@@ -73,7 +75,7 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
       emit({ type: "job-started", job: { ...view } });
 
       void deps
-        .runJob({ mode, prompt, abortSignal: abort.signal })
+        .runJob({ id: view.id, mode, prompt, abortSignal: abort.signal })
         .then((outcome) => {
           view.status = abort.signal.aborted ? "aborted" : "done";
           view.resultText = outcome.text;

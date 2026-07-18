@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 import packageJson from "../package.json";
 import { type Agent, createAgent as createProductionAgent, type ToolActivity } from "./lib/agent";
-import { createSessionPermissionGate, type PermissionGate } from "./lib/agent/permissions";
+import {
+  createSessionPermissionGate,
+  type PermissionGate,
+  withRequestOrigin,
+} from "./lib/agent/permissions";
 import {
   createSubagentsTool,
   type SubagentProgressEvent,
@@ -281,7 +285,11 @@ interface ChatComposition {
   /** The main agent's configured model, for display. */
   llm: { provider: string; model: string };
   agentFor(mode: ChatMode): Promise<Agent>;
-  runBuildJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string; branch?: string }>;
+  runBuildJob(
+    prompt: string,
+    abortSignal: AbortSignal,
+    origin?: string,
+  ): Promise<{ text: string; branch?: string }>;
   runPlanJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string }>;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
@@ -508,7 +516,7 @@ async function composeChat(
     return { text: result.text };
   };
 
-  const runBuildJob = async (prompt: string, abortSignal: AbortSignal) => {
+  const runBuildJob = async (prompt: string, abortSignal: AbortSignal, origin = "job") => {
     const tool = createSubagentsTool({
       execution: {
         kind: "delegation",
@@ -521,6 +529,11 @@ async function composeChat(
               root: session.path,
               ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
               metricsSink,
+              // Background builds answer to the same session gate, labeled.
+              permissions: {
+                config: config.permissions,
+                gate: withRequestOrigin(gate, origin),
+              },
             },
           );
           return {
@@ -834,10 +847,10 @@ export async function runAgentjChat(
     const jobs = createJobRunner({
       onEvent: render,
       addTurnNotice: (text) => chat.addTurnNotice(text),
-      runJob: ({ mode, prompt, abortSignal }) =>
+      runJob: ({ id, mode, prompt, abortSignal }) =>
         mode === "plan"
           ? composition.runPlanJob(prompt, abortSignal)
-          : composition.runBuildJob(prompt, abortSignal),
+          : composition.runBuildJob(prompt, abortSignal, `job ${id}`),
     });
 
     const home = homedir();

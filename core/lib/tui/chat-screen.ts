@@ -225,9 +225,12 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     const safeStatus = statusLines.map(safeLine);
     if (pendingModal?.kind === "permission") {
       const detail = permissionDetailLines(pendingModal.request);
+      const origin = pendingModal.request.origin
+        ? ` — ${escapeTerminalText(pendingModal.request.origin)}`
+        : "";
       const askLines = [
         ...wrapToDisplayWidth(
-          `Permission ${escapeTerminalText(pendingModal.request.tool)}`,
+          `Permission ${escapeTerminalText(pendingModal.request.tool)}${origin}`,
           contentWidth(),
         ),
         ...detail.lines,
@@ -349,7 +352,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   };
 
   const printPermissionRequest = (request: PermissionRequest): void => {
-    printTranscript(`Permission ${request.tool}:\n${request.detail}`);
+    const origin = request.origin ? ` (${request.origin})` : "";
+    printTranscript(`Permission ${request.tool}${origin}:\n${request.detail}`);
   };
 
   /** The request rendered inside the modal: indented, wrapped, clamped. The
