@@ -2,8 +2,10 @@ import type { ChatMode } from "../session/log";
 import type { ChatEvent, JobView } from "./events";
 
 /**
- * Background jobs: one detached agent run per job, started by the USER (input
- * beginning with `&`), never by the model. The composition root injects the
+ * Background jobs: one detached agent run per job, started by the user (input
+ * beginning with `&`) or by the primary agent through its run_job tool — the
+ * tool exists so "wait for CI, then fix it" detaches here instead of
+ * sleep-polling in the foreground turn. The composition root injects the
  * executor — plan jobs run a read-only agent in the session cwd; build jobs
  * run inside a child worktree via the same snapshot→integrate path as
  * subagents, so they cannot race the checkout or the foreground turn.

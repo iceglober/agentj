@@ -378,6 +378,9 @@ interface ChatComposition {
     origin?: string,
   ): Promise<{ text: string; branch?: string }>;
   runPlanJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string }>;
+  /** Late-binds the interactive job runner behind the model's run_job tool.
+   *  Never attached in one-shot runs: detached work would outlive the process. */
+  attachJobs(start: (mode: ChatMode, prompt: string) => { id: string }): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
   startMcp(): Promise<void>;
@@ -557,6 +560,13 @@ async function composeChat(
     agents.clear();
   };
   let agentMcpVersion = mcp.snapshot().version;
+  let startJob: ((mode: ChatMode, prompt: string) => { id: string }) | undefined;
+  const jobsPort = {
+    start: (mode: "plan" | "build", prompt: string): { id: string } | { error: string } =>
+      startJob
+        ? startJob(mode, prompt)
+        : { error: "Background jobs are unavailable in this session." },
+  };
   const agentFor = async (mode: ChatMode): Promise<Agent> => {
     await mcp.activatePending();
     const mcpSnapshot = mcp.snapshot();
@@ -577,6 +587,7 @@ async function composeChat(
             externalTools: mcpSnapshot.externalTools,
             research: { createWorker: createResearchWorker, onProgress: onDagProgress },
             onToolActivity,
+            jobs: jobsPort,
           })
         : createProductionAgent(environment, agentConfigFor("build"), {
             root,
@@ -589,6 +600,7 @@ async function composeChat(
             permissions: { config: config.permissions, gate },
             onSubagentProgress: onDagProgress,
             onToolActivity,
+            jobs: jobsPort,
           });
     agents.set(mode, agent);
     return agent;
@@ -722,6 +734,9 @@ async function composeChat(
     agentFor,
     runBuildJob,
     runPlanJob,
+    attachJobs: (start) => {
+      startJob = start;
+    },
     environment,
     stateRoot,
     startMcp: async () => {
@@ -1035,6 +1050,7 @@ export async function runAgentjChat(
           : composition.runBuildJob(prompt, abortSignal, `job ${id}`),
     });
     jobs = jobRunner;
+    composition.attachJobs((mode, prompt) => ({ id: jobRunner.start(mode, prompt).id }));
 
     const home = homedir();
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;

@@ -57,7 +57,9 @@ Keys and commands:
   an empty editor.
 - **`& <task>`** — run the task as a background job in the current mode. Jobs run in their own
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
-  and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one.
+  and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one. The agent can also start
+  jobs itself (`run_job`) — asked to wait on something external like a CI run or a review, it
+  detaches the wait instead of blocking the conversation.
 - **`@path/to/file`** — attach a file's contents to your message.
 - **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
   the first non-whitespace input token shows fuzzy-matched command suggestions.
