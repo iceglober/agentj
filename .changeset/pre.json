@@ -11,6 +11,7 @@
     "mcp-commands",
     "mcp-oauth",
     "mcp-support",
+    "model-configuration",
     "npm-bin-launcher",
     "permission-inline",
     "plan-readonly-mcp",
