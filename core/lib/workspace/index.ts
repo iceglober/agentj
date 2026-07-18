@@ -6,7 +6,10 @@ export interface CommandResult {
 
 /** Command and file execution boundary, independent of where it is hosted. */
 export interface ExecutionEnvironment {
-  executeCommand(command: string): Promise<CommandResult>;
+  /** `signal` requests cancellation of the running command: implementations
+   *  that can kill the underlying process resolve promptly with a nonzero
+   *  result; others may ignore it (the command then runs to completion). */
+  executeCommand(command: string, options?: { signal?: AbortSignal }): Promise<CommandResult>;
   readFile(path: string): Promise<string>;
   writeFiles(files: Array<{ path: string; content: string | Buffer }>): Promise<void>;
 }

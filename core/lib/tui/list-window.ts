@@ -41,10 +41,17 @@ export function windowList<T>(
   };
 }
 
-/** The `… ↑N`/`… ↓N` marker rows bracketing a scrolled window. */
-export const listOverflowMarkers = <T>(
-  window: ListWindow<T>,
-): { above: string | null; below: string | null } => ({
-  above: window.omittedAbove > 0 ? `  … ↑ ${window.omittedAbove} more` : null,
-  below: window.omittedBelow > 0 ? `  … ↓ ${window.omittedBelow} more` : null,
-});
+/**
+ * One footer row for a scrolled window: `  … ↑ 7 · ↓ 6 more`. A windowed list
+ * always omits at least one side, so the footer is present for the whole life
+ * of a scrolled list and only its counts change — separate above/below marker
+ * rows toggled with the scroll position, changing the menu's height and
+ * bouncing everything around it as the selection moved.
+ */
+export const listOverflowFooter = <T>(window: ListWindow<T>): string | null => {
+  const sides = [
+    ...(window.omittedAbove > 0 ? [`↑ ${window.omittedAbove}`] : []),
+    ...(window.omittedBelow > 0 ? [`↓ ${window.omittedBelow}`] : []),
+  ];
+  return sides.length === 0 ? null : `  … ${sides.join(" · ")} more`;
+};

@@ -242,21 +242,19 @@ describe("composeStatusSection", () => {
     expect(lines[0]).not.toContain("in 12.4k");
   });
 
-  test("the latest request's cache-read ratio rides next to ctx in the labeled form", () => {
+  test("session cache reads ride next to the input counter as a share of cumulative input", () => {
     const lines = composeStatusSection(
-      { ...base, usage: { ...base.usage, cacheReadRatio: 0.923 } },
-      100,
+      { ...base, usage: { ...base.usage, cacheRead: 8_030 } },
+      110,
     );
-    expect(lines[0]).toContain("ctx 8.7k (92%⚡)");
+    // 8 030 of the 12 400 cumulative input tokens came from the cache → 65%.
+    expect(lines[0]).toContain("in 12.4k · cached 8.0k(65%) ▸ out 3.1k");
   });
 
-  test("the compact form drops the cache ratio, width wins", () => {
-    const lines = composeStatusSection(
-      { ...base, usage: { ...base.usage, cacheReadRatio: 0.923 } },
-      66,
-    );
+  test("the compact form drops the cache stat, width wins", () => {
+    const lines = composeStatusSection({ ...base, usage: { ...base.usage, cacheRead: 8_030 } }, 66);
     expect(lines[0]).toContain("12.4k▸3.1k·8.7k·1m14s");
-    expect(lines[0]).not.toContain("⚡");
+    expect(lines[0]).not.toContain("cached");
   });
 
   test("ctx renders flagged once it reaches the configured soft limit", () => {
