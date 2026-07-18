@@ -15,6 +15,7 @@
     "mcp-support",
     "model-configuration",
     "npm-bin-launcher",
+    "paste-placeholder-undo-resume",
     "permission-inline",
     "plan-readonly-mcp",
     "status-section",
