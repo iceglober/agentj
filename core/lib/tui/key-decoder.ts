@@ -264,20 +264,28 @@ export class TerminalKeyDecoder {
     return commands;
   }
 
+  /** True while inside a bracketed paste whose end marker hasn't arrived —
+   *  the screen coalesces paste spans until this drops back to false. */
+  get midPaste(): boolean {
+    return this.pasted;
+  }
+
   private pushPasted(value: string, commands: EditorCommand[]): void {
+    let text = "";
     for (const character of value) {
       if (character === "\n" && this.pastedCarriageReturn) {
         this.pastedCarriageReturn = false;
         continue;
       }
       if (character === "\r") {
-        commands.push({ type: "newline" });
+        text += "\n";
         this.pastedCarriageReturn = true;
         continue;
       }
       this.pastedCarriageReturn = false;
-      if (character === "\n") commands.push({ type: "newline" });
-      else commands.push({ type: "insert", text: character });
+      if (character === "\n") text += "\n";
+      else if (!isControl(character)) text += character;
     }
+    if (text.length > 0) commands.push({ type: "paste", text });
   }
 }

@@ -59,6 +59,11 @@ export interface CreateChatScreenOptions {
   stdin?: Readable;
   stdout?: Writable;
   terminalWidth?: number | (() => number);
+  /** Viewport rows; defaults to the stream's `rows`. The live region is
+   *  clamped to fit — a region taller than the window cannot be repainted in
+   *  place (cursor-up stops at the viewport top) and duplicates into
+   *  scrollback. */
+  terminalHeight?: number | (() => number);
   callbacks: ChatScreenCallbacks;
   /** Bare-ESC resolution delay; tests shrink it. */
   escapeFlushMs?: number;
@@ -110,6 +115,13 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       ),
     );
   const contentWidth = (): number => Math.max(1, width() - 1);
+  const height = (): number | null => {
+    const rows =
+      typeof options.terminalHeight === "function"
+        ? options.terminalHeight()
+        : (options.terminalHeight ?? (stdout as { rows?: number }).rows);
+    return typeof rows === "number" && Number.isFinite(rows) ? Math.max(3, Math.floor(rows)) : null;
+  };
 
   const decoder = new TerminalKeyDecoder();
   let editor: EditorState = createEditorState();
@@ -332,8 +344,33 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     write(`\r${csi("J")}`);
   };
 
+  /** Drop logical lines from the top until the region fits the viewport —
+   *  content near the cursor and status stays; overflow yields to scrollback
+   *  reachability rather than corrupting every subsequent repaint. */
+  const clampToViewport = (layout: LiveLayout): LiveLayout => {
+    const maxRows = height();
+    if (maxRows === null) return layout;
+    const terminalWidth = width();
+    const physical = layout.lines.map((line) =>
+      Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
+    );
+    let total = physical.reduce((sum, rows) => sum + rows, 0);
+    let drop = 0;
+    while (drop < layout.lines.length - 1 && total > maxRows) {
+      total -= physical[drop] ?? 1;
+      drop += 1;
+    }
+    if (drop === 0) return layout;
+    const cursorRow = layout.cursorRow - drop;
+    return {
+      lines: layout.lines.slice(drop),
+      cursorRow: Math.max(0, cursorRow),
+      cursorColumn: cursorRow < 0 ? 0 : layout.cursorColumn,
+    };
+  };
+
   const paint = (): void => {
-    const layout = liveLines();
+    const layout = clampToViewport(liveLines());
     moveToRegionTop();
     write(layout.lines.join("\r\n"));
     const up = layout.lines.length - 1 - layout.cursorRow;
@@ -458,6 +495,49 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     paint();
   };
 
+  /** Large pastes live here, off-screen: the editor holds a short placeholder
+   *  (so the live region stays paintable) and submit expands it back. */
+  const PASTE_PLACEHOLDER_CHARS = 1_000;
+  const PASTE_PLACEHOLDER_LINES = 5;
+  let pasteBuffer: string | null = null;
+  let pasteCounter = 0;
+  const pastes = new Map<string, string>();
+
+  const clearPastes = (): void => {
+    pastes.clear();
+    pasteCounter = 0;
+  };
+
+  /** Replace each intact placeholder with its stored content. An edited
+   *  placeholder no longer matches and submits literally — content is only
+   *  ever substituted, never guessed. */
+  const expandPastes = (text: string): string => {
+    let expanded = text;
+    for (const [placeholder, content] of pastes) {
+      expanded = expanded.split(placeholder).join(content);
+    }
+    return expanded;
+  };
+
+  const commitPaste = (): void => {
+    if (pasteBuffer === null) return;
+    const text = pasteBuffer;
+    pasteBuffer = null;
+    // Modal inputs take pastes verbatim: their values must round-trip exactly.
+    const oversized =
+      pendingModal === null &&
+      (splitGraphemes(text).length > PASTE_PLACEHOLDER_CHARS ||
+        text.split("\n").length > PASTE_PLACEHOLDER_LINES);
+    if (!oversized) {
+      handleCommand({ type: "paste", text });
+      return;
+    }
+    pasteCounter += 1;
+    const placeholder = `[pasted content #${pasteCounter}: ${splitGraphemes(text).length} chars]`;
+    pastes.set(placeholder, text);
+    handleCommand({ type: "paste", text: placeholder });
+  };
+
   const acceptCompletion = (completion: ActiveCompletion): void => {
     const selected = completion.suggestions[completion.selectedIndex];
     if (!selected) return;
@@ -529,7 +609,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           acceptCompletion(completion);
           return;
         }
-        const text = editor.text;
+        const text = expandPastes(editor.text);
         if (text.trim().length === 0) return;
         if (options.shouldRememberInput?.(text) !== false) {
           if (history.at(-1) !== text) history.push(text);
@@ -539,6 +619,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         editor = createEditorState();
         completionIndex = 0;
         dismissedCompletion = null;
+        clearPastes();
         paint();
         options.callbacks.onSubmit(text);
         return;
@@ -549,6 +630,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           editor = createEditorState();
           completionIndex = 0;
           dismissedCompletion = null;
+          clearPastes();
           paint();
           return;
         }
@@ -592,7 +674,17 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       clearTimeout(escapeTimer);
       escapeTimer = null;
     }
-    for (const command of decoder.push(chunk)) handleCommand(command);
+    for (const command of decoder.push(chunk)) {
+      // One user paste can arrive as several spans across chunks; coalesce
+      // them so the placeholder decision sees the whole paste once.
+      if (command.type === "paste") {
+        pasteBuffer = (pasteBuffer ?? "") + command.text;
+        continue;
+      }
+      commitPaste();
+      handleCommand(command);
+    }
+    if (!decoder.midPaste) commitPaste();
     if (decoder.pendingLoneEscape) armEscapeFlush();
   };
 
