@@ -18,6 +18,7 @@
     "mcp-oauth-refresh-and-401",
     "mcp-oauth",
     "mcp-support",
+    "model-background-jobs",
     "model-configuration",
     "npm-bin-launcher",
     "paste-placeholder-undo-resume",
