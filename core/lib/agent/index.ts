@@ -22,6 +22,7 @@ import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
 import type { SpillWriter } from "../truncation";
+import { type BackgroundJobPort, createBackgroundJobTool } from "./background-jobs";
 import {
   resolveToolTarget,
   type WithPermissionsOptions,
@@ -177,6 +178,12 @@ export interface CreateAgentOptions {
   };
   /** Build-mode run_subagents progress (worktree children). */
   onSubagentProgress?(event: SubagentProgressEvent): void | Promise<void>;
+  /**
+   * Primary-only: lets the model detach a task into the session's
+   * background-job runner (run_job) instead of blocking its turn on it.
+   * Delegates and background children never inherit this.
+   */
+  jobs?: BackgroundJobPort;
 }
 
 /** Per-turn hooks for a single generate() call. */
@@ -376,6 +383,11 @@ export async function createAgentTools(
     });
   };
 
+  const jobsTool: ToolSet =
+    config.role === "primary" && opts.jobs
+      ? { run_job: createBackgroundJobTool(opts.jobs, mode) }
+      : {};
+
   if (mode === "plan") {
     return finalize({
       // The raw sandbox, not the confined one: the read tool does its own
@@ -386,6 +398,7 @@ export async function createAgentTools(
         ...(opts.spill ? { extraRoots: [opts.spill.dir] } : {}),
       }),
       ...createSearchTools(sb, { root: opts.root }),
+      ...jobsTool,
       ...(opts.research
         ? {
             run_subagents: createSubagentsTool({
@@ -408,6 +421,7 @@ export async function createAgentTools(
     ...createSearchTools(sb, { root: opts.root }),
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
+    ...jobsTool,
   });
 }
 
