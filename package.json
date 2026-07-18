@@ -1,6 +1,6 @@
 {
   "name": "@glrs-dev/aj",
-  "version": "0.1.0-next.7",
+  "version": "0.1.0-next.8",
   "private": false,
   "description": "agentj: a simple, effective terminal coding agent. The sole product lives in core/; this file carries the root Bun entrypoints.",
   "license": "MIT",

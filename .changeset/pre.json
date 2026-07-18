@@ -13,6 +13,7 @@
     "mcp-support",
     "npm-bin-launcher",
     "plan-readonly-mcp",
+    "status-section",
     "version-flag",
     "version-newline"
   ]
