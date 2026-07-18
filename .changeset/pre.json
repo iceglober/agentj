@@ -12,6 +12,7 @@
     "chat-first-rewrite",
     "cost-optimization",
     "initial-v0.1",
+    "job-soft-timeout",
     "list-footer-stable-height",
     "list-window-scroll",
     "mcp-commands",
