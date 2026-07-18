@@ -85,6 +85,31 @@ describe("runAgentjCli", () => {
     await expect(runAgentjCli(["run", "task"], deps)).resolves.toBe(130);
   });
 
+  test("update routes the selected channel and defaults to latest", async () => {
+    const calls: Array<{ channel: "next" | "latest" }> = [];
+    const { deps } = makeDeps({
+      update: async (options) => {
+        calls.push(options);
+        return EXIT_SUCCESS;
+      },
+    });
+
+    await expect(runAgentjCli(["update"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runAgentjCli(["update", "--channel", "next"], deps)).resolves.toBe(EXIT_SUCCESS);
+    expect(calls).toEqual([{ channel: "latest" }, { channel: "next" }]);
+  });
+
+  test("update rejects an invalid channel without invoking the handler", async () => {
+    const stderr = createMemoryWriter();
+    const update = async () => EXIT_SUCCESS;
+    const { deps } = makeDeps({ update });
+
+    await expect(runAgentjCli(["update", "--channel", "stable"], deps, { stderr })).resolves.not.toBe(
+      EXIT_SUCCESS,
+    );
+    expect(stderr.text()).toContain("stable");
+  });
+
   test("config routes dispatch to handlers and report failures", async () => {
     const calls: string[] = [];
     const handlers = {

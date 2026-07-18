@@ -1,6 +1,6 @@
 import { stderr as processStderr, stdout as processStdout } from "node:process";
 
-import { command, flag, option, optional, positional, runSafely, string } from "cmd-ts";
+import { command, flag, oneOf, option, optional, positional, runSafely, string } from "cmd-ts";
 
 import type { ConfigCliHandlers } from "../config-cli";
 import type { EvalCliHandlers } from "../eval-cli";
@@ -21,8 +21,12 @@ export interface RunOnceOptions {
   signal: AbortSignal;
 }
 
+export type UpdateChannel = "next" | "latest";
+
 export interface AgentjCommandDependencies {
   version: string;
+  /** Update the installed AgentJ CLI. */
+  update?: (options: { channel: UpdateChannel }) => Promise<number>;
   /** The interactive chat session (default command). */
   runChat(options?: { resume?: string; continueLatest?: boolean }): Promise<number>;
   /** Non-interactive one-shot turn for scripts/CI. */
@@ -59,6 +63,21 @@ const createChatCommand = (deps: AgentjCommandDependencies) =>
     },
     handler: ({ resume, continueLatest }) =>
       deps.runChat({ ...(resume ? { resume } : {}), continueLatest }),
+  });
+
+const createUpdateCommand = (deps: AgentjCommandDependencies) =>
+  command({
+    name: `${deps.name ?? DEFAULT_COMMAND_NAME} update`,
+    version: deps.version,
+    description: "Update the AgentJ CLI.",
+    args: {
+      channel: option({
+        long: "channel",
+        type: optional(oneOf(["next", "latest"] as const)),
+        description: "Release channel to install.",
+      }),
+    },
+    handler: ({ channel }) => deps.update!({ channel: channel ?? "latest" }),
   });
 
 const createRunCommand = (deps: AgentjCommandDependencies) =>
@@ -182,6 +201,18 @@ const isConfigRoute = (argv: string[]): boolean =>
 
 const isEvalRoute = (argv: string[]): boolean => argv[0] === "eval";
 
+const dispatchUpdate = async (
+  argv: string[],
+  deps: AgentjCommandDependencies,
+  writers: Required<AgentjCliIo>,
+): Promise<number> => {
+  if (deps.update === undefined) {
+    writers.stderr.write("error: update command is not available.\n");
+    return EXIT_FAILURE;
+  }
+  return dispatchLeaf(createUpdateCommand(deps), argv, writers);
+};
+
 const evalHelp = (name: string, version: string): string =>
   `${name} eval ${version}\n` +
   "> Run AgentJ evaluation commands.\n\n" +
@@ -278,6 +309,10 @@ export async function runAgentjCli(
 
   if (argv[0] === "run") {
     return dispatchLeaf(createRunCommand(deps), argv.slice(1), writers);
+  }
+
+  if (argv[0] === "update") {
+    return dispatchUpdate(argv.slice(1), deps, writers);
   }
 
   return dispatchLeaf(createChatCommand(deps), argv, writers);
