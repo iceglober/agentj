@@ -550,7 +550,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     if (completion.legacyMovePastSeparator) editor = { ...editor, cursor: editor.cursor + 1 };
     historyIndex = null;
     completionIndex = 0;
-    dismissedCompletion = editorSignature();
+    dismissedCompletion =
+      !completion.legacy && selected.value.endsWith(" ") ? null : editorSignature();
     paint();
   };
 

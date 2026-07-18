@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
-import { suggestChatCommands } from "../chat/commands";
+import { completeChatInput, suggestChatCommands } from "../chat/commands";
 import {
   type ChatScreenCallbacks,
   type CreateChatScreenOptions,
@@ -216,6 +216,29 @@ describe("createChatScreen", () => {
     await settle();
     expect(calls.tab).toBe(0);
     expect(calls.submit).toEqual(["/build "]);
+    screen.stop();
+  });
+
+  test("shows next-argument options after accepting an advancing completion", async () => {
+    const { screen, input, calls, text } = makeScreen({}, [], {
+      slashCommandOptions: (state) => completeChatInput(state.text, state.cursor),
+    });
+    screen.start();
+
+    input.write("/con\t");
+    await settle();
+    let shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("> /config ");
+    expect(shown).toContain("› get — Read a global configuration value");
+    expect(shown).toContain("set — Set a global configuration value");
+
+    input.write("s\t");
+    await settle();
+    shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("> /config set ");
+    expect(shown).toContain("agent.llm.model — Model name");
+    expect(calls.tab).toBe(0);
+    expect(calls.submit).toEqual([]);
     screen.stop();
   });
 
