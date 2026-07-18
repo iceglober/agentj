@@ -90,6 +90,32 @@ describe("childAgentConfig", () => {
     expect(childAgentConfig(inherited, "delegate").llm.model).toBe("next-primary");
   });
 
+  test("subagents.tier resolves through the ladder", () => {
+    const config = agentConfigSchema.parse({
+      llm: { tiers: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] },
+      tools: { subagents: { tier: 2 } },
+    });
+    expect(childAgentConfig(config, "delegate").llm.model).toBe("gpt-5.6-luna");
+  });
+
+  test("explicit subagents.model beats subagents.tier", () => {
+    const config = agentConfigSchema.parse({
+      llm: { tiers: ["gpt-5.6-sol", "gpt-5.6-terra"] },
+      tools: { subagents: { model: "deepseek-v4-pro", tier: 1 } },
+    });
+    expect(childAgentConfig(config, "delegate").llm.model).toBe("deepseek-v4-pro");
+  });
+
+  test("context ceiling: off by default, warn-only enum, children inherit it", () => {
+    const config = agentConfigSchema.parse({});
+    expect(config.context.softLimit).toBeUndefined();
+    expect(config.context.onLimit).toBe("warn");
+    const limited = agentConfigSchema.parse({ context: { softLimit: 240_000 } });
+    expect(limited.context.softLimit).toBe(240_000);
+    expect(childAgentConfig(limited, "delegate").context.softLimit).toBe(240_000);
+    expect(() => agentConfigSchema.parse({ context: { onLimit: "compact" } })).toThrow();
+  });
+
   test("the per-turn step ceiling defaults well above the SDK's 20 and flows to children", () => {
     const config = agentConfigSchema.parse({});
     expect(config.steps).toBe(100);

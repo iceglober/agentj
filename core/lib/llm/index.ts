@@ -77,6 +77,13 @@ export interface GenerateRequest {
   providerOptions?: Record<string, Record<string, unknown>>;
   /** Cap the tool loop at N steps; omitted → the runtime's default. */
   stopSteps?: number;
+  /**
+   * Stop the tool loop once a step's request context reaches this many input
+   * tokens — the fresh-context analogue of a soft context limit: children
+   * can't receive turn notices, so they stop instead of warning. Omitted → no
+   * token ceiling.
+   */
+  stopContextTokens?: number;
   abortSignal?: AbortSignal;
   onStep?: (step: RunStep) => void;
 }
@@ -111,6 +118,24 @@ export const llmConfigSchema = z.object({
   runtime: z.enum(runtimeNames).default("ai-sdk"),
   provider: z.enum(providerNames).default("azure"),
   model: z.string().default("gpt-5.6-sol"),
+  /**
+   * Ordered, provider-agnostic model ladder: index 0 is the frontier tier
+   * (most capable, most expensive), each later entry a cheaper rung. Routing
+   * config (mode routing, subagent tier) references indices into this ladder,
+   * never model ids, so swapping providers means swapping one array. Empty →
+   * every tier resolves to `model`.
+   */
+  tiers: z.array(z.string().min(1)).default([]),
+  /**
+   * Which ladder tier each chat mode runs on. Plan defaults to the frontier
+   * tier: planning is the highest-leverage phase of an agentic workstream.
+   */
+  modes: z
+    .object({
+      plan: z.number().int().min(0).default(0),
+      build: z.number().int().min(0).default(1),
+    })
+    .prefault({}),
   /** Call setting; forward to the agent/generate call, not the model. */
   temperature: z.number().min(0).max(2).optional(),
   /** Call setting; nucleus sampling (0–1). Forwarded like temperature. */
@@ -123,6 +148,16 @@ export const llmConfigSchema = z.object({
 });
 
 export type LlmConfig = z.infer<typeof llmConfigSchema>;
+
+/**
+ * Resolve a tier index against the ladder. Out-of-range indices clamp to the
+ * cheapest rung, so routing config written for a deep ladder stays valid on a
+ * shallow one; an empty ladder resolves every tier to `model`.
+ */
+export const resolveTierModel = (llm: LlmConfig, tier: number): string => {
+  const last = llm.tiers.length - 1;
+  return last < 0 ? llm.model : (llm.tiers[Math.min(Math.max(tier, 0), last)] as string);
+};
 
 /**
  * Registry keyed by config value (`llm.runtime`); same idiom as editModes. The

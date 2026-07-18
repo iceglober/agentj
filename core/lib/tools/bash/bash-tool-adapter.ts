@@ -3,7 +3,7 @@ import { createBashTool } from "bash-tool";
 import type { z } from "zod";
 import { defineTool, type ToolSet } from "../../llm";
 import type { Sandbox } from "../../sandbox";
-import { truncateWithNotice } from "../../truncation";
+import { type SpillWriter, truncateWithSpill } from "../../truncation";
 
 /** Map one ai `tool()` object (as bash-tool returns) into our ToolDef shape. */
 const wrap = (t: Tool) =>
@@ -22,16 +22,16 @@ const wrap = (t: Tool) =>
       ),
   });
 
-const TOOL_OUTPUT_LIMIT = 30_000;
-
-export const truncateToolOutput = (value: string): string =>
-  truncateWithNotice(value, TOOL_OUTPUT_LIMIT);
-
 /**
  * Adapter for the `bash-tool` vendor package: stand up its sandbox-backed
  * bash/readFile/writeFile tools and translate each ai `tool()` into a ToolDef.
  */
-export async function createBashToolAdapter(sb: Sandbox, opts: { root: string }): Promise<ToolSet> {
+export async function createBashToolAdapter(
+  sb: Sandbox,
+  opts: { root: string; maxOutputChars: number; spill?: SpillWriter },
+): Promise<ToolSet> {
+  const bound = (value: string, label: string): string =>
+    truncateWithSpill(value, opts.maxOutputChars, opts.spill, label);
   const { tools } = await createBashTool({
     sandbox: sb,
     destination: opts.root,
@@ -40,8 +40,8 @@ export async function createBashToolAdapter(sb: Sandbox, opts: { root: string })
     onAfterBashCall: ({ result }) => ({
       result: {
         ...result,
-        stdout: truncateToolOutput(result.stdout),
-        stderr: truncateToolOutput(result.stderr),
+        stdout: bound(result.stdout, "bash-stdout"),
+        stderr: bound(result.stderr, "bash-stderr"),
       },
     }),
   });

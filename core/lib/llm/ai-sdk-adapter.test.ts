@@ -76,6 +76,60 @@ describe("createAiSdkRuntime", () => {
     });
   });
 
+  test("per-step usage carries cache input details for live cache-health UIs", async () => {
+    resetResult({ inputTokens: 30, outputTokens: 4, totalTokens: 34 });
+    nextResult.steps = [
+      {
+        toolCalls: [],
+        toolResults: [],
+        usage: {
+          inputTokens: 100,
+          outputTokens: 2,
+          totalTokens: 102,
+          inputTokenDetails: { cacheReadTokens: 80, cacheWriteTokens: 5 },
+        },
+      },
+    ];
+
+    const result = await createAiSdkRuntime(config).generate(request());
+
+    expect(result.steps[0]?.usage).toEqual({
+      inputTokens: 100,
+      outputTokens: 2,
+      totalTokens: 102,
+      cacheReadInputTokens: 80,
+      cacheWriteInputTokens: 5,
+    });
+  });
+
+  test("stopContextTokens installs a stop condition on step input tokens", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+    await createAiSdkRuntime(config).generate({
+      ...request(),
+      stopSteps: 5,
+      stopContextTokens: 1_000,
+    });
+
+    const stopWhen = constructedAgents[0]?.stopWhen as unknown[];
+    expect(Array.isArray(stopWhen)).toBe(true);
+    expect(stopWhen).toHaveLength(2);
+    expect(stopWhen[0]).toEqual({ count: 5 });
+    const condition = stopWhen[1] as (options: { steps: unknown[] }) => boolean;
+    expect(condition({ steps: [{ usage: { inputTokens: 999 } }] })).toBe(false);
+    expect(condition({ steps: [{ usage: { inputTokens: 1_000 } }] })).toBe(true);
+    expect(condition({ steps: [{}] })).toBe(false);
+    expect(condition({ steps: [] })).toBe(false);
+  });
+
+  test("without stop settings no stopWhen is installed", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+    await createAiSdkRuntime(config).generate(request());
+
+    expect(constructedAgents[0]).not.toHaveProperty("stopWhen");
+  });
+
   test("falls back to zero aggregate usage without absent cache details", async () => {
     resetResult({});
 

@@ -42,7 +42,7 @@ import {
   SUBAGENT_LLM_MODEL_KEY,
 } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { providerNames } from "./lib/llm";
+import { providerNames, resolveTierModel } from "./lib/llm";
 import {
   connectModelContextProtocolServer,
   resolveMcpTransportConfig,
@@ -56,6 +56,7 @@ import type { McpRuntimeStatus } from "./lib/mcp/runtime";
 import { createMcpRuntime } from "./lib/mcp/runtime";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
+import { startMetricsProvider } from "./lib/metrics/otel-provider";
 import { type PromptContext, profileNames } from "./lib/prompt";
 import { resolveAzureApiKey } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
@@ -63,6 +64,7 @@ import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
 import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
+import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
@@ -235,8 +237,11 @@ export interface StatusSectionState {
   spinnerFrame: number;
   turnStartedAt: number | null;
   currentActivity: ToolActivity | null;
-  /** Cumulative request/response tokens; ctx is the latest request's size. */
-  usage: { in: number; out: number; ctx: number };
+  /** Cumulative request/response tokens; ctx is the latest request's size and
+   *  cacheReadRatio the latest request's provider-cache hit share (0–1). */
+  usage: { in: number; out: number; ctx: number; cacheReadRatio?: number };
+  /** When set and ctx has reached it, the ctx counter renders flagged. */
+  contextSoftLimit?: number;
   sessionStartedAt: number;
   /** Running background jobs only — each gets its own row. */
   jobs: ReadonlyArray<{ id: string; mode: ChatMode; prompt: string; startedAt: number }>;
@@ -248,18 +253,36 @@ export interface StatusSectionState {
  * busy indicator on its right end, then one row per running background job.
  * Foreground turn activity renders above the editor, not here.
  */
+/**
+ * One-shot context warning: fire the first time the latest request's context
+ * reaches the configured soft limit, then stay quiet for the session — the
+ * model was told once; repeating the notice every step is noise.
+ */
+export const shouldWarnContext = (
+  ctx: number,
+  softLimit: number | undefined,
+  alreadyWarned: boolean,
+): boolean => softLimit !== undefined && !alreadyWarned && ctx >= softLimit;
+
 export const composeStatusSection = (state: StatusSectionState, width: number): string[] => {
   const now = state.now ?? Date.now();
   const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
 
   const left = `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`;
   const clock = formatClock(now - state.sessionStartedAt);
+  const overLimit =
+    state.contextSoftLimit !== undefined && state.usage.ctx >= state.contextSoftLimit;
   const counters = [
     formatStatusTokens(state.usage.in),
     formatStatusTokens(state.usage.out),
-    formatStatusTokens(state.usage.ctx),
+    `${formatStatusTokens(state.usage.ctx)}${overLimit ? "!" : ""}`,
   ] as const;
-  const labeled = `in ${counters[0]} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
+  // The latest request's cache-read share: a live canary for prefix-cache
+  // regressions. Dropped in the compact form — width wins there.
+  const ratio = state.usage.cacheReadRatio;
+  const ctxLabeled =
+    ratio === undefined ? counters[2] : `${counters[2]} (${Math.round(ratio * 100)}%⚡)`;
+  const labeled = `in ${counters[0]} ▸ out ${counters[1]} · ctx ${ctxLabeled} · ${clock}`;
   const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
   const right = left.length + 2 + labeled.length <= width ? labeled : compact;
   const identity = splitEnds(left, right, width);
@@ -331,6 +354,11 @@ interface ChatComposition {
   readonly llm: ModelSelection;
   modelSelections(): { primary: ModelSelection; subagents: ModelSelection | null };
   configureModel(target: ModelTarget, selection: ModelSelection | null): void;
+  /** The mode's active model — the runtime selection when one is set, else
+   *  the mode's ladder tier. Drives the status-line model label. */
+  modelFor(mode: ChatMode): ModelSelection;
+  /** The configured context soft limit (agent.context.softLimit), if any. */
+  contextSoftLimit: number | undefined;
   agentFor(mode: ChatMode): Promise<Agent>;
   runBuildJob(
     prompt: string,
@@ -378,10 +406,17 @@ async function composeChat(
     );
   }
   const mcpOAuth = createKeyringMcpOAuthStorage(secretStore);
-  const metricsSink: MetricsSink = createOtelMetricsSink({
-    enabled: process.env.AGENTJ_OTEL_METRICS === "1",
-  });
+  // Config-first with the historical env var kept as a fallback enable. The
+  // provider is only stood up when an OTLP endpoint is configured; otherwise
+  // the sink reads the global meter (an external bootstrap's, or a no-op).
+  const metricsEnabled = config.metrics.enabled || process.env.AGENTJ_OTEL_METRICS === "1";
+  const metricsProvider = metricsEnabled ? startMetricsProvider(config.metrics) : undefined;
+  const metricsSink: MetricsSink = createOtelMetricsSink({ enabled: metricsEnabled });
   const environment = await createHostExecutionEnvironment(root);
+  // Over-cap tool output spills here in full; tools reference the file in
+  // their truncation notices so the model can slice it back in.
+  const spillSink = createSpillSink(join(tmpdir(), "agentj-spill", sessionId));
+  const spill = { dir: spillSink.dir, write: spillSink.write };
 
   let agentsMd = "";
   try {
@@ -448,12 +483,30 @@ async function composeChat(
     },
   };
 
+  // Mode routing: each chat mode rides its configured ladder tier — unless
+  // the user picked a model at runtime (configureModel), which wins outright.
+  let primaryModelOverride = false;
+  const agentConfigFor = (mode: ChatMode): AgentConfig =>
+    primaryModelOverride
+      ? agentConfig
+      : {
+          ...agentConfig,
+          llm: {
+            ...agentConfig.llm,
+            model: resolveTierModel(agentConfig.llm, agentConfig.llm.modes[mode]),
+          },
+        };
+  // Research workers are plan-mode children: subagent overrides/tier first,
+  // else they inherit the plan tier's model. Derived per call so runtime
+  // model selection applies to the next worker.
   const createResearchWorker = async () =>
-    createProductionAgent(environment, childAgentConfig(agentConfig, "delegate"), {
+    createProductionAgent(environment, childAgentConfig(agentConfigFor("plan"), "delegate"), {
       root,
       ctx,
       metricsSink,
+      spill,
       mode: "plan",
+      stopContextTokens: config.agent.context.softLimit,
     });
 
   const mcp = createMcpRuntime(config.mcp, {
@@ -461,6 +514,7 @@ async function composeChat(
     connectServer: connectModelContextProtocolServer,
     onStatus: onMcpStatus,
     oauth: mcpOAuth,
+    spill: spill.write,
   });
 
   const agents = new Map<ChatMode, Promise<Agent>>();
@@ -468,7 +522,8 @@ async function composeChat(
     const child = childAgentConfig(agentConfig, "delegate");
     const overridden =
       agentConfig.tools.subagents.provider !== undefined ||
-      agentConfig.tools.subagents.model !== undefined;
+      agentConfig.tools.subagents.model !== undefined ||
+      agentConfig.tools.subagents.tier !== undefined;
     return {
       primary: { provider: agentConfig.llm.provider, model: agentConfig.llm.model },
       subagents: overridden ? { provider: child.llm.provider, model: child.llm.model } : null,
@@ -485,6 +540,8 @@ async function composeChat(
           }
         : null,
     );
+    // An explicit primary selection suspends ladder mode-routing until reset.
+    if (target === "primary") primaryModelOverride = selection !== null;
     agents.clear();
   };
   let agentMcpVersion = mcp.snapshot().version;
@@ -499,19 +556,21 @@ async function composeChat(
     if (cached) return cached;
     const agent =
       mode === "plan"
-        ? createProductionAgent(environment, agentConfig, {
+        ? createProductionAgent(environment, agentConfigFor("plan"), {
             root,
             ctx,
             metricsSink,
+            spill,
             mode: "plan",
             externalTools: mcpSnapshot.externalTools,
             research: { createWorker: createResearchWorker, onProgress: onDagProgress },
             onToolActivity,
           })
-        : createProductionAgent(environment, agentConfig, {
+        : createProductionAgent(environment, agentConfigFor("build"), {
             root,
             ctx,
             metricsSink,
+            spill,
             delegation,
             mode: "build",
             externalTools: mcpSnapshot.externalTools,
@@ -588,11 +647,13 @@ async function composeChat(
         createChildAgent: async ({ session }) => {
           const child = await createProductionAgent(
             environment,
-            childAgentConfig(agentConfig, "delegate"),
+            childAgentConfig(agentConfigFor("build"), "delegate"),
             {
               root: session.path,
               ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
               metricsSink,
+              spill,
+              stopContextTokens: config.agent.context.softLimit,
               // Background builds answer to the same session gate, labeled.
               permissions: {
                 config: config.permissions,
@@ -641,6 +702,11 @@ async function composeChat(
     },
     modelSelections,
     configureModel,
+    modelFor: (mode: ChatMode) => {
+      const active = agentConfigFor(mode).llm;
+      return { provider: active.provider, model: active.model };
+    },
+    contextSoftLimit: config.agent.context.softLimit,
     agentFor,
     runBuildJob,
     runPlanJob,
@@ -656,7 +722,11 @@ async function composeChat(
       const invalid = invalidServerNames();
       return [...mcp.statuses().filter(({ name }) => !invalid.has(name)), ...issueStatuses()];
     },
-    close: () => mcp.close(),
+    close: async () => {
+      await mcp.close();
+      await metricsProvider?.shutdown();
+      spillSink.close();
+    },
   };
 }
 
@@ -692,7 +762,12 @@ export async function runAgentjChat(
   let spinnerFrame = 0;
   let updateStatus = (): void => {};
   const sessionStartedAt = Date.now();
-  const turnTokens = { in: 0, out: 0, ctx: 0 };
+  const turnTokens: { in: number; out: number; ctx: number; cacheReadRatio?: number } = {
+    in: 0,
+    out: 0,
+    ctx: 0,
+  };
+  let contextWarned = false;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
 
   // DAG progress nests under the tool activity that owns it, one tracker per
@@ -834,6 +909,19 @@ export async function runAgentjChat(
         turnTokens.in += event.usage.inputTokens;
         turnTokens.out += event.usage.outputTokens;
         turnTokens.ctx = event.usage.inputTokens;
+        turnTokens.cacheReadRatio =
+          event.usage.cacheReadInputTokens !== undefined && event.usage.inputTokens > 0
+            ? event.usage.cacheReadInputTokens / event.usage.inputTokens
+            : undefined;
+        // Only the foreground session's requests land here — subagent and job
+        // usage flows through task-usage progress events — so the soft limit
+        // measures exactly the context that grows this conversation.
+        if (shouldWarnContext(turnTokens.ctx, composition.contextSoftLimit, contextWarned)) {
+          contextWarned = true;
+          chat.addTurnNotice(
+            "[note] Context size crossed the configured soft limit. Wrap up soon, or delegate remaining exploration and build work to run_subagents — subagents start with fresh contexts.",
+          );
+        }
         updateStatus();
         return;
       }
@@ -940,7 +1028,9 @@ export async function runAgentjChat(
           {
             sessionId: log.id,
             root: rootDisplay,
-            model: `${composition.llm.provider}/${composition.llm.model}`,
+            model: (({ provider, model }) => `${provider}/${model}`)(
+              composition.modelFor(chat.pendingMode),
+            ),
             mode: chat.pendingMode,
             busy: chat.busy,
             interruptRequested,
@@ -948,6 +1038,7 @@ export async function runAgentjChat(
             turnStartedAt,
             currentActivity,
             usage: turnTokens,
+            contextSoftLimit: composition.contextSoftLimit,
             sessionStartedAt,
             jobs: jobRunner.list().filter((job) => job.status === "running"),
           },

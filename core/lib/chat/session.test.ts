@@ -74,6 +74,41 @@ describe("createChatSession", () => {
     });
   });
 
+  test("turn-usage reflects only the foreground agent's own steps — subagent usage stays out", async () => {
+    await withLog(async (log) => {
+      const events: ChatEvent[] = [];
+      // The session's turn-usage stream is fed exclusively by the foreground
+      // agent's onStep callback; subagents report through their own wiring
+      // (task-usage progress events), so a context soft limit keyed on
+      // turn-usage measures only the conversation-growing context.
+      const agent = makeAgent(async (_prompt, opts) => {
+        opts?.onStep?.({
+          toolCalls: [],
+          toolResults: [],
+          usage: { inputTokens: 210_000, outputTokens: 40, totalTokens: 210_040 },
+        });
+        return result("done");
+      });
+      const session = createChatSession({
+        agentFor: async () => agent,
+        log,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      await session.send("go");
+
+      const usage = events.filter((event) => event.type === "turn-usage");
+      expect(usage).toEqual([
+        {
+          type: "turn-usage",
+          usage: { inputTokens: 210_000, outputTokens: 40, totalTokens: 210_040 },
+        },
+      ]);
+    });
+  });
+
   test("uses a transcript label without changing the model prompt or durable user text", async () => {
     await withLog(async (log, root) => {
       const prompts: string[] = [];

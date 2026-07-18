@@ -10,6 +10,7 @@ import {
   mcpConfigSchema,
   mcpServerConfigSchema,
 } from "../mcp";
+import { metricsConfigSchema } from "../metrics";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
 import { sessionConfigSchema } from "../session";
 import { projectSetupConfigSchema } from "../workspace";
@@ -30,6 +31,7 @@ export const configSchema = z.object({
   session: sessionConfigSchema.prefault({}),
   eval: evalConfigSchema.prefault({}),
   project: projectSetupConfigSchema.prefault({}),
+  metrics: metricsConfigSchema.prefault({}),
 });
 
 export type Config = z.infer<typeof configSchema>;
