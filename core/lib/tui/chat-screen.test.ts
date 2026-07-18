@@ -210,6 +210,59 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("long completion lists scroll with the selection instead of truncating", async () => {
+    const values = Array.from(
+      { length: 20 },
+      (_, i) => `agent.param.${String(i).padStart(2, "0")}`,
+    );
+    const { screen, input, calls, text } = makeScreen({}, [], {
+      slashCommandOptions: (state) => {
+        if (!state.text.startsWith("/config set")) return null;
+        return {
+          token: { start: 12, end: state.text.length },
+          suggestions: values.map((value) => ({ value, summary: "Configuration value" })),
+          hint: "Choose a configuration path.",
+        };
+      },
+    });
+    screen.start();
+    input.write("/config set ");
+    await settle();
+    let shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("› agent.param.00");
+    expect(shown).toContain("… ↓ 13 more");
+    expect(shown).not.toContain("agent.param.10");
+
+    // Ten arrow-downs: the window follows the selection past the old cutoff.
+    input.write("[B".repeat(10));
+    await settle();
+    shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("› agent.param.10");
+    expect(shown).toContain("… ↑ 7 more");
+    expect(shown).toContain("… ↓ 6 more");
+
+    // The selected item beyond the visible cap is genuinely acceptable.
+    input.write("\t\r");
+    await settle();
+    expect(calls.submit).toEqual(["/config set agent.param.10"]);
+    screen.stop();
+  });
+
+  test("guided-input choices beyond the window stay reachable and visible", async () => {
+    const choices = Array.from({ length: 12 }, (_, i) => `choice-${String(i).padStart(2, "0")}`);
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    const answer = screen.askInput({ label: "Pick one", choices });
+    input.write("[B".repeat(9)); // move to choice-09, past the old 7-row cutoff
+    await settle();
+    const shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("› choice-09");
+    expect(shown).toContain("… ↑");
+    input.write("\r");
+    await expect(answer).resolves.toBe("choice-09");
+    screen.stop();
+  });
+
   test("navigates suggestions and lets exact commands submit immediately", async () => {
     const { screen, input, calls } = makeScreen();
     screen.start();
