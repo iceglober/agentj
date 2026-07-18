@@ -290,18 +290,22 @@ describe("createChatScreen", () => {
     screen.start();
     input.write("/config set ");
     await settle();
-    let shown = renderScreen(text()).join("\n");
+    let rendered = renderScreen(text());
+    let shown = rendered.join("\n");
+    const rowsAtTop = rendered.length;
     expect(shown).toContain("› agent.param.00");
     expect(shown).toContain("… ↓ 13 more");
     expect(shown).not.toContain("agent.param.10");
 
-    // Ten arrow-downs: the window follows the selection past the old cutoff.
+    // Ten arrow-downs: the window follows the selection past the old cutoff,
+    // and the single footer row keeps the menu height fixed while scrolling.
     input.write("[B".repeat(10));
     await settle();
-    shown = renderScreen(text()).join("\n");
+    rendered = renderScreen(text());
+    shown = rendered.join("\n");
     expect(shown).toContain("› agent.param.10");
-    expect(shown).toContain("… ↑ 7 more");
-    expect(shown).toContain("… ↓ 6 more");
+    expect(shown).toContain("… ↑ 7 · ↓ 6 more");
+    expect(rendered.length).toBe(rowsAtTop);
 
     // The selected item beyond the visible cap is genuinely acceptable.
     input.write("\t\r");
