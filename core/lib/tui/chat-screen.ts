@@ -90,7 +90,11 @@ export interface ChatScreen {
   printAbove(text: string, options?: { preStyled?: boolean }): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: string[]): void;
-  setStatus(text: string): void;
+  /** Replace the status section below the editor (idle repaints are skipped). */
+  setStatusLines(lines: string[]): void;
+  /** Usable line width (columns minus the repaint-safety margin) for
+   *  width-aware status composition — lines this long survive safeLine. */
+  width(): number;
   /** Modal single-key permission prompt in the live region. */
   askPermission(request: PermissionRequest): Promise<PermissionPromptDecision>;
   /** Modal editor prompt. Escape cancels without submitting or retaining the value. */
@@ -118,7 +122,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: string[] = [];
-  let status = "";
+  let statusLines: string[] = [];
   let started = false;
   let previousRawMode = false;
   let escapeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -216,7 +220,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
   const liveLines = (): LiveLayout => {
     const progress = progressLines.map(safeLine);
-    const safeStatus = safeLine(status);
+    const safeStatus = statusLines.map(safeLine);
     if (pendingModal?.kind === "permission") {
       const askLines = [
         ...wrapToDisplayWidth(
@@ -227,7 +231,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       ];
       const askCursorRow = progress.length + askLines.length - 1;
       return {
-        lines: [...progress, ...askLines, safeStatus],
+        lines: [...progress, ...askLines, ...safeStatus],
         cursorRow: askCursorRow,
         cursorColumn: displayWidth(askLines.at(-1) ?? ""),
       };
@@ -262,7 +266,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           ...layout.rows,
           ...choiceLines,
           ...errorLines,
-          safeStatus,
+          ...safeStatus,
         ],
         cursorRow: progress.length + labelLines.length + layout.cursorRow,
         cursorColumn: layout.cursorColumn,
@@ -281,7 +285,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       ? wrapToDisplayWidth(escapeTerminalText(completion.hint), contentWidth())
       : [];
     return {
-      lines: [...progress, ...layout.rows, ...completionLines, ...hintLines, safeStatus],
+      lines: [...progress, ...layout.rows, ...completionLines, ...hintLines, ...safeStatus],
       cursorRow: progress.length + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
@@ -598,8 +602,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       paint();
     },
 
-    setStatus(text) {
-      status = text;
+    width: contentWidth,
+
+    setStatusLines(lines) {
+      if (
+        lines.length === statusLines.length &&
+        lines.every((line, index) => line === statusLines[index])
+      ) {
+        return;
+      }
+      statusLines = lines;
       paint();
     },
 

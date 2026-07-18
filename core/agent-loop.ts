@@ -140,26 +140,83 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
 
 const SPINNER = ["◐", "◓", "◑", "◒"];
 
-export const formatChatStatus = (state: {
-  mode: ChatMode;
+/** Session clock: 9s → "9s", 74s → "1m14s", 3.5h → "3h30m", 30h → "1d6h0m". */
+export const formatClock = (ms: number): string => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86_400);
+  const hours = Math.floor((total % 86_400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (days > 0) return `${days}d${hours}h${minutes}m`;
+  if (hours > 0) return `${hours}h${minutes}m`;
+  if (minutes > 0) return `${minutes}m${seconds}s`;
+  return `${seconds}s`;
+};
+
+/** 456 → "456", 2437 → "2.4k", 432_312 → "432.3k". */
+const formatStatusTokens = (count: number): string =>
+  count < 1000 ? `${count}` : `${(count / 1000).toFixed(1)}k`;
+
+/** Left and right hugging opposite edges; joined loosely when they cannot. */
+const splitEnds = (left: string, right: string, width: number): string => {
+  if (right.length === 0) return left;
+  const gap = width - left.length - right.length;
+  return gap >= 2 ? `${left}${" ".repeat(gap)}${right}` : `${left}  ${right}`;
+};
+
+/** Long paths keep their head and leaf: ~/repos/…/nested/repo. */
+const middleEllipsis = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  if (max <= 1) return "…";
+  const head = Math.max(1, Math.floor((max - 1) * 0.4));
+  const tail = max - 1 - head;
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+};
+
+export interface StatusSectionState {
+  sessionId: string;
+  /** Display path of the directory the session started in — the root the
+   *  session orchestrates from, however many worktrees the work fans into. */
+  root: string;
   /** Provider/model label, e.g. "azure/gpt-5.6-sol". */
   model: string;
-  sessionId: string;
-  runningJobs: number;
+  mode: ChatMode;
   busy: boolean;
   interruptRequested: boolean;
   spinnerFrame: number;
   turnStartedAt: number | null;
   currentActivity: ToolActivity | null;
+  /** Cumulative request/response tokens; ctx is the latest request's size. */
+  usage: { in: number; out: number; ctx: number };
+  sessionStartedAt: number;
+  /** Running background jobs only — each gets its own row. */
+  jobs: ReadonlyArray<{ id: string; mode: ChatMode; prompt: string; startedAt: number }>;
   now?: number;
-}): string => {
-  let busy = "";
+}
+
+/**
+ * The status section below the editor: identity line, root-path line with the
+ * busy indicator on its right end, then one row per running background job.
+ * Foreground turn activity renders above the editor, not here.
+ */
+export const composeStatusSection = (state: StatusSectionState, width: number): string[] => {
+  const now = state.now ?? Date.now();
+  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
+
+  const left = `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`;
+  const clock = formatClock(now - state.sessionStartedAt);
+  const counters = [
+    formatStatusTokens(state.usage.in),
+    formatStatusTokens(state.usage.out),
+    formatStatusTokens(state.usage.ctx),
+  ] as const;
+  const labeled = `in ${counters[0]} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
+  const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
+  const right = left.length + 2 + labeled.length <= width ? labeled : compact;
+  const identity = splitEnds(left, right, width);
+
+  let busySegment = "";
   if (state.busy) {
-    const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-    const elapsed =
-      state.turnStartedAt !== null
-        ? ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`
-        : "";
     const doing = state.interruptRequested
       ? "interrupting…"
       : state.currentActivity
@@ -167,9 +224,24 @@ export const formatChatStatus = (state: {
           ? `run_subagents (${state.currentActivity.detail})`
           : state.currentActivity.tool
         : "thinking";
-    busy = ` · ${frame} ${doing}${elapsed}${state.interruptRequested ? "" : " (esc to interrupt)"}`;
+    const elapsed =
+      state.turnStartedAt !== null ? ` ${Math.round((now - state.turnStartedAt) / 1000)}s` : "";
+    busySegment = `${frame} ${doing}${elapsed}${state.interruptRequested ? "" : " (esc)"}`;
   }
-  return `⏵ ${state.mode} · ${state.model} · session ${state.sessionId} · ${state.runningJobs} job${state.runningJobs === 1 ? "" : "s"}${busy} · tab: mode · /help`;
+  const pathRoom = busySegment.length > 0 ? width - busySegment.length - 2 : width;
+  const location = splitEnds(
+    middleEllipsis(state.root, Math.max(pathRoom, 12)),
+    busySegment,
+    width,
+  );
+
+  const jobRows = state.jobs.map((job) => {
+    const firstLine = job.prompt.split("\n")[0] ?? "";
+    const snippet = firstLine.length > 48 ? `${firstLine.slice(0, 47)}…` : firstLine;
+    return `  ${frame} [${job.id}] ${job.mode}: ${snippet}  ${formatClock(now - job.startedAt)}`;
+  });
+
+  return [identity, location, ...jobRows];
 };
 
 /**
@@ -538,6 +610,8 @@ export async function runAgentjChat(
   let interruptRequested = false;
   let spinnerFrame = 0;
   let updateStatus = (): void => {};
+  const sessionStartedAt = Date.now();
+  const turnTokens = { in: 0, out: 0, ctx: 0 };
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
 
   // DAG progress nests under the tool activity that owns it, one tracker per
@@ -666,6 +740,13 @@ export async function runAgentjChat(
     });
 
     const render = (event: ChatEvent): void => {
+      if (event.type === "turn-usage") {
+        turnTokens.in += event.usage.inputTokens;
+        turnTokens.out += event.usage.outputTokens;
+        turnTokens.ctx = event.usage.inputTokens;
+        updateStatus();
+        return;
+      }
       if (event.type === "turn-queued") {
         queuedMessages.push({
           text: event.text,
@@ -758,28 +839,37 @@ export async function runAgentjChat(
           : composition.runBuildJob(prompt, abortSignal),
     });
 
+    const home = homedir();
+    const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;
     updateStatus = (): void => {
-      const runningJobs = jobs.list().filter((job) => job.status === "running").length;
-      screen?.setStatus(
-        formatChatStatus({
-          mode: chat.pendingMode,
-          model: `${composition.llm.provider}/${composition.llm.model}`,
-          sessionId: log.id,
-          runningJobs,
-          busy: chat.busy,
-          interruptRequested,
-          spinnerFrame,
-          turnStartedAt,
-          currentActivity,
-        }),
+      if (!screen) return;
+      screen.setStatusLines(
+        composeStatusSection(
+          {
+            sessionId: log.id,
+            root: rootDisplay,
+            model: `${composition.llm.provider}/${composition.llm.model}`,
+            mode: chat.pendingMode,
+            busy: chat.busy,
+            interruptRequested,
+            spinnerFrame,
+            turnStartedAt,
+            currentActivity,
+            usage: turnTokens,
+            sessionStartedAt,
+            jobs: jobs.list().filter((job) => job.status === "running"),
+          },
+          screen.width(),
+        ),
       );
     };
 
-    // Animate the spinner and elapsed time while anything is running.
+    // Animate spinners and clocks. The screen skips repaints when the status
+    // section is unchanged, so idle ticks cost one comparison.
     const ticker = setInterval(() => {
       spinnerFrame += 1;
       if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
-      if (chat.busy || jobs.list().some((job) => job.status === "running")) updateStatus();
+      updateStatus();
     }, 250);
 
     const configOutput = (message: string): void => {
@@ -852,9 +942,6 @@ export async function runAgentjChat(
 
     screen.start();
     updateStatus();
-    screen.printAbove(
-      `agentj — ${root} (${ctx.gitBranch}) · ${chat.mode} mode${resumed ? ` · resumed ${log.id}` : ""} · /help for keys`,
-    );
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
       screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
       screen.printAbove(turn.assistant);

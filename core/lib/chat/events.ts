@@ -30,6 +30,7 @@ export type ChatEvent =
   | { type: "command"; name: string }
   | { type: "tool-call"; call: ToolCall }
   | { type: "tool-result"; result: ToolResult }
+  | { type: "turn-usage"; usage: NonNullable<RunStep["usage"]> }
   | { type: "assistant"; mode: ChatMode; text: string; stepLimitReached?: boolean }
   | { type: "turn-abort-requested" }
   | { type: "turn-aborted" }

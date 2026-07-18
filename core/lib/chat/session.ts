@@ -88,6 +88,7 @@ export function createChatSession(
           for (const call of step.toolCalls) emit({ type: "tool-call", call });
           for (const toolResult of step.toolResults)
             emit({ type: "tool-result", result: toolResult });
+          if (step.usage) emit({ type: "turn-usage", usage: step.usage });
         },
         messages,
       });

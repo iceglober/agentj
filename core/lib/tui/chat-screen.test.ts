@@ -413,7 +413,7 @@ describe("createChatScreen", () => {
     // Many repaints: typing, Tab-driven status updates, progress churn.
     input.write("hello");
     await settle();
-    for (let i = 0; i < 5; i += 1) screen.setStatus(`status ${i}`);
+    for (let i = 0; i < 5; i += 1) screen.setStatusLines([`status ${i}`]);
     screen.setProgressLines(["  · t1 working"]);
     screen.setProgressLines([]);
     input.write(" world");
@@ -444,10 +444,11 @@ describe("createChatScreen", () => {
   test("status and progress lines render in the live region", async () => {
     const { screen, text } = makeScreen();
     screen.start();
-    screen.setStatus("⏵ build · 1 job");
+    screen.setStatusLines(["204ed50c · build", "~/repos/demo"]);
     screen.setProgressLines(["t1 ◐ mapping modules"]);
     await settle();
-    expect(text()).toContain("⏵ build · 1 job");
+    expect(text()).toContain("204ed50c · build");
+    expect(text()).toContain("~/repos/demo");
     expect(text()).toContain("t1 ◐ mapping modules");
     screen.stop();
   });
@@ -455,7 +456,7 @@ describe("createChatScreen", () => {
   test("repaints on resize and keeps every live line within the new width", () => {
     const { screen, output, text } = makeScreen();
     screen.start();
-    screen.setStatus("⏵ build · a deliberately long status");
+    screen.setStatusLines(["⏵ build · a deliberately long status"]);
     screen.setProgressLines(["t1 ◐ a deliberately long progress description"]);
     const beforeResize = text().length;
 
