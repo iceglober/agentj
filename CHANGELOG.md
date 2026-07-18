@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.19
+
+### Patch Changes
+
+- 414fe73: Status line: the `cached` stat now accumulates cache-read tokens across the session and shows their share of cumulative input (`in`), instead of the latest request's share of its own input — it measures how caching is working across the whole session.
+
 ## 0.1.0-next.18
 
 ### Patch Changes
