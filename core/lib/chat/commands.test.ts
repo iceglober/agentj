@@ -59,6 +59,7 @@ describe("suggestChatCommands", () => {
       "help",
       "mcp",
       "config",
+      "update",
       "model",
       "build",
       "jobs",
@@ -108,6 +109,14 @@ describe("completeChatInput", () => {
     expect(completeChatInput(selectedInput, selectedInput.length, context)?.hint).toContain(
       "choose a provider",
     );
+  });
+
+  test("completes update channels", () => {
+    const input = "/update ne";
+    const completion = completeChatInput(input, input.length);
+    expect(completion?.suggestions).toEqual([
+      { value: "next", label: "next", summary: "Update to the next release" },
+    ]);
   });
 
   test("enumerates schema config paths and enum values with contextual hints", () => {
@@ -189,6 +198,7 @@ describe("runChatCommand", () => {
       "/help",
       "/mcp",
       "/config",
+      "/update",
       "/model",
       "/build",
       "/jobs",
@@ -346,6 +356,26 @@ describe("runChatCommand", () => {
       { target: "subagents", selection: null },
     ]);
     expect((events.at(-1) as { text: string }).text).toContain("inherit the primary");
+  });
+
+  test("update requests the selected channel and exits", async () => {
+    const { context, quitCalls } = makeContext();
+    const channels: string[] = [];
+    context.requestUpdate = (channel) => {
+      channels.push(channel);
+    };
+    await runChatCommand(context, "update", "next");
+    await runChatCommand(context, "update", "");
+    expect(channels).toEqual(["next", "latest"]);
+    expect(quitCalls()).toBe(2);
+  });
+
+  test("update rejects unknown channels", async () => {
+    const { context, events, quitCalls } = makeContext();
+    context.requestUpdate = () => {};
+    await runChatCommand(context, "update", "stable");
+    expect((events.at(-1) as { text: string }).text).toContain("Usage: /update");
+    expect(quitCalls()).toBe(0);
   });
 
   test("quit ends the session", async () => {

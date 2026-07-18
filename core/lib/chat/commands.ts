@@ -74,6 +74,8 @@ export interface ModelController {
   configure(target: ModelTarget, selection: ModelSelection | null): Promise<boolean>;
 }
 
+export type UpdateChannel = "next" | "latest";
+
 export interface ChatCommandContext {
   session: ChatSession;
   jobs: JobRunner;
@@ -81,6 +83,8 @@ export interface ChatCommandContext {
   emit(event: ChatEvent): void;
   /** Ends the interactive session. */
   quit(): void;
+  /** Requests a self-update and then allows the caller to exit cleanly. */
+  requestUpdate?(channel: UpdateChannel): Promise<void> | void;
   /** Clears the visible transcript (screen-level concern). */
   clear?(): void;
   config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
@@ -396,6 +400,20 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
   }
 };
 
+const runUpdateCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
+  const channel = args.trim() || "latest";
+  if (channel !== "next" && channel !== "latest") {
+    context.emit({ type: "notice", text: "Usage: /update [next|latest]" });
+    return;
+  }
+  if (!context.requestUpdate) {
+    context.emit({ type: "notice", text: "Updates are unavailable in this session." });
+    return;
+  }
+  await context.requestUpdate(channel);
+  context.quit();
+};
+
 const runModelCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
   if (!context.models) {
     context.emit({ type: "notice", text: "Model selection is unavailable in this session." });
@@ -486,6 +504,10 @@ export const chatCommands: Record<string, ChatCommand> = {
   config: {
     summary: "Read or update global configuration",
     run: runConfigCommand,
+  },
+  update: {
+    summary: "Update agentj and exit",
+    run: runUpdateCommand,
   },
   model: {
     summary: "Choose primary or subagent models",
@@ -734,6 +756,18 @@ export function completeChatInput(
             : action === "auth"
               ? "Press Enter for masked Authorization entry."
               : undefined,
+    };
+  }
+
+  if (command === "update") {
+    return {
+      token,
+      suggestions: prefixedSuggestions(
+        [["next", "Update to the next release"], ["latest", "Update to the latest stable release"]],
+        prefix,
+        "",
+      ),
+      hint: "Choose an update channel, or press Enter for latest.",
     };
   }
 
