@@ -5,12 +5,14 @@
     "@glrs-dev/aj": "0.0.0"
   },
   "changesets": [
+    "bash-abort-signal",
     "biome-quality",
     "bright-updates",
     "chained-slash-completion",
     "chat-first-rewrite",
     "cost-optimization",
     "initial-v0.1",
+    "list-footer-stable-height",
     "list-window-scroll",
     "mcp-commands",
     "mcp-oauth-refresh-and-401",
