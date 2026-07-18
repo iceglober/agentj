@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.15
+
+### Patch Changes
+
+- 27608f0: Show guided next-argument options immediately after accepting slash-command completions such as `/config`.
+
 ## 0.1.0-next.14
 
 ### Patch Changes
