@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.11
+
+### Minor Changes
+
+- fef56f5: Add guided `/model` configuration for primary agents, subagents, and background jobs, including provider/model overrides and live updates for new work. Improve interactive chat handling for multiline input, queued-message restoration, and shutdown resume instructions.
+
 ## 0.1.0-next.10
 
 ### Minor Changes
