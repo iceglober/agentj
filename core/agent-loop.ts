@@ -248,8 +248,8 @@ export interface StatusSectionState {
   turnStartedAt: number | null;
   currentActivity: ToolActivity | null;
   /** Cumulative request/response tokens; ctx is the latest request's size and
-   *  cacheReadRatio the latest request's provider-cache hit share (0–1). */
-  usage: { in: number; out: number; ctx: number; cacheReadRatio?: number };
+   *  cacheRead the latest request's provider-cache read tokens. */
+  usage: { in: number; out: number; ctx: number; cacheRead?: number };
   /** When set and ctx has reached it, the ctx counter renders flagged. */
   contextSoftLimit?: number;
   sessionStartedAt: number;
@@ -287,12 +287,15 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
     formatStatusTokens(state.usage.out),
     `${formatStatusTokens(state.usage.ctx)}${overLimit ? "!" : ""}`,
   ] as const;
-  // The latest request's cache-read share: a live canary for prefix-cache
-  // regressions. Dropped in the compact form — width wins there.
-  const ratio = state.usage.cacheReadRatio;
-  const ctxLabeled =
-    ratio === undefined ? counters[2] : `${counters[2]} (${Math.round(ratio * 100)}%⚡)`;
-  const labeled = `in ${counters[0]} ▸ out ${counters[1]} · ctx ${ctxLabeled} · ${clock}`;
+  // The latest request's cache reads, shown as a share of that request's
+  // input (ctx): a live canary for prefix-cache regressions. Dropped in the
+  // compact form — width wins there.
+  const cacheRead = state.usage.cacheRead;
+  const cached =
+    cacheRead === undefined || state.usage.ctx <= 0
+      ? ""
+      : ` · cached ${formatStatusTokens(cacheRead)}(${Math.round((cacheRead / state.usage.ctx) * 100)}%)`;
+  const labeled = `in ${counters[0]}${cached} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
   const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
   const right = left.length + 2 + labeled.length <= width ? labeled : compact;
   const identity = splitEnds(left, right, width);
@@ -774,7 +777,7 @@ export async function runAgentjChat(
   let spinnerFrame = 0;
   let updateStatus = (): void => {};
   const sessionStartedAt = Date.now();
-  const turnTokens: { in: number; out: number; ctx: number; cacheReadRatio?: number } = {
+  const turnTokens: { in: number; out: number; ctx: number; cacheRead?: number } = {
     in: 0,
     out: 0,
     ctx: 0,
@@ -921,10 +924,8 @@ export async function runAgentjChat(
         turnTokens.in += event.usage.inputTokens;
         turnTokens.out += event.usage.outputTokens;
         turnTokens.ctx = event.usage.inputTokens;
-        turnTokens.cacheReadRatio =
-          event.usage.cacheReadInputTokens !== undefined && event.usage.inputTokens > 0
-            ? event.usage.cacheReadInputTokens / event.usage.inputTokens
-            : undefined;
+        turnTokens.cacheRead =
+          event.usage.inputTokens > 0 ? event.usage.cacheReadInputTokens : undefined;
         // Only the foreground session's requests land here — subagent and job
         // usage flows through task-usage progress events — so the soft limit
         // measures exactly the context that grows this conversation.
