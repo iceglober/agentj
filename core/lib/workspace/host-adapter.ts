@@ -22,35 +22,66 @@ export async function createHostExecutionEnvironment(
 
   return {
     root: canonicalRoot,
-    async executeCommand(command) {
+    async executeCommand(command, options) {
       return await new Promise((resolve, reject) => {
         const child = spawn("bash", ["-lc", command], {
           cwd: canonicalRoot,
           stdio: ["ignore", "pipe", "pipe"],
+          // Own process group: compound commands (`a && b`) fork children that
+          // inherit the stdio pipes, and killing only the parent bash leaves an
+          // orphan holding them open — `close` then waits out the orphan.
+          detached: true,
         });
         let stdout = "";
         let stderr = "";
         let timedOut = false;
+        let aborted = false;
+        const kill = (signal: NodeJS.Signals): void => {
+          try {
+            if (child.pid !== undefined) process.kill(-child.pid, signal);
+            else child.kill(signal);
+          } catch {
+            // The group is already gone.
+          }
+        };
+        const terminate = (): void => {
+          kill("SIGTERM");
+          setTimeout(() => kill("SIGKILL"), 5_000).unref();
+        };
         const timer = setTimeout(() => {
           timedOut = true;
-          child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+          terminate();
         }, commandTimeoutMs);
         timer.unref();
+        // An interrupt (Esc) kills the command the same way a timeout does:
+        // the tool call settles with a visible nonzero result instead of
+        // pending until the command finishes on its own.
+        const onAbort = (): void => {
+          aborted = true;
+          terminate();
+        };
+        const signal = options?.signal;
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener("abort", onAbort, { once: true });
         child.stdout.on("data", (chunk: Buffer | string) => (stdout += chunk.toString()));
         child.stderr.on("data", (chunk: Buffer | string) => (stderr += chunk.toString()));
         child.on("error", (error) => {
           clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
           reject(error);
         });
         child.on("close", (code) => {
           clearTimeout(timer);
+          signal?.removeEventListener("abort", onAbort);
+          const note = aborted
+            ? "\n[command interrupted and killed]"
+            : timedOut
+              ? `\n[command timed out after ${Math.round(commandTimeoutMs / 1000)}s and was killed]`
+              : "";
           resolve({
             stdout,
-            stderr: timedOut
-              ? `${stderr}\n[command timed out after ${Math.round(commandTimeoutMs / 1000)}s and was killed]`
-              : stderr,
-            exitCode: timedOut ? 124 : (code ?? 1),
+            stderr: `${stderr}${note}`,
+            exitCode: aborted ? 130 : timedOut ? 124 : (code ?? 1),
           });
         });
       });
