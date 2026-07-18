@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.14
+
+### Patch Changes
+
+- 0a65f20: Large pastes collapse to a `[pasted content #N: X chars]` placeholder in the editor (expanded back on submit), and the live region is clamped to the terminal height — a paste taller than the window previously corrupted every repaint, duplicating the screen into scrollback. Resuming a session no longer fails with `cannot lock ref refs/agentj/undo/...`: the undo stack continues its ref counter from the previous run and keeps those snapshots undoable.
+
 ## 0.1.0-next.13
 
 ### Minor Changes
