@@ -32,7 +32,7 @@ import {
   shouldRememberChatInput,
 } from "./lib/chat/commands";
 import type { ChatEvent } from "./lib/chat/events";
-import { createJobRunner } from "./lib/chat/jobs";
+import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
@@ -43,7 +43,7 @@ import {
   SUBAGENT_LLM_MODEL_KEY,
 } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { providerNames, resolveTierModel } from "./lib/llm";
+import { providerNames, type RunStep, resolveTierModel } from "./lib/llm";
 import {
   connectModelContextProtocolServer,
   resolveMcpTransportConfig,
@@ -376,11 +376,17 @@ interface ChatComposition {
     prompt: string,
     abortSignal: AbortSignal,
     origin?: string,
+    onStep?: (step: RunStep) => void,
   ): Promise<{ text: string; branch?: string }>;
-  runPlanJob(prompt: string, abortSignal: AbortSignal): Promise<{ text: string }>;
-  /** Late-binds the interactive job runner behind the model's run_job tool.
-   *  Never attached in one-shot runs: detached work would outlive the process. */
-  attachJobs(start: (mode: ChatMode, prompt: string) => { id: string }): void;
+  runPlanJob(
+    prompt: string,
+    abortSignal: AbortSignal,
+    onStep?: (step: RunStep) => void,
+  ): Promise<{ text: string }>;
+  /** Late-binds the interactive job runner behind the model's run_job and
+   *  check_job tools. Never attached in one-shot runs: detached work would
+   *  outlive the process. */
+  attachJobs(runner: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
   startMcp(): Promise<void>;
@@ -560,12 +566,20 @@ async function composeChat(
     agents.clear();
   };
   let agentMcpVersion = mcp.snapshot().version;
-  let startJob: ((mode: ChatMode, prompt: string) => { id: string }) | undefined;
+  let jobsRuntime: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort"> | undefined;
   const jobsPort = {
-    start: (mode: "plan" | "build", prompt: string): { id: string } | { error: string } =>
-      startJob
-        ? startJob(mode, prompt)
+    start: (
+      mode: "plan" | "build",
+      prompt: string,
+      options?: { softTimeoutMs?: number },
+    ): { id: string } | { error: string } =>
+      jobsRuntime
+        ? { id: jobsRuntime.start(mode, prompt, options).id }
         : { error: "Background jobs are unavailable in this session." },
+    inspect: (id: string) => jobsRuntime?.inspect(id),
+    renewSoftTimeout: (id: string, softTimeoutMs: number) =>
+      jobsRuntime?.renewSoftTimeout(id, softTimeoutMs) ?? false,
+    abort: (id: string) => jobsRuntime?.abort(id) ?? false,
   };
   const agentFor = async (mode: ChatMode): Promise<Agent> => {
     await mcp.activatePending();
@@ -657,13 +671,22 @@ async function composeChat(
     }
   };
 
-  const runPlanJob = async (prompt: string, abortSignal: AbortSignal) => {
+  const runPlanJob = async (
+    prompt: string,
+    abortSignal: AbortSignal,
+    onStep?: (step: RunStep) => void,
+  ) => {
     const worker = await createResearchWorker();
-    const result = await worker.generate(prompt, { abortSignal });
+    const result = await worker.generate(prompt, { abortSignal, onStep });
     return { text: result.text };
   };
 
-  const runBuildJob = async (prompt: string, abortSignal: AbortSignal, origin = "job") => {
+  const runBuildJob = async (
+    prompt: string,
+    abortSignal: AbortSignal,
+    origin = "job",
+    onStep?: (step: RunStep) => void,
+  ) => {
     const tool = createSubagentsTool({
       execution: {
         kind: "delegation",
@@ -689,7 +712,12 @@ async function composeChat(
             generate: (childPrompt, opts) =>
               child.generate(childPrompt, {
                 abortSignal: opts?.abortSignal,
-                onStep: opts?.onStep,
+                // Tee steps to the job runner's activity trail alongside the
+                // scheduler's own usage tracking.
+                onStep: (step) => {
+                  opts?.onStep?.(step);
+                  onStep?.(step);
+                },
               }),
           };
         },
@@ -734,8 +762,8 @@ async function composeChat(
     agentFor,
     runBuildJob,
     runPlanJob,
-    attachJobs: (start) => {
-      startJob = start;
+    attachJobs: (runner) => {
+      jobsRuntime = runner;
     },
     environment,
     stateRoot,
@@ -1044,13 +1072,21 @@ export async function runAgentjChat(
     const jobRunner = createJobRunner({
       onEvent: render,
       addTurnNotice: (text) => chat.addTurnNotice(text),
-      runJob: ({ id, mode, prompt, abortSignal }) =>
+      runJob: ({ id, mode, prompt, abortSignal, onStep }) =>
         mode === "plan"
-          ? composition.runPlanJob(prompt, abortSignal)
-          : composition.runBuildJob(prompt, abortSignal, `job ${id}`),
+          ? composition.runPlanJob(prompt, abortSignal, onStep)
+          : composition.runBuildJob(prompt, abortSignal, `job ${id}`, onStep),
+      // The soft-timeout ping rides the normal turn queue: it waits out a busy
+      // foreground turn and shows in the transcript only once its turn runs.
+      ping: (job) => {
+        void chat.send(
+          `[system] Background job ${job.id} reached its soft timeout and is still running — prompt: "${job.prompt.slice(0, 80)}". Check it with check_job, then renew its soft timeout if it is progressing or abort it if it is stuck.`,
+          { transcriptText: `[${job.id}] soft timeout reached — checking on it` },
+        );
+      },
     });
     jobs = jobRunner;
-    composition.attachJobs((mode, prompt) => ({ id: jobRunner.start(mode, prompt).id }));
+    composition.attachJobs(jobRunner);
 
     const home = homedir();
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;

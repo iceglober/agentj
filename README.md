@@ -59,7 +59,10 @@ Keys and commands:
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
   and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one. The agent can also start
   jobs itself (`run_job`) — asked to wait on something external like a CI run or a review, it
-  detaches the wait instead of blocking the conversation.
+  detaches the wait instead of blocking the conversation. A job may carry a renewable soft
+  timeout: if it is still running at the deadline the agent gets pinged, inspects the job's
+  recent activity (`check_job`), and either extends the deadline or aborts a stuck job — the
+  job itself keeps running throughout.
 - **`@path/to/file`** — attach a file's contents to your message.
 - **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
   the first non-whitespace input token shows fuzzy-matched command suggestions.

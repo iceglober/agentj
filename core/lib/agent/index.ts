@@ -22,7 +22,11 @@ import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
 import type { SpillWriter } from "../truncation";
-import { type BackgroundJobPort, createBackgroundJobTool } from "./background-jobs";
+import {
+  type BackgroundJobPort,
+  createBackgroundJobTool,
+  createCheckJobTool,
+} from "./background-jobs";
 import {
   resolveToolTarget,
   type WithPermissionsOptions,
@@ -385,7 +389,10 @@ export async function createAgentTools(
 
   const jobsTool: ToolSet =
     config.role === "primary" && opts.jobs
-      ? { run_job: createBackgroundJobTool(opts.jobs, mode) }
+      ? {
+          run_job: createBackgroundJobTool(opts.jobs, mode),
+          check_job: createCheckJobTool(opts.jobs),
+        }
       : {};
 
   if (mode === "plan") {
