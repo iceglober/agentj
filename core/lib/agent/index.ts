@@ -1,6 +1,7 @@
 import z from "zod";
 import {
   createRuntime,
+  type ImageAttachment,
   llmConfigSchema,
   providerNames,
   type RunResult,
@@ -202,6 +203,8 @@ export interface CreateAgentOptions {
 export interface GenerateOptions {
   abortSignal?: AbortSignal;
   onStep?: (step: RunStep) => void;
+  /** Images sent with this user message. */
+  images?: readonly ImageAttachment[];
   /** Prior turns (RunResult.messages) — the chat loop's opaque continuation. */
   messages?: unknown[];
 }
@@ -512,10 +515,16 @@ export async function createAgent(
   return {
     composed,
     compact: (messages) => compactor.compact(messages),
-    generate: (prompt, generateOpts) =>
-      runtime.generate({
+    generate: (prompt, generateOpts) => {
+      if (generateOpts?.images && generateOpts.images.length > 0 && !composed.supportsImages) {
+        return Promise.reject(
+          new Error(`The selected model (${config.llm.model}) does not support image input.`),
+        );
+      }
+      return runtime.generate({
         instructions: composed.instructions,
         prompt,
+        images: generateOpts?.images,
         messages: generateOpts?.messages,
         tools,
         temperature: config.llm.temperature ?? composed.params.temperature,
@@ -525,6 +534,7 @@ export async function createAgent(
         stopContextTokens: opts.stopContextTokens,
         abortSignal: generateOpts?.abortSignal,
         onStep: generateOpts?.onStep,
-      }),
+      });
+    },
   };
 }

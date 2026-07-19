@@ -25,6 +25,8 @@ export interface Profile {
   flags: Partial<RenderFlags>;
   /** Appended into {{PROFILE_DELTA}}. */
   delta?: string;
+  /** Whether the model accepts image inputs. Omitted means supported. */
+  supportsImages?: boolean;
   /** Primary builder role uses this template instead of base. */
   primary?: string;
   /** Delegate role uses this template instead of base. */
@@ -42,6 +44,7 @@ export const profiles = {
     match: [/^deepseek-v4-pro\b/],
     flags: { planning: false, hallucinationGuard: true },
     delta: DEEPSEEK_DELTA,
+    supportsImages: false,
     // DeepSeek vendor guidance: lower temps collapse the reasoning trace, so
     // hold sampling wide open.
     params: { temperature: 1.0, topP: 1.0 },

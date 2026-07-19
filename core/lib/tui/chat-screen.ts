@@ -43,7 +43,7 @@ interface RawInput extends Readable {
 export interface ChatScreenCallbacks {
   onSubmit(text: string): void;
   onTab(): void;
-  /** Reads copied files and returns @file references ready for editor insertion. */
+  /** Reads copied attachments and returns an editor marker ready for insertion. */
   onPasteFiles?(): Promise<string | null>;
   onEscape(): void;
   /** Double Ctrl+C on an empty editor. */

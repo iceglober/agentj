@@ -285,6 +285,23 @@ describe("createAiSdkRuntime", () => {
     expect(result.messages).toEqual([{ role: "user", content: prompt }, assistantTurn]);
   });
 
+  test("sends image attachments as AI SDK file parts", async () => {
+    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    const image = { mediaType: "image/png" as const, data: "c2NyZWVuc2hvdA==" };
+
+    const result = await createAiSdkRuntime(config).generate({ ...request(), images: [image] });
+
+    const user = {
+      role: "user",
+      content: [
+        { type: "text", text: prompt },
+        { type: "file", ...image },
+      ],
+    };
+    expect(generateCalls[0]).toEqual({ messages: [user] });
+    expect(result.messages).toEqual([user]);
+  });
+
   test("continued turns send prior messages plus the prompt as the next user message", async () => {
     resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
     const history = [

@@ -129,7 +129,14 @@ describe("composePrompt", () => {
     expect(sol.params.providerOptions?.openai?.reasoningEffort).toBe("high");
   });
 
-  test("9. no residual {{ across every profile × role", () => {
+  test("9. marks known non-vision profiles", () => {
+    expect(composePrompt(AUTO, inputs({ model: "deepseek-v4-pro" }), CTX).supportsImages).toBe(
+      false,
+    );
+    expect(composePrompt(AUTO, inputs({ model: "gpt-5.6-sol" }), CTX).supportsImages).toBe(true);
+  });
+
+  test("10. no residual {{ across every profile × role", () => {
     for (const name of [...profileNames, "claude-x"]) {
       for (const role of ["primary", "delegate"] as const) {
         const out = composePrompt(
@@ -142,7 +149,7 @@ describe("composePrompt", () => {
     }
   });
 
-  test("10. mode composes orthogonally with model profiles", () => {
+  test("11. mode composes orthogonally with model profiles", () => {
     const plan = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "plan" }), CTX);
     expect(plan.instructions).toContain("# Plan mode");
     expect(plan.instructions).toContain("presses Tab or enters /build");
@@ -166,7 +173,7 @@ describe("composePrompt", () => {
     expect(build.instructions).toContain("Verify behavior");
   });
 
-  test("11. hash pin: the purpose→mode collapse left build prompts byte-identical", () => {
+  test("12. hash pin: the purpose→mode collapse left build prompts byte-identical", () => {
     // Versions captured 2026-07-19 after the plan-handoff prompt edit
     // (PLAN_BLOCK close-with-next-action, COMMS_STOP_BLOCK don't-ask-the-
     // obvious). A failure here means prompt CONTENT changed — a separate,

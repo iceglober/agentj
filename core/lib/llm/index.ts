@@ -65,9 +65,17 @@ export interface RunResult {
   messages?: unknown[];
 }
 
+export interface ImageAttachment {
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  /** Base64-encoded image bytes. */
+  data: string;
+}
+
 export interface GenerateRequest {
   instructions: string;
   prompt: string;
+  /** Images sent with this user message. */
+  images?: readonly ImageAttachment[];
   /** Prior turns (RunResult.messages). When present, `prompt` is appended as
    *  the next user message; when absent, the turn starts fresh from `prompt`. */
   messages?: unknown[];

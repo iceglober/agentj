@@ -34,7 +34,11 @@ import {
 } from "./lib/chat/commands";
 import { LONG_CONTEXT_INPUT_TOKENS, type UsageRecord } from "./lib/chat/cost";
 import type { ChatEvent } from "./lib/chat/events";
-import { expandFileReferences, formatFileReferences } from "./lib/chat/file-attachments";
+import {
+  createPastedImageRegistry,
+  expandFileAttachments,
+  formatFileReferences,
+} from "./lib/chat/file-attachments";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
@@ -81,8 +85,8 @@ import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
-import { ClipboardFilesUnavailableError } from "./lib/tui/clipboard";
-import { createCrosscopyClipboardFiles } from "./lib/tui/crosscopy-clipboard-adapter";
+import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
+import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { renderMarkdownLite } from "./lib/tui/markdown";
 import {
   applyProgressEvent,
@@ -1283,15 +1287,18 @@ export async function runAgentjChat(
     ];
 
     const liveRegion = createAnsiLiveRegionAdapter({ stdout: processStdout });
-    const clipboardFiles = createCrosscopyClipboardFiles();
+    const clipboardAttachments = createCrosscopyClipboardAttachments();
+    const pastedImages = createPastedImageRegistry();
     screen = createChatScreen({
       liveRegion,
       initialHistory: promptHistory.entries,
       slashCommandOptions: (state) => completeChatInput(state.text, state.cursor, commandContext),
-      shouldRememberInput: shouldRememberChatInput,
+      shouldRememberInput: (text) =>
+        shouldRememberChatInput(text) && !pastedImages.hasReference(text),
       callbacks: {
         onSubmit: (text) => {
-          if (shouldRememberChatInput(text)) rememberPrompt(text);
+          if (shouldRememberChatInput(text) && !pastedImages.hasReference(text))
+            rememberPrompt(text);
           const parsed = parseInput(text);
           if (parsed.kind === "command") {
             pendingCommands = pendingCommands.then(() =>
@@ -1304,8 +1311,12 @@ export async function runAgentjChat(
             updateStatus();
             return;
           }
-          void expandFileReferences(parsed.text, root).then((expanded) => {
-            void chat.send(expanded, { restoreText: parsed.text });
+          void expandFileAttachments(parsed.text, root).then((expanded) => {
+            const images = [...pastedImages.resolve(parsed.text), ...expanded.images];
+            void chat.send(expanded.text, {
+              restoreText: parsed.text,
+              ...(images.length > 0 ? { images } : {}),
+            });
             updateStatus();
           });
         },
@@ -1315,23 +1326,31 @@ export async function runAgentjChat(
         },
         onPasteFiles: async () => {
           try {
-            const paths = await clipboardFiles.readFiles();
-            const references = formatFileReferences(paths);
-            if (references) return ` ${references} `;
-            // No files on the clipboard: say so, and what the key is for — an
-            // empty paste that showed nothing looked like a dead key.
+            const attachment = await clipboardAttachments.read();
+            if (attachment?.kind === "files") {
+              const references = formatFileReferences(attachment.paths);
+              if (references) return ` ${references} `;
+            }
+            if (attachment?.kind === "image") {
+              const added = pastedImages.add(attachment.image);
+              if ("error" in added) {
+                render({ type: "notice", text: added.error });
+                return null;
+              }
+              return ` ${added.marker} `;
+            }
             render({
               type: "notice",
-              text: "Ctrl+V attaches files copied in your file manager (Finder, etc.) as @references — the clipboard has no files right now. To paste text, use your terminal's paste (⌘V).",
+              text: "Ctrl+V attaches files copied in your file manager or a copied screenshot — the clipboard has neither right now. To paste text, use your terminal's paste (⌘V).",
             });
             return null;
           } catch (error) {
             render({
               type: "notice",
               text:
-                error instanceof ClipboardFilesUnavailableError
-                  ? "Reading files from the system clipboard isn't available here."
-                  : `Couldn't read files from the clipboard: ${error instanceof Error ? error.message : String(error)}`,
+                error instanceof ClipboardAttachmentsUnavailableError
+                  ? "Reading attachments from the system clipboard isn't available here."
+                  : `Couldn't read attachments from the clipboard: ${error instanceof Error ? error.message : String(error)}`,
             });
             return null;
           }

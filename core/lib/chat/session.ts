@@ -1,4 +1,5 @@
 import type { Agent } from "../agent";
+import type { ImageAttachment } from "../llm";
 import type { ChatLog, ChatMode } from "../session/log";
 import type { UndoStack } from "../session/undo";
 import type { ChatEvent } from "./events";
@@ -44,7 +45,14 @@ export interface ChatSession {
    * already running (queued messages run in order). Resolves when this
    * message's turn has completed.
    */
-  send(text: string, options?: { transcriptText?: string; restoreText?: string }): Promise<void>;
+  send(
+    text: string,
+    options?: {
+      transcriptText?: string;
+      restoreText?: string;
+      images?: readonly ImageAttachment[];
+    },
+  ): Promise<void>;
   /** Abort the running foreground turn. Returns false when idle. */
   abort(): boolean;
   /**
@@ -74,6 +82,7 @@ export function createChatSession(
     text: string;
     transcriptText?: string;
     restoreText?: string;
+    images?: readonly ImageAttachment[];
     resolve: () => void;
   }> = [];
 
@@ -81,7 +90,11 @@ export function createChatSession(
     void deps.onEvent?.(event);
   };
 
-  const runTurn = async (text: string, transcriptText?: string): Promise<void> => {
+  const runTurn = async (
+    text: string,
+    transcriptText?: string,
+    images?: readonly ImageAttachment[],
+  ): Promise<void> => {
     mode = pendingMode;
     busy = true;
     turnAbort = new AbortController();
@@ -102,6 +115,7 @@ export function createChatSession(
           if (step.usage) emit({ type: "turn-usage", usage: step.usage });
         },
         messages,
+        ...(images && images.length > 0 ? { images } : {}),
       });
       messages = result.messages ?? messages;
       emit({
@@ -151,7 +165,7 @@ export function createChatSession(
     while (queue.length > 0 && !busy) {
       const next = queue.shift();
       if (!next) break;
-      await runTurn(next.text, next.transcriptText);
+      await runTurn(next.text, next.transcriptText, next.images);
       next.resolve();
     }
   };
@@ -177,6 +191,7 @@ export function createChatSession(
     async send(text, options) {
       const transcriptText = options?.transcriptText;
       const restoreText = options?.restoreText;
+      const images = options?.images;
       if (busy) {
         emit({
           type: "turn-queued",
@@ -189,12 +204,13 @@ export function createChatSession(
             text,
             ...(transcriptText ? { transcriptText } : {}),
             ...(restoreText ? { restoreText } : {}),
+            ...(images && images.length > 0 ? { images } : {}),
             resolve,
           });
         });
         return;
       }
-      await runTurn(text, transcriptText);
+      await runTurn(text, transcriptText, images);
       await drainQueue();
     },
 
