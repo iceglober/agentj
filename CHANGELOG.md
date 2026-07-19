@@ -1,5 +1,12 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.31
+
+### Patch Changes
+
+- 094988e: Fixes the unpredictable blank rows in the chat transcript at the source. The live region (editor, progress, status) was glued to the terminal's bottom by hand-tracked scroll bookkeeping; because that region changes height on every event mid-turn (a tool row appears, the thinking line toggles), the bookkeeping drifted from the real terminal state and deposited a variable band of blank rows — the height of the region at that instant — between transcript lines. The region now floats directly beneath the transcript using the terminal's own scrolling, with no scroll state to desync, so transcript lines always sit one row apart. When the transcript is short the editor rests just under the last line rather than at the very bottom of the window.
+- 135d0ea: Ctrl+V now tells you what happened instead of doing nothing. It attaches files copied in your file manager (Finder, etc.) as `@references`; previously, if the clipboard held no files — because you copied text, copied nothing, or the copy wasn't detected — the key silently did nothing, which was indistinguishable from a broken feature. It now shows a notice explaining what the key is for and that terminal paste (⌘V) is how you paste text, and any clipboard read error is surfaced rather than swallowed.
+
 ## 0.1.0-next.30
 
 ### Minor Changes
