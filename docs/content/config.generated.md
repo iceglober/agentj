@@ -1,4 +1,4 @@
-# Configuration
+# Configuration reference
 
 Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults below come straight from the schema.
 

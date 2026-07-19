@@ -41,20 +41,34 @@ describe("docs generator", () => {
     ).toThrow("unknown config path");
   });
 
-  test("markdown renderer escapes HTML and handles the authored subset", () => {
-    const html = markdownToHtml(
+  test("markdown renderer escapes HTML, adds heading ids, and handles the subset", () => {
+    const { html, headings } = markdownToHtml(
       "# Title\n\nA **bold** `x<y` and [link](https://e.test).\n\n- one\n- two",
     );
-    expect(html).toContain("<h1>Title</h1>");
+    expect(html).toContain('<h1 id="title">Title</h1>');
     expect(html).toContain("<strong>bold</strong>");
     expect(html).toContain("<code>x&lt;y</code>");
     expect(html).toContain('<a href="https://e.test">link</a>');
     expect(html).toContain("<ul><li>one</li><li>two</li></ul>");
+    expect(headings).toEqual([{ level: 1, text: "Title", id: "title" }]);
   });
 
   test("fenced code blocks render verbatim and escaped", () => {
-    expect(markdownToHtml("```\nagentj run <task>\n```")).toBe(
+    expect(markdownToHtml("```\nagentj run <task>\n```").html).toBe(
       "<pre><code>agentj run &lt;task&gt;</code></pre>",
     );
+  });
+
+  test("repeated headings get unique ids so the nav anchors never collide", () => {
+    const { headings } = markdownToHtml("# Config\n\n## Config\n\n# Config");
+    expect(headings.map((h) => h.id)).toEqual(["config", "config-2", "config-3"]);
+  });
+
+  test("the site builds a table of contents from its own headings", () => {
+    const { headings } = markdownToHtml(buildOutputs()["content/reference.generated.md"] ?? "");
+    const site = buildOutputs()["index.html"] ?? "";
+    // Every h1/h2 in the content is linkable from the sticky nav.
+    expect(site).toContain('<nav class="toc"');
+    for (const h of headings) expect(site).toContain(`href="#${h.id}"`);
   });
 });
