@@ -95,6 +95,12 @@ export interface GenerateRequest {
  */
 export interface AgentRuntime {
   generate(req: GenerateRequest): Promise<RunResult>;
+  /**
+   * Replace an adapter-owned continuation with a fresh, summarized one. The
+   * messages remain opaque to callers; only the runtime adapter may inspect
+   * or construct their provider-specific shape.
+   */
+  compact(messages: unknown[]): Promise<unknown[]>;
 }
 
 /**

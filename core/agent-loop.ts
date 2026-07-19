@@ -262,6 +262,7 @@ interface ChatComposition {
   modelFor(mode: ChatMode): ModelSelection;
   /** The configured context soft limit (agent.context.softLimit), if any. */
   contextSoftLimit: number | undefined;
+  contextOnLimit: AgentConfig["context"]["onLimit"];
   agentFor(mode: ChatMode): Promise<Agent>;
   runBuildJob(
     prompt: string,
@@ -671,6 +672,7 @@ async function composeChat(
       return { provider: active.provider, model: active.model };
     },
     contextSoftLimit: config.agent.context.softLimit,
+    contextOnLimit: config.agent.context.onLimit,
     agentFor,
     runBuildJob,
     runPlanJob,
@@ -745,7 +747,8 @@ export async function runAgentjChat(
     out: 0,
     ctx: 0,
   };
-  let contextWarned = false;
+  let lastContextWarning: number | undefined;
+  let compactPending = false;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
 
   // DAG progress nests under the tool activity that owns it, one tracker per
@@ -901,8 +904,12 @@ export async function runAgentjChat(
         // Only the foreground session's requests land here — subagent and job
         // usage flows through task-usage progress events — so the soft limit
         // measures exactly the context that grows this conversation.
-        if (shouldWarnContext(turnTokens.ctx, composition.contextSoftLimit, contextWarned)) {
-          contextWarned = true;
+        if (composition.contextOnLimit === "compact") {
+          compactPending ||= turnTokens.ctx >= (composition.contextSoftLimit ?? Infinity);
+        } else if (
+          shouldWarnContext(turnTokens.ctx, composition.contextSoftLimit, lastContextWarning)
+        ) {
+          lastContextWarning = turnTokens.ctx;
           chat.addTurnNotice(
             "[note] Context size crossed the configured soft limit. Wrap up soon, or delegate remaining exploration and build work to run_subagents — subagents start with fresh contexts.",
           );
@@ -989,7 +996,35 @@ export async function runAgentjChat(
     emitChatEvent = render;
 
     const chat: ChatSession = createChatSession(
-      { agentFor, log, undo: undoStack, onEvent: render },
+      {
+        agentFor,
+        log,
+        undo: undoStack,
+        onEvent: render,
+        transformContinuation: async (messages, mode) => {
+          if (!compactPending) return messages;
+          compactPending = false;
+          const compact = (await agentFor(mode)).compact;
+          if (!compact) return messages;
+          try {
+            const summarized = await compact(messages);
+            // The next foreground request starts from this fresh continuation;
+            // its usage will replace the pre-compaction status value.
+            turnTokens.ctx = 0;
+            render({
+              type: "notice",
+              text: "[note] Context compacted into a fresh session summary.",
+            });
+            return summarized;
+          } catch (error) {
+            render({
+              type: "notice",
+              text: `[note] Context compaction failed; continuing with full history: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            return messages;
+          }
+        },
+      },
       resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
     );
 

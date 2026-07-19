@@ -74,6 +74,28 @@ describe("createChatSession", () => {
     });
   });
 
+  test("persists a transformed opaque continuation after the turn", async () => {
+    await withLog(async (log, root) => {
+      const original = [{ vendor: "full-history" }];
+      const compacted = [{ vendor: "summary" }];
+      const session = createChatSession({
+        agentFor: async () => makeAgent(async () => result("done", { messages: original })),
+        log,
+        transformContinuation: async (messages, mode) => {
+          expect(messages).toBe(original);
+          expect(mode).toBe("plan");
+          return compacted;
+        },
+      });
+
+      await session.send("go");
+
+      expect(session.snapshot().messages).toBe(compacted);
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.state?.messages).toEqual(compacted);
+    });
+  });
+
   test("turn-usage reflects only the foreground agent's own steps — subagent usage stays out", async () => {
     await withLog(async (log) => {
       const events: ChatEvent[] = [];
