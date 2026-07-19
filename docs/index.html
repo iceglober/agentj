@@ -22,6 +22,13 @@ li { margin:.25rem 0; }
 code { background:var(--code); padding:.12em .38em; border-radius:.35rem; font:.88em ui-monospace,SFMono-Regular,Menlo,monospace; }
 pre { background:var(--code); border:1px solid var(--border); border-radius:.6rem; padding:1rem; overflow-x:auto; }
 pre code { background:none; padding:0; }
+details { margin:.75rem 0; border:1px solid var(--border); border-radius:.6rem; padding:0 1rem; background:color-mix(in srgb, var(--code) 45%, transparent); }
+details[open] { padding-bottom:.5rem; }
+summary { cursor:pointer; padding:.7rem 0; font-weight:600; color:var(--fg); list-style:none; }
+summary::-webkit-details-marker { display:none; }
+summary::before { content:"\203A"; display:inline-block; width:1.1em; color:var(--muted); transition:transform .15s; }
+details[open] > summary::before { transform:rotate(90deg); }
+summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:3px; }
 footer { color:var(--muted); font-size:.85rem; margin-top:4rem; border-top:1px solid var(--border); padding-top:1rem; }
 .layout { display:grid; grid-template-columns:13rem minmax(0,44rem); gap:3rem; max-width:60rem; margin:0 auto; padding:3rem 1.5rem 6rem; align-items:start; }
 main { min-width:0; }
@@ -45,59 +52,75 @@ nav.toc .nav-h2 { padding-left:1.5rem; }
 </head>
 <body>
 <div class="layout">
-<nav class="toc" aria-label="Sections"><a class="nav-h1" href="#agentj">agentj</a><a class="nav-h2" href="#requirements">Requirements</a><a class="nav-h2" href="#install">Install</a><a class="nav-h2" href="#start-a-session">Start a session</a><a class="nav-h2" href="#one-shot-runs">One-shot runs</a><a class="nav-h2" href="#configuration">Configuration</a><a class="nav-h2" href="#reference">Reference</a><a class="nav-h1" href="#commands-keys">Commands &amp; keys</a><a class="nav-h2" href="#slash-commands">Slash commands</a><a class="nav-h2" href="#input-keys">Input &amp; keys</a><a class="nav-h1" href="#configuration-reference">Configuration reference</a></nav>
+<nav class="toc" aria-label="Sections"><a class="nav-h1" href="#agentj">agentj</a><a class="nav-h2" href="#quickstart">Quickstart</a><a class="nav-h2" href="#commands-keys">Commands &amp; keys</a><a class="nav-h2" href="#configuration-reference">Configuration reference</a></nav>
 <main>
 <h1 id="agentj">agentj</h1>
 <p>A terminal coding agent. It runs as a persistent chat session in your repo — you talk, it reads and edits files, runs commands, and fans out parallel subagents, with <strong>plan</strong> and <strong>build</strong> modes you toggle with Tab or <code>/build</code>. It is host-first and gated by a permission system; git plus a built-in undo are the safety net.</p>
-<h2 id="requirements">Requirements</h2>
-<ul><li><strong><a href="https://bun.sh">Bun</a></strong> — the runtime. Install once; there is no separate build step.</li><li><strong>A model provider</strong> — Azure AI Foundry is wired in.</li><li><strong>git</strong> — sessions run inside a git worktree; undo, subagent isolation, and search scoping all use it.</li></ul>
-<h2 id="install">Install</h2>
-<pre><code>bun add --global @glrs-dev/aj@next</code></pre>
-<p>This puts <code>agentj</code> (and the short alias <code>aj</code>) on your PATH from the prerelease channel. Update an installed CLI later with <code>agentj update --channel next</code>.</p>
-<p>Set your provider key once — it is stored in the OS keychain, never in plaintext:</p>
-<pre><code>agentj config set --secret providers.azure.api_key</code></pre>
-<h2 id="start-a-session">Start a session</h2>
-<p>Run <code>agentj</code> inside any git repository:</p>
-<pre><code>agentj                      # open a chat session in this repo (starts in plan mode)
-agentj --continue           # reopen the newest session for this project
-agentj --resume &lt;id&gt;        # reopen a specific session by id</code></pre>
-<p>You begin in <strong>plan mode</strong>: the agent's tools are read-only, so it can investigate, fan out research subagents, and present a plan, but it cannot change anything. Press <strong>Tab</strong> to switch to <strong>build mode</strong> (full tools), or enter <strong><code>/build</code></strong> to switch and immediately ask it to implement what the conversation agreed on. These are explicit gestures — there is no magic approval phrase.</p>
-<h2 id="one-shot-runs">One-shot runs</h2>
-<p>For scripts and CI, run a single task and exit:</p>
-<pre><code>agentj run &quot;add a --json flag&quot;                  # build mode
-agentj run --plan &quot;how does auth work?&quot;         # read-only
-agentj run --allow-all &quot;fix the tests&quot;          # permission asks auto-resolve to allow</code></pre>
-<h2 id="configuration">Configuration</h2>
-<p>Configuration lives in <code>~/.config/agentj/config.json</code> and is edited with the <code>config</code> subcommand:</p>
+<h2 id="quickstart">Quickstart</h2>
+<p>Install (you need <a href="https://bun.sh">Bun</a> and git), then set your model provider key once — it goes to the OS keychain, never plaintext:</p>
+<pre><code>bun add --global @glrs-dev/aj@next
+agentj config set --secret providers.azure.api_key</code></pre>
+<p>Start a session in any git repository:</p>
+<pre><code>agentj</code></pre>
+<p>You begin in <strong>plan mode</strong>: the agent's tools are read-only, so it investigates, fans out research subagents, and proposes a plan without changing anything. Press <strong>Tab</strong> to switch to <strong>build mode</strong> (full tools), or enter <strong><code>/build</code></strong> to switch and have it implement what the conversation agreed on. That is the whole loop — talk, plan, build. Type <code>/help</code> in a session to see every command and key.</p>
+<details><summary>Resume a session, or run one-shot from a script</summary>
+<pre><code>agentj --continue                          # reopen the newest session for this project
+agentj --resume &lt;id&gt;                        # reopen a specific session by id
+agentj run &quot;add a --json flag&quot;              # one task, build mode, then exit
+agentj run --plan &quot;how does auth work?&quot;     # one task, read-only
+agentj run --allow-all &quot;fix the tests&quot;      # one task; permission asks auto-resolve to allow</code></pre>
+<p><code>agentj update --channel next</code> updates an installed CLI; <code>agentj --help</code> lists the full command line.</p>
+</details>
+<details><summary>Change models, tiers, or permissions</summary>
+<p>Settings live in <code>~/.config/agentj/config.json</code>; edit them with the <code>config</code> subcommand:</p>
 <pre><code>agentj config set agent.llm.model gpt-5.6-sol
-agentj config set agent.tools.subagents.model gpt-5.6-luna   # route fan-out work to a cheaper tier
+agentj config set agent.tools.subagents.model gpt-5.6-luna   # route fan-out to a cheaper tier
 agentj config get agent.llm.model</code></pre>
-<p>Run <code>agentj --help</code> for the full command-line surface.</p>
-<h2 id="reference">Reference</h2>
-<p>The sections below list every in-session slash command and key binding, and the configuration keys with their current defaults. Both are generated from the source — the command list from the same registry that powers <code>/help</code>, the defaults straight from the config schema — so they always match the version you are running.</p>
-<h1 id="commands-keys">Commands &amp; keys</h1>
-<p>Generated from the command registry that powers <code>/help</code>. Do not edit by hand — run <code>bun run docs</code>.</p>
-<h2 id="slash-commands">Slash commands</h2>
+<p>Every key and its default is in the Configuration reference below.</p>
+</details>
+<h2 id="commands-keys">Commands &amp; keys</h2>
+<p>In-session slash commands and key bindings — the same list <code>/help</code> prints, generated from the registry so it always matches your version.</p>
+<details><summary>Show every slash command and key binding</summary>
+<h3 id="slash-commands">Slash commands</h3>
 <ul><li><code>/help</code> — List commands and keys</li><li><code>/mcp</code> — Manage and reload MCP servers</li><li><code>/config</code> — Read or update global configuration</li><li><code>/update</code> — Update agentj and exit</li><li><code>/model</code> — Choose primary or subagent models</li><li><code>/cost</code> — Show foreground token usage and estimated cost</li><li><code>/build</code> — Switch to build mode and implement the plan</li><li><code>/jobs</code> — Inspect background jobs, or <code>/jobs abort &lt;id&gt;</code></li><li><code>/undo</code> — Revert the agent's last file changes</li><li><code>/redo</code> — Re-apply reverted changes</li><li><code>/clear</code> — Clear the transcript view</li><li><code>/quit</code> — End the session</li></ul>
-<h2 id="input-keys">Input &amp; keys</h2>
+<h3 id="input-keys">Input &amp; keys</h3>
 <ul><li>&amp; &lt;task&gt; — run as a background job</li><li>@path/to/file — attach file contents · Ctrl+V — paste copied files</li><li>Tab/Enter — complete a shown command · Tab — toggle plan/build otherwise</li><li>Esc — dismiss suggestions / dequeue waiting message / interrupt turn · Ctrl+C×2 — quit</li></ul>
-<h1 id="configuration-reference">Configuration reference</h1>
-<p>Set with <code>agentj config set &lt;key&gt; &lt;value&gt;</code>; read with <code>agentj config get &lt;key&gt;</code>. Stored in <code>~/.config/agentj/config.json</code>. Defaults below come straight from the schema.</p>
+</details>
+<h2 id="configuration-reference">Configuration reference</h2>
+<p>Set with <code>agentj config set &lt;key&gt; &lt;value&gt;</code>; read with <code>agentj config get &lt;key&gt;</code>. Stored in <code>~/.config/agentj/config.json</code>. Defaults come straight from the schema.</p>
+<details><summary>Show all configuration keys</summary>
 <ul><li><code>agent.llm.model</code> (default: <code>&quot;gpt-5.6-sol&quot;</code>) — The primary model id the agent runs on.</li><li><code>agent.llm.provider</code> (default: <code>&quot;azure&quot;</code>) — Model provider. Azure AI Foundry is wired in.</li><li><code>agent.llm.tiers</code> (default: <code>[]</code>) — Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.</li><li><code>agent.llm.modes.plan</code> (default: <code>0</code>) — Ladder tier plan mode runs on. Defaults to the frontier tier (0).</li><li><code>agent.llm.modes.build</code> (default: <code>1</code>) — Ladder tier build mode runs on.</li><li><code>agent.tools.subagents.tier</code> (default: unset) — Ladder tier subagents and planning workers run on — route fan-out to a cheaper rung.</li><li><code>agent.tools.subagents.model</code> (default: unset) — Explicit model for subagents (deprecated — prefer <code>tier</code>; wins over it when set).</li><li><code>agent.tools.subagents.concurrency</code> (default: <code>2</code>) — Maximum subagents run at once within a single fan-out.</li><li><code>agent.tools.edit.mode</code> (default: <code>&quot;batch&quot;</code>) — Edit-tool strategy: <code>exact</code>, <code>batch</code>, or <code>hash</code>.</li><li><code>agent.tools.maxOutputChars</code> (default: <code>30000</code>) — Character cap on tool output returned to the model. Over-cap output spills to a session file so nothing is lost.</li><li><code>agent.context.softLimit</code> (default: unset) — Request input-token threshold that triggers <code>onLimit</code>. Unset means no ceiling.</li><li><code>agent.context.onLimit</code> (default: <code>&quot;warn&quot;</code>) — Behavior when a request crosses the soft limit: <code>warn</code> or <code>compact</code> (summarize history).</li><li><code>agent.steps</code> (default: <code>100</code>) — Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.</li><li><code>permissions.edit</code> (default: <code>&quot;allow&quot;</code>) — Policy for file edits in build mode: <code>allow</code>, <code>ask</code>, or <code>deny</code>.</li><li><code>permissions.bash.default</code> (default: <code>&quot;ask&quot;</code>) — Default policy for bash commands, before the allow/deny lists.</li><li><code>permissions.bash.allow</code> (default: <code>[]</code>) — Command prefixes (optional trailing <code>*</code>) that skip the prompt.</li><li><code>permissions.bash.deny</code> (default: <code>[]</code>) — Command prefixes that are always refused; checked before allow.</li><li><code>permissions.mcp.default</code> (default: <code>&quot;ask&quot;</code>) — Default policy for MCP tool calls, before the allow/deny lists.</li></ul>
+</details>
 <footer>Reference generated from the agentj source. Rebuild with <code>bun run docs</code>.</footer>
 </main>
 </div>
 <script>
 (() => {
   const links = new Map([...document.querySelectorAll('.toc a')].map(a => [a.hash.slice(1), a]));
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      for (const a of links.values()) a.removeAttribute('aria-current');
-      links.get(e.target.id)?.setAttribute('aria-current', 'true');
+  const heads = [...document.querySelectorAll('main h1[id], main h2[id]')];
+  if (!heads.length) return;
+  let active = null;
+  const setActive = (h) => {
+    if (h === active) return;
+    active = h;
+    for (const a of links.values()) a.removeAttribute('aria-current');
+    links.get(h.id)?.setAttribute('aria-current', 'true');
+  };
+  const update = () => {
+    // The current section is the last heading whose top has passed the marker
+    // line; deterministic at the top, between headings, and at page end.
+    const marker = 120;
+    let current = heads[0];
+    for (const h of heads) {
+      if (h.getBoundingClientRect().top <= marker) current = h;
+      else break;
     }
-  }, { rootMargin: '0px 0px -75% 0px' });
-  for (const h of document.querySelectorAll('main h1[id], main h2[id]')) io.observe(h);
+    if (innerHeight + scrollY >= document.body.scrollHeight - 2) current = heads[heads.length - 1];
+    setActive(current);
+  };
+  update();
+  addEventListener('scroll', update, { passive: true });
+  addEventListener('resize', update);
 })();
 </script>
 </body>

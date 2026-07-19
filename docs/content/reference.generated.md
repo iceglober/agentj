@@ -1,8 +1,10 @@
-# Commands & keys
+## Commands & keys
 
-Generated from the command registry that powers `/help`. Do not edit by hand — run `bun run docs`.
+In-session slash commands and key bindings — the same list `/help` prints, generated from the registry so it always matches your version.
 
-## Slash commands
+:::details Show every slash command and key binding
+
+### Slash commands
 
 - `/help` — List commands and keys
 - `/mcp` — Manage and reload MCP servers
@@ -17,9 +19,11 @@ Generated from the command registry that powers `/help`. Do not edit by hand —
 - `/clear` — Clear the transcript view
 - `/quit` — End the session
 
-## Input & keys
+### Input & keys
 
 - & <task> — run as a background job
 - @path/to/file — attach file contents · Ctrl+V — paste copied files
 - Tab/Enter — complete a shown command · Tab — toggle plan/build otherwise
 - Esc — dismiss suggestions / dequeue waiting message / interrupt turn · Ctrl+C×2 — quit
+
+:::

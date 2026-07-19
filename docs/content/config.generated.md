@@ -1,6 +1,8 @@
-# Configuration reference
+## Configuration reference
 
-Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults below come straight from the schema.
+Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults come straight from the schema.
+
+:::details Show all configuration keys
 
 - `agent.llm.model` (default: `"gpt-5.6-sol"`) — The primary model id the agent runs on.
 - `agent.llm.provider` (default: `"azure"`) — Model provider. Azure AI Foundry is wired in.
@@ -20,3 +22,5 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 - `permissions.bash.allow` (default: `[]`) — Command prefixes (optional trailing `*`) that skip the prompt.
 - `permissions.bash.deny` (default: `[]`) — Command prefixes that are always refused; checked before allow.
 - `permissions.mcp.default` (default: `"ask"`) — Default policy for MCP tool calls, before the allow/deny lists.
+
+:::
