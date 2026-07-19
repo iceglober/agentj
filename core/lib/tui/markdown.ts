@@ -1,37 +1,36 @@
-/**
- * Deliberately small terminal markdown: bold, italic, inline code, headers,
- * and dimmed code fences — the constructs models actually emit in chat. Not a
- * parser; line-oriented regex transforms. Callers gate on TTY (the plain text
- * passes through untouched everywhere else).
- */
+import type { UiBlock, UiLine, UiSpan } from "./styles";
 
-const BOLD = "\u001b[1m";
-const ITALIC = "\u001b[3m";
-const UNDERLINE = "\u001b[4m";
-const DIM = "\u001b[2m";
-const CYAN = "\u001b[36m";
-const RESET = "\u001b[0m";
+/** Small semantic terminal markdown. ANSI is deliberately emitted only by the screen. */
+const inline = (line: string): UiLine => {
+  const spans: UiSpan[] = [];
+  const pattern = /(\*\*([^*]+)\*\*|__([^_]+)__|(?<![\w*`])\*([^*\s][^*]*)\*(?![\w*])|`([^`]+)`)/gu;
+  let offset = 0;
+  for (const match of line.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    if (start > offset) spans.push({ text: line.slice(offset, start) });
+    if (match[2] !== undefined || match[3] !== undefined) {
+      spans.push({ text: match[2] ?? match[3] ?? "", bold: true });
+    } else if (match[4] !== undefined) {
+      spans.push({ text: match[4], italic: true });
+    } else {
+      spans.push({ text: match[5] ?? "", tone: "accent" });
+    }
+    offset = start + match[0].length;
+  }
+  if (offset < line.length || spans.length === 0) spans.push({ text: line.slice(offset) });
+  return spans;
+};
 
-const renderInline = (line: string): string =>
-  line
-    .replace(/\*\*([^*]+)\*\*/g, `${BOLD}$1${RESET}`)
-    .replace(/__([^_]+)__/g, `${BOLD}$1${RESET}`)
-    .replace(/(?<![\w*`])\*([^*\s][^*]*)\*(?![\w*])/g, `${ITALIC}$1${RESET}`)
-    .replace(/`([^`]+)`/g, `${CYAN}$1${RESET}`);
-
-export function renderMarkdownLite(text: string): string {
+export function renderMarkdownLite(text: string): UiBlock {
   let inFence = false;
-  return text
-    .split("\n")
-    .map((line) => {
-      if (line.trimStart().startsWith("```")) {
-        inFence = !inFence;
-        return `${DIM}${line}${RESET}`;
-      }
-      if (inFence) return line; // code verbatim
-      const header = line.match(/^#{1,4}\s+(.*)$/);
-      if (header) return `${BOLD}${UNDERLINE}${header[1]}${RESET}`;
-      return renderInline(line);
-    })
-    .join("\n");
+  return text.split("\n").map((line) => {
+    if (line.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      return [{ text: line, tone: "muted" }];
+    }
+    if (inFence) return [{ text: line }];
+    const header = line.match(/^#{1,4}\s+(.*)$/u);
+    if (header) return [{ text: header[1] ?? "", bold: true, underline: true }];
+    return inline(line);
+  });
 }

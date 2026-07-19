@@ -22,7 +22,10 @@ function makeScreen(
   over: Partial<ChatScreenCallbacks> = {},
   initialHistory: readonly string[] = [],
   screenOptions: Partial<
-    Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput" | "terminalHeight">
+    Pick<
+      CreateChatScreenOptions,
+      "slashCommandOptions" | "shouldRememberInput" | "terminalHeight" | "terminalWidth"
+    >
   > = {},
 ) {
   const input = new FakeInput();
@@ -403,6 +406,9 @@ describe("createChatScreen", () => {
     // The command renders in the modal itself — wrapped, indented — without a
     // duplicate transcript copy for a request this short.
     expect(text()).toContain("Permission bash\r\n  git push origin");
+    expect(renderScreen(text()).join("\n")).toContain(
+      "<Y> allow once · <A> always this session · <N> deny",
+    );
     expect(text()).toContain("  echo done");
     expect(text()).not.toContain("Permission bash:");
     expect(text()).not.toContain("review request above");
@@ -439,6 +445,20 @@ describe("createChatScreen", () => {
     expect(text()).toContain("Permission bash — subagent t2");
     input.write("n");
     await expect(child).resolves.toBe("deny");
+    screen.stop();
+  });
+
+  test("permission keycaps wrap into clear choices on narrow terminals", async () => {
+    const { screen, input, text } = makeScreen({}, [], { terminalWidth: 35 });
+    screen.start();
+    const ask = screen.askPermission({ tool: "bash", kind: "bash", detail: "git push" });
+    await settle();
+    const rendered = renderScreen(text()).join("\n");
+    expect(rendered).toContain("<Y> allow once");
+    expect(rendered).toContain("<A> always this session");
+    expect(rendered).toContain("<N> deny");
+    input.write("n");
+    await expect(ask).resolves.toBe("deny");
     screen.stop();
   });
 
@@ -606,15 +626,13 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("printAbove sanitizes by default; preStyled preserves trusted ANSI", async () => {
+  test("printAbove sanitizes text and styles only semantic spans", async () => {
     const { screen, text } = makeScreen();
     screen.start();
-    // Untrusted content: a raw ESC must be neutralized to visible text.
     screen.printAbove("evil \u001b[2J payload");
     expect(text()).toContain("\\x1b[2J");
-    // Trusted styled line (caller sanitized its interpolations) passes through.
-    screen.printAbove("\u001b[1mstyled\u001b[0m", { preStyled: true });
-    expect(text()).toContain("\u001b[1mstyled\u001b[0m");
+    screen.printAbove([[{ text: "styled", tone: "accent", bold: true }]]);
+    expect(text()).toContain("\u001b[1m\u001b[36mstyled\u001b[0m");
     screen.stop();
   });
 
