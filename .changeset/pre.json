@@ -31,8 +31,10 @@
     "status-section",
     "subagent-permissions",
     "subagent-result-prompt-ui",
+    "update-swr",
     "update-tui-refresh-and-spacing",
     "version-flag",
-    "version-newline"
+    "version-newline",
+    "visible-background-jobs"
   ]
 }
