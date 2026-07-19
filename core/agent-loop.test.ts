@@ -158,6 +158,23 @@ describe("formatChatEvent", () => {
       "(dequeued) do the thing",
     );
   });
+
+  test("reports completed jobs with their actual runtime and outcome", () => {
+    expect(
+      formatChatEvent({
+        type: "job-finished",
+        job: {
+          id: "j2",
+          mode: "build",
+          prompt: "monitor the release workflow",
+          status: "done",
+          startedAt: 0,
+          endedAt: 74_000,
+          resultText: "Package published.",
+        },
+      }),
+    ).toBe("✓ [j2] done in 1m14s — monitor the release workflow\nPackage published.");
+  });
 });
 
 describe("composeProgressLines", () => {
@@ -242,7 +259,7 @@ describe("composeStatusSection", () => {
     spinnerFrame: 0,
     usage: { in: 12_400, out: 3_100, ctx: 8_700 },
     sessionStartedAt: 0,
-    jobs: [],
+    runningJobs: 0,
     now: 74_000,
   };
 
@@ -306,17 +323,13 @@ describe("composeStatusSection", () => {
     ).toBeNull();
   });
 
-  test("running jobs each get a row below the section", () => {
-    const lines = composeStatusSection(
-      {
-        ...base,
-        jobs: [
-          { id: "j1", mode: "build", prompt: "refactor the auth flow\nwith detail", startedAt: 0 },
-        ],
-      },
-      90,
-    );
-    expect(lines).toHaveLength(3);
-    expect(lines[2]).toBe("  ◐ [j1] build: refactor the auth flow  1m14s");
+  test("running jobs render one compact count directly below the editor", () => {
+    const lines = composeStatusSection({ ...base, runningJobs: 2 }, 90);
+    expect(lines).toEqual([
+      "2 jobs running",
+      expect.stringContaining("204ed50c · azure/gpt-5.6-sol · plan"),
+      "~/repos/agentj",
+    ]);
+    expect(composeStatusSection({ ...base, runningJobs: 1 }, 90)[0]).toBe("1 job running");
   });
 });
