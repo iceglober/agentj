@@ -65,10 +65,12 @@ export function createUpdateService(options: {
   const check = async (
     current: string,
     requested: UpdateChannel = options.config.channel,
+    refresh = false,
   ): Promise<UpdateResult> => {
     const channel = resolveUpdateChannel(current, requested);
     const cached = await options.state?.read();
     if (
+      !refresh &&
       cached &&
       cached.current === current &&
       cached.channel === channel &&
@@ -89,7 +91,9 @@ export function createUpdateService(options: {
   return {
     check,
     async update(current, requested) {
-      const result = await check(current, requested);
+      // An explicit update must check the registry now, rather than reporting
+      // a stale cached result as current for up to the normal check interval.
+      const result = await check(current, requested, true);
       if (!result.available) return result;
       if (!options.installer)
         throw new Error("This AgentJ installation cannot be updated automatically.");

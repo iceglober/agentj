@@ -1042,7 +1042,7 @@ export async function runAgentjChat(
         if (event.transcriptText) screen?.printAbove(event.transcriptText);
         else {
           screen?.printAbove(
-            `\n\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
+            `\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
             { preStyled: true },
           );
         }
@@ -1052,7 +1052,7 @@ export async function runAgentjChat(
       if (event.type === "assistant") {
         const body = formatChatEvent(event);
         if (body !== null)
-          screen?.printAbove(`\n${renderMarkdownLite(escapeTerminalText(body))}`, {
+          screen?.printAbove(renderMarkdownLite(escapeTerminalText(body)), {
             preStyled: true,
           });
         updateStatus();
@@ -1414,6 +1414,29 @@ const shouldAutoUpdate = (argv: string[]): boolean =>
   !argv.includes("--version") &&
   !argv.includes("-v");
 
+export interface UpdateRestartOptions {
+  cmd: string[];
+  stdin: "inherit";
+  stdout: "inherit";
+  stderr: "inherit";
+  env: Record<string, string | undefined>;
+}
+
+export const createUpdateRestartOptions = (
+  argv: string[],
+  options: {
+    executable?: string;
+    script?: string;
+    env?: Record<string, string | undefined>;
+  } = {},
+): UpdateRestartOptions => ({
+  cmd: [options.executable ?? process.execPath, options.script ?? process.argv[1]!, ...argv],
+  stdin: "inherit" as const,
+  stdout: "inherit" as const,
+  stderr: "inherit" as const,
+  env: { ...(options.env ?? process.env), AGENTJ_UPDATE_RESTARTED: "1" },
+});
+
 const autoUpdate = async (argv: string[]): Promise<number | undefined> => {
   if (!shouldAutoUpdate(argv)) return undefined;
   try {
@@ -1421,14 +1444,10 @@ const autoUpdate = async (argv: string[]): Promise<number | undefined> => {
     if (!auto || !supported) return undefined;
     const result = await service.check(COMMAND_VERSION);
     if (!result.available) return undefined;
-    processStderr.write(`Updating agentj to ${result.available} (${result.channel})...\n`);
-    await service.update(COMMAND_VERSION);
-    const child = Bun.spawn({
-      cmd: [process.execPath, process.argv[1]!, ...argv],
-      stdout: "inherit",
-      stderr: "inherit",
-      env: { ...process.env, AGENTJ_UPDATE_RESTARTED: "1" },
-    });
+    const updated = await service.update(COMMAND_VERSION);
+    if (!updated.available) return undefined;
+    processStderr.write(`Updating agentj to ${updated.available} (${updated.channel})...\n`);
+    const child = Bun.spawn(createUpdateRestartOptions(argv));
     return await child.exited;
   } catch (error) {
     processStderr.write(

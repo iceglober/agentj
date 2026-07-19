@@ -252,6 +252,10 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         cursorColumn: displayWidth(askLines.at(-1) ?? ""),
       };
     }
+    const editorActivity = [...progress, ...(thinkingLine ? [safeLine(thinkingLine)] : [])];
+    // The transcript owns one blank separator. The live region owns the
+    // second row above an idle editor, which active work replaces.
+    const editorLead = editorActivity.length > 0 ? editorActivity : [""];
     if (pendingModal?.kind === "input") {
       const prompt = pendingModal;
       const labelLines = wrapToDisplayWidth(
@@ -280,15 +284,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         : [];
       return {
         lines: [
-          ...progress,
-          ...(thinkingLine ? [safeLine(thinkingLine)] : []),
+          ...editorLead,
           ...labelLines,
           ...layout.rows,
           ...choiceLines,
           ...errorLines,
           ...safeStatus,
         ],
-        cursorRow: progress.length + (thinkingLine ? 1 : 0) + labelLines.length + layout.cursorRow,
+        cursorRow: editorLead.length + labelLines.length + layout.cursorRow,
         cursorColumn: layout.cursorColumn,
       };
     }
@@ -312,15 +315,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       ? wrapToDisplayWidth(escapeTerminalText(completion.hint), contentWidth())
       : [];
     return {
-      lines: [
-        ...progress,
-        ...(thinkingLine ? [safeLine(thinkingLine)] : []),
-        ...layout.rows,
-        ...completionLines,
-        ...hintLines,
-        ...safeStatus,
-      ],
-      cursorRow: progress.length + (thinkingLine ? 1 : 0) + layout.cursorRow,
+      lines: [...editorLead, ...layout.rows, ...completionLines, ...hintLines, ...safeStatus],
+      cursorRow: editorLead.length + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
   };
@@ -396,8 +392,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
   const printTranscript = (text: string, preStyled = false): void => {
     clearLive();
-    // Keep two blank transcript rows between the newest output and the live editor.
-    write(`${(preStyled ? text : escapeTerminalText(text)).split("\n").join("\r\n")}\r\n\r\n\r\n`);
+    // The live region provides the second row above an idle editor; transcript
+    // rows themselves stay separated by exactly one blank line.
+    write(`${(preStyled ? text : escapeTerminalText(text)).split("\n").join("\r\n")}\r\n\r\n`);
     paint();
   };
 
