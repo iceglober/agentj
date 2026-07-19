@@ -149,6 +149,11 @@ const mapTools = (tools: ToolSet): AiToolSet =>
       .map((name) => [name, toAiTool(tools[name])]),
   ) as AiToolSet;
 
+const COMPACTION_INSTRUCTIONS = `Summarize the conversation so another coding agent can continue it accurately. Preserve the user's goals, decisions, constraints, relevant discoveries, current implementation state, and remaining work. Be concise but include exact paths, commands, errors, and identifiers that matter. Do not mention this compaction request.`;
+
+const COMPACTION_PROMPT =
+  "Create the handoff summary now. This replaces the prior conversation context.";
+
 /**
  * The AI SDK runtime: a ToolLoopAgent per generate() call (instructions and
  * call settings are per-request), driving the model this factory bound once.
@@ -160,6 +165,26 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
   const model = createModel(config);
 
   return {
+    async compact(messages: unknown[]): Promise<unknown[]> {
+      const agent = new ToolLoopAgent({
+        model,
+        instructions: COMPACTION_INSTRUCTIONS,
+      });
+      // `messages` is opaque above this adapter. We pass its vendor shape back
+      // to the SDK only here, then intentionally retain only the summary.
+      const result = await agent.generate({
+        messages: [...messages, { role: "user", content: COMPACTION_PROMPT }] as ModelMessage[],
+      });
+      return [
+        {
+          role: "user",
+          content:
+            "Conversation handoff summary follows. Continue from it as if you had the full history.",
+        },
+        { role: "assistant", content: result.text },
+      ];
+    },
+
     async generate(req: GenerateRequest): Promise<RunResult> {
       const startedAt = Date.now();
       const recordUsage = (outcome: "success" | "error", usage?: TokenUsage) => {

@@ -242,11 +242,12 @@ describe("formatClock", () => {
 });
 
 describe("shouldWarnContext", () => {
-  test("fires once at the threshold, never below it, never without a limit", () => {
-    expect(shouldWarnContext(239_999, 240_000, false)).toBe(false);
-    expect(shouldWarnContext(240_000, 240_000, false)).toBe(true);
-    expect(shouldWarnContext(300_000, 240_000, true)).toBe(false);
-    expect(shouldWarnContext(300_000, undefined, false)).toBe(false);
+  test("fires at the threshold and re-arms after meaningful context growth", () => {
+    expect(shouldWarnContext(239_999, 240_000, undefined)).toBe(false);
+    expect(shouldWarnContext(240_000, 240_000, undefined)).toBe(true);
+    expect(shouldWarnContext(263_999, 240_000, 240_000)).toBe(false);
+    expect(shouldWarnContext(264_000, 240_000, 240_000)).toBe(true);
+    expect(shouldWarnContext(300_000, undefined, undefined)).toBe(false);
   });
 });
 

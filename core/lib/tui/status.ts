@@ -81,16 +81,23 @@ export const composeThinkingLine = (
   );
 };
 
+/** Re-warn after enough growth to be useful without repeating every step. */
+export const contextWarningRearmThreshold = (softLimit: number): number =>
+  Math.max(1, Math.ceil(softLimit * 0.1));
+
 /**
- * One-shot context warning: fire the first time the latest request's context
- * reaches the configured soft limit, then stay quiet for the session — the
- * model was told once; repeating the notice every step is noise.
+ * Warn when the latest request first reaches the soft limit, then re-arm once
+ * the context has grown another tenth of that limit beyond the last warning.
  */
 export const shouldWarnContext = (
   ctx: number,
   softLimit: number | undefined,
-  alreadyWarned: boolean,
-): boolean => softLimit !== undefined && !alreadyWarned && ctx >= softLimit;
+  lastWarnedContext: number | undefined,
+): boolean =>
+  softLimit !== undefined &&
+  ctx >= softLimit &&
+  (lastWarnedContext === undefined ||
+    ctx >= lastWarnedContext + contextWarningRearmThreshold(softLimit));
 
 export const composeStatusSection = (state: StatusSectionState, width: number): string[] => {
   const now = state.now ?? Date.now();

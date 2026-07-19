@@ -303,4 +303,32 @@ describe("createAiSdkRuntime", () => {
     expect(generateCalls[0]?.messages).toEqual([...history, { role: "user", content: prompt }]);
     expect(result.messages).toEqual([...history, { role: "user", content: prompt }, assistantTurn]);
   });
+
+  test("compacts adapter-owned history into a fresh summary continuation", async () => {
+    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    nextResult.text = "User needs issue #24 implemented; context limit was crossed.";
+    const history = [
+      { role: "user", content: "implement it" },
+      { role: "assistant", content: "working" },
+    ];
+
+    const compacted = await createAiSdkRuntime(config).compact(history);
+
+    expect(generateCalls[0]?.messages).toEqual([
+      ...history,
+      {
+        role: "user",
+        content: "Create the handoff summary now. This replaces the prior conversation context.",
+      },
+    ]);
+    expect(compacted).toEqual([
+      {
+        role: "user",
+        content:
+          "Conversation handoff summary follows. Continue from it as if you had the full history.",
+      },
+      { role: "assistant", content: nextResult.text },
+    ]);
+    expect(JSON.stringify(compacted)).not.toContain("implement it");
+  });
 });

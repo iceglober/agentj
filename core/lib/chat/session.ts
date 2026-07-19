@@ -18,6 +18,12 @@ export interface ChatSessionDependencies {
   /** Present in repos only; snapshots are taken before each build turn. */
   undo?: UndoStack;
   onEvent?(event: ChatEvent): void | Promise<void>;
+  /**
+   * Optional composition-root continuation transform run after a successful
+   * turn and before its durable state record. It receives opaque messages and
+   * returns opaque messages; session logic never interprets either shape.
+   */
+  transformContinuation?(messages: unknown[], mode: ChatMode): Promise<unknown[]> | unknown[];
   now?: () => string;
 }
 
@@ -114,6 +120,9 @@ export function createChatSession(
         ts: now(),
         ...(transcriptText ? { transcriptText } : {}),
       });
+      if (deps.transformContinuation) {
+        messages = await deps.transformContinuation(messages, mode);
+      }
       await deps.log.append({ type: "state", messages, mode, ts: now() });
     } catch (error) {
       if (turnAbort.signal.aborted) {

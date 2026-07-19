@@ -63,13 +63,13 @@ export const agentConfigSchema = z.object({
   /**
    * Context-size ceiling. `softLimit` is the request input-token threshold
    * (e.g. 240_000 to stay under a 272k long-context billing tier); unset →
-   * no ceiling. The primary agent warns and keeps going (`onLimit: "warn"`);
-   * children — who cannot receive warnings — stop their tool loop instead.
+   * no ceiling. The primary agent warns or compacts (`onLimit`); children —
+   * who cannot receive warnings — stop their tool loop instead.
    */
   context: z
     .object({
       softLimit: z.number().int().min(1).optional(),
-      onLimit: z.enum(["warn"]).default("warn"),
+      onLimit: z.enum(["warn", "compact"]).default("warn"),
     })
     .prefault({}),
   llm: llmConfigSchema.prefault({}),
@@ -203,6 +203,11 @@ export interface Agent {
   composed: ComposedPrompt;
   /** Run one turn: prompt in, final text + trajectory + usage out. */
   generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
+  /**
+   * Replace this adapter's opaque continuation with a fresh summarized one.
+   * Optional so lightweight test/eval agents need only implement generation.
+   */
+  compact?(messages: unknown[]): Promise<unknown[]>;
 }
 
 /**
@@ -457,6 +462,10 @@ export async function createAgent(
   opts: CreateAgentOptions,
 ): Promise<Agent> {
   const runtime = createRuntime(config.llm, opts.metricsSink);
+  // Compaction is a child-style task, so it deliberately follows the same
+  // provider/model/tier routing as subagents rather than consuming the primary
+  // model's tier.
+  const compactor = createRuntime(childAgentConfig(config, "delegate").llm, opts.metricsSink);
 
   const composed = composePrompt(
     config.prompt,
@@ -474,6 +483,7 @@ export async function createAgent(
 
   return {
     composed,
+    compact: (messages) => compactor.compact(messages),
     generate: (prompt, generateOpts) =>
       runtime.generate({
         instructions: composed.instructions,
