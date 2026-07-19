@@ -38,4 +38,4 @@
 - Each domain owns its zod schema; `config/index.ts` only composes them.
 - Registries keyed by config values (`editModes`, `chatCommands`, `checkGraders`).
 - Every module has a colocated `.test.ts`; `bun test core`, `tsc --noEmit`, and `bun run check` must stay green, and `core/eval` must keep working (`--dry-run`, `--selfcheck`) at every commit.
-- Repo workflows live as Agent Skills in `.aj/skills/` (e.g. `/ship` for the changeset → PR → Copilot review → merge flow); prefer extending a skill over documenting a workflow only here.
+- Repo workflows live as Agent Skills in `.aj/skills/` (e.g. `/ship` for the changeset → PR → merge flow); prefer extending a skill over documenting a workflow only here.

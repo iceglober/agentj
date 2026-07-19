@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Ship completed engineering work in this repo — validate, add a changeset, open a pull request, address the automatic GitHub Copilot review, and merge. Use when code changes are complete and validated and the user wants them merged, or when the user says ship, open a PR, or merge this.
+description: Ship completed engineering work in this repo — validate, add a changeset, open a pull request, and merge once CI is green. Use when code changes are complete and validated and the user wants them merged, or when the user says ship, open a PR, or merge this.
 compatibility: Requires git and the gh CLI authenticated against github.com
 metadata:
   agentj-mode: build
@@ -41,24 +41,11 @@ Follow every step; do not skip the review loop.
   the branch, then: `gh pr create --fill` (expand the body with motivation and
   testing notes when the diff is not self-explanatory).
 
-## 4. Address the Copilot review — this gate is load-bearing
-
-- An automatic GitHub Copilot review lands on every PR. Wait for it; do not
-  merge before it arrives. Poll every 2-3 minutes (up to ~15 minutes):
-  - `gh api repos/{owner}/{repo}/pulls/<n>/reviews`
-  - `gh api repos/{owner}/{repo}/pulls/<n>/comments`
-    (the reviewer login contains "copilot")
-- For every actionable comment: fix it and push, or reply on the thread with a
-  short reason why not. Never silently ignore a comment.
-- Re-check for follow-up comments after pushing fixes.
-- If no review arrived after ~15 minutes, say so explicitly and ask the user
-  whether to proceed without it.
-
-## 5. Merge
+## 4. Merge
 
 - Confirm CI is green: `gh pr checks <n> --watch`
+- If any review comments landed on the PR, address each one before merging:
+  fix it and push, or reply on the thread with a short reason why not.
 - Merge (auto-merge queues it if checks are still running):
   `gh pr merge <n> --squash --auto`
-- If the repo has a merge queue enabled, `--auto` enqueues; report the queue
-  state instead of waiting silently.
 - After the merge, report the PR number and what shipped in one sentence.
