@@ -1,5 +1,22 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.27
+
+### Minor Changes
+
+- 49225a6: Auto smart compact: set `agent.context.onLimit: "compact"` and when a foreground request's context crosses `agent.context.softLimit`, the session summarizes its history into a fresh continuation (via the subagent-tier model) at the end of the turn instead of only warning — the compacted state persists to the session log, so `--resume` picks it up for free. The default `"warn"` path now re-arms instead of firing once: after the first warning, it warns again each time context grows another tenth of the soft limit.
+- 3d39bce: MCP capabilities can now reach subagents and background build jobs, per-server and opt-in. HTTP servers may declare `inherit: "shared"` — children get a read-only view of the primary connection's catalog (they call tools but can never reload, close, or refresh it) — and stdio servers may declare `inherit: "isolated"` — each child gets its own server process rooted at its worktree, closed deterministically when the child finishes, with cleanup on partial startup. The default stays primary-only, and children's MCP calls ride the existing `permissions.mcp` policy with asks labeled by the requesting subagent or job.
+- 2a4f4d8: MCP server-provided prompt templates are now supported. Prompts are discovered with pagination at connect time (and lazily refreshed on prompt-list-change notifications), listed by `/mcp`, and invoked as namespaced slash commands like `/mcp:github:review-pr` with fuzzy completion — built-in commands always win. Arguments are collected interactively with required-field validation; the returned prompt messages (including embedded text resources) are bounded, labeled as untrusted external content, and submitted through the normal chat path, so the opaque model continuation and resumed sessions are unaffected.
+- 10c2fcc: Keep Agentj’s editor, status, and other live terminal controls pinned to the bottom of the terminal while transcript output scrolls above them. For example, recalling a long multiline history entry now scrolls inside a bounded editor viewport instead of pushing the status line off-screen.
+- 62b5642: Plan-mode agents — the interactive plan chat, plan background jobs, and research subagents — now carry an observation-only `bash` tool, gated by the same `permissions.bash` policy as build mode (asks are labeled with the requesting job or subagent). Previously a plan job like "wait for checks on PR 62" failed immediately because plan agents had no way to run commands at all; now it can run `gh pr checks`, inspect git state, or run tests, while file edits remain build-only.
+- 5d3e44d: Terminal-native cost reporting replaces the briefly-committed Grafana dashboard (which assumed an OTLP→Prometheus pipeline most installs don't run). Each foreground turn now persists a usage record to the session log — provider/model, input tokens with cache-read/cache-write splits, output tokens, and a count of requests past Azure's 272k long-context tier — and the new `/cost` command prices the session (including resumed history) per model from the `eval.prices` $/Mtok map, showing `$ n/a` for unpriced models. Runtime metrics stay USD-free; the long-context OTel counter from the dashboard iteration is removed along with the dashboard.
+- 41b87f8: Model-picking config is now tier-first everywhere: `eval.judge.tier` routes the eval judge through the `llm.tiers` ladder (default: the frontier rung, falling back to the agent model when no ladder is configured — previously a hardcoded `gpt-5.6-sol`), and both `eval.judge.model` and `agent.tools.subagents.model` are deprecated escape hatches that still win over their tiers for back-compat. A provider or ladder swap no longer touches routing config.
+
+### Patch Changes
+
+- bc586d9: Long model requests no longer die at five minutes. Bun's fetch imposes a hardcoded 300-second timeout when no signal is supplied, so a long reasoning request could kill a whole turn with "The operation timed out" (observed killing a one-shot `agentj run` mid-task). Azure model requests now always carry an explicit 30-minute deadline signal, composed with the turn's own abort signal so interrupts still win.
+- cbaca25: Polish the interactive TUI with semantic terminal styling, clearer activity and status hierarchy, safe monochrome output, and `<Y>`, `<A>`, and `<N>` permission choices.
+
 ## 0.1.0-next.26
 
 ### Patch Changes
