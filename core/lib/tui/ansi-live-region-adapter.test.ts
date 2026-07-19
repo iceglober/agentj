@@ -2,85 +2,81 @@ import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { createAnsiLiveRegionAdapter } from "./ansi-live-region-adapter";
 
-const createOutput = (): {
-  output: PassThrough & { columns: number; rows: number };
-  text: () => string;
-} => {
+const createRegion = () => {
   const output = new PassThrough() as PassThrough & { columns: number; rows: number };
   output.columns = 40;
   output.rows = 10;
   const chunks: Buffer[] = [];
   output.on("data", (chunk: Buffer) => chunks.push(chunk));
-  return { output, text: () => Buffer.concat(chunks).toString("utf8") };
+  const region = createAnsiLiveRegionAdapter({ stdout: output });
+  const all = () => Buffer.concat(chunks).toString("utf8");
+  // Bytes written by `fn` alone.
+  const tap = (fn: () => void): string => {
+    const before = all().length;
+    fn();
+    return all().slice(before);
+  };
+  return { region, tap };
 };
 
-/** Bytes written by `fn`, isolated from everything emitted before it. */
-const tapLast =
-  (text: () => string) =>
-  (fn: () => void): string => {
-    const before = text().length;
-    fn();
-    return text().slice(before);
-  };
+const newlineCount = (s: string): number => (s.match(/\r\n/g) ?? []).length;
 
-describe("createAnsiLiveRegionAdapter", () => {
-  test("anchors logical layouts and their cursor to the terminal bottom", () => {
-    const { output, text } = createOutput();
-    const region = createAnsiLiveRegionAdapter({ stdout: output });
-
-    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 3 });
-
-    expect(text()).toContain("[9;1Heditor\r\nstatus");
-    expect(text()).toContain("[9;4H");
+describe("createAnsiLiveRegionAdapter (floating)", () => {
+  test("paint draws the layout beneath the transcript with relative moves, not absolute rows", () => {
+    const { region, tap } = createRegion();
+    const written = tap(() =>
+      region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 }),
+    );
+    expect(written).toContain("editor\r\nstatus");
+    // Floating never addresses an absolute row (…;1H) — that was the pinned design.
+    expect(written).not.toMatch(/\[\d+;1H/);
+    // Cursor parks back up onto the editor row.
+    expect(written).toContain("[1A");
   });
 
-  test("printAbove lands text on the bottom row and emits no trailing scroll padding", () => {
-    const { output, text } = createOutput();
-    const region = createAnsiLiveRegionAdapter({ stdout: output });
-    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
+  test("a transcript write adds one constant separator, never the region height", () => {
+    const { region, tap } = createRegion();
+    // A tall live region (progress block + editor + status), like mid-turn.
+    region.paint({ lines: ["p1", "p2", "p3", "editor", "status"], cursorRow: 3, cursorColumn: 0 });
 
-    const before = text().length;
-    region.printAbove("t1");
-    const written = text().slice(before);
-    // Last line of the text sits on row 10 (bottom); the following paint scrolls
-    // it up by the live-region height, so printAbove itself pads nothing.
-    expect(written).toContain("[10;1Ht1");
-    expect(written.endsWith("t1")).toBe(true);
-    expect(written).not.toContain("t1\r\n");
+    const written = tap(() => region.printAbove("row1"));
+    // Walks up to the region top, clears, writes the line + one blank separator.
+    expect(written).toContain("[3A"); // erase: up to region top (cursor was 3 rows down)
+    expect(written.endsWith("row1\r\n\r\n")).toBe(true);
+    expect(newlineCount(written)).toBe(2); // one line + one separator — NOT the 5-row height
   });
 
-  test("padding never scales with text height", () => {
-    const { output, text } = createOutput();
-    const region = createAnsiLiveRegionAdapter({ stdout: output });
-    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
+  test("consecutive writes keep the same one-row separator regardless of region height", () => {
+    const { region, tap } = createRegion();
+    region.paint({ lines: ["p1", "p2", "editor", "status"], cursorRow: 2, cursorColumn: 0 });
 
-    const tap = tapLast(text);
+    region.printAbove("a");
+    region.paint({ lines: ["", "editor", "status"], cursorRow: 1, cursorColumn: 0 });
+    const second = tap(() => region.printAbove("b"));
+
+    // Same constant separator whether the region was 4 rows or 3 — no height
+    // ever leaks in as extra padding.
+    expect(second.endsWith("b\r\n\r\n")).toBe(true);
+    expect(newlineCount(second)).toBe(2);
+  });
+
+  test("a tall transcript block scrolls naturally with only the one separator", () => {
+    const { region, tap } = createRegion();
+    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
     const block = Array.from({ length: 8 }, (_, i) => `L${i + 1}`).join("\r\n");
+
     const written = tap(() => region.printAbove(block));
-    // The 8-line block overflows and the terminal scrolls on its own; printAbove
-    // adds no trailing newlines, so nothing follows the block's last line.
-    expect(written.endsWith("L8")).toBe(true);
-    expect(written).not.toContain("L8\r\n");
+    // The block's own 7 newlines plus one separator; the terminal scrolls it
+    // into history on its own — the adapter adds no height-based padding.
+    expect(written.endsWith("L8\r\n\r\n")).toBe(true);
+    expect(newlineCount(written)).toBe(9);
   });
 
-  test("padding never scales with a stale (taller) live region — the shrink-gap bug", () => {
-    const { output, text } = createOutput();
-    const region = createAnsiLiveRegionAdapter({ stdout: output });
-    // A tall completion menu, then a shrink back to the 2-row editor. The band
-    // (anchor) stays 6 until reclaimed, but the visible region is 2.
-    region.paint({
-      lines: ["m1", "m2", "m3", "m4", "editor", "status"],
-      cursorRow: 4,
-      cursorColumn: 0,
-    });
-    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
-
-    const tap = tapLast(text);
-    const written = tap(() => region.printAbove("Command: help"));
-    // Clears the whole vacated band (from row 5) and still lands the line on the
-    // bottom row (10) with no padding — no gap the size of the dismissed menu.
-    expect(written).toContain("[5;1H[J");
-    expect(written).toContain("[10;1HCommand: help");
-    expect(written).not.toContain("help\r\n");
+  test("clear erases the drawn region and forgets it", () => {
+    const { region, tap } = createRegion();
+    region.paint({ lines: ["a", "b", "editor"], cursorRow: 2, cursorColumn: 0 });
+    const written = tap(() => region.clear());
+    expect(written).toContain("[2A"); // up to the region top
+    expect(written).toContain("[J"); // clear to end of screen
   });
 });
