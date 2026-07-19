@@ -167,17 +167,26 @@ export function createAnsiLiveRegionAdapter(
       }
       resetForResize(rows);
       if (anchorRows === 0) reserve(1, rows);
-      const top = Math.max(1, rows - anchorRows + 1);
-      write(`${csi(`${top};1H`)}${csi("J")}`);
-      // The text lands at the top of the reserved band and consumes it; the
-      // anchor shrinks as the band fills, so a layout that grew tall and then
-      // shrank does not leave a permanent gap under the transcript. Extra
-      // newlines scroll only when the band left over is smaller than the rows
-      // the live region actually paints.
-      const consumed = physicalTextRows(text) + 1;
-      const scrollRows = Math.max(0, lastPaintRows - (anchorRows - consumed));
-      write(`${csi(`${top};1H`)}${text}\r\n${"\r\n".repeat(scrollRows)}`);
-      anchorRows = Math.max(anchorRows - consumed, lastPaintRows);
+      // `anchorRows` spans the live region plus any rows a since-shrunk layout
+      // vacated; clearing all of it lets this write reclaim that gap.
+      const bandTop = Math.max(1, rows - anchorRows + 1);
+      write(`${csi(`${bandTop};1H`)}${csi("J")}`);
+      // The live region is pinned to the bottom `lastPaintRows` rows, so the
+      // text must end exactly one row above them. Scroll cost is independent of
+      // the text height — the terminal scrolls on its own as tall text overflows
+      // — which is what keeps the gap from growing with the content.
+      const textRows = physicalTextRows(text);
+      const fitStart = rows - lastPaintRows - textRows + 1;
+      if (fitStart >= bandTop) {
+        // Fits in the cleared band: place it low so it sits tight above the
+        // live region with no scrolling and no trailing gap.
+        write(`${csi(`${fitStart};1H`)}${text}`);
+      } else {
+        // Taller than the free space: write from the band top and let it scroll
+        // as it overflows, then reserve exactly the live region's rows below.
+        write(`${csi(`${bandTop};1H`)}${text}${"\r\n".repeat(lastPaintRows)}`);
+      }
+      anchorRows = lastPaintRows;
       lastLayout = null;
       knownHeight = rows;
     },

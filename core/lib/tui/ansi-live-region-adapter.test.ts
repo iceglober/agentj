@@ -21,8 +21,8 @@ describe("createAnsiLiveRegionAdapter", () => {
 
     region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 3 });
 
-    expect(text()).toContain("\u001b[9;1Heditor\r\nstatus");
-    expect(text()).toContain("\u001b[9;4H");
+    expect(text()).toContain("[9;1Heditor\r\nstatus");
+    expect(text()).toContain("[9;4H");
   });
 
   test("keeps transcript writes above the reserved live rows", () => {
@@ -44,31 +44,34 @@ describe("createAnsiLiveRegionAdapter", () => {
     region.paint({ lines: tall, cursorRow: 4, cursorColumn: 0 });
     region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
 
-    // Rows 5..10 are reserved (anchor 6) but only 2 are painted. The next
-    // transcript line must land at the top of that band — row 5 — and consume
-    // it rather than re-padding six newlines under itself.
+    // Rows 5..10 are still reserved (anchor 6) though only 2 are painted. The
+    // write clears the whole band (from row 5) and places its one line tight
+    // above the 2-row live region — at row 8 — with no scroll padding, so the
+    // vacated rows are reclaimed instead of left as a gap under the editor.
     region.printAbove("t1");
     const afterT1 = text();
-    expect(afterT1).toContain("[5;1Ht1\r\n");
-    expect(afterT1).not.toContain("t1\r\n\r\n\r\n");
-
-    // The band shrank by two rows (text + separator): the next write lands
-    // two rows lower, still without any scroll padding.
-    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
-    region.printAbove("t2");
-    expect(text()).toContain("[7;1Ht2\r\n");
-    expect(text()).not.toContain("t2\r\n\r\n\r\n");
+    expect(afterT1).toContain("[5;1H[J");
+    expect(afterT1).toContain("[8;1Ht1");
+    expect(afterT1).not.toContain("t1\r\n");
   });
 
-  test("steady-state writes scroll once the vacated band is used up", () => {
+  test("scroll padding tracks the live-region height, not the text height", () => {
     const { output, text } = createOutput();
     const region = createAnsiLiveRegionAdapter({ stdout: output });
-    region.paint({ lines: ["p1", "editor", "status"], cursorRow: 1, cursorColumn: 0 });
     region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
 
-    region.printAbove("t1"); // consumes the single vacated row; anchor floors at 2
+    // A single line, full screen: two trailing newlines keep the 2-row band free.
+    region.printAbove("t1");
+    expect(text()).toContain("t1\r\n\r\n");
+    expect(text()).not.toContain("t1\r\n\r\n\r\n");
+
+    // A tall block must NOT pad proportionally to its height — the terminal
+    // scrolls on its own as the text overflows, so the trailing padding stays
+    // at the live-region height (2). This is the gap-that-grows-with-content bug.
     region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
-    region.printAbove("t2"); // no band left: must scroll to keep 2 rows free
-    expect(text()).toContain("t2\r\n\r\n");
+    const block = Array.from({ length: 8 }, (_, i) => `L${i + 1}`).join("\r\n");
+    region.printAbove(block);
+    expect(text()).toContain("L8\r\n\r\n");
+    expect(text()).not.toContain("L8\r\n\r\n\r\n");
   });
 });
