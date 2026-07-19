@@ -2,7 +2,12 @@ import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
 import { providerNames } from "../llm";
-import { mcpServerConfigSchema } from "../mcp";
+import {
+  type McpPromptCatalogEntry,
+  type McpPromptResult,
+  mcpServerConfigSchema,
+  renderMcpPrompt,
+} from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
 import type { UpdateChannel } from "../update";
@@ -104,6 +109,12 @@ export interface ChatCommandContext {
   models?: ModelController;
   mcp?: {
     statuses(): readonly McpRuntimeStatus[];
+    prompts?(): readonly McpPromptCatalogEntry[];
+    getPrompt?(
+      server: string,
+      prompt: string,
+      args: Record<string, string>,
+    ): Promise<McpPromptResult>;
     reload(name?: string): Promise<void>;
     /** Interactive OAuth flow for an HTTP server (browser round-trip). */
     authorize?(
@@ -315,12 +326,19 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
   const [action, remainder] = splitHead(args);
   if (!action) {
     const statuses = context.mcp?.statuses() ?? [];
+    const prompts = context.mcp?.prompts?.() ?? [];
     context.emit({
       type: "notice",
       text:
-        statuses.length === 0
+        statuses.length === 0 && prompts.length === 0
           ? "No MCP servers configured. Run /mcp add."
-          : statuses.map(formatMcpStatus).join("\n"),
+          : [
+              ...statuses.map(formatMcpStatus),
+              ...prompts.map(
+                (prompt) =>
+                  `/mcp:${prompt.server}:${prompt.name} — ${prompt.description ?? prompt.title ?? "MCP prompt"}`,
+              ),
+            ].join("\n"),
     });
     return;
   }
@@ -412,6 +430,47 @@ const runMcpCommand = async (context: ChatCommandContext, args: string): Promise
   } catch {
     context.emit({ type: "notice", text: "MCP server definition must be valid JSON." });
   }
+};
+
+const parseMcpPromptCommand = (name: string): { server: string; prompt: string } | null => {
+  const match = name.match(/^mcp:([a-z0-9_-]+):([^\s:]+)$/iu);
+  return match ? { server: match[1]!, prompt: match[2]! } : null;
+};
+
+const runMcpPrompt = async (
+  context: ChatCommandContext,
+  invocation: { server: string; prompt: string },
+): Promise<void> => {
+  const found = context.mcp
+    ?.prompts?.()
+    .find((entry) => entry.server === invocation.server && entry.name === invocation.prompt);
+  if (!found || !context.mcp?.getPrompt) {
+    context.emit({
+      type: "notice",
+      text: `Unknown MCP prompt /mcp:${invocation.server}:${invocation.prompt}.`,
+    });
+    return;
+  }
+  const guided = requireGuidedInput(context);
+  if (!guided) return;
+  const args: Record<string, string> = {};
+  for (const argument of found.arguments ?? []) {
+    const value = await guided.askInput({
+      label: `MCP ${invocation.server}/${invocation.prompt}: ${argument.name}${argument.required ? " (required)" : " (optional)"}`,
+      validate: (entered) =>
+        argument.required && !entered.trim() ? `${argument.name} is required.` : null,
+    });
+    if (value === null) {
+      context.emit({ type: "notice", text: "MCP prompt invocation cancelled." });
+      return;
+    }
+    if (value || argument.required) args[argument.name] = value;
+  }
+  const result = await context.mcp.getPrompt(invocation.server, invocation.prompt, args);
+  await context.session.send(renderMcpPrompt(invocation.server, invocation.prompt, result), {
+    transcriptText: `MCP prompt: ${invocation.server}/${invocation.prompt}`,
+    restoreText: `/mcp:${invocation.server}:${invocation.prompt}`,
+  });
 };
 
 const runUpdateCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
@@ -756,16 +815,25 @@ export function completeChatInput(
   const token = { start, end };
 
   if (start === first) {
-    return {
-      token,
-      suggestions: suggestChatCommands(prefix.slice(1), context?.skills).map(
-        ({ name, summary }) => ({
-          value: `/${name} `,
-          label: `/${name}`,
-          summary,
-        }),
-      ),
-    };
+    const commands = suggestChatCommands(prefix.slice(1), context?.skills).map(
+      ({ name, summary }) => ({
+        value: `/${name} `,
+        label: `/${name}`,
+        summary,
+      }),
+    );
+    const prompts = (context?.mcp?.prompts?.() ?? [])
+      .map((prompt) => ({
+        name: `mcp:${prompt.server}:${prompt.name}`,
+        summary: prompt.description ?? prompt.title ?? "MCP prompt",
+      }))
+      .filter((prompt) => prompt.name.toLowerCase().startsWith(prefix.slice(1).toLowerCase()))
+      .map((prompt) => ({
+        value: `/${prompt.name} `,
+        label: `/${prompt.name}`,
+        summary: `${prompt.summary} (MCP prompt)`,
+      }));
+    return { token, suggestions: [...commands, ...prompts] };
   }
 
   const [command, ...args] = prior;
@@ -779,6 +847,19 @@ export function completeChatInput(
       };
     }
   }
+  const mcpPrompt = parseMcpPromptCommand(command ?? "");
+  if (mcpPrompt) {
+    return {
+      token,
+      suggestions: [],
+      hint: context?.mcp
+        ?.prompts?.()
+        .some((entry) => entry.server === mcpPrompt.server && entry.name === mcpPrompt.prompt)
+        ? "Press Enter to provide MCP prompt arguments."
+        : "Unknown MCP prompt.",
+    };
+  }
+
   if (command === "mcp") {
     if (args.length === 0) {
       return {
@@ -940,16 +1021,27 @@ export async function runChatCommand(
   args: string,
 ): Promise<void> {
   const command = chatCommands[name];
-  const skill = command ? undefined : context.skills?.find((entry) => entry.name === name);
+  const mcpPrompt = command ? null : parseMcpPromptCommand(name);
+  const skill =
+    command || mcpPrompt ? undefined : context.skills?.find((entry) => entry.name === name);
   // Skill invocations start turns, so like /build they skip the command event.
-  if (!command?.startsTurn && !skill) context.emit({ type: "command", name });
-  if (!command && !skill) {
+  if (!command?.startsTurn && !skill && !mcpPrompt) context.emit({ type: "command", name });
+  if (!command && !skill && !mcpPrompt) {
     context.emit({ type: "notice", text: `Unknown command /${name} — try /help.` });
     return;
   }
   try {
     if (command) {
       await command.run(context, args);
+    } else if (mcpPrompt) {
+      if (args) {
+        context.emit({
+          type: "notice",
+          text: "MCP prompt arguments are collected interactively; do not put them in the command.",
+        });
+        return;
+      }
+      await runMcpPrompt(context, mcpPrompt);
     } else if (skill) {
       if (skill.mode) context.session.setMode(skill.mode);
       await context.session.send(skill.prompt(args), {

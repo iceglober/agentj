@@ -67,8 +67,10 @@ Keys and commands:
 - **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
   the first non-whitespace input token shows fuzzy-matched command suggestions.
 - **`/mcp`** — inspect MCP status; guided completions provide `add`, `auth`, `reload`, `remove`,
-  and advanced `set` actions. Successful configuration changes reload automatically and become
-  available on the next foreground turn.
+  and advanced `set` actions. Server prompt templates appear as namespaced commands such as
+  **`/mcp:docs:summarize`**; built-in commands always win. Invoking one collects its arguments
+  interactively, then sends bounded, explicitly labeled external content as a normal user turn.
+  Successful configuration changes reload automatically and become available on the next foreground turn.
 - **`/config get|set|delete`** — inspect or update global configuration with path/value completion.
   Omitting a sensitive value opens a masked prompt.
 - **`/model [primary|subagents]`** — choose a provider and model in a guided prompt. Changes are
@@ -150,7 +152,12 @@ read-only planning. Tools in `tools.direct` are exposed with their native JSON s
 eligible tools stay in a bounded catalog accessed through `find_mcp_tools` and `call_mcp_tool`,
 which avoids sending every server schema to the model. Resources similarly use
 `find_mcp_resources` and `read_mcp_resource`, including URI templates. Catalogs refresh lazily when
-a server sends a list-change notification. `/mcp reload [name]` reconnects one or all servers;
+a server sends a list-change notification. Server prompt templates are likewise discovered with
+pagination and invoked as `/mcp:<server>:<prompt>` (for example, `/mcp:github:review-pr`).
+Their required and optional arguments are collected in terminal prompts rather than command text.
+Returned prompt messages, including text embedded in resources, are bounded and labeled as
+untrusted external instructions before being submitted through the normal chat path; this preserves
+the opaque model continuation and works unchanged after a session is resumed. `/mcp reload [name]` reconnects one or all servers;
 successful replacements (including direct-tool changes) activate at the next foreground turn. If a
 reload fails, an existing working connection stays active and `/mcp` shows a deterministic recovery
 hint when Agentj can identify one. External file or environment changes require a manual reload.
@@ -174,8 +181,8 @@ notice pointing at `/mcp auth`, so authorize once interactively before non-inter
 server does not support OAuth or dynamic client registration, the same command falls back to a
 masked Authorization-header prompt; that value is omitted from terminal and prompt history but
 remains plaintext in the existing configuration file format, so prefer `headersFromEnv` for
-long-lived keys. Initial MCP support does not include server prompts, legacy HTTP + SSE, or MCP
-access from delegates/background jobs.
+long-lived keys. MCP support does not include legacy HTTP + SSE, or MCP access from
+delegates/background jobs.
 
 ## Parallel subagents
 

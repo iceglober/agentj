@@ -80,7 +80,7 @@ await server.connect(new StdioServerTransport());
       }),
       { root: process.cwd() },
     );
-    expect(client.capabilities).toEqual({ tools: true, resources: true });
+    expect(client.capabilities).toEqual({ tools: true, resources: true, prompts: false });
     const tools = await client.listTools();
     expect(tools.items[0]).toMatchObject({ name: "echo", description: "Echo text" });
     expect(tools.items[0]?.inputSchema).toMatchObject({

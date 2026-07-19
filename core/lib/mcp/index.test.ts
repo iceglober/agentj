@@ -3,13 +3,18 @@ import type { ToolDef } from "../llm";
 import {
   canonicalMcpToolName,
   connectMcp,
+  connectMcpServer,
+  getMcpPrompt,
+  listMcpPrompts,
   type McpPage,
+  type McpRemotePrompt,
   type McpRemoteResource,
   type McpRemoteResourceTemplate,
   type McpRemoteTool,
   type McpServerClient,
   mcpConfigSchema,
   normalizeMcpToolResult,
+  renderMcpPrompt,
 } from ".";
 
 const execute = (tool: ToolDef | undefined, input: unknown, options?: unknown) => {
@@ -18,7 +23,10 @@ const execute = (tool: ToolDef | undefined, input: unknown, options?: unknown) =
 };
 
 class FakeClient implements McpServerClient {
-  capabilities = { tools: true, resources: true };
+  capabilities = { tools: true, resources: true, prompts: true };
+  prompts: McpRemotePrompt[] = [];
+  promptLists = 0;
+  promptListener?: (kind: "tools" | "resources" | "prompts") => void;
   tools: McpRemoteTool[] = [];
   resources: McpRemoteResource[] = [];
   templates: McpRemoteResourceTemplate[] = [];
@@ -27,7 +35,22 @@ class FakeClient implements McpServerClient {
   closes = 0;
   toolLists = 0;
   resourceLists = 0;
-  listener?: (kind: "tools" | "resources") => void;
+  listener?: (kind: "tools" | "resources" | "prompts") => void;
+
+  async listPrompts(cursor?: string): Promise<McpPage<McpRemotePrompt>> {
+    this.promptLists += 1;
+    if (!cursor && this.prompts.length > 1)
+      return { items: this.prompts.slice(0, 1), nextCursor: "2" };
+    return { items: cursor ? this.prompts.slice(1) : this.prompts };
+  }
+
+  async getPrompt(name: string, args: Record<string, string>) {
+    return {
+      messages: [
+        { role: "user" as const, content: { type: "text", text: `${name}:${args.topic ?? ""}` } },
+      ],
+    };
+  }
 
   async listTools(cursor?: string): Promise<McpPage<McpRemoteTool>> {
     this.toolLists += 1;
@@ -54,7 +77,7 @@ class FakeClient implements McpServerClient {
     return { contents: [{ uri, text: "resource body" }] };
   }
 
-  onListChanged(listener: (kind: "tools" | "resources") => void): void {
+  onListChanged(listener: (kind: "tools" | "resources" | "prompts") => void): void {
     this.listener = listener;
   }
 
@@ -225,6 +248,49 @@ describe("connectMcp", () => {
       error: "Unknown or unavailable MCP resource for plan mode: docs/secrets://not-listed",
     });
     await connection.close();
+  });
+
+  test("paginates, refreshes, and renders external server prompts", async () => {
+    const client = new FakeClient();
+    client.prompts = [
+      { name: "first", arguments: [{ name: "topic", required: true }] },
+      { name: "second", description: "Second prompt" },
+    ];
+    const state = await connectMcpServer(
+      "docs",
+      mcpConfigSchema.parse({ servers: { docs: { transport: "stdio", command: "server" } } })
+        .servers.docs!,
+      { root: "/repo", connectServer: async () => client },
+    );
+    expect(client.promptLists).toBe(2);
+    expect(listMcpPrompts([state]).map(({ name }) => name)).toEqual(["first", "second"]);
+    client.prompts = [{ name: "updated" }];
+    client.listener?.("prompts");
+    await expect(getMcpPrompt([state], "docs", "updated", {})).resolves.toMatchObject({
+      messages: [{ content: { text: "updated:" } }],
+    });
+    expect(client.promptLists).toBe(3);
+    expect(
+      renderMcpPrompt(
+        "docs",
+        "first",
+        {
+          messages: [
+            {
+              role: "user",
+              content: { type: "resource", resource: { uri: "docs://guide", text: "guide" } },
+            },
+          ],
+        },
+        500,
+      ),
+    ).toContain("embedded resource docs://guide");
+    expect(() =>
+      renderMcpPrompt("docs", "bad", {
+        messages: [{ role: "user", content: { type: "image", data: "x" } }],
+      }),
+    ).toThrow("unsupported content");
+    await state.client.close();
   });
 
   test("invalidates catalogs lazily and cleans up partial startup", async () => {

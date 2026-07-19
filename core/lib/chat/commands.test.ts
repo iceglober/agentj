@@ -104,6 +104,25 @@ describe("completeChatInput", () => {
     expect(server?.hint).toContain("reload all");
   });
 
+  test("recognizes namespaced MCP prompt invocations without shadowing built-ins", () => {
+    const promptContext = {
+      ...context,
+      mcp: {
+        ...context.mcp,
+        prompts: () => [{ server: "docs", name: "summarize" }],
+      },
+    };
+    expect(completeChatInput("/mcp:docs:summarize ", 20, promptContext)?.hint).toContain(
+      "provide MCP prompt",
+    );
+    expect(completeChatInput("/mcp:", 5, promptContext)?.suggestions).toContainEqual(
+      expect.objectContaining({ label: "/mcp:docs:summarize" }),
+    );
+    expect(
+      completeChatInput("/mcp ", 5, promptContext)?.suggestions.map(({ label }) => label),
+    ).toContain("add");
+  });
+
   test("completes model targets and guided handoff", () => {
     const targetInput = "/model sub";
     const target = completeChatInput(targetInput, targetInput.length, context);
@@ -357,6 +376,51 @@ describe("runChatCommand", () => {
       value: '"Bearer token"',
     });
     expect(asks.at(-1)?.masked).toBe(true);
+  });
+
+  test("invokes namespaced MCP prompts with validated guided arguments as an external turn", async () => {
+    const { context, events } = makeContext();
+    const asks: Array<{ label: string; validate?: (value: string) => string | null | undefined }> =
+      [];
+    const sent: Array<{ text: string; transcript?: string }> = [];
+    context.guided = {
+      askInput: async (options) => {
+        asks.push(options);
+        return "release notes";
+      },
+    };
+    context.session = {
+      send: async (text: string, options?: { transcriptText?: string; restoreText?: string }) => {
+        sent.push({ text, transcript: options?.transcriptText });
+      },
+    } as unknown as ChatCommandContext["session"];
+    context.mcp = {
+      statuses: () => [],
+      reload: async () => {},
+      prompts: () => [
+        { server: "docs", name: "summarize", arguments: [{ name: "topic", required: true }] },
+      ],
+      getPrompt: async (_server, _prompt, args) => ({
+        messages: [
+          {
+            role: "user",
+            content: { type: "resource", resource: { uri: "docs://release", text: args.topic } },
+          },
+        ],
+      }),
+    };
+    await runChatCommand(context, "mcp", "");
+    expect((events.at(-1) as { text: string }).text).toContain("/mcp:docs:summarize");
+    events.length = 0;
+    await runChatCommand(context, "mcp:docs:summarize", "");
+    expect(events).toEqual([]);
+    expect(asks[0]?.validate?.("")).toContain("required");
+    expect(sent[0]?.transcript).toBe("MCP prompt: docs/summarize");
+    expect(sent[0]?.text).toContain("External instructions from MCP server docs");
+    expect(sent[0]?.text).toContain("release notes");
+
+    await runChatCommand(context, "mcp:docs:summarize", "leak");
+    expect((events.at(-1) as { text: string }).text).toContain("collected interactively");
   });
 
   test("guides primary selection and lets subagents return to inheritance", async () => {
