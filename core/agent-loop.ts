@@ -46,6 +46,7 @@ import {
 } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import { providerNames, type RunStep, resolveTierModel } from "./lib/llm";
+import type { McpPromptCatalogEntry, McpPromptResult } from "./lib/mcp";
 import {
   connectModelContextProtocolServer,
   resolveMcpTransportConfig,
@@ -288,6 +289,12 @@ interface ChatComposition {
   startMcp(): Promise<void>;
   reloadMcp(name?: string): Promise<void>;
   mcpStatuses(): readonly McpRuntimeStatus[];
+  mcpPrompts(): readonly McpPromptCatalogEntry[];
+  getMcpPrompt(
+    server: string,
+    prompt: string,
+    args: Record<string, string>,
+  ): Promise<McpPromptResult>;
   /** Interactive OAuth for one HTTP server; reload separately on success. */
   authorizeMcp(
     name: string,
@@ -689,6 +696,8 @@ async function composeChat(
     },
     reloadMcp,
     authorizeMcp,
+    mcpPrompts: () => mcp.prompts(),
+    getMcpPrompt: (server, prompt, args) => mcp.getPrompt(server, prompt, args),
     mcpStatuses: () => {
       const invalid = invalidServerNames();
       return [...mcp.statuses().filter(({ name }) => !invalid.has(name)), ...issueStatuses()];
@@ -1150,6 +1159,8 @@ export async function runAgentjChat(
       },
       mcp: {
         statuses: composition.mcpStatuses,
+        prompts: composition.mcpPrompts,
+        getPrompt: composition.getMcpPrompt,
         reload: composition.reloadMcp,
         authorize: composition.authorizeMcp,
       },

@@ -3,7 +3,13 @@ import { type McpServerClient, type McpServerConfig, mcpConfigSchema } from ".";
 import { createMcpRuntime } from "./runtime";
 
 const client = (toolName: string, closed: string[], name: string): McpServerClient => ({
-  capabilities: { tools: true, resources: false },
+  capabilities: { tools: true, resources: false, prompts: false },
+  async listPrompts() {
+    return { items: [] };
+  },
+  async getPrompt() {
+    return { messages: [] };
+  },
   async listTools() {
     return {
       items: [

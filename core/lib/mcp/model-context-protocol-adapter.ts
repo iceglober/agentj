@@ -6,13 +6,16 @@ import {
 } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
+  PromptListChangedNotificationSchema,
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
   McpCallToolResult,
   McpPage,
+  McpPromptResult,
   McpReadResourceResult,
+  McpRemotePrompt,
   McpRemoteResource,
   McpRemoteResourceTemplate,
   McpRemoteTool,
@@ -103,10 +106,15 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
     });
     connected = true;
     const capabilities = client.getServerCapabilities();
-    const listeners = new Set<(kind: "tools" | "resources") => void>();
+    const listeners = new Set<(kind: "tools" | "resources" | "prompts") => void>();
     if (capabilities?.tools?.listChanged) {
       client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
         for (const listener of listeners) listener("tools");
+      });
+    }
+    if (capabilities?.prompts?.listChanged) {
+      client.setNotificationHandler(PromptListChangedNotificationSchema, async () => {
+        for (const listener of listeners) listener("prompts");
       });
     }
     if (capabilities?.resources?.listChanged) {
@@ -119,6 +127,33 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
       capabilities: {
         tools: capabilities?.tools !== undefined,
         resources: capabilities?.resources !== undefined,
+        prompts: capabilities?.prompts !== undefined,
+      },
+      async listPrompts(cursor, signal): Promise<McpPage<McpRemotePrompt>> {
+        const result = await client.listPrompts(cursor ? { cursor } : undefined, { signal });
+        return page(
+          result.prompts.map((prompt) => ({
+            name: prompt.name,
+            ...(prompt.title ? { title: prompt.title } : {}),
+            ...(prompt.description ? { description: prompt.description } : {}),
+            ...(prompt.arguments
+              ? {
+                  arguments: prompt.arguments.map((argument) => ({
+                    name: argument.name,
+                    ...(argument.description ? { description: argument.description } : {}),
+                    ...(argument.required ? { required: true } : {}),
+                  })),
+                }
+              : {}),
+          })),
+          result.nextCursor,
+        );
+      },
+      async getPrompt(prompt, args, signal): Promise<McpPromptResult> {
+        return (await client.getPrompt(
+          { name: prompt, arguments: args },
+          { signal },
+        )) as McpPromptResult;
       },
       async listTools(cursor, signal): Promise<McpPage<McpRemoteTool>> {
         const result = await client.listTools(cursor ? { cursor } : undefined, { signal });

@@ -2,7 +2,11 @@ import type { AgentMode, ExternalAgentTools } from "../agent";
 import {
   connectMcpServer,
   createMcpSnapshot,
+  getMcpPrompt,
+  listMcpPrompts,
   type McpConfig,
+  type McpPromptCatalogEntry,
+  type McpPromptResult,
   type McpServerConnection,
   type McpServerConnector,
   type McpSnapshot,
@@ -38,6 +42,8 @@ export interface McpRuntime {
   /** Apply successful reloads between foreground turns. */
   activatePending(): Promise<boolean>;
   snapshot(): McpSnapshot;
+  prompts(): readonly McpPromptCatalogEntry[];
+  getPrompt(server: string, prompt: string, args: Record<string, string>): Promise<McpPromptResult>;
   statuses(): readonly McpRuntimeStatus[];
   close(): Promise<void>;
 }
@@ -291,6 +297,14 @@ export function createMcpRuntime(initialConfig: McpConfig, options: McpRuntimeOp
 
     snapshot() {
       return current;
+    },
+
+    prompts() {
+      return listMcpPrompts([...active.values()]);
+    },
+
+    async getPrompt(server, prompt, args) {
+      return await getMcpPrompt([...active.values()], server, prompt, args);
     },
 
     statuses() {
