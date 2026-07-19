@@ -89,6 +89,9 @@ describe("completeChatInput", () => {
       ],
       reload: async () => {},
     },
+    jobs: {
+      list: () => [{ id: "j1", mode: "plan", prompt: "research", status: "running", startedAt: 0 }],
+    } as JobRunner,
   };
 
   test("guides nested MCP actions and dynamic server arguments", () => {
@@ -116,6 +119,18 @@ describe("completeChatInput", () => {
     const completion = completeChatInput(input, input.length);
     expect(completion?.suggestions).toEqual([
       { value: "next", label: "next", summary: "Update to the next release" },
+    ]);
+  });
+
+  test("completes job inspection and abort actions", () => {
+    const inspectInput = "/jobs ";
+    expect(completeChatInput(inspectInput, inspectInput.length, context)?.suggestions).toEqual([
+      { value: "abort ", label: "abort", summary: "Abort a running job" },
+      { value: "j1 ", label: "j1", summary: "Background job" },
+    ]);
+    const abortInput = "/jobs abort ";
+    expect(completeChatInput(abortInput, abortInput.length, context)?.suggestions).toEqual([
+      { value: "j1 ", label: "j1", summary: "Background job" },
     ]);
   });
 
@@ -167,7 +182,19 @@ describe("runChatCommand", () => {
             startedAt: 0,
           },
         ],
-        inspect: () => undefined,
+        inspect: (id: string) =>
+          id === "j1"
+            ? {
+                id: "j1",
+                mode: "plan",
+                prompt: "research",
+                status: "done",
+                startedAt: 0,
+                endedAt: 74_000,
+                resultText: "research complete",
+                recentActivity: ["readFile AGENTS.md"],
+              }
+            : undefined,
         renewSoftTimeout: () => false,
         abort: (id: string) => {
           aborted.push(id);
@@ -235,11 +262,17 @@ describe("runChatCommand", () => {
     ]);
   });
 
-  test("jobs lists and aborts; undo/redo report labels; unknown suggests help", async () => {
+  test("jobs lists, inspects, and aborts; undo/redo report labels; unknown suggests help", async () => {
     const { context, events, aborted } = makeContext();
     await runChatCommand(context, "jobs", "");
     expect(events[0]).toEqual({ type: "command", name: "jobs" });
     expect((events.at(-1) as { text: string }).text).toContain("j1 [running]");
+
+    await runChatCommand(context, "jobs", "j1");
+    const detail = (events.at(-1) as { text: string }).text;
+    expect(detail).toContain("[j1] done (plan) — 1m14s");
+    expect(detail).toContain("recent tool calls:\n  readFile AGENTS.md");
+    expect(detail).toContain("result:\nresearch complete");
 
     await runChatCommand(context, "jobs", "abort j1");
     expect(aborted).toEqual(["j1"]);

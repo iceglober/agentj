@@ -542,15 +542,38 @@ export const chatCommands: Record<string, ChatCommand> = {
     },
   },
   jobs: {
-    summary: "List background jobs, or `/jobs abort <id>`",
+    summary: "Inspect background jobs, or `/jobs abort <id>`",
     run(context, args) {
-      const [action, id] = args.split(/\s+/);
-      if (action === "abort" && id) {
-        const aborted = context.jobs.abort(id);
+      const [action, remainder] = splitHead(args);
+      if (action === "abort") {
+        if (!remainder) {
+          context.emit({ type: "notice", text: "Usage: /jobs abort <id>" });
+          return;
+        }
+        const aborted = context.jobs.abort(remainder);
         context.emit({
           type: "notice",
-          text: aborted ? `Aborting ${id}.` : `No running job ${id}.`,
+          text: aborted ? `Aborting ${remainder}.` : `No running job ${remainder}.`,
         });
+        return;
+      }
+      if (action) {
+        const job = context.jobs.inspect(action);
+        if (!job) {
+          context.emit({ type: "notice", text: `No job ${action} in this session.` });
+          return;
+        }
+        const elapsed = Math.max(0, (job.endedAt ?? Date.now()) - job.startedAt);
+        const minutes = Math.floor(elapsed / 60_000);
+        const seconds = Math.round((elapsed % 60_000) / 1_000);
+        const duration = minutes > 0 ? `${minutes}m${seconds}s` : `${seconds}s`;
+        const lines = [`[${job.id}] ${job.status} (${job.mode}) — ${duration}`, job.prompt];
+        if (job.recentActivity.length > 0) {
+          lines.push("recent tool calls:", ...job.recentActivity.map((entry) => `  ${entry}`));
+        }
+        if (job.resultText) lines.push("result:", job.resultText);
+        if (job.branch) lines.push(`work preserved on ${job.branch}`);
+        context.emit({ type: "notice", text: lines.join("\n") });
         return;
       }
       const jobs = context.jobs.list();
@@ -560,7 +583,13 @@ export const chatCommands: Record<string, ChatCommand> = {
           jobs.length === 0
             ? "No jobs this session."
             : jobs
-                .map((job) => `${job.id} [${job.status}] (${job.mode}) ${job.prompt.slice(0, 60)}`)
+                .map((job) => {
+                  const elapsed = Math.max(0, (job.endedAt ?? Date.now()) - job.startedAt);
+                  const minutes = Math.floor(elapsed / 60_000);
+                  const seconds = Math.round((elapsed % 60_000) / 1_000);
+                  const duration = minutes > 0 ? `${minutes}m${seconds}s` : `${seconds}s`;
+                  return `${job.id} [${job.status}] (${job.mode}) ${duration} — ${job.prompt.slice(0, 60)}`;
+                })
                 .join("\n"),
       });
     },
@@ -707,7 +736,7 @@ const prefixedSuggestions = (
 export function completeChatInput(
   text: string,
   cursor: number,
-  context?: Pick<ChatCommandContext, "mcp" | "models" | "skills">,
+  context?: Partial<Pick<ChatCommandContext, "mcp" | "models" | "skills" | "jobs">>,
 ): ChatInputCompletion | null {
   const graphemes = Array.from(text);
   const boundedCursor = Math.max(0, Math.min(cursor, graphemes.length));
@@ -796,6 +825,25 @@ export function completeChatInput(
               ? "Press Enter for masked Authorization entry."
               : undefined,
     };
+  }
+
+  if (command === "jobs") {
+    const jobIds = context?.jobs?.list().map(({ id }) => [id, "Background job"] as const) ?? [];
+    if (args.length === 0) {
+      return {
+        token,
+        suggestions: prefixedSuggestions([["abort", "Abort a running job"], ...jobIds], prefix),
+        hint: "Choose a job to inspect, or choose abort.",
+      };
+    }
+    if (args.length === 1 && args[0] === "abort") {
+      return {
+        token,
+        suggestions: prefixedSuggestions(jobIds, prefix),
+        hint: "Choose a running job to abort.",
+      };
+    }
+    return { token, suggestions: [], hint: "Press Enter to inspect this job." };
   }
 
   if (command === "update") {

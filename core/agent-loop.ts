@@ -167,8 +167,12 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       return event.pending ? `(mode → ${event.mode} at next turn)` : `(mode → ${event.mode})`;
     case "job-started":
       return `[${event.job.id}] started (${event.job.mode}): ${event.job.prompt.slice(0, 60)}`;
-    case "job-finished":
-      return `[${event.job.id}] ${event.job.status}${event.job.branch ? ` — work on ${event.job.branch}` : ""}`;
+    case "job-finished": {
+      const elapsed = formatClock((event.job.endedAt ?? Date.now()) - event.job.startedAt);
+      const result = event.job.resultText?.trim();
+      const branch = event.job.branch ? `\nwork preserved on ${event.job.branch}` : "";
+      return `✓ [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${result ? `\n${truncateWithNotice(result, 2_000)}` : ""}${branch}`;
+    }
     case "notice":
       return event.text;
     default:
@@ -259,14 +263,14 @@ export interface StatusSectionState {
   /** When set and ctx has reached it, the ctx counter renders flagged. */
   contextSoftLimit?: number;
   sessionStartedAt: number;
-  /** Running background jobs only — each gets its own row. */
-  jobs: ReadonlyArray<{ id: string; mode: ChatMode; prompt: string; startedAt: number }>;
+  /** Number of background jobs currently running. */
+  runningJobs: number;
   now?: number;
 }
 
 /**
- * The status section below the editor: identity line, root-path line, then one
- * row per running background job. Foreground activity renders above the editor.
+ * The status section below the editor. A compact job count is the first row
+ * whenever detached work is active; `/jobs` provides the per-job detail.
  */
 export const composeThinkingLine = (
   state: {
@@ -303,7 +307,6 @@ export const shouldWarnContext = (
 
 export const composeStatusSection = (state: StatusSectionState, width: number): string[] => {
   const now = state.now ?? Date.now();
-  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
 
   const left = `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`;
   const clock = formatClock(now - state.sessionStartedAt);
@@ -329,13 +332,12 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
 
   const location = middleEllipsis(state.root, width);
 
-  const jobRows = state.jobs.map((job) => {
-    const firstLine = job.prompt.split("\n")[0] ?? "";
-    const snippet = firstLine.length > 48 ? `${firstLine.slice(0, 47)}…` : firstLine;
-    return `  ${frame} [${job.id}] ${job.mode}: ${snippet}  ${formatClock(now - job.startedAt)}`;
-  });
+  const jobStatus =
+    state.runningJobs === 0
+      ? []
+      : [`${state.runningJobs} ${state.runningJobs === 1 ? "job" : "jobs"} running`];
 
-  return [identity, location, ...jobRows];
+  return [...jobStatus, identity, location];
 };
 
 /**
@@ -893,6 +895,13 @@ export async function runAgentjChat(
   };
 
   const onToolActivity = (activity: ToolActivity): void => {
+    // run_job returns as soon as detached work starts. Its tool duration is
+    // not the job duration, so the persistent job count and job lifecycle
+    // transcript are the only UI for it.
+    if (activity.tool === "run_job") {
+      updateStatus();
+      return;
+    }
     if (activity.phase === "start") {
       activeTools.set(activity.id, {
         tool: activity.tool,
@@ -1138,7 +1147,7 @@ export async function runAgentjChat(
             usage: turnTokens,
             contextSoftLimit: composition.contextSoftLimit,
             sessionStartedAt,
-            jobs: jobRunner.list().filter((job) => job.status === "running"),
+            runningJobs: jobRunner.list().filter((job) => job.status === "running").length,
           },
           screen.width(),
         ),
