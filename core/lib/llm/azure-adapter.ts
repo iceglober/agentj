@@ -18,18 +18,61 @@ export type AzureModelConfig = z.infer<typeof azureModelConfigSchema>;
  * incidental default with a deliberate ceiling for genuinely hung requests.
  */
 export const LLM_REQUEST_TIMEOUT_MS = 30 * 60_000;
+/** A connection that hung once tends to hang again — retries fail faster. */
+export const LLM_RETRY_TIMEOUT_MS = 10 * 60_000;
+/** Total tries per request: the first attempt plus two retries. */
+export const LLM_REQUEST_ATTEMPTS = 3;
 
-/** The provider's fetch with the request deadline attached, composed with any
- *  caller signal (turn aborts still win). Exported for tests. */
-export const fetchWithRequestDeadline = (
+/**
+ * Errors worth a second attempt: our own deadline firing (TimeoutError) or the
+ * connection dying under us. HTTP error *responses* return normally and are
+ * retried by the AI SDK's own policy; a caller abort is honored, never retried.
+ */
+const isTransientRequestError = (error: unknown): boolean =>
+  error instanceof TypeError ||
+  (error instanceof Error &&
+    (error.name === "TimeoutError" ||
+      error.name === "ConnectionError" ||
+      error.name === "ConnectTimeoutError" ||
+      error.name === "SocketError"));
+
+const backoff = (attempt: number, signal?: AbortSignal | null): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, 500 * attempt);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
+/**
+ * The provider's fetch with a request deadline attached (composed with any
+ * caller signal — turn aborts still win) and a bounded retry for transient
+ * request failures. Retrying here re-sends exactly one HTTP request; the tool
+ * loop above never re-executes tools. Exported for tests.
+ */
+export const fetchWithRequestDeadline = async (
   input: Parameters<typeof fetch>[0],
   init?: Parameters<typeof fetch>[1],
 ): ReturnType<typeof fetch> => {
-  const deadline = AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
-  return fetch(input, {
-    ...init,
-    signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
-  });
+  for (let attempt = 1; ; attempt += 1) {
+    const deadline = AbortSignal.timeout(
+      attempt === 1 ? LLM_REQUEST_TIMEOUT_MS : LLM_RETRY_TIMEOUT_MS,
+    );
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+      });
+    } catch (error) {
+      const abortedByCaller = init?.signal?.aborted === true;
+      if (abortedByCaller || attempt >= LLM_REQUEST_ATTEMPTS || !isTransientRequestError(error)) {
+        throw error;
+      }
+      await backoff(attempt, init?.signal);
+      if (init?.signal?.aborted) throw error;
+    }
+  }
 };
 
 export const createAzureModelProvider = (config: AzureModelConfig = {}): ModelFactory => {
