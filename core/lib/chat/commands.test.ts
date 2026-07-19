@@ -61,6 +61,7 @@ describe("suggestChatCommands", () => {
       "config",
       "update",
       "model",
+      "cost",
       "build",
       "jobs",
       "undo",

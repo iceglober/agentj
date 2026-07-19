@@ -75,6 +75,11 @@ Keys and commands:
   Omitting a sensitive value opens a masked prompt.
 - **`/model [primary|subagents]`** — choose a provider and model in a guided prompt. Changes are
   saved globally and apply to new turns/jobs immediately; subagents can instead inherit the primary.
+- **`/cost`** — per-model foreground token usage for this session (including resumed history):
+  input split into no-cache / cache-read / cache-write, output, requests past Azure's 272k
+  long-context tier, and USD priced from the `eval.prices` $/Mtok map (models without a price show
+  `$ n/a`; cache reads are priced at the input rate). Usage persists per turn in the session log;
+  subagent and background-job tokens are not included.
 - **`/update [next|latest]`** — exit cleanly and update the installed CLI. Omit the channel to keep
   the current release track.
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step

@@ -87,7 +87,6 @@ describe("createOtelMetricsSink", () => {
     expect(fake.created).toEqual([
       { kind: "histogram", name: "agentj.llm.duration", unit: "ms" },
       { kind: "counter", name: "agentj.llm.tokens.input", unit: "tokens" },
-      { kind: "counter", name: "agentj.llm.tokens.input_long_context", unit: "tokens" },
       { kind: "counter", name: "agentj.llm.tokens.no_cache", unit: "tokens" },
       { kind: "counter", name: "agentj.llm.tokens.cache_read", unit: "tokens" },
       { kind: "counter", name: "agentj.llm.tokens.cache_write", unit: "tokens" },
@@ -98,7 +97,6 @@ describe("createOtelMetricsSink", () => {
 
     for (const measurement of [
       { name: "model.tokens.input", value: 100 },
-      { name: "model.tokens.input_long_context", value: 100 },
       { name: "model.tokens.cache_read", value: 80 },
       { name: "model.tokens.cache_write", value: 5 },
       { name: "model.tokens.total", value: 120 },
@@ -109,12 +107,6 @@ describe("createOtelMetricsSink", () => {
 
     expect(fake.counters).toEqual([
       { name: "agentj.llm.tokens.input", unit: "tokens", value: 100, attributes: safeAttributes },
-      {
-        name: "agentj.llm.tokens.input_long_context",
-        unit: "tokens",
-        value: 100,
-        attributes: safeAttributes,
-      },
       {
         name: "agentj.llm.tokens.cache_read",
         unit: "tokens",

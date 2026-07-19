@@ -23,11 +23,26 @@ export type ChatLogRecord =
       transcriptText?: string;
     }
   | { type: "state"; messages: unknown[]; mode: ChatMode; ts: string }
+  | {
+      type: "usage";
+      provider: string;
+      model: string;
+      ts: string;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadInputTokens?: number;
+        cacheWriteInputTokens?: number;
+        longContextRequests: number;
+      };
+    }
   | { type: "undo"; ref: string; label: string; ts: string };
 
 export interface LoadedChatLog {
   meta: Extract<ChatLogRecord, { type: "meta" }>;
   turns: Extract<ChatLogRecord, { type: "turn" }>[];
+  /** Per-turn foreground usage, retained for resumed cost reporting. */
+  usage: Extract<ChatLogRecord, { type: "usage" }>[];
   /** The resumable continuation — the last `state` record, if any. */
   state: Extract<ChatLogRecord, { type: "state" }> | null;
 }
@@ -90,6 +105,7 @@ export async function loadChatLog(options: {
 
   let meta: LoadedChatLog["meta"] | null = null;
   const turns: LoadedChatLog["turns"] = [];
+  const usage: LoadedChatLog["usage"] = [];
   let state: LoadedChatLog["state"] = null;
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -101,9 +117,10 @@ export async function loadChatLog(options: {
     }
     if (record.type === "meta") meta ??= record;
     else if (record.type === "turn") turns.push(record);
+    else if (record.type === "usage") usage.push(record);
     else if (record.type === "state") state = record;
   }
-  return meta ? { meta, turns, state } : null;
+  return meta ? { meta, turns, usage, state } : null;
 }
 
 /** Newest session id for a project (by file mtime), or null when none exist. */
