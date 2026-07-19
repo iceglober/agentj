@@ -71,4 +71,22 @@ describe("docs generator", () => {
     expect(site).toContain('<nav class="toc"');
     for (const h of headings) expect(site).toContain(`href="#${h.id}"`);
   });
+
+  test(":::details blocks become collapsible disclosures", () => {
+    const { html } = markdownToHtml(":::details More\n\nhidden text\n\n:::");
+    expect(html).toContain("<details><summary>More</summary>");
+    expect(html).toContain("<p>hidden text</p>");
+    expect(html).toContain("</details>");
+  });
+
+  test("headings inside a disclosure stay out of the nav (they start collapsed)", () => {
+    const { headings } = markdownToHtml("## Visible\n\n:::details Advanced\n\n## Buried\n\n:::");
+    expect(headings.map((h) => h.text)).toEqual(["Visible"]);
+  });
+
+  test("an unterminated disclosure is closed so the HTML stays well-formed", () => {
+    const { html } = markdownToHtml(":::details Oops\n\ncontent");
+    expect(html.match(/<details>/g)?.length).toBe(1);
+    expect(html.match(/<\/details>/g)?.length).toBe(1);
+  });
 });

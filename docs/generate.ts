@@ -27,17 +27,21 @@ export function renderReferenceMarkdown(): string {
     ([name, command]) => `- \`/${name}\` — ${command.summary}`,
   );
   return [
-    "# Commands & keys",
+    "## Commands & keys",
     "",
-    "Generated from the command registry that powers `/help`. Do not edit by hand — run `bun run docs`.",
+    "In-session slash commands and key bindings — the same list `/help` prints, generated from the registry so it always matches your version.",
     "",
-    "## Slash commands",
+    ":::details Show every slash command and key binding",
+    "",
+    "### Slash commands",
     "",
     ...commands,
     "",
-    "## Input & keys",
+    "### Input & keys",
     "",
     ...INPUT_AND_KEY_HELP.map((line) => `- ${line}`),
+    "",
+    ":::",
     "",
   ].join("\n");
 }
@@ -66,13 +70,17 @@ export function renderConfigMarkdown(docs: readonly ConfigDoc[] = CONFIG_DOCS): 
       .split(".")
       .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], defaults);
   return [
-    "# Configuration reference",
+    "## Configuration reference",
     "",
-    "Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults below come straight from the schema.",
+    "Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults come straight from the schema.",
+    "",
+    ":::details Show all configuration keys",
     "",
     ...docs.map(
       (doc) => `- \`${doc.path}\` (default: ${formatDefault(at(doc.path))}) — ${doc.description}`,
     ),
+    "",
+    ":::",
     "",
   ].join("\n");
 }
@@ -116,6 +124,9 @@ export function markdownToHtml(markdown: string): { html: string; headings: DocH
   let inCode = false;
   let code: string[] = [];
   let list: string[] = [];
+  // Depth of open `:::details` blocks. Headings inside one are collapsed by
+  // default, so they stay out of the nav.
+  let detailsDepth = 0;
   const flushList = () => {
     if (list.length > 0) {
       out.push(`<ul>${list.map((item) => `<li>${renderInline(item)}</li>`).join("")}</ul>`);
@@ -138,6 +149,19 @@ export function markdownToHtml(markdown: string): { html: string; headings: DocH
       code.push(line);
       continue;
     }
+    const openDetails = /^:::details\s+(.*)$/.exec(line);
+    if (openDetails) {
+      flushList();
+      detailsDepth += 1;
+      out.push(`<details><summary>${renderInline(openDetails[1])}</summary>`);
+      continue;
+    }
+    if (line.trim() === ":::" && detailsDepth > 0) {
+      flushList();
+      detailsDepth -= 1;
+      out.push("</details>");
+      continue;
+    }
     const heading = /^(#{1,3})\s+(.*)$/.exec(line);
     if (heading) {
       flushList();
@@ -147,7 +171,7 @@ export function markdownToHtml(markdown: string): { html: string; headings: DocH
       const seen = (slugCounts.get(base) ?? 0) + 1;
       slugCounts.set(base, seen);
       const id = seen === 1 ? base : `${base}-${seen}`;
-      if (level <= 2) headings.push({ level, text, id });
+      if (level <= 2 && detailsDepth === 0) headings.push({ level, text, id });
       out.push(`<h${level} id="${id}">${renderInline(text)}</h${level}>`);
       continue;
     }
@@ -159,6 +183,7 @@ export function markdownToHtml(markdown: string): { html: string; headings: DocH
     if (line.trim().length > 0) out.push(`<p>${renderInline(line)}</p>`);
   }
   flushList();
+  for (; detailsDepth > 0; detailsDepth -= 1) out.push("</details>");
   return { html: out.join("\n"), headings };
 }
 
@@ -188,6 +213,13 @@ li { margin:.25rem 0; }
 code { background:var(--code); padding:.12em .38em; border-radius:.35rem; font:.88em ui-monospace,SFMono-Regular,Menlo,monospace; }
 pre { background:var(--code); border:1px solid var(--border); border-radius:.6rem; padding:1rem; overflow-x:auto; }
 pre code { background:none; padding:0; }
+details { margin:.75rem 0; border:1px solid var(--border); border-radius:.6rem; padding:0 1rem; background:color-mix(in srgb, var(--code) 45%, transparent); }
+details[open] { padding-bottom:.5rem; }
+summary { cursor:pointer; padding:.7rem 0; font-weight:600; color:var(--fg); list-style:none; }
+summary::-webkit-details-marker { display:none; }
+summary::before { content:"\\203A"; display:inline-block; width:1.1em; color:var(--muted); transition:transform .15s; }
+details[open] > summary::before { transform:rotate(90deg); }
+summary:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:3px; }
 footer { color:var(--muted); font-size:.85rem; margin-top:4rem; border-top:1px solid var(--border); padding-top:1rem; }
 .layout { display:grid; grid-template-columns:13rem minmax(0,44rem); gap:3rem; max-width:60rem; margin:0 auto; padding:3rem 1.5rem 6rem; align-items:start; }
 main { min-width:0; }
@@ -217,14 +249,30 @@ nav.toc .nav-h2 { padding-left:1.5rem; }
 const SCROLLSPY = `
 (() => {
   const links = new Map([...document.querySelectorAll('.toc a')].map(a => [a.hash.slice(1), a]));
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      for (const a of links.values()) a.removeAttribute('aria-current');
-      links.get(e.target.id)?.setAttribute('aria-current', 'true');
+  const heads = [...document.querySelectorAll('main h1[id], main h2[id]')];
+  if (!heads.length) return;
+  let active = null;
+  const setActive = (h) => {
+    if (h === active) return;
+    active = h;
+    for (const a of links.values()) a.removeAttribute('aria-current');
+    links.get(h.id)?.setAttribute('aria-current', 'true');
+  };
+  const update = () => {
+    // The current section is the last heading whose top has passed the marker
+    // line; deterministic at the top, between headings, and at page end.
+    const marker = 120;
+    let current = heads[0];
+    for (const h of heads) {
+      if (h.getBoundingClientRect().top <= marker) current = h;
+      else break;
     }
-  }, { rootMargin: '0px 0px -75% 0px' });
-  for (const h of document.querySelectorAll('main h1[id], main h2[id]')) io.observe(h);
+    if (innerHeight + scrollY >= document.body.scrollHeight - 2) current = heads[heads.length - 1];
+    setActive(current);
+  };
+  update();
+  addEventListener('scroll', update, { passive: true });
+  addEventListener('resize', update);
 })();
 `.trim();
 
