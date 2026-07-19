@@ -1,5 +1,16 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.28
+
+### Minor Changes
+
+- f336b4b: The base prompt now carries a writing-style section — Orwell's six rules adapted for agent prose (no stock metaphors, short words, cut every needless word, active voice, plain language over jargon, and break any rule sooner than write something unclear). It rides with the communication rules in user-facing roles; subagent-contract roles, which return structured data instead of prose, and the compact low-effort templates are unchanged.
+
+### Patch Changes
+
+- 5b250f1: No more dead space between the transcript and the editor. After a tall progress block (parallel tools, subagent fan-outs) collapsed, the bottom-pinned live region left a permanent blank band under the transcript — the reservation only ever grew, and every transcript line was re-padded to the high-water mark. Transcript writes now land at the top of the vacated band and reclaim it, scrolling only enough to keep the rows the live region actually paints.
+- 35de54c: Two resilience fixes for failed model requests. A request that dies on a transient error — our 30-minute deadline firing or the connection dropping — is now retried up to twice (10-minute deadline on retries, short backoff, caller aborts always win and are never retried); the retry re-sends exactly one HTTP request, never re-running tools. And when a turn still fails, the next turn now carries a notice with the error and the original request text, so "try again" actually retries instead of the model asking what you meant.
+
 ## 0.1.0-next.27
 
 ### Minor Changes
