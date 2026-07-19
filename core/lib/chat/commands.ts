@@ -533,6 +533,15 @@ const runModelCommand = async (context: ChatCommandContext, args: string): Promi
 };
 
 /** Registry keyed by command name — same idiom as checkGraders/editModes. */
+/** Non-slash input affordances and key bindings shown after the command list.
+ *  The single source for both `/help` and the generated docs reference. */
+export const INPUT_AND_KEY_HELP: readonly string[] = [
+  "& <task> — run as a background job",
+  "@path/to/file — attach file contents · Ctrl+V — paste copied files",
+  "Tab/Enter — complete a shown command · Tab — toggle plan/build otherwise",
+  "Esc — dismiss suggestions / dequeue waiting message / interrupt turn · Ctrl+C×2 — quit",
+];
+
 export const chatCommands: Record<string, ChatCommand> = {
   help: {
     summary: "List commands and keys",
@@ -543,12 +552,7 @@ export const chatCommands: Record<string, ChatCommand> = {
       for (const skill of context.skills ?? []) {
         if (!(skill.name in chatCommands)) lines.push(`/${skill.name} — ${skill.summary} (skill)`);
       }
-      lines.push(
-        "& <task> — run as a background job",
-        "@path/to/file — attach file contents · Ctrl+V — paste copied files",
-        "Tab/Enter — complete a shown command · Tab — toggle plan/build otherwise",
-        "Esc — dismiss suggestions / dequeue waiting message / interrupt turn · Ctrl+C×2 — quit",
-      );
+      lines.push(...INPUT_AND_KEY_HELP);
       context.emit({ type: "notice", text: lines.join("\n") });
     },
   },
