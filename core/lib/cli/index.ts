@@ -34,6 +34,8 @@ export interface AgentjCommandDependencies {
   name?: string;
   description?: string;
   configHandlers?: ConfigCliHandlers;
+  /** Interactive `agentj config` (no subcommand). Omitted → bare config errors. */
+  runConfigUi?: () => Promise<number>;
   evalHandlers?: EvalCliHandlers;
   createEvalHandlers?: () => EvalCliHandlers | Promise<EvalCliHandlers>;
   writers?: AgentjCliIo;
@@ -363,6 +365,10 @@ export async function runAgentjCli(
     stdout: io.stdout ?? deps.writers?.stdout ?? processStdout,
     stderr: io.stderr ?? deps.writers?.stderr ?? processStderr,
   };
+
+  if (argv[0] === "config" && argv.length === 1 && deps.runConfigUi) {
+    return deps.runConfigUi();
+  }
 
   if (isConfigRoute(argv)) {
     return dispatchConfig(argv, deps.configHandlers, writers);

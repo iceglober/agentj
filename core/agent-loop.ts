@@ -32,6 +32,7 @@ import {
   type SkillCommand,
   shouldRememberChatInput,
 } from "./lib/chat/commands";
+import { type ConfigUiPort, runConfigUi } from "./lib/chat/config-ui";
 import { LONG_CONTEXT_INPUT_TOKENS, type UsageRecord } from "./lib/chat/cost";
 import type { ChatEvent } from "./lib/chat/events";
 import {
@@ -153,6 +154,62 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
     report: () => spawn("core/eval/report.ts"),
     selfcheck: () => spawn("core/eval/run.ts", ["--selfcheck"]),
   });
+}
+
+/** `agentj config` with no subcommand: a prompts-driven editor over the config
+ *  keys, persisting through the same handlers as `config set`. */
+function createProductionConfigUi(): () => Promise<number> {
+  return async () => {
+    if (!processStdout.isTTY) {
+      processStderr.write("Run `agentj config` in a terminal, or use `agentj config set <key>`.\n");
+      return EXIT_FAILURE;
+    }
+    const { createRequire } = await import("node:module");
+    const prompts = createRequire(import.meta.url)("prompts") as (
+      question: Record<string, unknown>,
+      options: { onCancel: () => void },
+    ) => Promise<{ v?: unknown }>;
+    const ask = async (question: Record<string, unknown>): Promise<unknown> => {
+      let cancelled = false;
+      const answer = await prompts(
+        { ...question, name: "v" },
+        {
+          onCancel: () => {
+            cancelled = true;
+          },
+        },
+      );
+      return cancelled ? null : (answer.v ?? null);
+    };
+    const silent = { write: () => {} };
+    const handlers = createConfigCliHandlers({
+      secretStore: createKeyringSecretStore({}),
+      prompt: createMaskedSecretPrompt(),
+      writers: { stdout: silent, stderr: silent },
+    });
+    const port: ConfigUiPort = {
+      select: (message, choices) =>
+        ask({
+          type: "select",
+          message,
+          choices: choices.map((choice) => ({ title: choice.label, value: choice.value })),
+        }) as Promise<string | null>,
+      text: (message, initial) => ask({ type: "text", message, initial }) as Promise<string | null>,
+      secret: (message) => ask({ type: "password", message }) as Promise<string | null>,
+      read: async (path) => {
+        const result = await handlers.get({ key: path });
+        return result.ok ? result.value : undefined;
+      },
+      apply: async (path, value, options) => {
+        const result = await handlers.set({ key: path, value, secret: options?.secret });
+        if (!result.ok) processStdout.write(`Could not set ${path}.\n`);
+        return result.ok;
+      },
+      note: (text) => processStdout.write(`${text}\n`),
+    };
+    await runConfigUi(port);
+    return EXIT_SUCCESS;
+  };
 }
 
 /** Render a ChatEvent as transcript text. */
@@ -1665,6 +1722,7 @@ const main = async (): Promise<void> => {
         update: ({ channel }) => runProductionUpdate(channel),
         createAbortSignal: () => abortController.signal,
         configHandlers,
+        runConfigUi: createProductionConfigUi(),
         createEvalHandlers: () => createProductionEvalCliHandlers(),
       },
       writers,
