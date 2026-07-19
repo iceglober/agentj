@@ -45,7 +45,13 @@ export function createAnsiLiveRegionAdapter(
   };
 
   let lastLayout: LiveLayout | null = null;
-  let reservedRows = 0;
+  /** Rows between the transcript's last line and the terminal bottom. Grows
+   *  when a tall layout needs room; shrinks only as transcript text fills the
+   *  vacated band — a terminal cannot pull scrolled-off text back down, so a
+   *  shrunken layout leaves a temporary gap that new transcript lines close. */
+  let anchorRows = 0;
+  /** Rows the last paint actually used — the band printAbove must keep free. */
+  let lastPaintRows = 0;
   let knownHeight: number | null = null;
 
   const physicalCursorRow = (layout: LiveLayout): number => {
@@ -71,21 +77,33 @@ export function createAnsiLiveRegionAdapter(
 
   const resetForResize = (rows: number): void => {
     if (knownHeight === null || knownHeight === rows) return;
-    if (reservedRows > 0) {
-      write(`${csi(`${Math.max(1, rows - reservedRows + 1)};1H`)}${csi("J")}`);
+    if (anchorRows > 0) {
+      write(`${csi(`${Math.max(1, rows - anchorRows + 1)};1H`)}${csi("J")}`);
     }
-    reservedRows = 0;
+    anchorRows = 0;
+    lastPaintRows = 0;
   };
 
   const reserve = (rows: number, terminalHeight: number): void => {
-    if (rows <= reservedRows) return;
-    if (reservedRows > 0) {
-      write(`${csi(`${Math.max(1, terminalHeight - reservedRows + 1)};1H`)}${csi("J")}`);
+    if (rows <= anchorRows) return;
+    if (anchorRows > 0) {
+      write(`${csi(`${Math.max(1, terminalHeight - anchorRows + 1)};1H`)}${csi("J")}`);
     }
-    const additional = rows - reservedRows;
+    const additional = rows - anchorRows;
     write(csi(`${terminalHeight};1H`));
     write("\n".repeat(additional));
-    reservedRows = rows;
+    anchorRows = rows;
+  };
+
+  /** Physical rows a pre-rendered transcript block occupies, wrap included. */
+  const physicalTextRows = (text: string): number => {
+    const terminalWidth = width();
+    return text
+      .split("\r\n")
+      .reduce(
+        (total, line) => total + Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
+        0,
+      );
   };
 
   const clamp = (layout: LiveLayout, terminalHeight: number): LiveLayout => {
@@ -104,10 +122,11 @@ export function createAnsiLiveRegionAdapter(
     const fitted = clamp(layout, terminalHeight);
     reserve(fitted.lines.length, terminalHeight);
     const start = terminalHeight - fitted.lines.length + 1;
-    write(`${csi(`${Math.max(1, terminalHeight - reservedRows + 1)};1H`)}${csi("J")}`);
+    write(`${csi(`${Math.max(1, terminalHeight - anchorRows + 1)};1H`)}${csi("J")}`);
     write(`${csi(`${start};1H`)}${fitted.lines.join("\r\n")}`);
     write(csi(`${start + fitted.cursorRow};${fitted.cursorColumn + 1}H`));
     lastLayout = fitted;
+    lastPaintRows = fitted.lines.length;
     knownHeight = terminalHeight;
   };
 
@@ -147,13 +166,18 @@ export function createAnsiLiveRegionAdapter(
         return;
       }
       resetForResize(rows);
-      if (reservedRows === 0) reserve(1, rows);
-      write(`${csi(`${Math.max(1, rows - reservedRows + 1)};1H`)}${csi("J")}`);
-      // One transcript separator plus the reserved blank rows moves all text
-      // above the live region while using normal full-screen scrolling.
-      write(
-        `${csi(`${Math.max(1, rows - reservedRows + 1)};1H`)}${text}\r\n${"\r\n".repeat(reservedRows)}`,
-      );
+      if (anchorRows === 0) reserve(1, rows);
+      const top = Math.max(1, rows - anchorRows + 1);
+      write(`${csi(`${top};1H`)}${csi("J")}`);
+      // The text lands at the top of the reserved band and consumes it; the
+      // anchor shrinks as the band fills, so a layout that grew tall and then
+      // shrank does not leave a permanent gap under the transcript. Extra
+      // newlines scroll only when the band left over is smaller than the rows
+      // the live region actually paints.
+      const consumed = physicalTextRows(text) + 1;
+      const scrollRows = Math.max(0, lastPaintRows - (anchorRows - consumed));
+      write(`${csi(`${top};1H`)}${text}\r\n${"\r\n".repeat(scrollRows)}`);
+      anchorRows = Math.max(anchorRows - consumed, lastPaintRows);
       lastLayout = null;
       knownHeight = rows;
     },
@@ -161,11 +185,12 @@ export function createAnsiLiveRegionAdapter(
       const rows = height();
       if (rows === null) {
         if (lastLayout) moveToRelativeRegionTop();
-      } else if (reservedRows > 0) {
+      } else if (anchorRows > 0) {
         resetForResize(rows);
-        write(`${csi(`${Math.max(1, rows - reservedRows + 1)};1H`)}${csi("J")}`);
+        write(`${csi(`${Math.max(1, rows - anchorRows + 1)};1H`)}${csi("J")}`);
       }
       lastLayout = null;
+      lastPaintRows = 0;
     },
   };
 }
