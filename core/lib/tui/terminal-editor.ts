@@ -5,12 +5,31 @@ import { type EditorState, splitGraphemes } from "./editor";
  * wrapping (East-Asian/emoji widths), and cursor placement. The chat screen
  * owns painting; this module owns geometry.
  */
-interface RenderLayout {
+export interface RenderLayout {
   rows: string[];
   cursorRow: number;
   cursorColumn: number;
   finalColumn: number;
 }
+
+/**
+ * Keep the active cursor visible in a bounded editor viewport. Layout stays
+ * pure: the screen can repaint the returned rows without retaining scroll
+ * state or knowing wrapping details.
+ */
+export const windowEditorLayout = (layout: RenderLayout, maxRows: number): RenderLayout => {
+  const size = Math.max(1, Math.floor(maxRows));
+  if (layout.rows.length <= size) return layout;
+  const start = Math.max(
+    0,
+    Math.min(layout.rows.length - size, layout.cursorRow - Math.floor(size / 2)),
+  );
+  return {
+    ...layout,
+    rows: layout.rows.slice(start, start + size),
+    cursorRow: layout.cursorRow - start,
+  };
+};
 
 export const graphemeWidth = (value: string): number => {
   if (/^\p{Mark}+$/u.test(value)) return 0;

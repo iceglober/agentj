@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { completeChatInput, suggestChatCommands } from "../chat/commands";
+import { createAnsiLiveRegionAdapter } from "./ansi-live-region-adapter";
 import {
   type ChatScreenCallbacks,
   type CreateChatScreenOptions,
@@ -22,10 +23,10 @@ function makeScreen(
   over: Partial<ChatScreenCallbacks> = {},
   initialHistory: readonly string[] = [],
   screenOptions: Partial<
-    Pick<
-      CreateChatScreenOptions,
-      "slashCommandOptions" | "shouldRememberInput" | "terminalHeight" | "terminalWidth"
-    >
+    Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput"> & {
+      terminalHeight?: number;
+      terminalWidth?: number;
+    }
   > = {},
 ) {
   const input = new FakeInput();
@@ -34,14 +35,15 @@ function makeScreen(
   const chunks: Buffer[] = [];
   output.on("data", (chunk: Buffer) => chunks.push(chunk));
   const calls = { submit: [] as string[], tab: 0, escape: 0, quit: 0 };
+  const { terminalHeight, terminalWidth, ...chatScreenOptions } = screenOptions;
   const screen = createChatScreen({
     stdin: input,
-    stdout: output,
+    liveRegion: createAnsiLiveRegionAdapter({ stdout: output, terminalHeight, terminalWidth }),
     escapeFlushMs: 5,
     quitWindowMs: 100,
     initialHistory,
     slashCommandSuggestions: suggestChatCommands,
-    ...screenOptions,
+    ...chatScreenOptions,
     callbacks: {
       onSubmit: (text) => calls.submit.push(text),
       onTab: () => (calls.tab += 1),
@@ -59,32 +61,53 @@ function makeScreen(
  * survives on screen — presence-in-stream assertions cannot catch repaint
  * arithmetic bugs that eat lines above the live region.
  */
-function renderScreen(stream: string): string[] {
-  const rows: string[][] = [[]];
+function renderScreen(stream: string, height = Number.POSITIVE_INFINITY): string[] {
+  const rows: string[][] = Number.isFinite(height)
+    ? Array.from({ length: height }, () => [])
+    : [[]];
   let row = 0;
   let col = 0;
+  const ensureRow = (target: number): void => {
+    while (rows.length <= target) rows.push([]);
+  };
+  const lineFeed = (): void => {
+    if (Number.isFinite(height) && row >= height - 1) {
+      rows.shift();
+      rows.push([]);
+      row = height - 1;
+    } else {
+      row += 1;
+      ensureRow(row);
+    }
+    col = 0;
+  };
   // biome-ignore lint/suspicious/noControlCharactersInRegex: parsing ANSI escapes is the point
-  const pattern = /\u001b\[([0-9]*)([A-Za-z])|([\s\S])/g;
+  const pattern = /\u001b\[([0-9;?]*)([A-Za-z])|([\s\S])/g;
   for (const match of stream.matchAll(pattern)) {
-    const [, count, command, char] = match;
+    const [, params, command, char] = match;
     if (command) {
-      const n = count === "" || count === undefined ? 1 : Number(count);
+      const values = params.replace("?", "").split(";").filter(Boolean).map(Number);
+      const n = values[0] ?? 1;
       if (command === "A") row = Math.max(0, row - n);
       else if (command === "B") row += n;
       else if (command === "C") col += n;
-      else if (command === "J") {
+      else if (command === "H") {
+        row = Math.max(0, (values[0] ?? 1) - 1);
+        col = Math.max(0, (values[1] ?? 1) - 1);
+        ensureRow(row);
+      } else if (command === "J") {
+        ensureRow(row);
         rows[row] = (rows[row] ?? []).slice(0, col);
-        rows.length = row + 1;
+        if (Number.isFinite(height)) {
+          for (let index = row + 1; index < height; index += 1) rows[index] = [];
+        } else rows.length = row + 1;
       }
       continue;
     }
     if (char === "\r") col = 0;
-    else if (char === "\n") {
-      row += 1;
-      col = 0;
-      while (rows.length <= row) rows.push([]);
-    } else if (char !== undefined) {
-      while (rows.length <= row) rows.push([]);
+    else if (char === "\n") lineFeed();
+    else if (char !== undefined) {
+      ensureRow(row);
       const line = rows[row] ?? [];
       while (line.length < col) line.push(" ");
       line[col] = char;
@@ -171,7 +194,7 @@ describe("createChatScreen", () => {
     const rows = Array.from({ length: 20 }, (_, i) => `row-${String(i).padStart(2, "0")}`);
     input.write(rows.join("\u001b[13;2u"));
     await settle();
-    const rendered = renderScreen(text());
+    const rendered = renderScreen(text(), 8);
     expect(rendered.join("\n")).toContain("row-19");
     expect(rendered.join("\n")).not.toContain("row-00");
     expect(rendered.filter((line) => line.length > 0).length).toBeLessThanOrEqual(8);

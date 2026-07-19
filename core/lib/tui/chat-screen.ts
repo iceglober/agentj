@@ -1,4 +1,4 @@
-import type { Readable, Writable } from "node:stream";
+import type { Readable } from "node:stream";
 import type { PermissionPromptDecision, PermissionRequest } from "../agent/permissions";
 import type { GuidedInputOptions, GuidedInputPort } from "../chat/guided-input";
 import {
@@ -10,6 +10,7 @@ import {
 } from "./editor";
 import { TerminalKeyDecoder } from "./key-decoder";
 import { listOverflowFooter, windowList } from "./list-window";
+import type { LiveLayout, LiveRegionPort } from "./live-region";
 import {
   findSlashCommandToken,
   type SlashCompletionProvider,
@@ -21,6 +22,7 @@ import {
   displayWidth,
   escapeTerminalText,
   renderEditorLayout,
+  windowEditorLayout,
   wrapToDisplayWidth,
 } from "./terminal-editor";
 
@@ -38,11 +40,6 @@ interface RawInput extends Readable {
   setRawMode?(mode: boolean): this;
 }
 
-interface TerminalOutput extends Writable {
-  columns?: number;
-  isTTY?: boolean;
-}
-
 export interface ChatScreenCallbacks {
   onSubmit(text: string): void;
   onTab(): void;
@@ -58,13 +55,8 @@ export interface SlashCommandSuggestion {
 
 export interface CreateChatScreenOptions {
   stdin?: Readable;
-  stdout?: Writable;
-  terminalWidth?: number | (() => number);
-  /** Viewport rows; defaults to the stream's `rows`. The live region is
-   *  clamped to fit — a region taller than the window cannot be repainted in
-   *  place (cursor-up stops at the viewport top) and duplicates into
-   *  scrollback. */
-  terminalHeight?: number | (() => number);
+  /** Terminal output port, selected by the composition root. */
+  liveRegion: LiveRegionPort;
   callbacks: ChatScreenCallbacks;
   /** Bare-ESC resolution delay; tests shrink it. */
   escapeFlushMs?: number;
@@ -104,28 +96,9 @@ export interface ChatScreen extends GuidedInputPort {
 
 export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const stdin = (options.stdin ?? process.stdin) as RawInput;
-  const stdout = (options.stdout ?? process.stdout) as TerminalOutput;
-  const width = (): number =>
-    Math.max(
-      1,
-      Math.floor(
-        typeof options.terminalWidth === "function"
-          ? options.terminalWidth()
-          : (options.terminalWidth ?? stdout.columns ?? 80),
-      ),
-    );
-  const contentWidth = (): number => Math.max(1, width() - 1);
-  const height = (): number | null => {
-    const rows =
-      typeof options.terminalHeight === "function"
-        ? options.terminalHeight()
-        : (options.terminalHeight ?? (stdout as { rows?: number }).rows);
-    return typeof rows === "number" && Number.isFinite(rows) ? Math.max(3, Math.floor(rows)) : null;
-  };
-
-  const color =
-    stdout.isTTY !== false && process.env.NO_COLOR === undefined && process.env.TERM !== "dumb";
-  const styler = createTerminalStyler({ color });
+  const liveRegion = options.liveRegion;
+  const contentWidth = liveRegion.width;
+  const styler = createTerminalStyler({ color: liveRegion.color() });
   const decoder = new TerminalKeyDecoder();
   let editor: EditorState = createEditorState();
   const history = (options.initialHistory ?? [])
@@ -136,6 +109,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   let thinkingLine: UiTextLine | null = null;
   let statusLines: UiTextLine[] = [];
   let started = false;
+  let removeResizeListener: (() => void) | null = null;
   let previousRawMode = false;
   let escapeTimer: ReturnType<typeof setTimeout> | null = null;
   let quitArmedAt = 0;
@@ -157,16 +131,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   type PendingModal = PendingPermission | PendingInput;
   let pendingModal: PendingModal | null = null;
   const modalQueue: PendingModal[] = [];
-
-  const write = (text: string): void => {
-    stdout.write(text);
-  };
-
-  interface LiveLayout {
-    lines: string[];
-    cursorRow: number;
-    cursorColumn: number;
-  }
 
   const safeLine = (line: UiTextLine): string => styler.renderLine(line, contentWidth());
 
@@ -290,7 +254,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
               .join(""),
           }
         : prompt.editor;
-      const layout = renderEditorLayout(displayed, contentWidth());
+      const layout = windowEditorLayout(renderEditorLayout(displayed, contentWidth()), 10);
       const choiceWindow = windowList(prompt.options.choices ?? [], prompt.selectedIndex);
       const choiceFooter = listOverflowFooter(choiceWindow);
       const choiceLines = [
@@ -315,7 +279,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         cursorColumn: layout.cursorColumn,
       };
     }
-    const layout = renderEditorLayout(editor, contentWidth());
+    const layout = windowEditorLayout(renderEditorLayout(editor, contentWidth()), 10);
     const completion = activeCompletion();
     const suggestionWindow = completion
       ? windowList(completion.suggestions, completion.selectedIndex)
@@ -341,80 +305,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     };
   };
 
-  const csi = (sequence: string): string => `\u001b[${sequence}`;
-  const bracketedPaste = (enabled: boolean): string => csi(`?2004${enabled ? "h" : "l"}`);
-
-  /** The previous logical layout is retained so a resize can account for
-   * terminal reflow before climbing back to the live region's first row. */
-  let lastLayout: LiveLayout | null = null;
-
-  const physicalCursorRow = (layout: LiveLayout): number => {
-    const terminalWidth = width();
-    const rowsBefore = layout.lines
-      .slice(0, layout.cursorRow)
-      .reduce(
-        (total, line) => total + Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
-        0,
-      );
-    const cursorWrap =
-      layout.cursorColumn === 0
-        ? 0
-        : Math.floor(Math.max(0, layout.cursorColumn - 1) / terminalWidth);
-    return rowsBefore + cursorWrap;
-  };
-
-  const moveToRegionTop = (): void => {
-    const cursorRow = lastLayout ? physicalCursorRow(lastLayout) : 0;
-    if (cursorRow > 0) write(csi(`${cursorRow}A`));
-    write(`\r${csi("J")}`);
-  };
-
-  /** Drop logical lines from the top until the region fits the viewport —
-   *  content near the cursor and status stays; overflow yields to scrollback
-   *  reachability rather than corrupting every subsequent repaint. */
-  const clampToViewport = (layout: LiveLayout): LiveLayout => {
-    const maxRows = height();
-    if (maxRows === null) return layout;
-    const terminalWidth = width();
-    const physical = layout.lines.map((line) =>
-      Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
-    );
-    let total = physical.reduce((sum, rows) => sum + rows, 0);
-    let drop = 0;
-    while (drop < layout.lines.length - 1 && total > maxRows) {
-      total -= physical[drop] ?? 1;
-      drop += 1;
-    }
-    if (drop === 0) return layout;
-    const cursorRow = layout.cursorRow - drop;
-    return {
-      lines: layout.lines.slice(drop),
-      cursorRow: Math.max(0, cursorRow),
-      cursorColumn: cursorRow < 0 ? 0 : layout.cursorColumn,
-    };
-  };
-
   const paint = (): void => {
-    const layout = clampToViewport(liveLines());
-    moveToRegionTop();
-    write(layout.lines.join("\r\n"));
-    const up = layout.lines.length - 1 - layout.cursorRow;
-    write(
-      `\r${up > 0 ? csi(`${up}A`) : ""}${layout.cursorColumn > 0 ? csi(`${layout.cursorColumn}C`) : ""}`,
-    );
-    lastLayout = layout;
+    liveRegion.paint(liveLines());
   };
 
   const clearLive = (): void => {
-    if (lastLayout) moveToRegionTop();
-    lastLayout = null;
+    liveRegion.clear();
   };
 
   const printTranscript = (text: string | UiBlock): void => {
-    clearLive();
-    // The live region provides the second row above an idle editor; transcript
-    // rows themselves stay separated by exactly one blank line.
-    write(`${styler.renderBlock(text).join("\r\n")}\r\n\r\n`);
+    liveRegion.printAbove(styler.renderBlock(text).join("\r\n"));
     paint();
   };
 
@@ -722,10 +622,10 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       started = true;
       previousRawMode = stdin.isRaw === true;
       stdin.on("data", onData);
-      stdout.on("resize", onResize);
+      removeResizeListener = liveRegion.onResize(onResize);
       if (stdin.setRawMode && !previousRawMode) stdin.setRawMode(true);
       stdin.resume?.();
-      write(bracketedPaste(true));
+      liveRegion.setBracketedPaste(true);
       paint();
     },
 
@@ -734,8 +634,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       started = false;
       if (escapeTimer) clearTimeout(escapeTimer);
       stdin.removeListener("data", onData);
-      stdout.removeListener("resize", onResize);
-      write(bracketedPaste(false));
+      removeResizeListener?.();
+      removeResizeListener = null;
+      liveRegion.setBracketedPaste(false);
       if (stdin.setRawMode) stdin.setRawMode(previousRawMode);
       // A resumed stdin is a live handle that keeps the runtime alive after
       // the chat loop returns; without this, /quit tears down but never exits.
@@ -748,7 +649,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         if (modal.kind === "permission") modal.resolve("deny");
         else modal.resolve(null);
       }
-      write("\r\n");
     },
 
     printAbove(text) {
