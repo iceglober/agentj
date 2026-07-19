@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIG_DOCS } from "./content/config-reference";
+import { CONFIG_DOCS } from "../core/lib/config/reference";
 import {
   buildOutputs,
   markdownToHtml,

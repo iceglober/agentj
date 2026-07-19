@@ -16,8 +16,8 @@ import { join } from "node:path";
 import { chatCommands, INPUT_AND_KEY_HELP } from "../core/lib/chat/commands";
 import { type CliCommandDoc, describeCli } from "../core/lib/cli";
 import { configSchema } from "../core/lib/config";
+import { CONFIG_DOCS, type ConfigDoc } from "../core/lib/config/reference";
 import { listConfigPaths } from "../core/lib/config-cli";
-import { CONFIG_DOCS, type ConfigDoc } from "./content/config-reference";
 
 const DOCS_DIR = new URL(".", import.meta.url).pathname;
 const CONTENT_DIR = join(DOCS_DIR, "content");

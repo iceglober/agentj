@@ -21,4 +21,8 @@ describe("configField", () => {
   test("rejects a path that is not a real config key", () => {
     expect(() => configField("agent.not.a.real.key")).toThrow("Unknown configuration path");
   });
+
+  test("carries the editorial description from the shared reference", () => {
+    expect(configField("agent.steps").description).toContain("tool-loop ceiling");
+  });
 });

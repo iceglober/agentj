@@ -1,6 +1,9 @@
 import type z from "zod";
 import { listConfigPaths } from "../config-cli";
 import { configSchema } from "./index";
+import { CONFIG_DOCS } from "./reference";
+
+const DESCRIPTIONS = new Map(CONFIG_DOCS.map((doc) => [doc.path, doc.description]));
 
 export type ConfigFieldKind = "enum" | "boolean" | "number" | "string" | "string-array" | "record";
 
@@ -80,10 +83,6 @@ const kindFor = (schema: InternalSchema): ConfigFieldKind => {
   return "string";
 };
 
-/**
- * Descriptions are deliberately omitted: core must not depend on the docs
- * layer, which already imports core config code to validate CONFIG_DOCS.
- */
 export function configField(path: string): ConfigField {
   if (!listConfigPaths().includes(path)) {
     throw new Error(`Unknown configuration path: ${path}`);
@@ -93,10 +92,12 @@ export function configField(path: string): ConfigField {
   if (!schema) throw new Error(`Unknown configuration path: ${path}`);
   const def = schema._zod?.def;
   const enumValues = def?.type === "enum" ? Object.values(def.entries ?? {}) : undefined;
+  const description = DESCRIPTIONS.get(path);
   return {
     path,
     kind: kindFor(schema),
     defaultValue: valueAtPath(configSchema.parse({}), segments),
+    ...(description ? { description } : {}),
     ...(enumValues ? { enumValues } : {}),
     ...(path.endsWith("apiKey") || /(^|\.)providers\..*\.api_key$/u.test(path)
       ? { secret: true }
