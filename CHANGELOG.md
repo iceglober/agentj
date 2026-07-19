@@ -1,5 +1,15 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.30
+
+### Minor Changes
+
+- 5a76333: You can now press Ctrl+V in the prompt editor to insert copied local files as editable `@file` references. Paths with spaces are quoted automatically, so copying a file such as `notes/release plan.md` attaches it when you submit the prompt.
+
+### Patch Changes
+
+- 67e85b7: Fixes a blank gap that appeared when a tall live region shrank right before a transcript line was written — most visibly, submitting a slash command left a band of empty rows (the height of the dismissed completion menu) between the last reply and the command's output. The transcript writer no longer scrolls by the previous paint's height; it lands each line on the bottom row and lets the next repaint reserve exactly the current live region, so the padding can't go stale.
+
 ## 0.1.0-next.29
 
 ### Patch Changes
