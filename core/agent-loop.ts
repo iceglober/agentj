@@ -77,6 +77,7 @@ import {
 } from "./lib/skills";
 import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
+import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
 import {
@@ -1236,7 +1237,9 @@ export async function runAgentjChat(
         .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
     ];
 
+    const liveRegion = createAnsiLiveRegionAdapter({ stdout: processStdout });
     screen = createChatScreen({
+      liveRegion,
       initialHistory: promptHistory.entries,
       slashCommandOptions: (state) => completeChatInput(state.text, state.cursor, commandContext),
       shouldRememberInput: shouldRememberChatInput,

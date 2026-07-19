@@ -5,6 +5,7 @@ import {
   displayWidth,
   renderEditorLayout,
   truncateToDisplayWidth,
+  windowEditorLayout,
   wrapToDisplayWidth,
 } from "./terminal-editor";
 
@@ -40,5 +41,16 @@ describe("renderEditorLayout", () => {
   test("keeps editor rows inside narrow terminal widths", () => {
     const layout = renderEditorLayout(createEditorState("ab🙂\tcd"), 3);
     expect(layout.rows.every((row) => displayWidth(row) <= 3)).toBe(true);
+  });
+
+  test("windows long editor layouts around the cursor", () => {
+    const layout = renderEditorLayout(createEditorState("one\ntwo\nthree\nfour\nfive"), 20);
+    const atEnd = windowEditorLayout(layout, 3);
+    expect(atEnd.rows).toEqual(["three", "four", "five"]);
+    expect(atEnd.cursorRow).toBe(2);
+
+    const nearTop = windowEditorLayout({ ...layout, cursorRow: 0 }, 3);
+    expect(nearTop.rows).toEqual(["> one", "two", "three"]);
+    expect(nearTop.cursorRow).toBe(0);
   });
 });
