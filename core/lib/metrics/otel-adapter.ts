@@ -19,6 +19,7 @@ export interface OtelMetricsSinkOptions {
 interface OtelInstruments {
   duration: Histogram;
   inputTokens: Counter;
+  longContextInputTokens: Counter;
   noCacheTokens: Counter;
   cacheReadTokens: Counter;
   cacheWriteTokens: Counter;
@@ -41,6 +42,10 @@ export function createOtelMetricsSink(options: OtelMetricsSinkOptions = {}): Met
     const instruments: OtelInstruments = {
       duration: meter.createHistogram("agentj.llm.duration", instrumentOptions.duration),
       inputTokens: meter.createCounter("agentj.llm.tokens.input", instrumentOptions.tokens),
+      longContextInputTokens: meter.createCounter(
+        "agentj.llm.tokens.input_long_context",
+        instrumentOptions.tokens,
+      ),
       noCacheTokens: meter.createCounter("agentj.llm.tokens.no_cache", instrumentOptions.tokens),
       cacheReadTokens: meter.createCounter(
         "agentj.llm.tokens.cache_read",
@@ -86,6 +91,9 @@ function recordMeasurement(instruments: OtelInstruments, measurement: MetricMeas
       return;
     case "model.tokens.input":
       instruments.inputTokens.add(measurement.value, measurement.attributes);
+      return;
+    case "model.tokens.input_long_context":
+      instruments.longContextInputTokens.add(measurement.value, measurement.attributes);
       return;
     case "model.tokens.no_cache":
       instruments.noCacheTokens.add(measurement.value, measurement.attributes);

@@ -68,6 +68,17 @@ describe("metrics port", () => {
     ).toBeTrue();
   });
 
+  test("records a content-free long-context counter only above 272k input tokens", () => {
+    const { sink, measurements } = createFakeSink();
+
+    recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 272_000 });
+    recordModelUsage(sink, attributes, { durationMs: 1, inputTokens: 272_001 });
+
+    expect(measurements.filter(({ name }) => name === "model.tokens.input_long_context")).toEqual([
+      { name: "model.tokens.input_long_context", value: 272_001, attributes },
+    ]);
+  });
+
   test("omits cache-read ratio when its inputs are absent or unsafe", () => {
     const { sink, measurements } = createFakeSink();
 

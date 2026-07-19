@@ -74,6 +74,11 @@ export const resultRowSchema = z.object({
 });
 export type ResultRow = z.infer<typeof resultRowSchema>;
 
+/** $/Mtok by deployed model id; shared by eval reporting and the cost dashboard. */
+export const evalPrices: Record<string, { in: number; out: number }> = {
+  "gpt-5.6-sol": { in: 1.25, out: 10 },
+};
+
 /** The `eval.*` section of the root config. */
 export const evalConfigSchema = z.object({
   resultsDir: z.string().default("core/eval/results"),
@@ -95,7 +100,7 @@ export const evalConfigSchema = z.object({
     })
     .prefault({}),
   /** $/Mtok by model id; usd is null for models not present. */
-  prices: z.record(z.string(), z.object({ in: z.number(), out: z.number() })).default({}),
+  prices: z.record(z.string(), z.object({ in: z.number(), out: z.number() })).default(evalPrices),
 });
 export type EvalConfig = z.infer<typeof evalConfigSchema>;
 
