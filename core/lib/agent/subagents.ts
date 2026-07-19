@@ -137,6 +137,7 @@ export interface DelegationWiring {
     task: NormalizedSubagentTask;
     session: ChildSession;
     root: string;
+    abortSignal?: AbortSignal;
   }) => Promise<SubagentRunner>;
   readonly prepareBatch?: () => Promise<{
     parentRef: string;
@@ -257,7 +258,7 @@ async function runDelegationTask(
   let run: RunResult | null = null;
   try {
     session = await wiring.createChildSession({ id: task.id, parentRef: wiring.parentRef, task });
-    const child = await wiring.createChildAgent({ task, session, root: session.path });
+    const child = await wiring.createChildAgent({ task, session, root: session.path, abortSignal });
     run = await child.generate(prompt, { abortSignal, onStep });
 
     let finalized: ChildSessionFinalizeResult;

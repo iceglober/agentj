@@ -531,6 +531,8 @@ async function composeChat(
             delegation,
             mode: "build",
             externalTools: mcpSnapshot.externalTools,
+            createChildExternalTools: (childRoot, signal) =>
+              mcp.createChildConnection(childRoot, signal),
             permissions: { config: config.permissions, gate },
             onSubagentProgress: onDagProgress,
             onToolActivity,
@@ -612,34 +614,50 @@ async function composeChat(
       execution: {
         kind: "delegation",
         ...delegation,
-        createChildAgent: async ({ session }) => {
-          const child = await createProductionAgent(
-            environment,
-            childAgentConfig(agentConfigFor("build"), "delegate"),
-            {
-              root: session.path,
-              ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
-              metricsSink,
-              spill,
-              stopContextTokens: config.agent.context.softLimit,
-              // Background builds answer to the same session gate, labeled.
-              permissions: {
-                config: config.permissions,
-                gate: withRequestOrigin(gate, origin),
-              },
-            },
+        createChildAgent: async ({ session, abortSignal: childAbortSignal }) => {
+          const externalLease = await mcp.createChildConnection(
+            session.path,
+            childAbortSignal ?? abortSignal,
           );
-          return {
-            generate: (childPrompt, opts) =>
-              child.generate(childPrompt, {
-                abortSignal: opts?.abortSignal,
-                // Tee steps to the job runner's activity trail alongside the
-                // scheduler's own usage tracking.
-                onStep: (step) => {
-                  opts?.onStep?.(step);
-                  onStep?.(step);
+          let child: Agent;
+          try {
+            child = await createProductionAgent(
+              environment,
+              childAgentConfig(agentConfigFor("build"), "delegate"),
+              {
+                root: session.path,
+                ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
+                metricsSink,
+                spill,
+                stopContextTokens: config.agent.context.softLimit,
+                childExternalTools: externalLease.externalTools,
+                // Background builds answer to the same session gate, labeled.
+                permissions: {
+                  config: config.permissions,
+                  gate: withRequestOrigin(gate, origin),
                 },
-              }),
+              },
+            );
+          } catch (error) {
+            await externalLease.close();
+            throw error;
+          }
+          return {
+            generate: async (childPrompt, opts) => {
+              try {
+                return await child.generate(childPrompt, {
+                  abortSignal: opts?.abortSignal,
+                  // Tee steps to the job runner's activity trail alongside the
+                  // scheduler's own usage tracking.
+                  onStep: (step) => {
+                    opts?.onStep?.(step);
+                    onStep?.(step);
+                  },
+                });
+              } finally {
+                await externalLease.close();
+              }
+            },
           };
         },
       },

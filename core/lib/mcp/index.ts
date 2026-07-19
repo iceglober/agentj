@@ -34,6 +34,8 @@ const serverFields = {
   resources: resourceSelectionSchema,
 };
 
+/** Child agents receive no MCP capability unless a server opts in. Shared HTTP
+ * connections are catalog-read-only; isolated stdio processes are child-owned. */
 export const mcpStdioServerConfigSchema = z.object({
   transport: z.literal("stdio"),
   command: z.string().min(1),
@@ -42,6 +44,7 @@ export const mcpStdioServerConfigSchema = z.object({
   env: z.record(z.string(), z.string()).default({}),
   /** Child environment name → source process environment name. */
   envFrom: z.record(z.string(), z.string().min(1)).default({}),
+  inherit: z.enum(["none", "isolated"]).default("none"),
   ...serverFields,
 });
 
@@ -51,6 +54,7 @@ export const mcpHttpServerConfigSchema = z.object({
   headers: z.record(z.string(), z.string()).default({}),
   /** HTTP header name → source process environment name. */
   headersFromEnv: z.record(z.string(), z.string().min(1)).default({}),
+  inherit: z.enum(["none", "shared"]).default("none"),
   ...serverFields,
 });
 
@@ -186,6 +190,12 @@ export interface McpServerConnection {
 
 export interface McpConnection {
   externalTools: Record<AgentMode, ExternalAgentTools>;
+  close(): Promise<void>;
+}
+
+export interface McpChildConnection {
+  externalTools: Record<AgentMode, ExternalAgentTools>;
+  /** Closes only child-owned isolated connections. Shared connections remain primary-owned. */
   close(): Promise<void>;
 }
 
@@ -491,16 +501,19 @@ export function createMcpExternalTools(
   states: readonly McpServerConnection[],
   maxOutputChars: number,
   spill?: SpillWriter,
+  options: { readonlyCatalog?: readonly McpServerConnection[] } = {},
 ): Record<AgentMode, ExternalAgentTools> {
   validateMcpToolNames(states);
   const refreshTools = async (state: McpServerConnection): Promise<void> => {
-    if (!state.toolsStale) return;
+    // Shared child views must not consume notifications or mutate the primary
+    // catalog. Isolated children own their private state and may refresh it.
+    if (options.readonlyCatalog?.includes(state) || !state.toolsStale) return;
     state.tools = await allPages((cursor) => state.client.listTools(cursor));
     state.toolsStale = false;
     validateMcpToolNames(states);
   };
   const refreshResources = async (state: McpServerConnection): Promise<void> => {
-    if (!state.resourcesStale) return;
+    if (options.readonlyCatalog?.includes(state) || !state.resourcesStale) return;
     [state.resources, state.templates] = await Promise.all([
       allPages((cursor) => state.client.listResources(cursor)),
       allPages((cursor) => state.client.listResourceTemplates(cursor)),
