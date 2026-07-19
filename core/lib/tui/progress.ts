@@ -1,4 +1,5 @@
 import type { SubagentProgressEvent } from "../agent/subagents";
+import { truncateWithNotice } from "../truncation";
 
 /**
  * Flat task-line rendering for the unified subagent DAG: feed progress events
@@ -7,6 +8,9 @@ import type { SubagentProgressEvent } from "../agent/subagents";
  */
 
 const SPINNER = ["◐", "◓", "◑", "◒"];
+
+const truncateLine = (value: string, maxLength: number): string =>
+  truncateWithNotice(value.replace(/\r\n?|\n/gu, " "), maxLength);
 
 interface TrackedTask {
   id: string;
@@ -175,3 +179,27 @@ export function createProgressTracker(): ProgressTracker {
     },
   };
 }
+export const composeProgressLines = (state: {
+  activeTools: Iterable<[number, { tool: string; detail: string }]>;
+  dagBlocks: ReadonlyMap<number, string[]>;
+  queued: string[];
+  spinnerFrame: number;
+}): string[] => {
+  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
+  const owned = new Set<number>();
+  const toolRows: string[] = [];
+  for (const [id, { tool, detail }] of state.activeTools) {
+    toolRows.push(
+      `  ${frame} ${tool}${detail && tool !== "run_subagents" ? ` ${truncateLine(detail, 40)}` : ""}`,
+    );
+    const block = state.dagBlocks.get(id);
+    if (block) {
+      owned.add(id);
+      toolRows.push(...block);
+    }
+  }
+  const orphanRows = [...state.dagBlocks]
+    .filter(([id]) => !owned.has(id))
+    .flatMap(([, block]) => block);
+  return [...orphanRows, ...toolRows, ...state.queued];
+};

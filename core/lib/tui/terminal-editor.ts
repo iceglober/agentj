@@ -40,8 +40,12 @@ export const graphemeWidth = (value: string): number => {
   return 1;
 };
 
+/** SGR is emitted only by the TUI style boundary and occupies no terminal cells. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: strips trusted ANSI SGR emitted by styles.ts
+const stripSgr = (value: string): string => value.replace(/\u001b\[[0-9;]*m/gu, "");
+
 export const displayWidth = (value: string): number =>
-  splitGraphemes(value).reduce((total, grapheme) => total + graphemeWidth(grapheme), 0);
+  splitGraphemes(stripSgr(value)).reduce((total, grapheme) => total + graphemeWidth(grapheme), 0);
 
 const escapeCodePoint = (value: string): string => {
   const code = value.codePointAt(0) ?? 0;

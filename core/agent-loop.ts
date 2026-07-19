@@ -81,11 +81,18 @@ import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { renderMarkdownLite } from "./lib/tui/markdown";
 import {
   applyProgressEvent,
+  composeProgressLines,
   createProgressTracker,
   formatDuration,
   type ProgressTracker,
 } from "./lib/tui/progress";
-import { escapeTerminalText } from "./lib/tui/terminal-editor";
+import {
+  composeStatusSection,
+  composeThinkingLine,
+  formatClock,
+  shouldWarnContext,
+} from "./lib/tui/status";
+import type { UiTextLine } from "./lib/tui/styles";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
   createNpmInstaller,
@@ -180,7 +187,25 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
   }
 };
 
-const SPINNER = ["◐", "◓", "◑", "◒"];
+/** Keep activity state legible in monochrome while giving active outcomes a semantic tone. */
+const presentActivityLine = (text: string): UiTextLine => {
+  const trimmed = text.trimStart();
+  const tone = trimmed.startsWith("✓")
+    ? "success"
+    : trimmed.startsWith("x")
+      ? "danger"
+      : trimmed.startsWith("↳ queued")
+        ? "warning"
+        : trimmed.startsWith("◐") ||
+            trimmed.startsWith("◓") ||
+            trimmed.startsWith("◑") ||
+            trimmed.startsWith("◒")
+          ? "accent"
+          : trimmed.startsWith("·")
+            ? "muted"
+            : undefined;
+  return tone ? [{ text, tone }] : text;
+};
 
 /** Command shown after an interactive session has restored the terminal. */
 export const formatResumeCommand = (sessionId: string): string =>
@@ -215,160 +240,14 @@ export async function finalizeInteractiveChat(options: {
   }
 }
 
-/** Session clock: 9s → "9s", 74s → "1m14s", 3.5h → "3h30m", 30h → "1d6h0m". */
-export const formatClock = (ms: number): string => {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const days = Math.floor(total / 86_400);
-  const hours = Math.floor((total % 86_400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  if (days > 0) return `${days}d${hours}h${minutes}m`;
-  if (hours > 0) return `${hours}h${minutes}m`;
-  if (minutes > 0) return `${minutes}m${seconds}s`;
-  return `${seconds}s`;
-};
-
-/** 456 → "456", 2437 → "2.4k", 432_312 → "432.3k". */
-const formatStatusTokens = (count: number): string =>
-  count < 1000 ? `${count}` : `${(count / 1000).toFixed(1)}k`;
-
-/** Left and right hugging opposite edges; joined loosely when they cannot. */
-const splitEnds = (left: string, right: string, width: number): string => {
-  if (right.length === 0) return left;
-  const gap = width - left.length - right.length;
-  return gap >= 2 ? `${left}${" ".repeat(gap)}${right}` : `${left}  ${right}`;
-};
-
-/** Long paths keep their head and leaf: ~/repos/…/nested/repo. */
-const middleEllipsis = (text: string, max: number): string => {
-  if (text.length <= max) return text;
-  if (max <= 1) return "…";
-  const head = Math.max(1, Math.floor((max - 1) * 0.4));
-  const tail = max - 1 - head;
-  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
-};
-
-export interface StatusSectionState {
-  sessionId: string;
-  /** Display path of the directory the session started in — the root the
-   *  session orchestrates from, however many worktrees the work fans into. */
-  root: string;
-  /** Provider/model label, e.g. "azure/gpt-5.6-sol". */
-  model: string;
-  mode: ChatMode;
-  spinnerFrame: number;
-  /** Cumulative request/response tokens; ctx is the latest request's size and
-   *  cacheRead the session's cumulative provider-cache read tokens. */
-  usage: { in: number; out: number; ctx: number; cacheRead?: number };
-  /** When set and ctx has reached it, the ctx counter renders flagged. */
-  contextSoftLimit?: number;
-  sessionStartedAt: number;
-  /** Number of background jobs currently running. */
-  runningJobs: number;
-  now?: number;
-}
-
-/**
- * The status section below the editor. A compact job count is the first row
- * whenever detached work is active; `/jobs` provides the per-job detail.
- */
-export const composeThinkingLine = (
-  state: {
-    thinking: boolean;
-    interruptRequested: boolean;
-    spinnerFrame: number;
-    turnStartedAt: number | null;
-    now?: number;
-  },
-  width: number,
-): string | null => {
-  if (!state.thinking) return null;
-  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-  const elapsed =
-    state.turnStartedAt === null
-      ? ""
-      : ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`;
-  return truncateLineWithNotice(
-    `${frame} ${state.interruptRequested ? "interrupting…" : "thinking"}${elapsed}${state.interruptRequested ? "" : " (esc)"}`,
-    width,
-  );
-};
-
-/**
- * One-shot context warning: fire the first time the latest request's context
- * reaches the configured soft limit, then stay quiet for the session — the
- * model was told once; repeating the notice every step is noise.
- */
-export const shouldWarnContext = (
-  ctx: number,
-  softLimit: number | undefined,
-  alreadyWarned: boolean,
-): boolean => softLimit !== undefined && !alreadyWarned && ctx >= softLimit;
-
-export const composeStatusSection = (state: StatusSectionState, width: number): string[] => {
-  const now = state.now ?? Date.now();
-
-  const left = `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`;
-  const clock = formatClock(now - state.sessionStartedAt);
-  const overLimit =
-    state.contextSoftLimit !== undefined && state.usage.ctx >= state.contextSoftLimit;
-  const counters = [
-    formatStatusTokens(state.usage.in),
-    formatStatusTokens(state.usage.out),
-    `${formatStatusTokens(state.usage.ctx)}${overLimit ? "!" : ""}`,
-  ] as const;
-  // Session-cumulative cache reads as a share of cumulative input: how much
-  // of everything sent so far was served from the provider's prefix cache.
-  // Dropped in the compact form — width wins there.
-  const cacheRead = state.usage.cacheRead;
-  const cached =
-    cacheRead === undefined || state.usage.in <= 0
-      ? ""
-      : ` · cached ${formatStatusTokens(cacheRead)}(${Math.round((cacheRead / state.usage.in) * 100)}%)`;
-  const labeled = `in ${counters[0]}${cached} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
-  const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
-  const right = left.length + 2 + labeled.length <= width ? labeled : compact;
-  const identity = splitEnds(left, right, width);
-
-  const location = middleEllipsis(state.root, width);
-
-  const jobStatus =
-    state.runningJobs === 0
-      ? []
-      : [`${state.runningJobs} ${state.runningJobs === 1 ? "job" : "jobs"} running`];
-
-  return [...jobStatus, identity, location];
-};
-
-/**
- * Interleave running tool rows with the DAG blocks they own: each tool head
- * line is followed by its nested subagent rows; blocks with no live owner
- * (progress events that carried no activity id) render first, un-nested.
- */
-export const composeProgressLines = (state: {
-  activeTools: Iterable<[number, { tool: string; detail: string }]>;
-  dagBlocks: ReadonlyMap<number, string[]>;
-  queued: string[];
-  spinnerFrame: number;
-}): string[] => {
-  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-  const owned = new Set<number>();
-  const toolRows: string[] = [];
-  for (const [id, { tool, detail }] of state.activeTools) {
-    toolRows.push(
-      `  ${frame} ${tool}${detail && tool !== "run_subagents" ? ` ${truncateLineWithNotice(detail, 40)}` : ""}`,
-    );
-    const block = state.dagBlocks.get(id);
-    if (block) {
-      owned.add(id);
-      toolRows.push(...block);
-    }
-  }
-  const orphanRows = [...state.dagBlocks]
-    .filter(([id]) => !owned.has(id))
-    .flatMap(([, block]) => block);
-  return [...orphanRows, ...toolRows, ...state.queued];
-};
+export { composeProgressLines } from "./lib/tui/progress";
+export {
+  composeStatusSection,
+  composeThinkingLine,
+  formatClock,
+  type StatusSectionState,
+  shouldWarnContext,
+} from "./lib/tui/status";
 
 interface ChatComposition {
   root: string;
@@ -890,7 +769,7 @@ export async function runAgentjChat(
         dagBlocks: dagBlockLines(),
         queued: queuedLines(),
         spinnerFrame,
-      }),
+      }).map(presentActivityLine),
     );
   };
 
@@ -921,7 +800,10 @@ export async function runAgentjChat(
         (live?.live ? live.lines(spinnerFrame, dagIndent(activity.id)) : []);
       frozenDagBlocks.delete(activity.id);
       dagTrackers.delete(activity.id);
-      screen?.printAbove([`  ✓ ${activity.tool}${elapsed}`, ...block].join("\n"));
+      screen?.printAbove([
+        [{ text: `  ✓ ${activity.tool}${elapsed}`, tone: "success" }],
+        ...block.map((text) => [{ text }]),
+      ]);
     }
     refreshProgress();
     updateStatus();
@@ -1072,20 +954,20 @@ export async function runAgentjChat(
       if (event.type === "turn-started") {
         if (event.transcriptText) screen?.printAbove(event.transcriptText);
         else {
-          screen?.printAbove(
-            `\u001b[1m\u001b[36m❯\u001b[0m \u001b[1m${escapeTerminalText(event.text)}\u001b[0m`,
-            { preStyled: true },
-          );
+          screen?.printAbove([
+            [
+              { text: "❯", tone: "accent", bold: true },
+              { text: " " },
+              { text: event.text, bold: true },
+            ],
+          ]);
         }
         updateStatus();
         return;
       }
       if (event.type === "assistant") {
         const body = formatChatEvent(event);
-        if (body !== null)
-          screen?.printAbove(renderMarkdownLite(escapeTerminalText(body)), {
-            preStyled: true,
-          });
+        if (body !== null) screen?.printAbove(renderMarkdownLite(body));
         updateStatus();
         return;
       }
@@ -1147,10 +1029,18 @@ export async function runAgentjChat(
             usage: turnTokens,
             contextSoftLimit: composition.contextSoftLimit,
             sessionStartedAt,
-            runningJobs: jobRunner.list().filter((job) => job.status === "running").length,
+            jobs: jobRunner
+              .list()
+              .filter((job) => job.status === "running")
+              .map((job) => ({
+                id: job.id,
+                mode: job.mode,
+                prompt: job.prompt,
+                startedAt: job.startedAt,
+              })),
           },
           screen.width(),
-        ),
+        ).map((text) => [{ text, tone: "muted" }]),
       );
     };
 
