@@ -1317,14 +1317,22 @@ export async function runAgentjChat(
           try {
             const paths = await clipboardFiles.readFiles();
             const references = formatFileReferences(paths);
-            return references ? ` ${references} ` : null;
+            if (references) return ` ${references} `;
+            // No files on the clipboard: say so, and what the key is for — an
+            // empty paste that showed nothing looked like a dead key.
+            render({
+              type: "notice",
+              text: "Ctrl+V attaches files copied in your file manager (Finder, etc.) as @references — the clipboard has no files right now. To paste text, use your terminal's paste (⌘V).",
+            });
+            return null;
           } catch (error) {
-            if (error instanceof ClipboardFilesUnavailableError) {
-              render({
-                type: "notice",
-                text: "Unable to read copied files from the system clipboard.",
-              });
-            }
+            render({
+              type: "notice",
+              text:
+                error instanceof ClipboardFilesUnavailableError
+                  ? "Reading files from the system clipboard isn't available here."
+                  : `Couldn't read files from the clipboard: ${error instanceof Error ? error.message : String(error)}`,
+            });
             return null;
           }
         },
