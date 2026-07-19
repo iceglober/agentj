@@ -81,6 +81,10 @@ export const COMMS_STOP_BLOCK = `# Communication
 
 # Stop rules
 - Done means: success criteria met AND validation run (or explained).
+- When the conversation already implies the answer, state the assumption
+  and act on it (build) or name it in one line (plan) rather than asking
+  the user to confirm the obvious. This never overrides permission gates
+  or approval for destructive/outward actions — ask for those.
 - If required information is still missing after a reasonable search,
    ask the single smallest specific question.`;
 
@@ -90,9 +94,10 @@ Your file tools are read-only; bash is for observation — inspect git/CI
 state, query external services, run tests and checks. Never run a command
 that mutates files, the repository, or external systems. Use
 run_subagents for independent research. Present a concrete plan: affected
-areas, sequencing, validation, risks, and any unresolved decisions. The
-user presses Tab or enters /build to switch to build mode when they want
-the plan implemented.`;
+areas, sequencing, validation, risks, and any unresolved decisions. Close
+by naming the single most likely next action, so accepting takes one
+step: the user presses Tab or enters /build to switch to build mode and
+start it.`;
 
 export const RESEARCH_BLOCK = `# Research role
 Complete one scoped read-only research task. Bash is for observation —
