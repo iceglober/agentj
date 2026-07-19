@@ -177,6 +177,72 @@ const createConfigListMutationCommand = (
     handler: ({ key, value }) => handlers[operation]({ key, value }),
   });
 
+/** One argument or flag of a CLI command, as shown in `--help`. */
+export interface CliArgDoc {
+  usage: string;
+  description: string;
+}
+
+/** A user-facing CLI command's documentable shape. */
+export interface CliCommandDoc {
+  name: string;
+  description: string;
+  args: CliArgDoc[];
+  flags: CliArgDoc[];
+}
+
+/** cmd-ts commands expose their help rows through `helpTopics()`, which isn't in
+ *  the published types; this is the slice we read. */
+interface HelpTopic {
+  category: string;
+  usage: string;
+  description: string;
+}
+interface Introspectable {
+  name: string;
+  description?: string;
+  helpTopics(): HelpTopic[];
+}
+
+const describeCommand = (command: Introspectable): CliCommandDoc => {
+  const rows = command.helpTopics();
+  const inCategories = (categories: string[]): CliArgDoc[] =>
+    rows
+      // The auto-added help flag is noise in a reference table.
+      .filter((row) => categories.includes(row.category) && !row.usage.startsWith("--help"))
+      .map((row) => ({ usage: row.usage, description: row.description }));
+  return {
+    name: command.name,
+    description: command.description ?? "",
+    // Positionals are "arguments"; `--x` flags and `--x <value>` options both read
+    // as flags in a reference (their usage string already shows any value).
+    args: inCategories(["arguments"]),
+    flags: inCategories(["flags", "options"]),
+  };
+};
+
+/**
+ * The user-facing command line, extracted from the same `command()` definitions
+ * the parser runs — so docs and `--help` can never disagree. Handlers are never
+ * invoked here (help extraction only reads structure), so no-op deps are safe.
+ */
+export function describeCli(): CliCommandDoc[] {
+  const deps = {
+    version: "",
+    runChat: async () => EXIT_SUCCESS,
+    runOnce: async () => EXIT_SUCCESS,
+  } as AgentjCommandDependencies;
+  const handlers = {} as ConfigCliHandlers;
+  return [
+    createChatCommand(deps),
+    createRunCommand(deps),
+    createUpdateCommand(deps),
+    createConfigSetCommand(handlers),
+    createConfigGetCommand(handlers),
+    createConfigDeleteCommand(handlers),
+  ].map((command) => describeCommand(command as unknown as Introspectable));
+}
+
 const writeResult = (
   result: Awaited<ReturnType<typeof runSafely>>,
   writers: Required<AgentjCliIo>,

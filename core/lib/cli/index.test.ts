@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { ConfigCliHandlers } from "../config-cli";
 import {
   type AgentjCommandDependencies,
+  describeCli,
   EXIT_FAILURE,
   EXIT_SUCCESS,
   type RunOnceOptions,
@@ -184,5 +185,17 @@ describe("runAgentjCli", () => {
     expect(stdout.text()).toContain("chat");
     expect(chatCalls).toHaveLength(0);
     expect(onceCalls).toHaveLength(0);
+  });
+
+  test("describeCli extracts every command's args and flags without running handlers", () => {
+    const cli = describeCli();
+    const run = cli.find((c) => c.name === "agentj run");
+    expect(run?.args.map((a) => a.usage)).toEqual(["<task>"]);
+    expect(run?.flags.map((f) => f.usage)).toEqual(["--plan", "--allow-all"]);
+    // A value-taking option is captured too, not only boolean flags.
+    const chat = cli.find((c) => c.name === "agentj");
+    expect(chat?.flags.some((f) => f.usage === "--resume <str>")).toBe(true);
+    // The auto-added help flag is excluded from the reference.
+    expect(cli.every((c) => c.flags.every((f) => !f.usage.startsWith("--help")))).toBe(true);
   });
 });

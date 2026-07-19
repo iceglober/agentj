@@ -14,6 +14,7 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chatCommands, INPUT_AND_KEY_HELP } from "../core/lib/chat/commands";
+import { type CliCommandDoc, describeCli } from "../core/lib/cli";
 import { configSchema } from "../core/lib/config";
 import { listConfigPaths } from "../core/lib/config-cli";
 import { CONFIG_DOCS, type ConfigDoc } from "./content/config-reference";
@@ -83,6 +84,31 @@ export function renderConfigMarkdown(docs: readonly ConfigDoc[] = CONFIG_DOCS): 
     ":::",
     "",
   ].join("\n");
+}
+
+/**
+ * The command-line reference, sourced from the CLI's own `command()` definitions
+ * via `describeCli()` — so it can never disagree with `agentj --help`.
+ */
+export function renderCliMarkdown(commands: readonly CliCommandDoc[] = describeCli()): string {
+  const lines = [
+    "## Command line",
+    "",
+    "Every subcommand, argument, and flag — generated from the same definitions `agentj --help` prints.",
+    "",
+    ":::details Show all commands and flags",
+    "",
+  ];
+  for (const command of commands) {
+    const usage = [command.name, ...command.args.map((arg) => arg.usage)].join(" ");
+    lines.push(`### \`${usage}\``, "", command.description, "");
+    for (const item of [...command.args, ...command.flags]) {
+      lines.push(`- \`${item.usage}\` — ${item.description}`);
+    }
+    lines.push("");
+  }
+  lines.push(":::", "");
+  return lines.join("\n");
 }
 
 const escapeHtml = (text: string): string =>
@@ -310,13 +336,15 @@ const CONTENT_ORDER = ["index.md"] as const;
 
 /** The full set of files the generator owns, as {relativePath: contents}. */
 export function buildOutputs(): Record<string, string> {
+  const cli = renderCliMarkdown();
   const reference = renderReferenceMarkdown();
   const config = renderConfigMarkdown();
   const prose = CONTENT_ORDER.map((name) => readFileSync(join(CONTENT_DIR, name), "utf8"));
   return {
+    "content/cli.generated.md": cli,
     "content/reference.generated.md": reference,
     "content/config.generated.md": config,
-    "index.html": renderSite([...prose, reference, config]),
+    "index.html": renderSite([...prose, cli, reference, config]),
   };
 }
 
