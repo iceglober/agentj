@@ -40,6 +40,7 @@ import {
   formatFileReferences,
 } from "./lib/chat/file-attachments";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
+import { runOnboarding } from "./lib/chat/onboarding";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
@@ -67,7 +68,12 @@ import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
 import { startMetricsProvider } from "./lib/metrics/otel-provider";
 import { type PromptContext, profileNames } from "./lib/prompt";
-import { resolveAzureApiKey } from "./lib/secrets";
+import {
+  AZURE_API_KEY_ACCOUNT,
+  AZURE_SECRET_SERVICE,
+  hasAzureApiKey,
+  resolveAzureApiKey,
+} from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
@@ -865,6 +871,21 @@ export async function runAgentjChat(
     refreshProgress();
     updateStatus();
   };
+
+  // First-run gate: walk the user through setting a provider key before
+  // standing up the session, which otherwise hard-errors on a missing key.
+  // Interactive TTY only — `agentj run` and pipes keep the clean error.
+  if (processStdout.isTTY) {
+    const onboardingStore = createKeyringSecretStore({});
+    const maskedPrompt = createMaskedSecretPrompt();
+    const onboarding = await runOnboarding({
+      hasKey: () => hasAzureApiKey({ store: onboardingStore }),
+      askSecret: () => maskedPrompt.askSecret(),
+      storeKey: (value) => onboardingStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, value),
+      write: (text) => processStdout.write(text),
+    });
+    if (onboarding === "cancelled") return EXIT_FAILURE;
+  }
 
   let composition: ChatComposition;
   try {
