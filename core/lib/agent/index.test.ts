@@ -198,7 +198,7 @@ describe("createAgentTools", () => {
     expect(events).toEqual(["permission:bash", "start:bash:ls", "end:bash:ls"]);
   });
 
-  test("plan mode receives only read/search capabilities; research adds run_subagents", async () => {
+  test("plan mode receives read/search/bash but never edit tools; research adds run_subagents", async () => {
     const config = agentConfigSchema.parse({});
     const planPrimary = await createAgentTools(sandbox, config, {
       ...baseOptions,
@@ -220,10 +220,15 @@ describe("createAgentTools", () => {
       mode: "plan",
     });
 
-    expect(Object.keys(planPrimary).sort()).toEqual(["glob", "grep", "readFile", "run_subagents"]);
-    expect(Object.keys(planDelegate).sort()).toEqual(["glob", "grep", "readFile"]);
+    expect(Object.keys(planPrimary).sort()).toEqual([
+      "bash",
+      "glob",
+      "grep",
+      "readFile",
+      "run_subagents",
+    ]);
+    expect(Object.keys(planDelegate).sort()).toEqual(["bash", "glob", "grep", "readFile"]);
     for (const tools of [planPrimary, planDelegate]) {
-      expect(tools).not.toHaveProperty("bash");
       expect(tools).not.toHaveProperty("writeFile");
       expect(tools).not.toHaveProperty("edit");
     }
