@@ -772,6 +772,10 @@ export async function runAgentjChat(
   // the transcript with elapsed time when they finish.
   let turnStartedAt: number | null = null;
   let interruptRequested = false;
+  // Did the running turn surface anything (a tool row or assistant text)? A
+  // turn that ends with none — an empty model reply — otherwise renders
+  // nothing, which looks identical to a freeze.
+  let turnProducedOutput = false;
   let spinnerFrame = 0;
   const sessionStartedAt = Date.now();
   const turnTokens: { in: number; out: number; ctx: number; cacheRead?: number } = {
@@ -846,6 +850,7 @@ export async function runAgentjChat(
         (live?.live ? live.lines(spinnerFrame, dagIndent(activity.id)) : []);
       frozenDagBlocks.delete(activity.id);
       dagTrackers.delete(activity.id);
+      turnProducedOutput = true;
       screen?.printAbove([
         [{ text: `  ✓ ${activity.tool}${elapsed}`, tone: "success" }],
         ...block.map((text) => [{ text }]),
@@ -985,6 +990,7 @@ export async function runAgentjChat(
         }
         turnStartedAt = Date.now();
         interruptRequested = false;
+        turnProducedOutput = false;
         turnModel = composition.modelFor(event.mode);
         turnUsage = { inputTokens: 0, outputTokens: 0, longContextRequests: 0 };
       }
@@ -1027,8 +1033,10 @@ export async function runAgentjChat(
         if (update.completedLines.length > 0) {
           // Owned blocks wait for the tool-end row so the transcript reads
           // parent-then-children; ownerless blocks freeze immediately.
-          if (owner === NO_ACTIVITY) screen?.printAbove(update.completedLines.join("\n"));
-          else frozenDagBlocks.set(owner, update.completedLines);
+          if (owner === NO_ACTIVITY) {
+            turnProducedOutput = true;
+            screen?.printAbove(update.completedLines.join("\n"));
+          } else frozenDagBlocks.set(owner, update.completedLines);
         }
         if (!dagTracker.live) dagTrackers.delete(owner);
         refreshProgress();
@@ -1051,12 +1059,43 @@ export async function runAgentjChat(
       }
       if (event.type === "assistant") {
         const body = formatChatEvent(event);
-        if (body !== null) screen?.printAbove(renderMarkdownLite(body));
+        if (body !== null) {
+          turnProducedOutput = true;
+          screen?.printAbove(renderMarkdownLite(body));
+        } else if (!turnProducedOutput) {
+          // The turn ran, showed no tool work, and the model returned no text —
+          // say so, or the turn is indistinguishable from a hang.
+          screen?.printAbove([
+            [{ text: "(no response — the model returned nothing; try again)", tone: "muted" }],
+          ]);
+        }
+        updateStatus();
+        return;
+      }
+      if (event.type === "turn-error") {
+        turnProducedOutput = true;
+        const filtered = /content management policy|content filter|was filtered/i.test(event.error);
+        screen?.printAbove([
+          [{ text: `error: ${event.error}`, tone: "danger" }],
+          ...(filtered
+            ? [
+                [
+                  {
+                    text: "The provider's content filter rejected this request. It often fires intermittently — retry once; if it keeps happening, start a new session (aj) instead of resuming this one.",
+                    tone: "muted" as const,
+                  },
+                ],
+              ]
+            : []),
+        ]);
         updateStatus();
         return;
       }
       const text = formatChatEvent(event);
-      if (text) screen?.printAbove(text);
+      if (text) {
+        turnProducedOutput = true;
+        screen?.printAbove(text);
+      }
       updateStatus();
     };
     emitChatEvent = render;
