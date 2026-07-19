@@ -40,6 +40,7 @@ import {
   formatFileReferences,
 } from "./lib/chat/file-attachments";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
+import { runOnboarding } from "./lib/chat/onboarding";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
@@ -67,7 +68,6 @@ import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
 import { startMetricsProvider } from "./lib/metrics/otel-provider";
 import { type PromptContext, profileNames } from "./lib/prompt";
-import { runOnboarding } from "./lib/chat/onboarding";
 import {
   AZURE_API_KEY_ACCOUNT,
   AZURE_SECRET_SERVICE,
@@ -881,8 +881,7 @@ export async function runAgentjChat(
     const onboarding = await runOnboarding({
       hasKey: () => hasAzureApiKey({ store: onboardingStore }),
       askSecret: () => maskedPrompt.askSecret(),
-      storeKey: (value) =>
-        onboardingStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, value),
+      storeKey: (value) => onboardingStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, value),
       write: (text) => processStdout.write(text),
     });
     if (onboarding === "cancelled") return EXIT_FAILURE;

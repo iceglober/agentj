@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { type OnboardingPort, runOnboarding } from "./onboarding";
 
-const makePort = (over: Partial<OnboardingPort> & { key?: string | null }): {
+const makePort = (
+  over: Partial<OnboardingPort> & { key?: string | null },
+): {
   port: OnboardingPort;
   out: string[];
   stored: string[];
