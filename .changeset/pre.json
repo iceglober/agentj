@@ -5,6 +5,7 @@
     "@glrs-dev/aj": "0.0.0"
   },
   "changesets": [
+    "agent-skills",
     "bash-abort-signal",
     "biome-quality",
     "bright-updates",
