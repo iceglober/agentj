@@ -386,3 +386,72 @@ describe("runChatCommand", () => {
     expect(quitCalls()).toBe(1);
   });
 });
+
+describe("skill commands", () => {
+  const shipSkill = {
+    name: "ship",
+    summary: "Ship finished work.",
+    mode: "build" as const,
+    prompt: (args: string) => `SHIP BODY${args ? ` :: ${args}` : ""}`,
+  };
+
+  function makeSkillContext() {
+    const events: ChatEvent[] = [];
+    const calls: string[] = [];
+    const context = {
+      session: {
+        setMode: (mode?: "plan" | "build") => {
+          calls.push(`mode:${mode}`);
+          return mode ?? "plan";
+        },
+        send: async (text: string, options?: { transcriptText?: string; restoreText?: string }) => {
+          calls.push(`send:${options?.transcriptText}:${options?.restoreText}:${text}`);
+        },
+      } as unknown as ChatCommandContext["session"],
+      jobs: {} as JobRunner,
+      emit: (event: ChatEvent) => {
+        events.push(event);
+      },
+      quit: () => {},
+      skills: [shipSkill],
+    } satisfies ChatCommandContext;
+    return { context, events, calls };
+  }
+
+  test("invoking a skill switches mode and sends its prompt as a turn", async () => {
+    const { context, events, calls } = makeSkillContext();
+    await runChatCommand(context, "ship", "fast please");
+    expect(events).toEqual([]); // startsTurn semantics: no command event
+    expect(calls).toEqual([
+      "mode:build",
+      "send:Command: ship:/ship fast please:SHIP BODY :: fast please",
+    ]);
+  });
+
+  test("built-in commands shadow same-named skills and unknown names still notice", async () => {
+    const { context, events, calls } = makeSkillContext();
+    context.skills = [{ ...shipSkill, name: "help" }, shipSkill];
+    await runChatCommand(context, "help", "");
+    expect(calls).toEqual([]);
+    expect(events[0]).toEqual({ type: "command", name: "help" });
+    expect((events[1] as { text: string }).text).toContain("/ship — Ship finished work. (skill)");
+    await runChatCommand(context, "nope", "");
+    expect((events.at(-1) as { text: string }).text).toContain("Unknown command /nope");
+  });
+
+  test("suggestions and completion include skills without shadowing built-ins", () => {
+    const skills = [shipSkill, { ...shipSkill, name: "quit", summary: "shadowed" }];
+    const names = suggestChatCommands("", skills).map(({ name }) => name);
+    expect(names).toContain("ship");
+    expect(names.filter((name) => name === "quit")).toHaveLength(1);
+    expect(suggestChatCommands("shi", skills)[0]).toEqual({
+      name: "ship",
+      summary: "Ship finished work. (skill)",
+    });
+
+    const completion = completeChatInput("/ship ", 6, { skills });
+    expect(completion?.hint).toBe("Press Enter to run the ship skill (build mode).");
+    const top = completeChatInput("/sh", 3, { skills });
+    expect(top?.suggestions.map(({ label }) => label)).toContain("/ship");
+  });
+});
