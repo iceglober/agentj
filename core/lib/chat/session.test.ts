@@ -396,3 +396,30 @@ describe("createChatSession", () => {
     });
   });
 });
+
+test("a failed turn's request survives into the next turn's notice", async () => {
+  await withLog(async (log) => {
+    const prompts: string[] = [];
+    let failNext = true;
+    const session = createChatSession({
+      agentFor: async () =>
+        makeAgent(async (prompt) => {
+          prompts.push(prompt);
+          if (failNext) {
+            failNext = false;
+            throw new Error("The operation timed out.");
+          }
+          return result("ok");
+        }),
+      log,
+    });
+
+    await session.send("add Orwell's rules to the base prompt");
+    await session.send("try again");
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("The previous turn failed (The operation timed out.)");
+    expect(prompts[1]).toContain('Its request was: "add Orwell\'s rules to the base prompt"');
+    expect(prompts[1]).toContain("try again");
+  });
+});

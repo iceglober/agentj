@@ -19,7 +19,7 @@ const captureFetch = (): { init: RequestInit | undefined }[] => {
   globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
     calls.push({ init });
     return new Response("ok");
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   return calls;
 };
 
@@ -44,5 +44,56 @@ describe("fetchWithRequestDeadline", () => {
 
   test("the deadline leaves headroom far beyond Bun's 5-minute default", () => {
     expect(LLM_REQUEST_TIMEOUT_MS).toBeGreaterThan(5 * 60_000);
+  });
+});
+
+describe("fetchWithRequestDeadline retry", () => {
+  test("retries a timed-out request and returns the recovered response", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (calls < 3)
+        throw Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
+      return new Response("recovered");
+    }) as unknown as typeof fetch;
+    const response = await fetchWithRequestDeadline("https://example.test");
+    expect(await response.text()).toBe("recovered");
+    expect(calls).toBe(3);
+  });
+
+  test("gives up after the attempt budget", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      throw Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
+    }) as unknown as typeof fetch;
+    await expect(fetchWithRequestDeadline("https://example.test")).rejects.toThrow("timed out");
+    expect(calls).toBe(3);
+  });
+
+  test("a caller abort is honored immediately, never retried", async () => {
+    let calls = 0;
+    const caller = new AbortController();
+    globalThis.fetch = (async () => {
+      calls += 1;
+      caller.abort();
+      throw Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+    }) as unknown as typeof fetch;
+    await expect(
+      fetchWithRequestDeadline("https://example.test", { signal: caller.signal }),
+    ).rejects.toThrow("aborted");
+    expect(calls).toBe(1);
+  });
+
+  test("non-transient errors propagate without a retry", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      throw Object.assign(new Error("bad request assembly"), { name: "SyntaxError" });
+    }) as unknown as typeof fetch;
+    await expect(fetchWithRequestDeadline("https://example.test")).rejects.toThrow(
+      "bad request assembly",
+    );
+    expect(calls).toBe(1);
   });
 });

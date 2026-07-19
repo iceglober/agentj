@@ -130,10 +130,14 @@ export function createChatSession(
         // The model should know the turn was cut short on the next turn.
         notices.push(`[note] The previous turn ("${text.slice(0, 60)}") was interrupted.`);
       } else {
-        emit({
-          type: "turn-error",
-          error: error instanceof Error ? error.message : String(error),
-        });
+        const message = error instanceof Error ? error.message : String(error);
+        emit({ type: "turn-error", error: message });
+        // A failed turn leaves no trace in the continuation — its user message
+        // never joined the messages. Carry the request forward so "try again"
+        // means something on the next turn.
+        notices.push(
+          `[note] The previous turn failed (${message.slice(0, 200)}) before completing. Its request was: "${text.slice(0, 2_000)}". If the user asks to retry or continue, act on that request.`,
+        );
       }
     } finally {
       busy = false;
