@@ -30,6 +30,7 @@
     "status-section",
     "subagent-permissions",
     "subagent-result-prompt-ui",
+    "update-tui-refresh-and-spacing",
     "version-flag",
     "version-newline"
   ]

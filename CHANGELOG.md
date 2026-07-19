@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.24
+
+### Patch Changes
+
+- 58a7a31: Make explicit updates refresh the registry, preserve terminal input when restarting after automatic updates, and restore one blank transcript row while reserving editor spacing for live activity.
+
 ## 0.1.0-next.23
 
 ### Minor Changes
