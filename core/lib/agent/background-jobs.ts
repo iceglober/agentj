@@ -74,8 +74,9 @@ export const createBackgroundJobTool = (port: BackgroundJobPort, agentMode: "pla
       "When you can estimate the duration, set softTimeoutMinutes a little above it: if the",
       "job is still running then, you are pinged to check_job it — the job keeps running, and",
       "you either renew the soft timeout (progressing, just slow) or abort it (stuck).",
-      "mode plan runs a read-only agent in the session directory; mode build runs in an",
-      "isolated worktree and integrates its commits when done.",
+      "mode plan runs an observe-only agent in the session directory — it reads, searches,",
+      "and runs non-mutating commands (CI status, git state, tests) but cannot edit; mode",
+      "build runs in an isolated worktree and integrates its commits when done.",
     ].join("\n"),
     inputSchema: backgroundJobInputSchema,
     execute: async ({ mode, prompt, softTimeoutMinutes }) => {

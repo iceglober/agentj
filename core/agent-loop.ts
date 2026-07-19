@@ -272,6 +272,7 @@ interface ChatComposition {
   runPlanJob(
     prompt: string,
     abortSignal: AbortSignal,
+    origin?: string,
     onStep?: (step: RunStep) => void,
   ): Promise<{ text: string }>;
   /** Late-binds the interactive job runner behind the model's run_job and
@@ -420,8 +421,9 @@ async function composeChat(
         };
   // Research workers are plan-mode children: subagent overrides/tier first,
   // else they inherit the plan tier's model. Derived per call so runtime
-  // model selection applies to the next worker.
-  const createResearchWorker = async () =>
+  // model selection applies to the next worker. Their observation bash
+  // answers to the same session gate, labeled with who is asking.
+  const createResearchWorker = async (origin?: string) =>
     createProductionAgent(environment, childAgentConfig(agentConfigFor("plan"), "delegate"), {
       root,
       ctx,
@@ -429,6 +431,10 @@ async function composeChat(
       spill,
       mode: "plan",
       stopContextTokens: config.agent.context.softLimit,
+      permissions: {
+        config: config.permissions,
+        gate: origin ? withRequestOrigin(gate, origin) : gate,
+      },
     });
 
   const mcp = createMcpRuntime(config.mcp, {
@@ -500,8 +506,12 @@ async function composeChat(
             spill,
             mode: "plan",
             externalTools: mcpSnapshot.externalTools,
-            research: { createWorker: createResearchWorker, onProgress: onDagProgress },
+            research: {
+              createWorker: (task) => createResearchWorker(`subagent ${task.id}`),
+              onProgress: onDagProgress,
+            },
             onToolActivity,
+            permissions: { config: config.permissions, gate },
             jobs: jobsPort,
           })
         : createProductionAgent(environment, agentConfigFor("build"), {
@@ -575,9 +585,10 @@ async function composeChat(
   const runPlanJob = async (
     prompt: string,
     abortSignal: AbortSignal,
+    origin = "job",
     onStep?: (step: RunStep) => void,
   ) => {
-    const worker = await createResearchWorker();
+    const worker = await createResearchWorker(origin);
     const result = await worker.generate(prompt, { abortSignal, onStep });
     return { text: result.text };
   };
@@ -987,7 +998,7 @@ export async function runAgentjChat(
       addTurnNotice: (text) => chat.addTurnNotice(text),
       runJob: ({ id, mode, prompt, abortSignal, onStep }) =>
         mode === "plan"
-          ? composition.runPlanJob(prompt, abortSignal, onStep)
+          ? composition.runPlanJob(prompt, abortSignal, `job ${id}`, onStep)
           : composition.runBuildJob(prompt, abortSignal, `job ${id}`, onStep),
       // The soft-timeout ping rides the normal turn queue: it waits out a busy
       // foreground turn and shows in the transcript only once its turn runs.

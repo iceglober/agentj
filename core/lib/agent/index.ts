@@ -396,7 +396,17 @@ export async function createAgentTools(
       : {};
 
   if (mode === "plan") {
+    // Plan agents observe but never edit: of the bash-tool trio they get only
+    // `bash` (no writeFile), so they can inspect VCS/CI/build state and run
+    // checks. The prompt scopes it to non-mutating commands; the same
+    // permission policy as build gates each command.
+    const { bash } = await createBashTools(fileSandbox, {
+      root: opts.root,
+      maxOutputChars: config.tools.maxOutputChars,
+      spill: opts.spill?.write,
+    });
     return finalize({
+      ...(bash ? { bash } : {}),
       // The raw sandbox, not the confined one: the read tool does its own
       // root-confined resolution, extended with the spill dir.
       ...createReadTools(sb, {
