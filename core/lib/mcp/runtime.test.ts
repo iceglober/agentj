@@ -41,6 +41,14 @@ const config = (servers: Record<string, McpServerConfig>) => mcpConfigSchema.par
 const stdio = (command: string) =>
   mcpConfigSchema.parse({ servers: { value: { transport: "stdio", command } } }).servers.value!;
 
+const inheritedConfig = () =>
+  mcpConfigSchema.parse({
+    servers: {
+      hosted: { transport: "http", url: "https://example.com/mcp", inherit: "shared" },
+      workspace: { transport: "stdio", command: "workspace", inherit: "isolated" },
+    },
+  });
+
 describe("createMcpRuntime", () => {
   test("isolates failures, stages successful servers, and activates a versioned snapshot", async () => {
     const closed: string[] = [];
@@ -78,6 +86,86 @@ describe("createMcpRuntime", () => {
     expect(statuses).toContain("bad:failed");
     await runtime.close();
     expect(closed).toContain("good");
+  });
+
+  test("keeps MCP primary-only unless a server opts in", async () => {
+    const initial = config({ docs: stdio("docs") });
+    const runtime = createMcpRuntime(initial, {
+      root: "/primary",
+      connectServer: async (name) => client("search", [], name),
+    });
+    await runtime.reload(initial);
+    await runtime.activatePending();
+    const child = await runtime.createChildConnection("/worktrees/a");
+    expect(child.externalTools.plan.tools).toEqual({});
+    expect(child.externalTools.build.tools).toEqual({});
+    await child.close();
+    await runtime.close();
+  });
+
+  test("creates child-scoped isolated stdio connections while sharing a read-only HTTP view", async () => {
+    const roots: string[] = [];
+    const closed: string[] = [];
+    const lists: string[] = [];
+    const initial = inheritedConfig();
+    const runtime = createMcpRuntime(initial, {
+      root: "/primary",
+      connectServer: async (name, _config, options) => {
+        roots.push(`${name}:${options.root}`);
+        const value = client("search", closed, `${name}:${options.root}`);
+        return {
+          ...value,
+          async listTools() {
+            lists.push(`${name}:${options.root}`);
+            return await value.listTools();
+          },
+        };
+      },
+    });
+    await runtime.reload(initial);
+    await runtime.activatePending();
+    const childA = await runtime.createChildConnection("/worktrees/a");
+    const childB = await runtime.createChildConnection("/worktrees/b");
+
+    expect(roots).toContain("workspace:/worktrees/a");
+    expect(roots).toContain("workspace:/worktrees/b");
+    expect(roots).not.toContain("hosted:/worktrees/a");
+    await childA.externalTools.build.tools.find_mcp_tools?.execute({ query: "", limit: 8 });
+    // The child did not refresh the shared primary catalog.
+    expect(lists.filter((entry) => entry === "hosted:/primary")).toHaveLength(1);
+    await childA.close();
+    expect(closed).toContain("workspace:/worktrees/a");
+    expect(closed).not.toContain("hosted:/primary");
+    expect(closed).not.toContain("workspace:/worktrees/b");
+    await childB.close();
+    await runtime.close();
+    expect(closed).toContain("hosted:/primary");
+  });
+
+  test("cleans up partial child startup and honors an aborted startup", async () => {
+    const closed: string[] = [];
+    const initial = mcpConfigSchema.parse({
+      servers: {
+        first: { transport: "stdio", command: "first", inherit: "isolated" },
+        second: { transport: "stdio", command: "second", inherit: "isolated" },
+      },
+    });
+    const runtime = createMcpRuntime(initial, {
+      root: "/primary",
+      connectServer: async (name, _config, options) => {
+        if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        if (name === "second") throw new Error("startup failed");
+        return client("search", closed, name);
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(runtime.createChildConnection("/worktrees/a", controller.signal)).rejects.toThrow(
+      "Aborted",
+    );
+    await expect(runtime.createChildConnection("/worktrees/a")).rejects.toThrow("startup failed");
+    expect(closed).toContain("first");
+    await runtime.close();
   });
 
   test("classifies the SDK's numeric 401 code, whose message never says 401", async () => {

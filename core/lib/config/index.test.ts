@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { mcpServerConfigSchema } from "../mcp";
 import {
   type ConfigFileSystem,
   configSchema,
@@ -83,6 +84,16 @@ describe("global config reads and merges", () => {
   test("defaults project setup and MCP servers to empty", () => {
     expect(configSchema.parse({}).project.setup).toEqual([]);
     expect(configSchema.parse({}).mcp).toEqual({ servers: {}, maxOutputChars: 30_000 });
+    expect(mcpServerConfigSchema.parse({ transport: "stdio", command: "server" }).inherit).toBe(
+      "none",
+    );
+    expect(
+      mcpServerConfigSchema.safeParse({
+        transport: "stdio",
+        command: "server",
+        inherit: "shared",
+      }).success,
+    ).toBe(false);
     expect(configSchema.parse({}).metrics.enabled).toBe(false);
     expect(configSchema.parse({}).update).toEqual({ auto: true, channel: "auto" });
     expect(configSchema.parse({}).agent.tools.maxOutputChars).toBe(30_000);

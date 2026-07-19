@@ -181,8 +181,13 @@ notice pointing at `/mcp auth`, so authorize once interactively before non-inter
 server does not support OAuth or dynamic client registration, the same command falls back to a
 masked Authorization-header prompt; that value is omitted from terminal and prompt history but
 remains plaintext in the existing configuration file format, so prefer `headersFromEnv` for
-long-lived keys. MCP support does not include legacy HTTP + SSE, or MCP access from
-delegates/background jobs.
+long-lived keys. MCP support does not include legacy HTTP + SSE. Delegates and background build
+jobs receive no MCP capability unless a server opts in with `inherit`: HTTP servers may declare
+`inherit: "shared"` (children get a read-only view of the primary connection's catalog — they can
+call tools but never reload, close, or refresh it), and stdio servers may declare
+`inherit: "isolated"` (each child gets its own server process rooted at its worktree, closed
+deterministically when the child finishes). Children's MCP calls ride the same `permissions.mcp`
+policy, with asks labeled by the requesting subagent or job.
 
 ## Parallel subagents
 

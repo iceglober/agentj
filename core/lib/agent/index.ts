@@ -170,11 +170,19 @@ export interface CreateAgentOptions {
   stopContextTokens?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
   mode?: AgentMode;
-  /**
-   * Primary-only, mode-specific tools supplied by an external integration such
-   * as MCP. Delegates and background children never inherit these capabilities.
-   */
+  /** Primary-only, mode-specific tools supplied by an external integration. */
   externalTools?: Partial<Record<AgentMode, ExternalAgentTools>>;
+  /** Child-specific external tools. The composition root must create these as
+   * a scoped lease; children never receive the primary connection directly. */
+  childExternalTools?: Partial<Record<AgentMode, ExternalAgentTools>>;
+  /** Creates a child-owned external capability lease for a worktree. */
+  createChildExternalTools?(
+    root: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    externalTools: Record<AgentMode, ExternalAgentTools>;
+    close(): Promise<void>;
+  }>;
   /** Plan-mode run_subagents wiring: read-only research workers. */
   research?: {
     createWorker(task: NormalizedSubagentTask): Promise<SubagentRunner>;
@@ -335,36 +343,55 @@ export async function createAgentTools(
             parentRef: opts.delegation.parentRef,
             createChildSession: opts.delegation.createChildSession,
             prepareBatch: opts.delegation.prepareBatch,
-            createChildAgent: async ({ task, session, root }) => {
-              const child = await createAgent(sb, childAgentConfig(config, "delegate"), {
-                root,
-                ctx: {
-                  ...opts.ctx,
-                  cwd: root,
-                  gitBranch: session.branch,
-                  gitStatusSummary: await session.status(),
-                },
-                metricsSink: opts.metricsSink,
-                spill: opts.spill,
-                stopSteps: opts.stopSteps,
-                stopContextTokens: config.context.softLimit,
-                // Children answer to the same session gate as the parent —
-                // worktree isolation confines their edits, not their bash.
-                ...(opts.permissions
-                  ? {
-                      permissions: {
-                        ...opts.permissions,
-                        gate: withRequestOrigin(opts.permissions.gate, `subagent ${task.id}`),
-                      },
-                    }
-                  : {}),
-              });
+            createChildAgent: async ({ task, session, root, abortSignal }) => {
+              const externalLease = opts.createChildExternalTools
+                ? await opts.createChildExternalTools(root, abortSignal)
+                : undefined;
+              let child: Agent;
+              try {
+                child = await createAgent(sb, childAgentConfig(config, "delegate"), {
+                  root,
+                  ctx: {
+                    ...opts.ctx,
+                    cwd: root,
+                    gitBranch: session.branch,
+                    gitStatusSummary: await session.status(),
+                  },
+                  metricsSink: opts.metricsSink,
+                  spill: opts.spill,
+                  stopSteps: opts.stopSteps,
+                  stopContextTokens: config.context.softLimit,
+                  ...(externalLease
+                    ? { childExternalTools: externalLease.externalTools }
+                    : opts.childExternalTools
+                      ? { childExternalTools: opts.childExternalTools }
+                      : {}),
+                  // Children answer to the same session gate as the parent —
+                  // worktree isolation confines their edits, not their bash.
+                  ...(opts.permissions
+                    ? {
+                        permissions: {
+                          ...opts.permissions,
+                          gate: withRequestOrigin(opts.permissions.gate, `subagent ${task.id}`),
+                        },
+                      }
+                    : {}),
+                });
+              } catch (error) {
+                await externalLease?.close();
+                throw error;
+              }
               return {
-                generate: (prompt, generateOpts) =>
-                  child.generate(prompt, {
-                    abortSignal: generateOpts?.abortSignal,
-                    onStep: generateOpts?.onStep,
-                  }),
+                generate: async (prompt, generateOpts) => {
+                  try {
+                    return await child.generate(prompt, {
+                      abortSignal: generateOpts?.abortSignal,
+                      onStep: generateOpts?.onStep,
+                    });
+                  } finally {
+                    await externalLease?.close();
+                  }
+                },
               };
             },
           },
@@ -376,7 +403,8 @@ export async function createAgentTools(
     : {};
 
   const mode = opts.mode ?? "build";
-  const external = config.role === "primary" ? opts.externalTools?.[mode] : undefined;
+  const external =
+    config.role === "primary" ? opts.externalTools?.[mode] : opts.childExternalTools?.[mode];
   const finalize = (builtIn: ToolSet): ToolSet => {
     const merged = mergeExternalTools(builtIn, external);
     const resolveExternalTarget = external?.permissionTargets

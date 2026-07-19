@@ -1,9 +1,11 @@
 import type { AgentMode, ExternalAgentTools } from "../agent";
 import {
   connectMcpServer,
+  createMcpExternalTools,
   createMcpSnapshot,
   getMcpPrompt,
   listMcpPrompts,
+  type McpChildConnection,
   type McpConfig,
   type McpPromptCatalogEntry,
   type McpPromptResult,
@@ -45,6 +47,8 @@ export interface McpRuntime {
   prompts(): readonly McpPromptCatalogEntry[];
   getPrompt(server: string, prompt: string, args: Record<string, string>): Promise<McpPromptResult>;
   statuses(): readonly McpRuntimeStatus[];
+  /** Create a child-scoped capability lease. Only opted-in servers are exposed. */
+  createChildConnection(root: string, signal?: AbortSignal): Promise<McpChildConnection>;
   close(): Promise<void>;
 }
 
@@ -305,6 +309,51 @@ export function createMcpRuntime(initialConfig: McpConfig, options: McpRuntimeOp
 
     async getPrompt(server, prompt, args) {
       return await getMcpPrompt([...active.values()], server, prompt, args);
+    },
+
+    async createChildConnection(root, signal) {
+      if (closed) throw new Error("MCP runtime is closed");
+      // Shared HTTP states are a read-only view of the primary catalog. They
+      // cannot reload, close, or consume list-change notifications. Isolated
+      // stdio states are connected under the child's worktree and owned only by
+      // this lease, so concurrent children never share lifecycle state.
+      const shared = [...active.values()].filter(
+        (state) => state.config.transport === "http" && state.config.inherit === "shared",
+      );
+      const isolatedConfigs = Object.entries(config.servers)
+        .filter(
+          (entry): entry is [string, McpConfig["servers"][string]] =>
+            entry[1]?.transport === "stdio" && entry[1].inherit === "isolated",
+        )
+        .sort(([left], [right]) => left.localeCompare(right));
+      const isolated: McpServerConnection[] = [];
+      try {
+        for (const [name, serverConfig] of isolatedConfigs) {
+          isolated.push(
+            await connectMcpServer(name, serverConfig, {
+              root,
+              connectServer: options.connectServer,
+              ...(signal ? { signal } : {}),
+              ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+              ...(options.oauth ? { oauth: options.oauth } : {}),
+            }),
+          );
+        }
+        const states = [...shared, ...isolated].sort((left, right) =>
+          left.name.localeCompare(right.name),
+        );
+        return {
+          externalTools: createMcpExternalTools(states, activeMaxOutputChars, options.spill, {
+            readonlyCatalog: shared,
+          }),
+          async close() {
+            await Promise.allSettled(isolated.map((state) => state.client.close()));
+          },
+        };
+      } catch (error) {
+        await Promise.allSettled(isolated.map((state) => state.client.close()));
+        throw error;
+      }
     },
 
     statuses() {
