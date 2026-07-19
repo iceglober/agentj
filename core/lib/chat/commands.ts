@@ -736,7 +736,7 @@ const prefixedSuggestions = (
 export function completeChatInput(
   text: string,
   cursor: number,
-  context?: Pick<ChatCommandContext, "mcp" | "models" | "skills" | "jobs">,
+  context?: Partial<Pick<ChatCommandContext, "mcp" | "models" | "skills" | "jobs">>,
 ): ChatInputCompletion | null {
   const graphemes = Array.from(text);
   const boundedCursor = Math.max(0, Math.min(cursor, graphemes.length));
