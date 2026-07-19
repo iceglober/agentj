@@ -326,6 +326,33 @@ describe("runChatCommand", () => {
     expect((events.at(-1) as { text: string }).text).toContain("docs [http] — connected");
   });
 
+  test("edits string-array config values through guided list actions", async () => {
+    const { context } = makeContext();
+    const answers = ["add", "second", "edit", "updated", "save"];
+    const asks: Array<{ label: string; choices?: readonly string[] }> = [];
+    const sets: Array<{ key: string; value?: string }> = [];
+    context.guided = {
+      askInput: async (options) => {
+        asks.push(options);
+        return answers.shift() ?? null;
+      },
+    };
+    context.config = {
+      get: async ({ key }) => ({ ok: true, key, storage: "global_config", value: ["first"] }),
+      set: async (input) => {
+        sets.push(input);
+        return { ok: true, key: input.key, storage: "global_config", changed: true };
+      },
+      delete: async ({ key }) => ({ ok: true, key, storage: "global_config", changed: true }),
+    };
+
+    await runChatCommand(context, "config", "set agent.llm.tiers");
+
+    expect(sets).toEqual([{ key: "agent.llm.tiers", value: '["first","updated"]' }]);
+    expect(asks[0]?.label).toContain("> first");
+    expect(asks[0]?.choices).toContain("add");
+  });
+
   test("guides MCP add and masked auth without placing values in command arguments", async () => {
     const { context } = makeContext();
     const answers = ["docs", "http", "https://example.com/mcp", "Bearer token"];
