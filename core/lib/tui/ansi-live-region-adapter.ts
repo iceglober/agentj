@@ -17,12 +17,21 @@ export interface CreateAnsiLiveRegionAdapterOptions {
 /**
  * ANSI implementation of the live terminal region. It is the only TUI module
  * that knows cursor-control protocol details; callers render logical layouts.
+ *
+ * The live region floats directly beneath the transcript rather than being
+ * glued to the terminal's bottom: transcript writes use the terminal's own
+ * scrolling, and the region is erased and redrawn right where the cursor sits.
+ * There is deliberately no scroll bookkeeping — an earlier design tracked a
+ * reserved bottom band and manually scrolled to keep it free, which drifted out
+ * of sync whenever the region's height changed mid-turn (a tool row appearing,
+ * the thinking line toggling) and deposited stray blank rows. With no state to
+ * desync, that whole class of spacing bugs cannot occur.
  */
 export function createAnsiLiveRegionAdapter(
   options: CreateAnsiLiveRegionAdapterOptions = {},
 ): LiveRegionPort {
   const stdout = (options.stdout ?? process.stdout) as TerminalOutput;
-  const csi = (sequence: string): string => `\u001b[${sequence}`;
+  const csi = (sequence: string): string => `[${sequence}`;
   const write = (text: string): void => {
     stdout.write(text);
   };
@@ -44,14 +53,12 @@ export function createAnsiLiveRegionAdapter(
     return typeof rows === "number" && Number.isFinite(rows) ? Math.max(3, Math.floor(rows)) : null;
   };
 
+  /** The layout currently drawn on screen, so it can be erased before a redraw
+   *  or a transcript write. Null when the region is not on screen. */
   let lastLayout: LiveLayout | null = null;
-  /** Rows between the transcript's last line and the terminal bottom. Grows
-   *  when a tall layout needs room; shrinks only as transcript text fills the
-   *  vacated band — a terminal cannot pull scrolled-off text back down, so a
-   *  shrunken layout leaves a temporary gap that new transcript lines close. */
-  let anchorRows = 0;
-  let knownHeight: number | null = null;
 
+  /** Physical rows the cursor sits below the region's first line, wrapping
+   *  included — how far up to walk to reach the top of the drawn region. */
   const physicalCursorRow = (layout: LiveLayout): number => {
     const terminalWidth = width();
     const rowsBefore = layout.lines
@@ -67,73 +74,25 @@ export function createAnsiLiveRegionAdapter(
     return rowsBefore + cursorWrap;
   };
 
-  const moveToRelativeRegionTop = (): void => {
+  /** Move the cursor to the top-left of the drawn region and clear to the end
+   *  of the screen, leaving the cursor where the next line should begin. */
+  const eraseRegion = (): void => {
     const cursorRow = lastLayout ? physicalCursorRow(lastLayout) : 0;
     if (cursorRow > 0) write(csi(`${cursorRow}A`));
     write(`\r${csi("J")}`);
   };
 
-  const resetForResize = (rows: number): void => {
-    if (knownHeight === null || knownHeight === rows) return;
-    if (anchorRows > 0) {
-      write(`${csi(`${Math.max(1, rows - anchorRows + 1)};1H`)}${csi("J")}`);
-    }
-    anchorRows = 0;
-  };
-
-  const reserve = (rows: number, terminalHeight: number): void => {
-    if (rows <= anchorRows) return;
-    if (anchorRows > 0) {
-      write(`${csi(`${Math.max(1, terminalHeight - anchorRows + 1)};1H`)}${csi("J")}`);
-    }
-    const additional = rows - anchorRows;
-    write(csi(`${terminalHeight};1H`));
-    write("\n".repeat(additional));
-    anchorRows = rows;
-  };
-
-  /** Physical rows a pre-rendered transcript block occupies, wrap included. */
-  const physicalTextRows = (text: string): number => {
-    const terminalWidth = width();
-    return text
-      .split("\r\n")
-      .reduce(
-        (total, line) => total + Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
-        0,
-      );
-  };
-
-  const clamp = (layout: LiveLayout, terminalHeight: number): LiveLayout => {
-    if (layout.lines.length <= terminalHeight) return layout;
-    const drop = layout.lines.length - terminalHeight;
-    const cursorRow = layout.cursorRow - drop;
+  /** Keep the region no taller than the screen so redrawing it can never scroll
+   *  the transcript out of reach; the oldest (top) rows drop first. */
+  const clamp = (layout: LiveLayout): LiveLayout => {
+    const rows = height();
+    if (rows === null || layout.lines.length <= rows) return layout;
+    const drop = layout.lines.length - rows;
     return {
       lines: layout.lines.slice(drop),
-      cursorRow: Math.max(0, cursorRow),
-      cursorColumn: cursorRow < 0 ? 0 : layout.cursorColumn,
+      cursorRow: Math.max(0, layout.cursorRow - drop),
+      cursorColumn: layout.cursorColumn,
     };
-  };
-
-  const paintAnchored = (layout: LiveLayout, terminalHeight: number): void => {
-    resetForResize(terminalHeight);
-    const fitted = clamp(layout, terminalHeight);
-    reserve(fitted.lines.length, terminalHeight);
-    const start = terminalHeight - fitted.lines.length + 1;
-    write(`${csi(`${Math.max(1, terminalHeight - anchorRows + 1)};1H`)}${csi("J")}`);
-    write(`${csi(`${start};1H`)}${fitted.lines.join("\r\n")}`);
-    write(csi(`${start + fitted.cursorRow};${fitted.cursorColumn + 1}H`));
-    lastLayout = fitted;
-    knownHeight = terminalHeight;
-  };
-
-  const paintRelative = (layout: LiveLayout): void => {
-    moveToRelativeRegionTop();
-    write(layout.lines.join("\r\n"));
-    const up = layout.lines.length - 1 - layout.cursorRow;
-    write(
-      `\r${up > 0 ? csi(`${up}A`) : ""}${layout.cursorColumn > 0 ? csi(`${layout.cursorColumn}C`) : ""}`,
-    );
-    lastLayout = layout;
   };
 
   return {
@@ -149,46 +108,27 @@ export function createAnsiLiveRegionAdapter(
       write(csi(`?2004${enabled ? "h" : "l"}`));
     },
     paint(layout) {
-      const rows = height();
-      if (rows === null) paintRelative(layout);
-      else paintAnchored(layout, rows);
+      eraseRegion();
+      const fitted = clamp(layout);
+      write(fitted.lines.join("\r\n"));
+      const up = fitted.lines.length - 1 - fitted.cursorRow;
+      write(
+        `\r${up > 0 ? csi(`${up}A`) : ""}${fitted.cursorColumn > 0 ? csi(`${fitted.cursorColumn}C`) : ""}`,
+      );
+      lastLayout = fitted;
     },
     printAbove(text) {
-      const rows = height();
-      if (rows === null) {
-        moveToRelativeRegionTop();
-        lastLayout = null;
-        write(`${text}\r\n\r\n`);
-        return;
-      }
-      resetForResize(rows);
-      if (anchorRows === 0) reserve(1, rows);
-      // `anchorRows` spans the live region plus any rows a since-shrunk layout
-      // vacated; clearing all of it lets this write reclaim that gap.
-      const bandTop = Math.max(1, rows - anchorRows + 1);
-      const textRows = physicalTextRows(text);
-      // Land the text with its last line on the bottom row — tall text scrolls
-      // the terminal on its own as it overflows — then hand the band back by
-      // zeroing the anchor. The next paint()'s reserve() scrolls up by the
-      // CURRENT live-region height, so the gap never depends on the previous
-      // paint's height (which goes stale when a tall completion menu or modal
-      // is dismissed right before this write).
-      const writeRow = Math.max(bandTop, rows - textRows + 1);
-      write(`${csi(`${bandTop};1H`)}${csi("J")}${csi(`${writeRow};1H`)}${text}`);
-      anchorRows = 0;
+      // Erase the region, drop `text` below the transcript with the single blank
+      // separator the transcript owns, and let the terminal scroll naturally as
+      // it overflows. The next paint() redraws the region right after — no
+      // height-dependent padding, so the separator is always exactly one row.
+      eraseRegion();
       lastLayout = null;
-      knownHeight = rows;
+      write(`${text}\r\n\r\n`);
     },
     clear() {
-      const rows = height();
-      if (rows === null) {
-        if (lastLayout) moveToRelativeRegionTop();
-      } else if (anchorRows > 0) {
-        resetForResize(rows);
-        write(`${csi(`${Math.max(1, rows - anchorRows + 1)};1H`)}${csi("J")}`);
-      }
+      eraseRegion();
       lastLayout = null;
-      anchorRows = 0;
     },
   };
 }
