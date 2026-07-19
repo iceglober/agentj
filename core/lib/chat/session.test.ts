@@ -164,6 +164,25 @@ describe("createChatSession", () => {
     });
   });
 
+  test("passes image attachments to the agent without exposing them in events", async () => {
+    await withLog(async (log) => {
+      const images: Array<GenerateOptions["images"]> = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (_prompt, opts) => {
+            images.push(opts?.images);
+            return result("seen");
+          }),
+        log,
+      });
+      const screenshot = { mediaType: "image/png" as const, data: "c2NyZWVuc2hvdA==" };
+
+      await session.send("inspect [pasted image #1]", { images: [screenshot] });
+
+      expect(images).toEqual([[screenshot]]);
+    });
+  });
+
   test("queues messages during a running turn and applies Tab at the next turn", async () => {
     await withLog(async (log) => {
       let release: (() => void) | undefined;

@@ -75,6 +75,8 @@ export interface ComposedPrompt {
   params: ModelParams;
   profile: ProfileName | "default";
   flags: RenderFlags;
+  /** Whether the selected profile accepts image inputs. */
+  supportsImages: boolean;
   /** 12-char sha256 of instructions + "\0" + JSON(params). Cache/version key. */
   version: string;
 }
@@ -160,5 +162,12 @@ export function composePrompt(
     .digest("hex")
     .slice(0, 12);
 
-  return { instructions, params, profile: profileName ?? "default", flags, version };
+  return {
+    instructions,
+    params,
+    profile: profileName ?? "default",
+    flags,
+    supportsImages: profile?.supportsImages !== false,
+    version,
+  };
 }

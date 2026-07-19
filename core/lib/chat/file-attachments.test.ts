@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  createPastedImageRegistry,
+  expandFileAttachments,
   expandFileReferences,
   formatFileReference,
   formatFileReferences,
@@ -40,6 +42,36 @@ describe("file attachments", () => {
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+
+  test("attaches supported referenced images as base64 instead of UTF-8 text", async () => {
+    const cwd = await createAttachmentDirectory();
+    try {
+      const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+      await writeFile(path.join(cwd, "screen.png"), png);
+
+      const expanded = await expandFileAttachments("inspect @screen.png", cwd);
+
+      expect(expanded.text).toBe("inspect @screen.png");
+      expect(expanded.images).toEqual([{ mediaType: "image/png", data: png.toString("base64") }]);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves only intact pasted-image markers and bounds session storage", () => {
+    const images = createPastedImageRegistry();
+    const screenshot = { mediaType: "image/png" as const, data: "c2NyZWVuc2hvdA==" };
+    const added = images.add(screenshot);
+    expect(added).toEqual({ marker: "[pasted image #1]" });
+    if ("marker" in added) {
+      expect(images.resolve(`inspect ${added.marker}`)).toEqual([screenshot]);
+      expect(images.resolve("inspect [pasted image #x]")).toEqual([]);
+      expect(images.hasReference(`inspect ${added.marker}`)).toBe(true);
+    }
+    expect(images.add({ mediaType: "image/png", data: "a".repeat(14_000_000) })).toEqual({
+      error: "The pasted image exceeds the 10 MiB limit.",
+    });
   });
 
   test("shares count and content limits across all references", async () => {

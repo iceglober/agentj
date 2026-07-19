@@ -154,6 +154,21 @@ const COMPACTION_INSTRUCTIONS = `Summarize the conversation so another coding ag
 const COMPACTION_PROMPT =
   "Create the handoff summary now. This replaces the prior conversation context.";
 
+const userMessage = (req: GenerateRequest): ModelMessage =>
+  req.images && req.images.length > 0
+    ? {
+        role: "user",
+        content: [
+          { type: "text", text: req.prompt },
+          ...req.images.map((image) => ({
+            type: "file" as const,
+            mediaType: image.mediaType,
+            data: image.data,
+          })),
+        ],
+      }
+    : { role: "user", content: req.prompt };
+
 /**
  * The AI SDK runtime: a ToolLoopAgent per generate() call (instructions and
  * call settings are per-request), driving the model this factory bound once.
@@ -229,15 +244,16 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
         const onStep = req.onStep;
         // Continuation: prior turns (opaque vendor messages) plus this turn's
         // prompt as the next user message; fresh turns send prompt alone.
-        const inputMessages = req.messages
-          ? [...req.messages, { role: "user" as const, content: req.prompt }]
-          : undefined;
+        const input = userMessage(req);
+        const inputMessages = req.messages ? [...req.messages, input] : undefined;
         // The continuation is opaque at the port; this vendor boundary is the
         // one place that re-asserts its true shape (same idiom as providerOptions).
         const result = await agent.generate({
           ...(inputMessages
             ? { messages: inputMessages as ModelMessage[] }
-            : { prompt: req.prompt }),
+            : req.images && req.images.length > 0
+              ? { messages: [input] }
+              : { prompt: req.prompt }),
           ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
           ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step)) } : {}),
         });
@@ -273,10 +289,7 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
           text: result.text,
           steps: result.steps.map(mapStep),
           usage: mappedUsage,
-          messages: [
-            ...(inputMessages ?? [{ role: "user", content: req.prompt }]),
-            ...responseMessages,
-          ],
+          messages: [...(inputMessages ?? [input]), ...responseMessages],
           ...(finishReason ? { finishReason } : {}),
           ...(result.steps.length >= stepLimit && result.text.trim() === ""
             ? { stepLimitReached: true }
