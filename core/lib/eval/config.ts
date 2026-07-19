@@ -1,5 +1,6 @@
 import z from "zod";
 import { agentConfigSchema } from "../agent";
+import { type LlmConfig, resolveTierModel } from "../llm";
 import { verdictEnum } from "./types";
 
 /**
@@ -42,6 +43,7 @@ export function configHash(rc: RunConfig): string {
     // Included only when set, so hashes of existing configs stay stable.
     ...(a.tools.subagents.provider ? { subagentProvider: a.tools.subagents.provider } : {}),
     ...(a.tools.subagents.model ? { subagentModel: a.tools.subagents.model } : {}),
+    ...(a.tools.subagents.tier !== undefined ? { subagentTier: a.tools.subagents.tier } : {}),
     prompt: { profile: a.prompt.profile, flags: a.prompt.flags ?? {} },
   };
   return new Bun.CryptoHasher("sha256")
@@ -81,12 +83,26 @@ export const evalConfigSchema = z.object({
   concurrency: z.number().int().min(1).default(2),
   defaultSeeds: z.number().int().min(1).default(3),
   judge: z
-    .object({ enabled: z.boolean().default(false), model: z.string().default("gpt-5.6-sol") })
+    .object({
+      enabled: z.boolean().default(false),
+      /**
+       * @deprecated Use `tier` for provider-agnostic routing. This explicit
+       * model wins over `tier` for backward compatibility.
+       */
+      model: z.string().trim().min(1).optional(),
+      /** Ladder tier resolved against `agent.llm`; defaults to the frontier rung. */
+      tier: z.number().int().min(0).default(0),
+    })
     .prefault({}),
   /** $/Mtok by model id; usd is null for models not present. */
   prices: z.record(z.string(), z.object({ in: z.number(), out: z.number() })).default({}),
 });
 export type EvalConfig = z.infer<typeof evalConfigSchema>;
+
+/** The judge model: legacy explicit model override, otherwise the agent's ladder tier. */
+export function judgeModel(config: EvalConfig, llm: LlmConfig): string {
+  return config.judge.model ?? resolveTierModel(llm, config.judge.tier);
+}
 
 /** Dollar cost for a trial, or null if the model has no price entry. */
 export function usdCost(

@@ -87,12 +87,12 @@ export const agentConfigSchema = z.object({
       subagents: z
         .object({
           concurrency: z.number().int().min(1).max(8).default(2),
-          /**
-           * Explicit provider/model overrides for planning workers and build
-           * subagents; these win over `tier`. The prompt profile re-resolves
-           * from the child model, so its own template/params apply.
-           */
+          /** Explicit provider override for planning workers and build subagents. */
           provider: z.enum(providerNames).optional(),
+          /**
+           * @deprecated Use `tier` for provider-agnostic routing. This explicit
+           * model override wins over `tier` for backward compatibility.
+           */
           model: z.string().trim().min(1).optional(),
           /**
            * Ladder tier (index into `llm.tiers`) children run on — the
