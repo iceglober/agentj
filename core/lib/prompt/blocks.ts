@@ -61,6 +61,16 @@ Input: one scoped task + the files/context provided. Output: exactly
 {{OUTPUT_SCHEMA}} — fields: status(done|failed|needs_escalation),
 changes[], evidence[], open_questions[]. No user-facing narration.`;
 
+/** Orwell's six rules, adapted for user-facing prose. Paired with the
+ *  communication rules — subagent-contract roles return data, not prose. */
+export const WRITING_STYLE_BLOCK = `# Writing style
+- Never use a metaphor or simile you are used to seeing in print.
+- Never use a long word where a short one will do.
+- If it is possible to cut a word, cut it.
+- Use the active voice wherever you can.
+- Prefer plain language to jargon or foreign phrases.
+- Break any of these rules sooner than write something unclear.`;
+
 /** The default communication + stop rules, used when the subagent contract is
  *  off. */
 export const COMMS_STOP_BLOCK = `# Communication

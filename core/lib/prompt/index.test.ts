@@ -167,17 +167,19 @@ describe("composePrompt", () => {
   });
 
   test("11. hash pin: the purpose→mode collapse left build prompts byte-identical", () => {
-    // Versions captured on main before the collapse (2026-07-16). If this
-    // fails, prompt CONTENT changed — that is a separate, eval-validated
-    // decision, never a refactor side effect.
+    // Versions captured 2026-07-19 after the deliberate Orwell writing-style
+    // addition (user-directed content change). If this fails, prompt CONTENT
+    // changed — that is a separate, eval-validated decision, never a refactor
+    // side effect. luna/nano ride the compact/standalone templates, which
+    // carry no writing-style block, so their pins did not move.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "6cc6fd104800", delegate: "6cc6fd104800" },
-      "gpt-5.6-terra": { primary: "4e24d536121e", delegate: "4e24d536121e" },
+      "gpt-5.6-sol": { primary: "abd9d50d8dd1", delegate: "abd9d50d8dd1" },
+      "gpt-5.6-terra": { primary: "6bdfbb4d996e", delegate: "6bdfbb4d996e" },
       "gpt-5.6-luna": { primary: "f91c9447de64", delegate: "f91c9447de64" },
-      "gpt-5.4": { primary: "fe304a12a750", delegate: "fe304a12a750" },
+      "gpt-5.4": { primary: "c7b2fde5f3e1", delegate: "c7b2fde5f3e1" },
       "gpt-5.4-nano": { primary: "35ae181e4740", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "448130e272fd", delegate: "448130e272fd" },
-      "claude-x": { primary: "2419b9429dda", delegate: "2419b9429dda" },
+      "deepseek-v4-pro": { primary: "41fa97373658", delegate: "41fa97373658" },
+      "claude-x": { primary: "ef12c4aebc41", delegate: "ef12c4aebc41" },
     };
     const pinCtx = {
       cwd: "/repo",
