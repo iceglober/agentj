@@ -14,6 +14,9 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chatCommands, INPUT_AND_KEY_HELP } from "../core/lib/chat/commands";
+import { configSchema } from "../core/lib/config";
+import { listConfigPaths } from "../core/lib/config-cli";
+import { CONFIG_DOCS, type ConfigDoc } from "./content/config-reference";
 
 const DOCS_DIR = new URL(".", import.meta.url).pathname;
 const CONTENT_DIR = join(DOCS_DIR, "content");
@@ -35,6 +38,41 @@ export function renderReferenceMarkdown(): string {
     "## Input & keys",
     "",
     ...INPUT_AND_KEY_HELP.map((line) => `- ${line}`),
+    "",
+  ].join("\n");
+}
+
+/** Render a schema default as inline-code Markdown, or "unset" when absent. */
+const formatDefault = (value: unknown): string => {
+  if (value === undefined) return "unset";
+  if (Array.isArray(value)) return value.length === 0 ? "`[]`" : `\`${JSON.stringify(value)}\``;
+  return `\`${JSON.stringify(value)}\``;
+};
+
+/**
+ * The configuration reference: keys and defaults from the live schema, editorial
+ * text from `CONFIG_DOCS`. Throws if a documented key is not a real config path,
+ * so a rename can't silently ship a stale doc.
+ */
+export function renderConfigMarkdown(docs: readonly ConfigDoc[] = CONFIG_DOCS): string {
+  const valid = new Set(listConfigPaths());
+  const unknown = docs.filter((doc) => !valid.has(doc.path)).map((doc) => doc.path);
+  if (unknown.length > 0) {
+    throw new Error(`CONFIG_DOCS references unknown config paths: ${unknown.join(", ")}`);
+  }
+  const defaults = configSchema.parse({}) as Record<string, unknown>;
+  const at = (path: string): unknown =>
+    path
+      .split(".")
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], defaults);
+  return [
+    "# Configuration",
+    "",
+    "Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults below come straight from the schema.",
+    "",
+    ...docs.map(
+      (doc) => `- \`${doc.path}\` (default: ${formatDefault(at(doc.path))}) — ${doc.description}`,
+    ),
     "",
   ].join("\n");
 }
@@ -149,10 +187,12 @@ const CONTENT_ORDER = ["index.md"] as const;
 /** The full set of files the generator owns, as {relativePath: contents}. */
 export function buildOutputs(): Record<string, string> {
   const reference = renderReferenceMarkdown();
+  const config = renderConfigMarkdown();
   const prose = CONTENT_ORDER.map((name) => readFileSync(join(CONTENT_DIR, name), "utf8"));
   return {
     "content/reference.generated.md": reference,
-    "index.html": renderSite([...prose, reference]),
+    "content/config.generated.md": config,
+    "index.html": renderSite([...prose, reference, config]),
   };
 }
 
