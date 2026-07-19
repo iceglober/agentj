@@ -34,4 +34,40 @@ describe("updates", () => {
     expect(installs).toEqual(["next"]);
     expect(writes).toHaveLength(2);
   });
+
+  test("refreshes the registry for an explicit update despite a fresh current cache", async () => {
+    let calls = 0;
+    const installs: string[] = [];
+    const cache = {
+      checkedAt: 10,
+      current: "0.1.0-next.15",
+      channel: "next" as const,
+    };
+    const service = createUpdateService({
+      config: updateConfigSchema.parse({}),
+      packageName: "@glrs-dev/aj",
+      registry: {
+        latest: async () => {
+          calls += 1;
+          return "0.1.0-next.16";
+        },
+      },
+      installer: { install: async (_name, channel) => void installs.push(channel) },
+      state: { read: async () => cache, write: async () => {} },
+      now: () => 11,
+    });
+
+    expect(await service.check("0.1.0-next.15")).toMatchObject({
+      current: "0.1.0-next.15",
+      channel: "next",
+    });
+    expect(calls).toBe(0);
+
+    expect(await service.update("0.1.0-next.15")).toMatchObject({
+      available: "0.1.0-next.16",
+      channel: "next",
+    });
+    expect(calls).toBe(1);
+    expect(installs).toEqual(["next"]);
+  });
 });

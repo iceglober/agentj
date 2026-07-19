@@ -618,21 +618,33 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("keeps two blank transcript rows before activity and places thinking above the editor", async () => {
+  test("keeps one blank transcript row and reserves the second editor row for activity", async () => {
     const { screen, text } = makeScreen();
     screen.start();
+    screen.printAbove("earlier transcript item");
     screen.printAbove("latest transcript item");
+    await settle();
+
+    let rendered = renderScreen(text());
+    const earlier = rendered.findIndex((line) => line.includes("earlier transcript item"));
+    const latest = rendered.findIndex((line) => line.includes("latest transcript item"));
+    const idleEditor = rendered.findIndex((line) => line.startsWith("> "));
+    expect(rendered.slice(earlier, latest + 1)).toEqual([
+      "earlier transcript item",
+      "",
+      "latest transcript item",
+    ]);
+    expect(rendered.slice(latest + 1, idleEditor)).toEqual(["", ""]);
+
     screen.setProgressLines(["  ◐ tool running"]);
     screen.setThinkingLine("◐ thinking 1s (esc)");
     await settle();
-
-    expect(text()).toContain("latest transcript item\r\n\r\n\r\n");
-    const rendered = renderScreen(text());
+    rendered = renderScreen(text());
     const tool = rendered.findIndex((line) => line.includes("tool running"));
     const thinking = rendered.findIndex((line) => line.includes("thinking 1s"));
-    const editor = rendered.findIndex((line) => line.startsWith("> "));
+    const activeEditor = rendered.findIndex((line) => line.startsWith("> "));
     expect(tool).toBeLessThan(thinking);
-    expect(thinking).toBeLessThan(editor);
+    expect(thinking).toBe(activeEditor - 1);
     screen.stop();
   });
 

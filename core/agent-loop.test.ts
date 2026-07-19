@@ -3,6 +3,7 @@ import {
   composeProgressLines,
   composeStatusSection,
   composeThinkingLine,
+  createUpdateRestartOptions,
   finalizeInteractiveChat,
   formatChatEvent,
   formatClock,
@@ -10,6 +11,24 @@ import {
   shouldWarnContext,
   truncateLineWithNotice,
 } from "./agent-loop";
+
+describe("update restart", () => {
+  test("inherits terminal streams and marks the restarted process", () => {
+    expect(
+      createUpdateRestartOptions(["--continue"], {
+        executable: "/bun",
+        script: "/app/bin/agentj",
+        env: { PATH: "/bin", AGENTJ_UPDATE_RESTARTED: undefined },
+      }),
+    ).toEqual({
+      cmd: ["/bun", "/app/bin/agentj", "--continue"],
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      env: { PATH: "/bin", AGENTJ_UPDATE_RESTARTED: "1" },
+    });
+  });
+});
 
 describe("interactive chat shutdown", () => {
   test("formats the exact resume command", () => {
