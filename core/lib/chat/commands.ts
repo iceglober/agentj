@@ -61,6 +61,20 @@ export async function expandAtFiles(text: string, cwd: string): Promise<string> 
   return attachments.length > 0 ? `${text}\n\n${attachments.join("\n\n")}` : text;
 }
 
+/**
+ * A discovered Agent Skill surfaced as a slash command (the composition root
+ * adapts core/lib/skills discoveries into these). Built-in commands win name
+ * collisions everywhere skills appear.
+ */
+export interface SkillCommand {
+  name: string;
+  summary: string;
+  /** Mode to switch to before the skill turn starts (metadata agentj-mode). */
+  mode?: "plan" | "build";
+  /** The full turn prompt for an explicit invocation with these arguments. */
+  prompt(args: string): string;
+}
+
 export type ModelTarget = "primary" | "subagents";
 
 export interface ModelSelection {
@@ -98,6 +112,7 @@ export interface ChatCommandContext {
     ): Promise<{ ok: true } | { ok: false; reason: string }>;
   };
   guided?: GuidedInputPort;
+  skills?: readonly SkillCommand[];
 }
 
 type ChatCommand = {
@@ -487,6 +502,9 @@ export const chatCommands: Record<string, ChatCommand> = {
       const lines = Object.entries(chatCommands).map(
         ([name, command]) => `/${name} — ${command.summary}`,
       );
+      for (const skill of context.skills ?? []) {
+        if (!(skill.name in chatCommands)) lines.push(`/${skill.name} — ${skill.summary} (skill)`);
+      }
       lines.push(
         "& <task> — run as a background job",
         "@path/to/file — attach file contents",
@@ -607,18 +625,24 @@ const fuzzyRank = (name: string, query: string): FuzzyRank | null => {
 };
 
 /** Case-insensitive exact, prefix, then compact ordered-subsequence command matches. */
-export function suggestChatCommands(query: string): ChatCommandSuggestion[] {
+export function suggestChatCommands(
+  query: string,
+  skills: readonly Pick<SkillCommand, "name" | "summary">[] = [],
+): ChatCommandSuggestion[] {
+  const entries: ReadonlyArray<readonly [string, string]> = [
+    ...Object.entries(chatCommands).map(([name, command]) => [name, command.summary] as const),
+    ...skills
+      .filter(({ name }) => !(name in chatCommands))
+      .map(({ name, summary }) => [name, `${summary} (skill)`] as const),
+  ];
   const normalized = query.toLowerCase();
   if (normalized.length === 0) {
-    return Object.entries(chatCommands).map(([name, command]) => ({
-      name,
-      summary: command.summary,
-    }));
+    return entries.map(([name, summary]) => ({ name, summary }));
   }
-  return Object.entries(chatCommands)
-    .map(([name, command], index) => ({
+  return entries
+    .map(([name, summary], index) => ({
       name,
-      summary: command.summary,
+      summary,
       index,
       rank: fuzzyRank(name.toLowerCase(), normalized),
     }))
@@ -683,7 +707,7 @@ const prefixedSuggestions = (
 export function completeChatInput(
   text: string,
   cursor: number,
-  context?: Pick<ChatCommandContext, "mcp" | "models">,
+  context?: Pick<ChatCommandContext, "mcp" | "models" | "skills">,
 ): ChatInputCompletion | null {
   const graphemes = Array.from(text);
   const boundedCursor = Math.max(0, Math.min(cursor, graphemes.length));
@@ -705,15 +729,27 @@ export function completeChatInput(
   if (start === first) {
     return {
       token,
-      suggestions: suggestChatCommands(prefix.slice(1)).map(({ name, summary }) => ({
-        value: `/${name} `,
-        label: `/${name}`,
-        summary,
-      })),
+      suggestions: suggestChatCommands(prefix.slice(1), context?.skills).map(
+        ({ name, summary }) => ({
+          value: `/${name} `,
+          label: `/${name}`,
+          summary,
+        }),
+      ),
     };
   }
 
   const [command, ...args] = prior;
+  if (command && !(command in chatCommands)) {
+    const skill = context?.skills?.find((entry) => entry.name === command);
+    if (skill) {
+      return {
+        token,
+        suggestions: [],
+        hint: `Press Enter to run the ${skill.name} skill${skill.mode ? ` (${skill.mode} mode)` : ""}.`,
+      };
+    }
+  }
   if (command === "mcp") {
     if (args.length === 0) {
       return {
@@ -856,13 +892,23 @@ export async function runChatCommand(
   args: string,
 ): Promise<void> {
   const command = chatCommands[name];
-  if (!command?.startsTurn) context.emit({ type: "command", name });
-  if (!command) {
+  const skill = command ? undefined : context.skills?.find((entry) => entry.name === name);
+  // Skill invocations start turns, so like /build they skip the command event.
+  if (!command?.startsTurn && !skill) context.emit({ type: "command", name });
+  if (!command && !skill) {
     context.emit({ type: "notice", text: `Unknown command /${name} — try /help.` });
     return;
   }
   try {
-    await command.run(context, args);
+    if (command) {
+      await command.run(context, args);
+    } else if (skill) {
+      if (skill.mode) context.session.setMode(skill.mode);
+      await context.session.send(skill.prompt(args), {
+        transcriptText: `Command: ${name}`,
+        restoreText: `/${name}${args ? ` ${args}` : ""}`,
+      });
+    }
   } catch {
     context.emit({
       type: "notice",

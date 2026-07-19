@@ -23,12 +23,14 @@ import {
 } from "./lib/agent/subagents";
 import {
   type ChatCommandContext,
+  chatCommands,
   completeChatInput,
   expandAtFiles,
   type ModelSelection,
   type ModelTarget,
   parseInput,
   runChatCommand,
+  type SkillCommand,
   shouldRememberChatInput,
 } from "./lib/chat/commands";
 import type { ChatEvent } from "./lib/chat/events";
@@ -65,6 +67,14 @@ import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
 import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
+import {
+  composeSkillsPromptSection,
+  discoverSkills,
+  renderSkillInvocation,
+  type Skill,
+  type SkillIssue,
+  skillMode,
+} from "./lib/skills";
 import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
@@ -389,6 +399,9 @@ interface ChatComposition {
   attachJobs(runner: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
+  /** Discovered Agent Skills and the malformed entries worth surfacing. */
+  skills: readonly Skill[];
+  skillIssues: readonly SkillIssue[];
   startMcp(): Promise<void>;
   reloadMcp(name?: string): Promise<void>;
   mcpStatuses(): readonly McpRuntimeStatus[];
@@ -443,9 +456,16 @@ async function composeChat(
   try {
     agentsMd = await environment.readFile("AGENTS.md");
   } catch {}
+  // Agent Skills (agentskills.io): project skills win over global ones. Their
+  // names/descriptions ride the rules so every mode and entrypoint can
+  // activate a skill by reading its SKILL.md (progressive disclosure).
+  const skillsDiscovery = await discoverSkills({
+    roots: [join(root, ".aj", "skills"), join(homedir(), ".config", "agentj", "skills")],
+  });
+  const skillsSection = composeSkillsPromptSection(skillsDiscovery.skills);
   let agentConfig: AgentConfig = {
     ...config.agent,
-    rules: config.agent.rules || agentsMd || "",
+    rules: [config.agent.rules || agentsMd || "", skillsSection].filter(Boolean).join("\n\n"),
     llm: {
       ...config.agent.llm,
       providers: {
@@ -767,6 +787,8 @@ async function composeChat(
     },
     environment,
     stateRoot,
+    skills: skillsDiscovery.skills,
+    skillIssues: skillsDiscovery.issues,
     startMcp: async () => {
       publishConfigIssues();
       await mcp.reload(config.mcp, undefined, { skip: [...invalidServerNames()] });
@@ -1189,7 +1211,21 @@ export async function runAgentjChat(
       guided: {
         askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
       },
+      skills: composition.skills.map(
+        (skill): SkillCommand => ({
+          name: skill.name,
+          summary: skill.description,
+          ...(skillMode(skill) ? { mode: skillMode(skill) } : {}),
+          prompt: (args) => renderSkillInvocation(skill, args),
+        }),
+      ),
     };
+    const skillNotices = [
+      ...composition.skillIssues.map(({ path, detail }) => `skill ${path}: ${detail}`),
+      ...composition.skills
+        .filter(({ name }) => name in chatCommands)
+        .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
+    ];
 
     screen = createChatScreen({
       initialHistory: promptHistory.entries,
@@ -1230,6 +1266,7 @@ export async function runAgentjChat(
 
     screen.start();
     updateStatus();
+    for (const notice of skillNotices) render({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
       screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
       screen.printAbove(turn.assistant);
@@ -1312,6 +1349,9 @@ export async function runAgentjOnce(
   }
 
   try {
+    for (const { path, detail } of composition.skillIssues) {
+      processStderr.write(`skill ${path}: ${detail}\n`);
+    }
     await composition.startMcp();
     const log = await createChatLog({
       root: join(composition.stateRoot, "agentj", "chats"),

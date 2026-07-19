@@ -20,6 +20,7 @@
 - `core/lib/llm/` — port + adapters (`ai-sdk-adapter.ts`, `azure-adapter.ts`). `GenerateRequest.messages`/`RunResult.messages` carry the chat continuation as an opaque token only the adapter understands. Token usage preserves Azure prompt-cache detail; tool names sorted for provider caching.
 - `core/lib/prompt/` — pure prompt composition: per-model profiles, `mode` (plan/build) × `role` (primary/delegate) template flags, promptVersion hashing (pinned by test against accidental content drift).
 - `core/lib/config/` — composes domain schemas; global config in `~/.config/agentj/config.json`.
+- `core/lib/skills/` — Agent Skills (agentskills.io format): discovery over `.aj/skills/` (project) and `~/.config/agentj/skills/` (global), spec-compliant SKILL.md frontmatter validation, `/name` invocation rendering, and the progressive-disclosure prompt section appended to the rules.
 - `core/lib/secrets/` — `SecretStore` port + keychain adapter; env → keychain precedence; no plaintext fallback; values never printed.
 - `core/lib/metrics/` — content-free OTel sink, `AGENTJ_OTEL_METRICS=1` gated.
 - `core/eval/` — eval runner (`run.ts`), tasks, graders, fixtures, adapters. Must keep working at every commit.
@@ -37,3 +38,4 @@
 - Each domain owns its zod schema; `config/index.ts` only composes them.
 - Registries keyed by config values (`editModes`, `chatCommands`, `checkGraders`).
 - Every module has a colocated `.test.ts`; `bun test core`, `tsc --noEmit`, and `bun run check` must stay green, and `core/eval` must keep working (`--dry-run`, `--selfcheck`) at every commit.
+- Repo workflows live as Agent Skills in `.aj/skills/` (e.g. `/ship` for the changeset → PR → Copilot review → merge flow); prefer extending a skill over documenting a workflow only here.
