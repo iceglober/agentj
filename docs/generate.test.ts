@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildOutputs, markdownToHtml, renderReferenceMarkdown } from "./generate";
+import { CONFIG_DOCS } from "./content/config-reference";
+import {
+  buildOutputs,
+  markdownToHtml,
+  renderConfigMarkdown,
+  renderReferenceMarkdown,
+} from "./generate";
 
 const DOCS_DIR = new URL(".", import.meta.url).pathname;
 const read = (relative: string): string => readFileSync(join(DOCS_DIR, relative), "utf8");
@@ -19,6 +25,20 @@ describe("docs generator", () => {
     // skipped regeneration is caught here too, not only by the byte pin above.
     expect(reference).toContain("`/build` — Switch to build mode");
     expect(reference).toContain("Ctrl+V — paste copied files");
+  });
+
+  test("config reference pulls defaults from the schema for every documented key", () => {
+    const config = renderConfigMarkdown();
+    // Real key with its schema default and a non-default example.
+    expect(config).toContain("`agent.steps` (default: `100`)");
+    expect(config).toContain("`agent.context.softLimit` (default: unset)");
+    for (const doc of CONFIG_DOCS) expect(config).toContain(`\`${doc.path}\``);
+  });
+
+  test("documenting a config key that does not exist fails the build", () => {
+    expect(() =>
+      renderConfigMarkdown([{ path: "agent.not.a.real.key", description: "x" }]),
+    ).toThrow("unknown config path");
   });
 
   test("markdown renderer escapes HTML and handles the authored subset", () => {

@@ -58,4 +58,4 @@ Run `agentj --help` for the full command-line surface.
 
 ## Reference
 
-The next section lists every in-session slash command and key binding. It is generated from the same registry that powers `/help`, so it always matches the version you are running.
+The sections below list every in-session slash command and key binding, and the configuration keys with their current defaults. Both are generated from the source — the command list from the same registry that powers `/help`, the defaults straight from the config schema — so they always match the version you are running.
