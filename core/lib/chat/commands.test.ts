@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import {
   type ChatCommandContext,
   completeChatInput,
-  expandAtFiles,
   parseInput,
   runChatCommand,
   shouldRememberChatInput,
@@ -164,21 +160,6 @@ describe("completeChatInput", () => {
     const secretInput = "/config set mcp.servers.github.headers.Authorization ";
     const secret = completeChatInput(secretInput, secretInput.length, context);
     expect(secret?.hint).toContain("masked");
-  });
-});
-
-describe("expandAtFiles", () => {
-  test("attaches referenced files bounded, leaves misses untouched", async () => {
-    const cwd = await mkdtemp(path.join(tmpdir(), "agentj-at-"));
-    try {
-      await writeFile(path.join(cwd, "notes.md"), "the notes content");
-      const expanded = await expandAtFiles("look at @notes.md and @missing.md", cwd);
-      expect(expanded).toContain("--- @notes.md ---");
-      expect(expanded).toContain("the notes content");
-      expect(expanded).not.toContain("--- @missing.md");
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
-    }
   });
 });
 

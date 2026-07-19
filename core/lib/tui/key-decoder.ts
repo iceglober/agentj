@@ -62,6 +62,7 @@ const decodeCsi = (parameters: string, final: string): EditorCommand | undefined
   if (final === "u") {
     const key = Number.parseInt(parts[0]?.split(":")[0] ?? "", 10);
     if (key === 13) return modifiers.shift ? { type: "newline" } : { type: "submit" };
+    if (key === 118 && modifiers.control) return { type: "paste-files" };
     if (key === 8 || key === 127) return modifiedBackspace(modifiers);
     if (key === 57349) return modifiedDelete(modifiers);
     if (key === 57350) return arrowCommand("D", modifiers);
@@ -108,6 +109,8 @@ const decodeControl = (character: string): EditorCommand | undefined => {
       return { type: "delete-line-backward" };
     case "\u000b":
       return { type: "delete-line-forward" };
+    case "\u0016":
+      return { type: "paste-files" };
     case "\u0002":
       return { type: "move-left" };
     case "\u0006":

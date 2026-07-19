@@ -21,8 +21,9 @@ export type EditorCommand =
   | { type: "delete-line-forward" }
   | { type: "submit" }
   | { type: "cancel" }
-  /** Screen-level keys (mode toggle, interrupt) — no-ops on the editor model. */
+  /** Screen-level keys (mode toggle, file paste, interrupt) — no-ops on the editor model. */
   | { type: "tab" }
+  | { type: "paste-files" }
   | { type: "escape" };
 
 export interface EditorState {
@@ -130,6 +131,7 @@ export const applyEditorCommand = (state: EditorState, command: EditorCommand): 
     command.type === "submit" ||
     command.type === "cancel" ||
     command.type === "tab" ||
+    command.type === "paste-files" ||
     command.type === "escape"
   ) {
     return state;

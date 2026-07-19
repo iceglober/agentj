@@ -25,7 +25,6 @@ import {
   type ChatCommandContext,
   chatCommands,
   completeChatInput,
-  expandAtFiles,
   type ModelSelection,
   type ModelTarget,
   parseInput,
@@ -35,6 +34,7 @@ import {
 } from "./lib/chat/commands";
 import { LONG_CONTEXT_INPUT_TOKENS, type UsageRecord } from "./lib/chat/cost";
 import type { ChatEvent } from "./lib/chat/events";
+import { expandFileReferences, formatFileReferences } from "./lib/chat/file-attachments";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
@@ -81,6 +81,8 @@ import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
+import { ClipboardFilesUnavailableError } from "./lib/tui/clipboard";
+import { createCrosscopyClipboardFiles } from "./lib/tui/crosscopy-clipboard-adapter";
 import { renderMarkdownLite } from "./lib/tui/markdown";
 import {
   applyProgressEvent,
@@ -1281,6 +1283,7 @@ export async function runAgentjChat(
     ];
 
     const liveRegion = createAnsiLiveRegionAdapter({ stdout: processStdout });
+    const clipboardFiles = createCrosscopyClipboardFiles();
     screen = createChatScreen({
       liveRegion,
       initialHistory: promptHistory.entries,
@@ -1301,7 +1304,7 @@ export async function runAgentjChat(
             updateStatus();
             return;
           }
-          void expandAtFiles(parsed.text, root).then((expanded) => {
+          void expandFileReferences(parsed.text, root).then((expanded) => {
             void chat.send(expanded, { restoreText: parsed.text });
             updateStatus();
           });
@@ -1309,6 +1312,21 @@ export async function runAgentjChat(
         onTab: () => {
           chat.setMode();
           updateStatus();
+        },
+        onPasteFiles: async () => {
+          try {
+            const paths = await clipboardFiles.readFiles();
+            const references = formatFileReferences(paths);
+            return references ? ` ${references} ` : null;
+          } catch (error) {
+            if (error instanceof ClipboardFilesUnavailableError) {
+              render({
+                type: "notice",
+                text: "Unable to read copied files from the system clipboard.",
+              });
+            }
+            return null;
+          }
         },
         onEscape: () => {
           // Escalation ladder: undo the newest pending intent first, then interrupt.
