@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentj — docs</title>
+<style>
+:root { color-scheme: light dark; --fg:#1a1a1a; --muted:#666; --bg:#fff; --code:#f4f4f5; --border:#e4e4e7; --accent:#3b5bdb; }
+@media (prefers-color-scheme: dark) { :root { --fg:#e7e7e9; --muted:#9a9aa2; --bg:#161618; --code:#232327; --border:#2e2e33; --accent:#8facff; } }
+* { box-sizing: border-box; }
+body { margin:0; color:var(--fg); background:var(--bg); font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 6rem; }
+h1 { font-size:2rem; margin:0 0 .25rem; letter-spacing:-.02em; }
+h2 { font-size:1.35rem; margin:2.5rem 0 .75rem; padding-top:1rem; border-top:1px solid var(--border); letter-spacing:-.01em; }
+h3 { font-size:1.05rem; margin:1.5rem 0 .5rem; }
+p { margin:.6rem 0; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+ul { margin:.6rem 0; padding-left:1.25rem; } li { margin:.25rem 0; }
+code { background:var(--code); padding:.12em .38em; border-radius:.35rem; font:.88em ui-monospace,SFMono-Regular,Menlo,monospace; }
+pre { background:var(--code); border:1px solid var(--border); border-radius:.6rem; padding:1rem; overflow-x:auto; }
+pre code { background:none; padding:0; }
+.tagline { color:var(--muted); font-size:1.1rem; margin:.25rem 0 1.5rem; }
+footer { color:var(--muted); font-size:.85rem; margin-top:4rem; border-top:1px solid var(--border); padding-top:1rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>agentj</h1>
+<p>A terminal coding agent. It runs as a persistent chat session in your repo — you talk, it reads and edits files, runs commands, and fans out parallel subagents, with <strong>plan</strong> and <strong>build</strong> modes you toggle with Tab or <code>/build</code>. It is host-first and gated by a permission system; git plus a built-in undo are the safety net.</p>
+<h2>Requirements</h2>
+<ul><li><strong><a href="https://bun.sh">Bun</a></strong> — the runtime. Install once; there is no separate build step.</li><li><strong>A model provider</strong> — Azure AI Foundry is wired in.</li><li><strong>git</strong> — sessions run inside a git worktree; undo, subagent isolation, and search scoping all use it.</li></ul>
+<h2>Install</h2>
+<pre><code>bun add --global @glrs-dev/aj@next</code></pre>
+<p>This puts <code>agentj</code> (and the short alias <code>aj</code>) on your PATH from the prerelease channel. Update an installed CLI later with <code>agentj update --channel next</code>.</p>
+<p>Set your provider key once — it is stored in the OS keychain, never in plaintext:</p>
+<pre><code>agentj config set --secret providers.azure.api_key</code></pre>
+<h2>Start a session</h2>
+<p>Run <code>agentj</code> inside any git repository:</p>
+<pre><code>agentj                      # open a chat session in this repo (starts in plan mode)
+agentj --continue           # reopen the newest session for this project
+agentj --resume &lt;id&gt;        # reopen a specific session by id</code></pre>
+<p>You begin in <strong>plan mode</strong>: the agent's tools are read-only, so it can investigate, fan out research subagents, and present a plan, but it cannot change anything. Press <strong>Tab</strong> to switch to <strong>build mode</strong> (full tools), or enter <strong><code>/build</code></strong> to switch and immediately ask it to implement what the conversation agreed on. These are explicit gestures — there is no magic approval phrase.</p>
+<h2>One-shot runs</h2>
+<p>For scripts and CI, run a single task and exit:</p>
+<pre><code>agentj run &quot;add a --json flag&quot;                  # build mode
+agentj run --plan &quot;how does auth work?&quot;         # read-only
+agentj run --allow-all &quot;fix the tests&quot;          # permission asks auto-resolve to allow</code></pre>
+<h2>Configuration</h2>
+<p>Configuration lives in <code>~/.config/agentj/config.json</code> and is edited with the <code>config</code> subcommand:</p>
+<pre><code>agentj config set agent.llm.model gpt-5.6-sol
+agentj config set agent.tools.subagents.model gpt-5.6-luna   # route fan-out work to a cheaper tier
+agentj config get agent.llm.model</code></pre>
+<p>Run <code>agentj --help</code> for the full command-line surface.</p>
+<h2>Reference</h2>
+<p>The next section lists every in-session slash command and key binding. It is generated from the same registry that powers <code>/help</code>, so it always matches the version you are running.</p>
+<h1>Commands &amp; keys</h1>
+<p>Generated from the command registry that powers <code>/help</code>. Do not edit by hand — run <code>bun run docs</code>.</p>
+<h2>Slash commands</h2>
+<ul><li><code>/help</code> — List commands and keys</li><li><code>/mcp</code> — Manage and reload MCP servers</li><li><code>/config</code> — Read or update global configuration</li><li><code>/update</code> — Update agentj and exit</li><li><code>/model</code> — Choose primary or subagent models</li><li><code>/cost</code> — Show foreground token usage and estimated cost</li><li><code>/build</code> — Switch to build mode and implement the plan</li><li><code>/jobs</code> — Inspect background jobs, or <code>/jobs abort &lt;id&gt;</code></li><li><code>/undo</code> — Revert the agent's last file changes</li><li><code>/redo</code> — Re-apply reverted changes</li><li><code>/clear</code> — Clear the transcript view</li><li><code>/quit</code> — End the session</li></ul>
+<h2>Input &amp; keys</h2>
+<ul><li>&amp; &lt;task&gt; — run as a background job</li><li>@path/to/file — attach file contents · Ctrl+V — paste copied files</li><li>Tab/Enter — complete a shown command · Tab — toggle plan/build otherwise</li><li>Esc — dismiss suggestions / dequeue waiting message / interrupt turn · Ctrl+C×2 — quit</li></ul>
+<footer>Reference generated from the agentj source. Rebuild with <code>bun run docs</code>.</footer>
+</main>
+</body>
+</html>

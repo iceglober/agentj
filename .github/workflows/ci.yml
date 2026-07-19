@@ -29,7 +29,7 @@ jobs:
       - name: biome
         run: bun run check
       - name: test
-        run: bun test core
+        run: bun test core docs
 
   eval-selftest:
     runs-on: ubuntu-latest
