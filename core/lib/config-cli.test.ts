@@ -203,8 +203,8 @@ describe("createConfigCliHandlers", () => {
       changed: true,
     });
     await expect(handlers.set({ key: "sandbox.bootstrap", value: "[]" })).resolves.toMatchObject({
-      ok: false,
-      code: "operation_not_supported",
+      ok: true,
+      changed: true,
     });
     await expect(handlers.add({ key: "sandbox.image", value: "image" })).resolves.toMatchObject({
       ok: false,
@@ -218,6 +218,7 @@ describe("createConfigCliHandlers", () => {
     expect(config.calls).toEqual([
       [{ type: "set", path: ["agent", "llm", "temperature"], value: 0.7 }],
       [{ type: "set", path: ["sandbox", "bootstrap"], value: ["apt-get update"] }],
+      [{ type: "set", path: ["sandbox", "bootstrap"], value: [] }],
     ]);
     expect(stdout.text()).toContain("Saved sandbox.bootstrap in global configuration.\n");
     expect(stderr.text()).toContain("This operation is not supported for the configuration key.\n");

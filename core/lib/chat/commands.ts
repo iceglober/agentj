@@ -1,3 +1,4 @@
+import { type ConfigField, configField } from "../config/fields";
 import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
 import { providerNames } from "../llm";
 import {
@@ -8,6 +9,8 @@ import {
 } from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
+import { type ListEditorAction, type ListEditorState, reduceListEditor } from "../tui/list-editor";
+import { listOverflowFooter, windowList } from "../tui/list-window";
 import type { UpdateChannel } from "../update";
 import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
 import type { ChatEvent } from "./events";
@@ -156,6 +159,64 @@ const reloadConfigPath = async (context: ChatCommandContext, key: string): Promi
   await context.mcp?.reload(match?.[1]);
 };
 
+const listEditorLabel = (key: string, state: ListEditorState): string => {
+  const window = windowList(state.items, state.cursor);
+  const items = window.items.map((item, index) => {
+    const selected = window.start + index === state.cursor ? ">" : " ";
+    return `${selected} ${item}`;
+  });
+  const overflow = listOverflowFooter(window);
+  return [
+    `Edit ${key}`,
+    ...(items.length > 0 ? items : ["(no items)"]),
+    ...(overflow ? [overflow] : []),
+  ].join("\n");
+};
+
+const editStringArray = async (
+  context: ChatCommandContext,
+  key: string,
+  initial: readonly string[],
+): Promise<string[] | null> => {
+  const guided = requireGuidedInput(context);
+  if (!guided) return null;
+  let state: ListEditorState = { items: [...initial], cursor: 0 };
+  while (true) {
+    const multi = state.items.length > 1;
+    const actions = [
+      "add",
+      ...(state.items.length > 0 ? ["edit", "delete", "select up", "select down"] : []),
+      ...(multi ? ["move item up", "move item down"] : []),
+      "save",
+    ];
+    const action = await guided.askInput({
+      label: listEditorLabel(key, state),
+      choices: actions,
+      validate: (value) => (actions.includes(value) ? null : "Choose a list action."),
+    });
+    if (action === null) return null;
+    if (action === "save") return state.items;
+    const commands: Record<string, Exclude<ListEditorAction, { item: string }>["type"]> = {
+      "select up": "move-up",
+      "select down": "move-down",
+      "move item up": "reorder-up",
+      "move item down": "reorder-down",
+      delete: "delete",
+    };
+    const kind = commands[action];
+    if (kind) {
+      state = reduceListEditor(state, { type: kind });
+      continue;
+    }
+    const item = await guided.askInput({
+      label: action === "add" ? `Add item to ${key}` : `Edit item in ${key}`,
+      validate: (value) => (value.trim() ? null : "An item is required."),
+    });
+    if (item === null) return null;
+    state = reduceListEditor(state, { type: action === "add" ? "add" : "edit", item: item.trim() });
+  }
+};
+
 const formatMcpStatus = (status: McpRuntimeStatus): string => {
   const label = `${status.name} [${status.transport}]`;
   if (status.state === "connecting") return `${label} — connecting`;
@@ -212,6 +273,30 @@ const runConfigCommand = async (context: ChatCommandContext, args: string): Prom
 
   if (key === "providers.azure.api_key" || key === "agent.llm.providers.azure.apiKey") {
     const result = await handlers.set({ key, secret: true });
+    if (successful(result)) await reloadConfigPath(context, key);
+    return;
+  }
+  let field: ConfigField | undefined;
+  try {
+    field = configField(key);
+  } catch {
+    field = undefined;
+  }
+  if (field?.kind === "string-array") {
+    const current = await handlers.get({ key });
+    if (
+      !current.ok ||
+      !Array.isArray(current.value) ||
+      !current.value.every((item) => typeof item === "string")
+    ) {
+      return;
+    }
+    const items = await editStringArray(context, key, current.value);
+    if (items === null) {
+      context.emit({ type: "notice", text: "Configuration update cancelled." });
+      return;
+    }
+    const result = await handlers.set({ key, value: JSON.stringify(items) });
     if (successful(result)) await reloadConfigPath(context, key);
     return;
   }

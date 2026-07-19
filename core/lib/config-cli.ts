@@ -365,9 +365,6 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       if (!resolved) return writeError(dependencies.writers, "unknown_key", input.key);
       if (input.value === undefined)
         return writeError(dependencies.writers, "missing_value", input.key);
-      if (unwrap(resolved.schema)._zod?.def?.type === "array") {
-        return writeError(dependencies.writers, "operation_not_supported", input.key);
-      }
       const parsed = parseCliValue(resolved.schema, input.value);
       if (!parsed.success) return writeError(dependencies.writers, "invalid_value", input.key);
       return write(input.key, [{ type: "set", path: resolved.path, value: parsed.data }]);
