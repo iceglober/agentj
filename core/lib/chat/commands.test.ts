@@ -89,6 +89,9 @@ describe("completeChatInput", () => {
       ],
       reload: async () => {},
     },
+    jobs: {
+      list: () => [{ id: "j1", mode: "plan", prompt: "research", status: "running", startedAt: 0 }],
+    } as JobRunner,
   };
 
   test("guides nested MCP actions and dynamic server arguments", () => {
@@ -116,6 +119,18 @@ describe("completeChatInput", () => {
     const completion = completeChatInput(input, input.length);
     expect(completion?.suggestions).toEqual([
       { value: "next", label: "next", summary: "Update to the next release" },
+    ]);
+  });
+
+  test("completes job inspection and abort actions", () => {
+    const inspectInput = "/jobs ";
+    expect(completeChatInput(inspectInput, inspectInput.length, context)?.suggestions).toEqual([
+      { value: "abort ", label: "abort", summary: "Abort a running job" },
+      { value: "j1 ", label: "j1", summary: "Background job" },
+    ]);
+    const abortInput = "/jobs abort ";
+    expect(completeChatInput(abortInput, abortInput.length, context)?.suggestions).toEqual([
+      { value: "j1 ", label: "j1", summary: "Background job" },
     ]);
   });
 
@@ -167,7 +182,19 @@ describe("runChatCommand", () => {
             startedAt: 0,
           },
         ],
-        inspect: () => undefined,
+        inspect: (id: string) =>
+          id === "j1"
+            ? {
+                id: "j1",
+                mode: "plan",
+                prompt: "research",
+                status: "done",
+                startedAt: 0,
+                endedAt: 74_000,
+                resultText: "research complete",
+                recentActivity: ["readFile AGENTS.md"],
+              }
+            : undefined,
         renewSoftTimeout: () => false,
         abort: (id: string) => {
           aborted.push(id);
@@ -235,11 +262,17 @@ describe("runChatCommand", () => {
     ]);
   });
 
-  test("jobs lists and aborts; undo/redo report labels; unknown suggests help", async () => {
+  test("jobs lists, inspects, and aborts; undo/redo report labels; unknown suggests help", async () => {
     const { context, events, aborted } = makeContext();
     await runChatCommand(context, "jobs", "");
     expect(events[0]).toEqual({ type: "command", name: "jobs" });
     expect((events.at(-1) as { text: string }).text).toContain("j1 [running]");
+
+    await runChatCommand(context, "jobs", "j1");
+    const detail = (events.at(-1) as { text: string }).text;
+    expect(detail).toContain("[j1] done (plan) — 1m14s");
+    expect(detail).toContain("recent tool calls:\n  readFile AGENTS.md");
+    expect(detail).toContain("result:\nresearch complete");
 
     await runChatCommand(context, "jobs", "abort j1");
     expect(aborted).toEqual(["j1"]);
@@ -384,5 +417,74 @@ describe("runChatCommand", () => {
     const { context, quitCalls } = makeContext();
     await runChatCommand(context, "quit", "");
     expect(quitCalls()).toBe(1);
+  });
+});
+
+describe("skill commands", () => {
+  const shipSkill = {
+    name: "ship",
+    summary: "Ship finished work.",
+    mode: "build" as const,
+    prompt: (args: string) => `SHIP BODY${args ? ` :: ${args}` : ""}`,
+  };
+
+  function makeSkillContext() {
+    const events: ChatEvent[] = [];
+    const calls: string[] = [];
+    const context = {
+      session: {
+        setMode: (mode?: "plan" | "build") => {
+          calls.push(`mode:${mode}`);
+          return mode ?? "plan";
+        },
+        send: async (text: string, options?: { transcriptText?: string; restoreText?: string }) => {
+          calls.push(`send:${options?.transcriptText}:${options?.restoreText}:${text}`);
+        },
+      } as unknown as ChatCommandContext["session"],
+      jobs: {} as JobRunner,
+      emit: (event: ChatEvent) => {
+        events.push(event);
+      },
+      quit: () => {},
+      skills: [shipSkill],
+    } satisfies ChatCommandContext;
+    return { context, events, calls };
+  }
+
+  test("invoking a skill switches mode and sends its prompt as a turn", async () => {
+    const { context, events, calls } = makeSkillContext();
+    await runChatCommand(context, "ship", "fast please");
+    expect(events).toEqual([]); // startsTurn semantics: no command event
+    expect(calls).toEqual([
+      "mode:build",
+      "send:Command: ship:/ship fast please:SHIP BODY :: fast please",
+    ]);
+  });
+
+  test("built-in commands shadow same-named skills and unknown names still notice", async () => {
+    const { context, events, calls } = makeSkillContext();
+    context.skills = [{ ...shipSkill, name: "help" }, shipSkill];
+    await runChatCommand(context, "help", "");
+    expect(calls).toEqual([]);
+    expect(events[0]).toEqual({ type: "command", name: "help" });
+    expect((events[1] as { text: string }).text).toContain("/ship — Ship finished work. (skill)");
+    await runChatCommand(context, "nope", "");
+    expect((events.at(-1) as { text: string }).text).toContain("Unknown command /nope");
+  });
+
+  test("suggestions and completion include skills without shadowing built-ins", () => {
+    const skills = [shipSkill, { ...shipSkill, name: "quit", summary: "shadowed" }];
+    const names = suggestChatCommands("", skills).map(({ name }) => name);
+    expect(names).toContain("ship");
+    expect(names.filter((name) => name === "quit")).toHaveLength(1);
+    expect(suggestChatCommands("shi", skills)[0]).toEqual({
+      name: "ship",
+      summary: "Ship finished work. (skill)",
+    });
+
+    const completion = completeChatInput("/ship ", 6, { skills });
+    expect(completion?.hint).toBe("Press Enter to run the ship skill (build mode).");
+    const top = completeChatInput("/sh", 3, { skills });
+    expect(top?.suggestions.map(({ label }) => label)).toContain("/ship");
   });
 });

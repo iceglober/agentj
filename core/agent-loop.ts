@@ -23,12 +23,14 @@ import {
 } from "./lib/agent/subagents";
 import {
   type ChatCommandContext,
+  chatCommands,
   completeChatInput,
   expandAtFiles,
   type ModelSelection,
   type ModelTarget,
   parseInput,
   runChatCommand,
+  type SkillCommand,
   shouldRememberChatInput,
 } from "./lib/chat/commands";
 import type { ChatEvent } from "./lib/chat/events";
@@ -65,6 +67,14 @@ import { createChildSession } from "./lib/session";
 import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
 import { createPromptHistory } from "./lib/session/prompt-history";
 import { createUndoStack } from "./lib/session/undo";
+import {
+  composeSkillsPromptSection,
+  discoverSkills,
+  renderSkillInvocation,
+  type Skill,
+  type SkillIssue,
+  skillMode,
+} from "./lib/skills";
 import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
@@ -76,7 +86,12 @@ import {
   formatDuration,
   type ProgressTracker,
 } from "./lib/tui/progress";
-import { composeStatusSection, composeThinkingLine, shouldWarnContext } from "./lib/tui/status";
+import {
+  composeStatusSection,
+  composeThinkingLine,
+  formatClock,
+  shouldWarnContext,
+} from "./lib/tui/status";
 import type { UiTextLine } from "./lib/tui/styles";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
@@ -159,8 +174,12 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       return event.pending ? `(mode → ${event.mode} at next turn)` : `(mode → ${event.mode})`;
     case "job-started":
       return `[${event.job.id}] started (${event.job.mode}): ${event.job.prompt.slice(0, 60)}`;
-    case "job-finished":
-      return `[${event.job.id}] ${event.job.status}${event.job.branch ? ` — work on ${event.job.branch}` : ""}`;
+    case "job-finished": {
+      const elapsed = formatClock((event.job.endedAt ?? Date.now()) - event.job.startedAt);
+      const result = event.job.resultText?.trim();
+      const branch = event.job.branch ? `\nwork preserved on ${event.job.branch}` : "";
+      return `✓ [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${result ? `\n${truncateWithNotice(result, 2_000)}` : ""}${branch}`;
+    }
     case "notice":
       return event.text;
     default:
@@ -261,6 +280,9 @@ interface ChatComposition {
   attachJobs(runner: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
+  /** Discovered Agent Skills and the malformed entries worth surfacing. */
+  skills: readonly Skill[];
+  skillIssues: readonly SkillIssue[];
   startMcp(): Promise<void>;
   reloadMcp(name?: string): Promise<void>;
   mcpStatuses(): readonly McpRuntimeStatus[];
@@ -315,9 +337,16 @@ async function composeChat(
   try {
     agentsMd = await environment.readFile("AGENTS.md");
   } catch {}
+  // Agent Skills (agentskills.io): project skills win over global ones. Their
+  // names/descriptions ride the rules so every mode and entrypoint can
+  // activate a skill by reading its SKILL.md (progressive disclosure).
+  const skillsDiscovery = await discoverSkills({
+    roots: [join(root, ".aj", "skills"), join(homedir(), ".config", "agentj", "skills")],
+  });
+  const skillsSection = composeSkillsPromptSection(skillsDiscovery.skills);
   let agentConfig: AgentConfig = {
     ...config.agent,
-    rules: config.agent.rules || agentsMd || "",
+    rules: [config.agent.rules || agentsMd || "", skillsSection].filter(Boolean).join("\n\n"),
     llm: {
       ...config.agent.llm,
       providers: {
@@ -639,6 +668,8 @@ async function composeChat(
     },
     environment,
     stateRoot,
+    skills: skillsDiscovery.skills,
+    skillIssues: skillsDiscovery.issues,
     startMcp: async () => {
       publishConfigIssues();
       await mcp.reload(config.mcp, undefined, { skip: [...invalidServerNames()] });
@@ -743,6 +774,13 @@ export async function runAgentjChat(
   };
 
   const onToolActivity = (activity: ToolActivity): void => {
+    // run_job returns as soon as detached work starts. Its tool duration is
+    // not the job duration, so the persistent job count and job lifecycle
+    // transcript are the only UI for it.
+    if (activity.tool === "run_job") {
+      updateStatus();
+      return;
+    }
     if (activity.phase === "start") {
       activeTools.set(activity.id, {
         tool: activity.tool,
@@ -991,7 +1029,15 @@ export async function runAgentjChat(
             usage: turnTokens,
             contextSoftLimit: composition.contextSoftLimit,
             sessionStartedAt,
-            jobs: jobRunner.list().filter((job) => job.status === "running"),
+            jobs: jobRunner
+              .list()
+              .filter((job) => job.status === "running")
+              .map((job) => ({
+                id: job.id,
+                mode: job.mode,
+                prompt: job.prompt,
+                startedAt: job.startedAt,
+              })),
           },
           screen.width(),
         ).map((text) => [{ text, tone: "muted" }]),
@@ -1064,7 +1110,21 @@ export async function runAgentjChat(
       guided: {
         askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
       },
+      skills: composition.skills.map(
+        (skill): SkillCommand => ({
+          name: skill.name,
+          summary: skill.description,
+          ...(skillMode(skill) ? { mode: skillMode(skill) } : {}),
+          prompt: (args) => renderSkillInvocation(skill, args),
+        }),
+      ),
     };
+    const skillNotices = [
+      ...composition.skillIssues.map(({ path, detail }) => `skill ${path}: ${detail}`),
+      ...composition.skills
+        .filter(({ name }) => name in chatCommands)
+        .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
+    ];
 
     screen = createChatScreen({
       initialHistory: promptHistory.entries,
@@ -1105,6 +1165,7 @@ export async function runAgentjChat(
 
     screen.start();
     updateStatus();
+    for (const notice of skillNotices) render({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
       screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
       screen.printAbove(turn.assistant);
@@ -1187,6 +1248,9 @@ export async function runAgentjOnce(
   }
 
   try {
+    for (const { path, detail } of composition.skillIssues) {
+      processStderr.write(`skill ${path}: ${detail}\n`);
+    }
     await composition.startMcp();
     const log = await createChatLog({
       root: join(composition.stateRoot, "agentj", "chats"),

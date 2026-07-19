@@ -1,5 +1,18 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.26
+
+### Patch Changes
+
+- 5b57b59: Auto-update now revalidates its check cache in the background. A launch inside the 24-hour check window still starts instantly off the cached answer, but the registry is re-queried behind the scenes and the cache rewritten — so a release published minutes after your last launch is picked up on the next one instead of up to a day later. Especially noticeable on the `next` channel, where publish-then-immediately-use is the normal rhythm.
+- c3d6e3c: Show a compact running-job count beneath the editor, suppress misleading detached-job startup timing, and make `/jobs` show completed job results and recent activity.
+
+## 0.1.0-next.25
+
+### Minor Changes
+
+- 12a18ef: Agent Skills (the agentskills.io format) are now discovered from `.aj/skills/<name>/SKILL.md` in the project and `~/.config/agentj/skills/<name>/SKILL.md` globally (project wins name collisions). Each skill's name and description are injected into the system prompt so the model can activate one by reading its SKILL.md when a task matches (progressive disclosure), and every skill is also invocable directly as a `/name` slash command — `/<name> <args>` starts a turn with the skill body as the prompt, substituting `$ARGUMENTS` when the body uses it. agentj-specific behavior rides the spec's `metadata` map: `agentj-mode: build` switches mode on invocation, `agentj-model-invocation: disabled` keeps a skill out of the prompt listing. Malformed skills surface as startup notices without blocking the session.
+
 ## 0.1.0-next.24
 
 ### Patch Changes

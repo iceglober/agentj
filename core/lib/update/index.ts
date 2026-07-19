@@ -62,6 +62,16 @@ export function createUpdateService(options: {
 }): UpdateService {
   const now = options.now ?? Date.now;
   const checkIntervalMs = options.checkIntervalMs ?? 24 * 60 * 60 * 1000;
+  const refreshCache = async (current: string, channel: ReleaseChannel): Promise<UpdateResult> => {
+    const available = await options.registry.latest(options.packageName, channel);
+    const result = {
+      current,
+      channel,
+      ...(available && available !== current ? { available } : {}),
+    };
+    await options.state?.write({ ...result, checkedAt: now() });
+    return result;
+  };
   const check = async (
     current: string,
     requested: UpdateChannel = options.config.channel,
@@ -76,16 +86,15 @@ export function createUpdateService(options: {
       cached.channel === channel &&
       now() - cached.checkedAt < checkIntervalMs
     ) {
+      // Stale-while-revalidate: the cached "no update" stays authoritative for
+      // this call so launches never wait on the registry, while a background
+      // refresh rewrites the cache so the NEXT launch acts on releases
+      // published since the cache was written. A cache that already carries
+      // `available` skips this — the caller is about to install and refresh.
+      if (!cached.available) void refreshCache(current, channel).catch(() => undefined);
       return cached;
     }
-    const available = await options.registry.latest(options.packageName, channel);
-    const result = {
-      current,
-      channel,
-      ...(available && available !== current ? { available } : {}),
-    };
-    await options.state?.write({ ...result, checkedAt: now() });
-    return result;
+    return refreshCache(current, channel);
   };
 
   return {

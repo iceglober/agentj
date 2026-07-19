@@ -158,6 +158,23 @@ describe("formatChatEvent", () => {
       "(dequeued) do the thing",
     );
   });
+
+  test("reports completed jobs with their actual runtime and outcome", () => {
+    expect(
+      formatChatEvent({
+        type: "job-finished",
+        job: {
+          id: "j2",
+          mode: "build",
+          prompt: "monitor the release workflow",
+          status: "done",
+          startedAt: 0,
+          endedAt: 74_000,
+          resultText: "Package published.",
+        },
+      }),
+    ).toBe("✓ [j2] done in 1m14s — monitor the release workflow\nPackage published.");
+  });
 });
 
 describe("composeProgressLines", () => {
@@ -306,17 +323,22 @@ describe("composeStatusSection", () => {
     ).toBeNull();
   });
 
-  test("running jobs each get a row below the section", () => {
+  test("running jobs render individual rows below the status", () => {
     const lines = composeStatusSection(
       {
         ...base,
         jobs: [
-          { id: "j1", mode: "build", prompt: "refactor the auth flow\nwith detail", startedAt: 0 },
+          { id: "j1", mode: "build", prompt: "Run the test suite", startedAt: 50_000 },
+          { id: "j2", mode: "plan", prompt: "Investigate the failure", startedAt: 60_000 },
         ],
       },
       90,
     );
-    expect(lines).toHaveLength(3);
-    expect(lines[2]).toBe("  ◐ [j1] build: refactor the auth flow  1m14s");
+    expect(lines).toEqual([
+      expect.stringContaining("204ed50c · azure/gpt-5.6-sol · plan"),
+      "~/repos/agentj",
+      "  ◐ [j1] build: Run the test suite  24s",
+      "  ◐ [j2] plan: Investigate the failure  14s",
+    ]);
   });
 });
