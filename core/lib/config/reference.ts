@@ -1,9 +1,10 @@
 /**
- * The user-facing configuration keys documented on the site, in display order.
- * Keys and their defaults come from the live schema at generate time; only the
- * editorial description lives here. Every `path` is validated against
- * `listConfigPaths()` when the docs are built, so a renamed or removed key
- * fails the build instead of shipping a stale doc.
+ * The user-facing configuration keys and their editorial descriptions, in
+ * display order. Lives in core because two consumers read it: the docs
+ * generator (which pairs each key with its schema default) and the config UI
+ * (field help, and which keys the browser exposes). Keys and defaults come from
+ * the schema; only the description text lives here. Every `path` is validated
+ * against `listConfigPaths()` — a renamed or removed key fails the docs build.
  */
 export interface ConfigDoc {
   path: string;
