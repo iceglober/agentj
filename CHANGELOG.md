@@ -1,5 +1,18 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.32
+
+### Minor Changes
+
+- 903aed6: `agentj config` with no subcommand now opens an interactive editor. It lists the configurable keys with their current values and lets you edit each with the right control for its type — a menu for enums, true/false for booleans, masked entry for the provider key, a numeric field, or an add/remove list for arrays like `agent.llm.tiers` — persisting through the same path as `config set`. The subcommands (`config get`/`set`/`delete`) are unchanged; non-interactive use still errors cleanly.
+- d5abe0d: Editing a list-valued config key no longer means typing raw JSON. `/config set agent.llm.tiers` (and any array key) now opens a guided list editor — add, edit, delete, and reorder items (order matters for the model ladder) — instead of asking for `["a","b"]`. Under the hood a new schema-field layer reads each config key's type straight from the zod schema, the groundwork for onboarding and a full config screen.
+- 925f4ed: First run no longer dead-ends on a missing key. Starting `agentj` interactively without a provider key configured used to print "Azure API key missing" and exit; it now walks you through entering the key (masked, stored in your OS keychain) and continues straight into a session. The model already has a working default, so that key is the only step. Non-interactive runs (`agentj run`, pipes) keep the plain error.
+- c74df62: Allow Ctrl+V to attach copied screenshots as vision input, and send supported `@` image files as vision attachments.
+
+### Patch Changes
+
+- ea1b4b0: Plan mode now hands off in one gesture. A plan closes by naming the single most likely next action, so accepting collapses to pressing Tab or `/build` instead of restating what you obviously want. The stop rules also lean less on "should I?": when the conversation already implies the answer the agent states the assumption and acts (build) or names it in a line (plan) — while still asking before anything permission-gated, destructive, or outward-facing.
+
 ## 0.1.0-next.31
 
 ### Patch Changes
