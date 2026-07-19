@@ -50,8 +50,6 @@ export function createAnsiLiveRegionAdapter(
    *  vacated band — a terminal cannot pull scrolled-off text back down, so a
    *  shrunken layout leaves a temporary gap that new transcript lines close. */
   let anchorRows = 0;
-  /** Rows the last paint actually used — the band printAbove must keep free. */
-  let lastPaintRows = 0;
   let knownHeight: number | null = null;
 
   const physicalCursorRow = (layout: LiveLayout): number => {
@@ -81,7 +79,6 @@ export function createAnsiLiveRegionAdapter(
       write(`${csi(`${Math.max(1, rows - anchorRows + 1)};1H`)}${csi("J")}`);
     }
     anchorRows = 0;
-    lastPaintRows = 0;
   };
 
   const reserve = (rows: number, terminalHeight: number): void => {
@@ -126,7 +123,6 @@ export function createAnsiLiveRegionAdapter(
     write(`${csi(`${start};1H`)}${fitted.lines.join("\r\n")}`);
     write(csi(`${start + fitted.cursorRow};${fitted.cursorColumn + 1}H`));
     lastLayout = fitted;
-    lastPaintRows = fitted.lines.length;
     knownHeight = terminalHeight;
   };
 
@@ -170,23 +166,16 @@ export function createAnsiLiveRegionAdapter(
       // `anchorRows` spans the live region plus any rows a since-shrunk layout
       // vacated; clearing all of it lets this write reclaim that gap.
       const bandTop = Math.max(1, rows - anchorRows + 1);
-      write(`${csi(`${bandTop};1H`)}${csi("J")}`);
-      // The live region is pinned to the bottom `lastPaintRows` rows, so the
-      // text must end exactly one row above them. Scroll cost is independent of
-      // the text height — the terminal scrolls on its own as tall text overflows
-      // — which is what keeps the gap from growing with the content.
       const textRows = physicalTextRows(text);
-      const fitStart = rows - lastPaintRows - textRows + 1;
-      if (fitStart >= bandTop) {
-        // Fits in the cleared band: place it low so it sits tight above the
-        // live region with no scrolling and no trailing gap.
-        write(`${csi(`${fitStart};1H`)}${text}`);
-      } else {
-        // Taller than the free space: write from the band top and let it scroll
-        // as it overflows, then reserve exactly the live region's rows below.
-        write(`${csi(`${bandTop};1H`)}${text}${"\r\n".repeat(lastPaintRows)}`);
-      }
-      anchorRows = lastPaintRows;
+      // Land the text with its last line on the bottom row — tall text scrolls
+      // the terminal on its own as it overflows — then hand the band back by
+      // zeroing the anchor. The next paint()'s reserve() scrolls up by the
+      // CURRENT live-region height, so the gap never depends on the previous
+      // paint's height (which goes stale when a tall completion menu or modal
+      // is dismissed right before this write).
+      const writeRow = Math.max(bandTop, rows - textRows + 1);
+      write(`${csi(`${bandTop};1H`)}${csi("J")}${csi(`${writeRow};1H`)}${text}`);
+      anchorRows = 0;
       lastLayout = null;
       knownHeight = rows;
     },
@@ -199,7 +188,7 @@ export function createAnsiLiveRegionAdapter(
         write(`${csi(`${Math.max(1, rows - anchorRows + 1)};1H`)}${csi("J")}`);
       }
       lastLayout = null;
-      lastPaintRows = 0;
+      anchorRows = 0;
     },
   };
 }
