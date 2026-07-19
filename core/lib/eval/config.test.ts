@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { configHash, runConfigSchema, usdCost } from "./config";
+import { llmConfigSchema } from "../llm";
+import { configHash, evalConfigSchema, judgeModel, runConfigSchema, usdCost } from "./config";
 
 const base = () =>
   runConfigSchema.parse({
@@ -39,6 +40,14 @@ describe("configHash", () => {
       agent: { llm: { model: "gpt-5.6-sol" }, tools: { subagents: { concurrency: 2 } } },
     });
     expect(configHash(explicitConcurrencyOnly)).toBe(configHash(plain));
+  });
+
+  test("subagent tier routing moves the hash", () => {
+    const routed = runConfigSchema.parse({
+      id: "sol",
+      agent: { tools: { subagents: { tier: 1 } } },
+    });
+    expect(configHash(routed)).not.toBe(configHash(base()));
   });
 
   test("an explicit subagent provider moves the hash", () => {
@@ -81,6 +90,24 @@ describe("configHash", () => {
 
   test("identical agent → identical hash across parses", () => {
     expect(configHash(base())).toBe(configHash(base()));
+  });
+});
+
+describe("judgeModel", () => {
+  const llm = llmConfigSchema.parse({
+    tiers: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  });
+
+  test("resolves the judge tier through the agent model ladder", () => {
+    const config = evalConfigSchema.parse({ judge: { tier: 2 } });
+    expect(judgeModel(config, llm)).toBe("gpt-5.6-luna");
+  });
+
+  test("legacy explicit judge model wins over tier", () => {
+    const config = evalConfigSchema.parse({
+      judge: { model: "deepseek-v4-pro", tier: 1 },
+    });
+    expect(judgeModel(config, llm)).toBe("deepseek-v4-pro");
   });
 });
 

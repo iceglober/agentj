@@ -4,6 +4,7 @@ import { loadConfig } from "../lib/config";
 import {
   configHash,
   type EvalConfig,
+  judgeModel,
   type ResultRow,
   type RunConfig,
   resultRowSchema,
@@ -75,8 +76,8 @@ const refFiles = (task: Task) =>
 
 function buildJudge(evalCfg: EvalConfig, baseLlm: LlmConfig): GradeCtx {
   if (!evalCfg.judge.enabled) return noJudge;
-  // Reuse the agent's provider/auth, swap in the judge model.
-  const runtime = createRuntime({ ...baseLlm, model: evalCfg.judge.model });
+  // Reuse the agent's provider/auth, swapping in the configured judge model.
+  const runtime = createRuntime({ ...baseLlm, model: judgeModel(evalCfg, baseLlm) });
   return {
     judge: async (rubric, diff, report) => {
       try {
