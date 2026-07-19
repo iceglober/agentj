@@ -1,5 +1,12 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.29
+
+### Patch Changes
+
+- 0911e44: The blank gap between the transcript and the editor no longer grows with the size of what was printed. The bottom-pinned live region padded each transcript write with newlines proportional to the block's own height, so a long reply or a tall progress block left a correspondingly tall band of empty rows above the editor. Writes now land tight against the pinned live region — placed exactly above it when they fit, and scrolled by a fixed amount (the live region's height) when they overflow — regardless of how many lines they contain.
+- 7d5a23a: A turn that ends without producing anything no longer looks like a freeze. When the model returns no text and ran no tools, the transcript now says so instead of silently returning to the prompt. Turn errors render in red, and a provider content-filter rejection — which can fire intermittently on the same conversation — gets an explicit hint to retry or start a fresh session rather than resuming the one that keeps tripping the filter.
+
 ## 0.1.0-next.28
 
 ### Minor Changes
