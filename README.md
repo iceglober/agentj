@@ -63,7 +63,8 @@ Keys and commands:
   timeout: if it is still running at the deadline the agent gets pinged, inspects the job's
   recent activity (`check_job`), and either extends the deadline or aborts a stuck job — the
   job itself keeps running throughout.
-- **`@path/to/file`** — attach a file's contents to your message.
+- **`@path/to/file`** — attach a file's contents to your message. Quote paths with spaces as
+  **`@"path/to/my file.md"`**. **Ctrl+V** inserts copied local files as editable references.
 - **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
   the first non-whitespace input token shows fuzzy-matched command suggestions.
 - **`/mcp`** — inspect MCP status; guided completions provide `add`, `auth`, `reload`, `remove`,
@@ -85,7 +86,7 @@ Keys and commands:
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 
-Editor shortcuts: Option+←/→ word hop, Option+Backspace/Delete word delete, Cmd+←/→ line bounds,
+Editor shortcuts: Ctrl+V pastes copied local files as `@file` references; Option+←/→ word hop, Option+Backspace/Delete word delete, Cmd+←/→ line bounds,
 Cmd+Backspace/Delete delete to bound; Home/End, Ctrl+A/E/U/K, and Esc+B/F/D fallbacks work in any
 terminal. Shift+Return and Cmd combinations need a modifier-aware terminal protocol (CSI-u — kitty,
 WezTerm, Ghostty, or mapped keys in iTerm2).

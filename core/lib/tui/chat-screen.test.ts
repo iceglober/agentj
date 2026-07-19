@@ -212,6 +212,35 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("pastes copied file references in key order", async () => {
+    let resolveFiles: ((value: string | null) => void) | undefined;
+    const files = new Promise<string | null>((resolve) => {
+      resolveFiles = resolve;
+    });
+    const { screen, input, calls } = makeScreen({ onPasteFiles: () => files });
+    screen.start();
+    input.write("before\u0016after\r");
+    await settle();
+    expect(calls.submit).toEqual([]);
+    resolveFiles?.(' @"my notes.md" @src/main.ts ');
+    await settle();
+    expect(calls.submit).toEqual(['before @"my notes.md" @src/main.ts after']);
+    screen.stop();
+  });
+
+  test("recovers queued input when file paste fails", async () => {
+    const { screen, input, calls } = makeScreen({
+      onPasteFiles: async () => {
+        throw new Error("clipboard unavailable");
+      },
+    });
+    screen.start();
+    input.write("\u0016after\r");
+    await settle();
+    expect(calls.submit).toEqual(["after"]);
+    screen.stop();
+  });
+
   test("Tab toggles mode, bare Escape flushes to an interrupt", async () => {
     const { screen, input, calls } = makeScreen();
     screen.start();

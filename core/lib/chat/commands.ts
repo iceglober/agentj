@@ -1,5 +1,3 @@
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
 import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
 import { providerNames } from "../llm";
 import {
@@ -41,30 +39,6 @@ export function parseInput(raw: string): ParsedInput {
   }
   if (text.startsWith("&")) return { kind: "job", prompt: text.slice(1).trim() };
   return { kind: "message", text };
-}
-
-const AT_FILE_LIMIT = 16_384;
-const AT_FILE_PATTERN = /(^|\s)@([\w./~-]+)/g;
-
-/** Expand `@path` references into bounded attachment blocks (missing → left as-is). */
-export async function expandAtFiles(text: string, cwd: string): Promise<string> {
-  const attachments: string[] = [];
-  for (const match of text.matchAll(AT_FILE_PATTERN)) {
-    const reference = match[2];
-    if (!reference) continue;
-    const path = isAbsolute(reference) ? reference : join(cwd, reference);
-    try {
-      if (!(await stat(path)).isFile()) continue;
-      const content = await readFile(path, "utf8");
-      const clipped = content.length > AT_FILE_LIMIT;
-      attachments.push(
-        `--- @${reference}${clipped ? " (truncated)" : ""} ---\n${content.slice(0, AT_FILE_LIMIT)}`,
-      );
-    } catch {
-      // Not a readable file — leave the mention untouched.
-    }
-  }
-  return attachments.length > 0 ? `${text}\n\n${attachments.join("\n\n")}` : text;
 }
 
 /**
@@ -571,7 +545,7 @@ export const chatCommands: Record<string, ChatCommand> = {
       }
       lines.push(
         "& <task> — run as a background job",
-        "@path/to/file — attach file contents",
+        "@path/to/file — attach file contents · Ctrl+V — paste copied files",
         "Tab/Enter — complete a shown command · Tab — toggle plan/build otherwise",
         "Esc — dismiss suggestions / dequeue waiting message / interrupt turn · Ctrl+C×2 — quit",
       );

@@ -43,6 +43,8 @@ interface RawInput extends Readable {
 export interface ChatScreenCallbacks {
   onSubmit(text: string): void;
   onTab(): void;
+  /** Reads copied files and returns @file references ready for editor insertion. */
+  onPasteFiles?(): Promise<string | null>;
   onEscape(): void;
   /** Double Ctrl+C on an empty editor. */
   onQuit(): void;
@@ -131,6 +133,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   type PendingModal = PendingPermission | PendingInput;
   let pendingModal: PendingModal | null = null;
   const modalQueue: PendingModal[] = [];
+  let inputQueue: Promise<void> | null = null;
 
   const safeLine = (line: UiTextLine): string => styler.renderLine(line, contentWidth());
 
@@ -342,7 +345,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     if (escapeTimer) clearTimeout(escapeTimer);
     escapeTimer = setTimeout(() => {
       escapeTimer = null;
-      for (const command of decoder.flush()) handleCommand(command);
+      for (const command of decoder.flush()) enqueueCommand(command);
     }, options.escapeFlushMs ?? 40);
   };
 
@@ -456,13 +459,13 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       (splitGraphemes(text).length > PASTE_PLACEHOLDER_CHARS ||
         text.split("\n").length > PASTE_PLACEHOLDER_LINES);
     if (!oversized) {
-      handleCommand({ type: "paste", text });
+      enqueueCommand({ type: "paste", text });
       return;
     }
     pasteCounter += 1;
     const placeholder = `[pasted content #${pasteCounter}: ${splitGraphemes(text).length} chars]`;
     pastes.set(placeholder, text);
-    handleCommand({ type: "paste", text: placeholder });
+    enqueueCommand({ type: "paste", text: placeholder });
   };
 
   const acceptCompletion = (completion: ActiveCompletion): void => {
@@ -504,7 +507,10 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     return true;
   };
 
-  const handleCommand = (command: ReturnType<TerminalKeyDecoder["push"]>[number]): void => {
+  const handleCommand = (
+    command: ReturnType<TerminalKeyDecoder["push"]>[number],
+  ): void | Promise<void> => {
+    if (!started) return;
     if (pendingModal?.kind === "permission") {
       handlePermissionKey(pendingModal, command);
       return;
@@ -515,6 +521,20 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     }
     const completion = activeCompletion();
     switch (command.type) {
+      case "paste-files":
+        return (async () => {
+          try {
+            const references = await options.callbacks.onPasteFiles?.();
+            if (!references || !started) return;
+            historyIndex = null;
+            completionIndex = 0;
+            dismissedCompletion = null;
+            editor = applyEditorCommand(editor, { type: "paste", text: references });
+            paint();
+          } catch {
+            // The composition callback reports clipboard failures as notices.
+          }
+        })();
       case "tab":
         if (completion?.suggestions.length) acceptCompletion(completion);
         else if (!completion) options.callbacks.onTab();
@@ -593,6 +613,21 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     }
   };
 
+  const enqueueCommand = (command: ReturnType<TerminalKeyDecoder["push"]>[number]): void => {
+    const settle = (pending: Promise<void>): void => {
+      inputQueue = pending;
+      void pending.finally(() => {
+        if (inputQueue === pending) inputQueue = null;
+      });
+    };
+    if (inputQueue) {
+      settle(inputQueue.then(() => Promise.resolve(handleCommand(command))).catch(() => {}));
+      return;
+    }
+    const pending = handleCommand(command);
+    if (pending) settle(pending.catch(() => {}));
+  };
+
   const onResize = (): void => {
     if (started) paint();
   };
@@ -610,7 +645,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         continue;
       }
       commitPaste();
-      handleCommand(command);
+      enqueueCommand(command);
     }
     if (!decoder.midPaste) commitPaste();
     if (decoder.pendingLoneEscape) armEscapeFlush();

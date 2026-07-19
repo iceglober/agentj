@@ -145,8 +145,12 @@ describe("terminal key decoder", () => {
     expect(decoder.end()).toEqual([]);
   });
 
-  test("Tab decodes as a screen-level tab command", () => {
-    expect(decode("\t")).toEqual([{ type: "tab" }]);
+  test("Tab and Ctrl+V decode as screen-level commands", () => {
+    expect(decode("\t", "\u0016", "\u001b[118;5u")).toEqual([
+      { type: "tab" },
+      { type: "paste-files" },
+      { type: "paste-files" },
+    ]);
   });
 
   test("a bare Escape resolves via flush after no continuation arrives", () => {

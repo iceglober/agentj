@@ -56,6 +56,7 @@
   },
   "dependencies": {
     "@ai-sdk/azure": "^4.0.11",
+    "@crosscopy/clipboard": "^0.3.6",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@napi-rs/keyring": "^1.3.0",
     "@opentelemetry/api": "^1.9.1",
