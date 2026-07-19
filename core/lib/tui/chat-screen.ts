@@ -17,20 +17,21 @@ import {
   type SlashCompletionSuggestion,
   type SlashCompletionToken,
 } from "./slash-completion";
+import { createTerminalStyler, type UiBlock, type UiTextLine } from "./styles";
 import {
   displayWidth,
   escapeTerminalText,
   renderEditorLayout,
-  truncateToDisplayWidth,
   windowEditorLayout,
   wrapToDisplayWidth,
 } from "./terminal-editor";
 
 /**
  * The persistent chat surface: raw mode for the whole session, one live
- * region at the bottom (optional progress block → editor rows → status line),
- * and an append-only transcript. ANSI positioning lives behind LiveRegionPort;
- * this adapter renders and routes keys but decides nothing (ChatSession does).
+ * region at the bottom (optional progress block → editor rows → status line)
+ * repainted in place, and an append-only transcript printed above it — the
+ * same cursor-up/clear/repaint trick the DAG painter proved, generalized.
+ * The screen renders and routes keys; it decides nothing (ChatSession does).
  */
 
 interface RawInput extends Readable {
@@ -74,19 +75,16 @@ export interface CreateChatScreenOptions {
 export interface ChatScreen extends GuidedInputPort {
   start(): void;
   stop(): void;
-  /** Append transcript output above the live region. */
-  /** Append transcript output. Text is sanitized against terminal-escape
-   *  injection unless `preStyled` — then the CALLER must have sanitized any
-   *  interpolated content before adding its own trusted ANSI styling. */
-  printAbove(text: string, options?: { preStyled?: boolean }): void;
+  /** Append sanitized plain or semantic transcript output above the live region. */
+  printAbove(text: string | UiBlock): void;
   /** Restore a dequeued prompt, ahead of any draft already being edited. */
   restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
-  setProgressLines(lines: string[]): void;
+  setProgressLines(lines: UiTextLine[]): void;
   /** Ephemeral model-generation indicator, immediately above the editor. */
-  setThinkingLine(line: string | null): void;
+  setThinkingLine(line: UiTextLine | null): void;
   /** Replace the status section below the editor (idle repaints are skipped). */
-  setStatusLines(lines: string[]): void;
+  setStatusLines(lines: UiTextLine[]): void;
   /** Usable line width (columns minus the repaint-safety margin) for
    *  width-aware status composition — lines this long survive safeLine. */
   width(): number;
@@ -100,16 +98,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const stdin = (options.stdin ?? process.stdin) as RawInput;
   const liveRegion = options.liveRegion;
   const contentWidth = liveRegion.width;
-
+  const styler = createTerminalStyler({ color: liveRegion.color() });
   const decoder = new TerminalKeyDecoder();
   let editor: EditorState = createEditorState();
   const history = (options.initialHistory ?? [])
     .filter((entry) => entry.trim().length > 0 && options.shouldRememberInput?.(entry) !== false)
     .slice(-100);
   let historyIndex: number | null = null;
-  let progressLines: string[] = [];
-  let thinkingLine: string | null = null;
-  let statusLines: string[] = [];
+  let progressLines: UiTextLine[] = [];
+  let thinkingLine: UiTextLine | null = null;
+  let statusLines: UiTextLine[] = [];
   let started = false;
   let removeResizeListener: (() => void) | null = null;
   let previousRawMode = false;
@@ -134,8 +132,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   let pendingModal: PendingModal | null = null;
   const modalQueue: PendingModal[] = [];
 
-  const safeLine = (line: string): string =>
-    truncateToDisplayWidth(escapeTerminalText(line).replace(/\n+/gu, " "), contentWidth());
+  const safeLine = (line: UiTextLine): string => styler.renderLine(line, contentWidth());
 
   interface ActiveCompletion {
     token: SlashCompletionToken;
@@ -201,6 +198,26 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       const origin = pendingModal.request.origin
         ? ` — ${escapeTerminalText(pendingModal.request.origin)}`
         : "";
+      const permissionChoices =
+        contentWidth() < 42
+          ? [
+              safeLine([{ text: "<Y>", tone: "accent", bold: true }, { text: " allow once" }]),
+              safeLine([
+                { text: "<A>", tone: "accent", bold: true },
+                { text: " always this session" },
+              ]),
+              safeLine([{ text: "<N>", tone: "accent", bold: true }, { text: " deny" }]),
+            ]
+          : [
+              safeLine([
+                { text: "<Y>", tone: "accent", bold: true },
+                { text: " allow once · " },
+                { text: "<A>", tone: "accent", bold: true },
+                { text: " always this session · " },
+                { text: "<N>", tone: "accent", bold: true },
+                { text: " deny" },
+              ]),
+            ];
       const askLines = [
         ...wrapToDisplayWidth(
           `Permission ${escapeTerminalText(pendingModal.request.tool)}${origin}`,
@@ -210,7 +227,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         ...(detail.omitted > 0
           ? wrapToDisplayWidth(`  … +${detail.omitted} more lines`, contentWidth())
           : []),
-        ...wrapToDisplayWidth("[y]es once · [a]lways this session · [n]o", contentWidth()),
+        ...permissionChoices,
       ];
       const askCursorRow = progress.length + askLines.length - 1;
       return {
@@ -296,8 +313,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     liveRegion.clear();
   };
 
-  const printTranscript = (text: string, preStyled = false): void => {
-    liveRegion.printAbove((preStyled ? text : escapeTerminalText(text)).split("\n").join("\r\n"));
+  const printTranscript = (text: string | UiBlock): void => {
+    liveRegion.printAbove(styler.renderBlock(text).join("\r\n"));
     paint();
   };
 
@@ -634,8 +651,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       }
     },
 
-    printAbove(text, options) {
-      printTranscript(text, options?.preStyled === true);
+    printAbove(text) {
+      printTranscript(text);
     },
 
     restoreInput(text) {

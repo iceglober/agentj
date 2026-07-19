@@ -259,7 +259,7 @@ describe("composeStatusSection", () => {
     spinnerFrame: 0,
     usage: { in: 12_400, out: 3_100, ctx: 8_700 },
     sessionStartedAt: 0,
-    runningJobs: 0,
+    jobs: [],
     now: 74_000,
   };
 
@@ -323,13 +323,22 @@ describe("composeStatusSection", () => {
     ).toBeNull();
   });
 
-  test("running jobs render one compact count directly below the editor", () => {
-    const lines = composeStatusSection({ ...base, runningJobs: 2 }, 90);
+  test("running jobs render individual rows below the status", () => {
+    const lines = composeStatusSection(
+      {
+        ...base,
+        jobs: [
+          { id: "j1", mode: "build", prompt: "Run the test suite", startedAt: 50_000 },
+          { id: "j2", mode: "plan", prompt: "Investigate the failure", startedAt: 60_000 },
+        ],
+      },
+      90,
+    );
     expect(lines).toEqual([
-      "2 jobs running",
       expect.stringContaining("204ed50c · azure/gpt-5.6-sol · plan"),
       "~/repos/agentj",
+      "  ◐ [j1] build: Run the test suite  24s",
+      "  ◐ [j2] plan: Investigate the failure  14s",
     ]);
-    expect(composeStatusSection({ ...base, runningJobs: 1 }, 90)[0]).toBe("1 job running");
   });
 });

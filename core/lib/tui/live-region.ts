@@ -6,6 +6,8 @@ export interface LiveLayout {
 }
 
 export interface LiveRegionPort {
+  /** Whether semantic UI spans should render SGR styling. */
+  color(): boolean;
   /** Usable line width, excluding the repaint safety margin. */
   width(): number;
   /** Viewport height when the terminal exposes it. */

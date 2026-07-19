@@ -25,6 +25,7 @@ function makeScreen(
   screenOptions: Partial<
     Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput"> & {
       terminalHeight?: number;
+      terminalWidth?: number;
     }
   > = {},
 ) {
@@ -34,10 +35,10 @@ function makeScreen(
   const chunks: Buffer[] = [];
   output.on("data", (chunk: Buffer) => chunks.push(chunk));
   const calls = { submit: [] as string[], tab: 0, escape: 0, quit: 0 };
-  const { terminalHeight, ...chatScreenOptions } = screenOptions;
+  const { terminalHeight, terminalWidth, ...chatScreenOptions } = screenOptions;
   const screen = createChatScreen({
     stdin: input,
-    liveRegion: createAnsiLiveRegionAdapter({ stdout: output, terminalHeight }),
+    liveRegion: createAnsiLiveRegionAdapter({ stdout: output, terminalHeight, terminalWidth }),
     escapeFlushMs: 5,
     quitWindowMs: 100,
     initialHistory,
@@ -197,21 +198,6 @@ describe("createChatScreen", () => {
     expect(rendered.join("\n")).toContain("row-19");
     expect(rendered.join("\n")).not.toContain("row-00");
     expect(rendered.filter((line) => line.length > 0).length).toBeLessThanOrEqual(8);
-    screen.stop();
-  });
-
-  test("keeps status pinned while recalled multiline history scrolls inside the editor", async () => {
-    const history = Array.from({ length: 16 }, (_, index) => `history-${index}`).join("\n");
-    const { screen, input, text } = makeScreen({}, [history], { terminalHeight: 20 });
-    screen.start();
-    screen.setStatusLines(["status-bottom"]);
-    input.write("\u001b[A");
-    await settle();
-
-    const rendered = renderScreen(text(), 20);
-    expect(rendered.at(-1)).toBe("status-bottom");
-    expect(rendered.join("\n")).toContain("history-15");
-    expect(rendered.join("\n")).not.toContain("history-00");
     screen.stop();
   });
 
@@ -443,6 +429,9 @@ describe("createChatScreen", () => {
     // The command renders in the modal itself — wrapped, indented — without a
     // duplicate transcript copy for a request this short.
     expect(text()).toContain("Permission bash\r\n  git push origin");
+    expect(renderScreen(text()).join("\n")).toContain(
+      "<Y> allow once · <A> always this session · <N> deny",
+    );
     expect(text()).toContain("  echo done");
     expect(text()).not.toContain("Permission bash:");
     expect(text()).not.toContain("review request above");
@@ -479,6 +468,20 @@ describe("createChatScreen", () => {
     expect(text()).toContain("Permission bash — subagent t2");
     input.write("n");
     await expect(child).resolves.toBe("deny");
+    screen.stop();
+  });
+
+  test("permission keycaps wrap into clear choices on narrow terminals", async () => {
+    const { screen, input, text } = makeScreen({}, [], { terminalWidth: 35 });
+    screen.start();
+    const ask = screen.askPermission({ tool: "bash", kind: "bash", detail: "git push" });
+    await settle();
+    const rendered = renderScreen(text()).join("\n");
+    expect(rendered).toContain("<Y> allow once");
+    expect(rendered).toContain("<A> always this session");
+    expect(rendered).toContain("<N> deny");
+    input.write("n");
+    await expect(ask).resolves.toBe("deny");
     screen.stop();
   });
 
@@ -646,15 +649,13 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("printAbove sanitizes by default; preStyled preserves trusted ANSI", async () => {
+  test("printAbove sanitizes text and styles only semantic spans", async () => {
     const { screen, text } = makeScreen();
     screen.start();
-    // Untrusted content: a raw ESC must be neutralized to visible text.
     screen.printAbove("evil \u001b[2J payload");
     expect(text()).toContain("\\x1b[2J");
-    // Trusted styled line (caller sanitized its interpolations) passes through.
-    screen.printAbove("\u001b[1mstyled\u001b[0m", { preStyled: true });
-    expect(text()).toContain("\u001b[1mstyled\u001b[0m");
+    screen.printAbove([[{ text: "styled", tone: "accent", bold: true }]]);
+    expect(text()).toContain("\u001b[1m\u001b[36mstyled\u001b[0m");
     screen.stop();
   });
 

@@ -5,6 +5,7 @@ import { displayWidth } from "./terminal-editor";
 interface TerminalOutput extends Writable {
   columns?: number;
   rows?: number;
+  isTTY?: boolean;
 }
 
 export interface CreateAnsiLiveRegionAdapterOptions {
@@ -121,6 +122,8 @@ export function createAnsiLiveRegionAdapter(
   };
 
   return {
+    color: () =>
+      stdout.isTTY !== false && process.env.NO_COLOR === undefined && process.env.TERM !== "dumb",
     width: contentWidth,
     height,
     onResize(listener) {
