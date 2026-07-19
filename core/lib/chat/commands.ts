@@ -11,6 +11,7 @@ import {
 import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
 import type { UpdateChannel } from "../update";
+import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
 import type { ChatEvent } from "./events";
 import type { GuidedInputPort } from "./guided-input";
 import type { JobRunner } from "./jobs";
@@ -107,6 +108,10 @@ export interface ChatCommandContext {
   clear?(): void;
   config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
   models?: ModelController;
+  cost?: {
+    rows(): readonly UsageRecord[];
+    prices: Readonly<Record<string, CostPrice>>;
+  };
   mcp?: {
     statuses(): readonly McpRuntimeStatus[];
     prompts?(): readonly McpPromptCatalogEntry[];
@@ -588,6 +593,19 @@ export const chatCommands: Record<string, ChatCommand> = {
   model: {
     summary: "Choose primary or subagent models",
     run: runModelCommand,
+  },
+  cost: {
+    summary: "Show foreground token usage and estimated cost",
+    run(context) {
+      if (!context.cost) {
+        context.emit({ type: "notice", text: "Cost reporting is unavailable in this session." });
+        return;
+      }
+      context.emit({
+        type: "notice",
+        text: formatCostReport(context.cost.rows(), context.cost.prices),
+      });
+    },
   },
   build: {
     summary: "Switch to build mode and implement the plan",

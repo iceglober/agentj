@@ -54,3 +54,33 @@ test("loadChatLog returns null for unknown sessions", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("usage records round-trip and logs without them load with an empty list", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const projectRoot = "/repo/example";
+  try {
+    const bare = await createChatLog({ root, projectRoot, id: "bare" });
+    await bare.append({ type: "turn", mode: "plan", user: "hi", assistant: "hello", ts: "t1" });
+    const legacy = await loadChatLog({ root, projectRoot, id: "bare" });
+    expect(legacy?.usage).toEqual([]);
+
+    const log = await createChatLog({ root, projectRoot, id: "metered" });
+    const record = {
+      type: "usage",
+      provider: "azure",
+      model: "gpt-5.6-terra",
+      ts: "t1",
+      usage: {
+        inputTokens: 300_000,
+        outputTokens: 1_200,
+        cacheReadInputTokens: 250_000,
+        longContextRequests: 1,
+      },
+    } as const;
+    await log.append(record);
+    const loaded = await loadChatLog({ root, projectRoot, id: "metered" });
+    expect(loaded?.usage).toEqual([record]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

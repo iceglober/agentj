@@ -49,7 +49,6 @@ export interface ModelUsageMetrics {
 export type ModelUsageMetricName =
   | "model.duration_ms"
   | "model.tokens.input"
-  | "model.tokens.input_long_context"
   | "model.tokens.no_cache"
   | "model.tokens.cache_read"
   | "model.tokens.cache_write"
@@ -149,17 +148,6 @@ export function recordModelUsage(
     for (const [key, name] of tokenMeasurements) {
       const value = usage[key];
       if (isMetricValue(value)) record(sink, { name, value, attributes: safeAttributes });
-    }
-
-    // This counter carries only aggregate tokens and a fixed threshold. It lets
-    // dashboards identify Azure's long-context price tier without exporting
-    // request content or a high-cardinality request identifier.
-    if (isMetricValue(usage.inputTokens) && usage.inputTokens > 272_000) {
-      record(sink, {
-        name: "model.tokens.input_long_context",
-        value: usage.inputTokens,
-        attributes: safeAttributes,
-      });
     }
 
     if (

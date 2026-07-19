@@ -33,6 +33,7 @@ import {
   type SkillCommand,
   shouldRememberChatInput,
 } from "./lib/chat/commands";
+import { LONG_CONTEXT_INPUT_TOKENS, type UsageRecord } from "./lib/chat/cost";
 import type { ChatEvent } from "./lib/chat/events";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
@@ -265,6 +266,8 @@ interface ChatComposition {
   /** The configured context soft limit (agent.context.softLimit), if any. */
   contextSoftLimit: number | undefined;
   contextOnLimit: AgentConfig["context"]["onLimit"];
+  /** The eval $/Mtok map, reused by /cost for terminal pricing. */
+  evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
   runBuildJob(
     prompt: string,
@@ -699,6 +702,7 @@ async function composeChat(
     },
     contextSoftLimit: config.agent.context.softLimit,
     contextOnLimit: config.agent.context.onLimit,
+    evalPrices: config.eval.prices,
     agentFor,
     runBuildJob,
     runPlanJob,
@@ -915,6 +919,12 @@ export async function runAgentjChat(
     resumeSessionId = log.id;
     const undoStack = createUndoStack(environment, root, log.id);
     undo = undoStack;
+    // Foreground usage ledger: resumed rows plus one appended record per turn.
+    // Only foreground steps land in turn-usage, so /cost prices exactly the
+    // context this conversation grew.
+    const usageRows: UsageRecord[] = [...(resumed?.usage ?? [])];
+    let turnUsage: UsageRecord["usage"] | null = null;
+    let turnModel = composition.modelFor(resumed?.state?.mode ?? "plan");
 
     let quitResolve: (() => void) | undefined;
     const done = new Promise<void>((resolve) => {
@@ -928,6 +938,20 @@ export async function runAgentjChat(
         turnTokens.ctx = event.usage.inputTokens;
         if (event.usage.cacheReadInputTokens !== undefined) {
           turnTokens.cacheRead = (turnTokens.cacheRead ?? 0) + event.usage.cacheReadInputTokens;
+        }
+        if (turnUsage) {
+          turnUsage.inputTokens += event.usage.inputTokens;
+          turnUsage.outputTokens += event.usage.outputTokens;
+          if (event.usage.cacheReadInputTokens !== undefined) {
+            turnUsage.cacheReadInputTokens =
+              (turnUsage.cacheReadInputTokens ?? 0) + event.usage.cacheReadInputTokens;
+          }
+          if (event.usage.cacheWriteInputTokens !== undefined) {
+            turnUsage.cacheWriteInputTokens =
+              (turnUsage.cacheWriteInputTokens ?? 0) + event.usage.cacheWriteInputTokens;
+          }
+          if (event.usage.inputTokens > LONG_CONTEXT_INPUT_TOKENS)
+            turnUsage.longContextRequests += 1;
         }
         // Only the foreground session's requests land here — subagent and job
         // usage flows through task-usage progress events — so the soft limit
@@ -961,6 +985,8 @@ export async function runAgentjChat(
         }
         turnStartedAt = Date.now();
         interruptRequested = false;
+        turnModel = composition.modelFor(event.mode);
+        turnUsage = { inputTokens: 0, outputTokens: 0, longContextRequests: 0 };
       }
       if (event.type === "turn-abort-requested") interruptRequested = true;
       if (event.type === "turn-dequeued") {
@@ -972,6 +998,18 @@ export async function runAgentjChat(
       if (event.type === "turn-finished") {
         turnStartedAt = null;
         interruptRequested = false;
+        if (turnUsage && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+          const record: UsageRecord = {
+            type: "usage",
+            provider: turnModel.provider,
+            model: turnModel.model,
+            ts: new Date().toISOString(),
+            usage: turnUsage,
+          };
+          usageRows.push(record);
+          void log.append(record);
+        }
+        turnUsage = null;
       }
       if (event.type === "subagent-progress") {
         const owner = event.progress.parentActivityId ?? NO_ACTIVITY;
@@ -1151,6 +1189,7 @@ export async function runAgentjChat(
         requestedUpdate = channel;
       },
       config: interactiveConfig,
+      cost: { rows: () => usageRows, prices: composition.evalPrices },
       models: {
         current: composition.modelSelections,
         providers: () => providerNames,
