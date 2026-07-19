@@ -5,6 +5,7 @@ import { CONFIG_DOCS } from "./content/config-reference";
 import {
   buildOutputs,
   markdownToHtml,
+  renderCliMarkdown,
   renderConfigMarkdown,
   renderReferenceMarkdown,
 } from "./generate";
@@ -33,6 +34,14 @@ describe("docs generator", () => {
     expect(config).toContain("`agent.steps` (default: `100`)");
     expect(config).toContain("`agent.context.softLimit` (default: unset)");
     for (const doc of CONFIG_DOCS) expect(config).toContain(`\`${doc.path}\``);
+  });
+
+  test("the CLI reference is sourced from the command definitions (flags and options)", () => {
+    const cli = renderCliMarkdown();
+    expect(cli).toContain("### `agentj run <task>`");
+    expect(cli).toContain("`--allow-all` — Resolve permission asks to allow");
+    // An option (value-taking), not just a boolean flag, so both categories are covered.
+    expect(cli).toContain("`--resume <str>` — Resume a chat session by id.");
   });
 
   test("documenting a config key that does not exist fails the build", () => {
