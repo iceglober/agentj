@@ -188,7 +188,10 @@ describe("global config reads and merges", () => {
     expect(config.agent.llm.provider).toBe("azure");
     expect(config.agent.rules).toBe("project");
     expect(config.agent.name).toBe("agentj");
-    expect(config.eval.prices).toEqual({ model: { in: 1, out: 2 } });
+    expect(config.eval.prices).toEqual({
+      "gpt-5.6-sol": { in: 1.25, out: 10 },
+      model: { in: 1, out: 2 },
+    });
   });
 });
 
