@@ -44,6 +44,9 @@ const llmProviders: {
 /** Provider names, exported so the port schema derives its enum from here. */
 export const providerNames = Object.keys(llmProviders) as [ProviderName, ...ProviderName[]];
 
+/** Maximum retries for retryable model responses such as rate limits and 5xx errors. */
+export const LLM_MAX_RETRIES = 5;
+
 const createModel = (config: LlmConfig): LanguageModel => {
   // The mapped registry ties each key to its own config type; indexing with a
   // union key erases that link, so re-assert it here — the shape is enforced
@@ -202,6 +205,7 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
         const agent = new ToolLoopAgent({
           model,
           instructions: req.instructions,
+          maxRetries: LLM_MAX_RETRIES,
           ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
           ...(req.topP !== undefined ? { topP: req.topP } : {}),
           // Our providerOptions is Record<string, Record<string, unknown>>; the
