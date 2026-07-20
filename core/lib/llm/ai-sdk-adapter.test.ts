@@ -166,9 +166,13 @@ describe("createAiSdkRuntime", () => {
     resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     await createAiSdkRuntime(config).generate({
       ...request({
-        run_job: { description: "start", inputSchema: z.object({}), execute: async () => "" },
+        run_background_job: {
+          description: "start",
+          inputSchema: z.object({}),
+          execute: async () => "",
+        },
       }),
-      requiredFirstTool: "run_job",
+      requiredFirstTool: "run_background_job",
     });
 
     const prepareStep = constructedAgents[0]?.prepareStep as
@@ -176,8 +180,8 @@ describe("createAiSdkRuntime", () => {
       | undefined;
     expect(prepareStep).toBeDefined();
     expect(prepareStep?.({ stepNumber: 0 })).toEqual({
-      activeTools: ["run_job"],
-      toolChoice: { type: "tool", toolName: "run_job" },
+      activeTools: ["run_background_job"],
+      toolChoice: { type: "tool", toolName: "run_background_job" },
     });
     expect(prepareStep?.({ stepNumber: 1 })).toEqual({});
   });

@@ -1358,7 +1358,7 @@ export async function runAgentjChat(
       // foreground turn and shows in the transcript only once its turn runs.
       ping: (job) => {
         void chat.send(
-          `[system] Background job ${job.id} reached its soft timeout and is still running — prompt: "${job.prompt.slice(0, 80)}". Check it with check_job, then renew its soft timeout if it is progressing or abort it if it is stuck.`,
+          `[system] Background job ${job.id} reached its soft timeout and is still running — prompt: "${job.prompt.slice(0, 80)}". Check it with check_background_job, then renew its soft timeout if it is progressing or abort it if it is stuck.`,
           { transcriptText: `[${job.id}] soft timeout reached — checking on it` },
         );
       },

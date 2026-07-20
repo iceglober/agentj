@@ -218,18 +218,18 @@ describe("composePrompt", () => {
   });
 
   test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
-    // Versions captured 2026-07-20 after adding bounded and DAG delegation
-    // guidance. A failure here means prompt CONTENT changed — a separate,
-    // eval-validated decision, never a refactor side effect. Nano's standalone
-    // delegate remains unaffected.
+    // Versions captured 2026-07-20 after clarifying foreground delegation
+    // versus detached background jobs. A failure here means prompt CONTENT
+    // changed — a separate, eval-validated decision, never a refactor side
+    // effect. Nano's standalone delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "b0953e50240d", delegate: "b0953e50240d" },
-      "gpt-5.6-terra": { primary: "b2412297cc02", delegate: "b2412297cc02" },
-      "gpt-5.6-luna": { primary: "e368c4917a7e", delegate: "e368c4917a7e" },
-      "gpt-5.4": { primary: "bbadb2638219", delegate: "bbadb2638219" },
-      "gpt-5.4-nano": { primary: "6460ca395c93", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "e6aa7f677ba4", delegate: "e6aa7f677ba4" },
-      "claude-x": { primary: "00432a934fca", delegate: "00432a934fca" },
+      "gpt-5.6-sol": { primary: "46cc4803bbbc", delegate: "46cc4803bbbc" },
+      "gpt-5.6-terra": { primary: "00d0e8e9fedf", delegate: "00d0e8e9fedf" },
+      "gpt-5.6-luna": { primary: "5f56e8b4a36f", delegate: "5f56e8b4a36f" },
+      "gpt-5.4": { primary: "4aee67ba2975", delegate: "4aee67ba2975" },
+      "gpt-5.4-nano": { primary: "988884fa561d", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "dd92cfcbe4e8", delegate: "dd92cfcbe4e8" },
+      "claude-x": { primary: "cc4fee863014", delegate: "cc4fee863014" },
     };
     const pinCtx = {
       cwd: "/repo",

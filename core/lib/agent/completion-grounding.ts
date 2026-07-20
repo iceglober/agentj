@@ -7,11 +7,11 @@ const ACTIVE_DEFERRED_WORK =
 const NEGATED_DEFERRED_WORK =
   /\b(?:cannot|can't|unable to|will not|won't|not)\b.{0,32}\b(?:monitor|watch|wait|await)\b/iu;
 
-const BACKGROUND_CORRECTIVE = `Your prior response claimed that background monitoring or future work had started, but no background job was created and that response was not shown to the user. Start the needed background work now. Your first action must be run_job. Use a build job if the work may merge, push, deploy, edit, or otherwise mutate; use a plan job only when all work is read-only. Do not claim that work is monitoring until run_job returns a job ID.`;
+const BACKGROUND_CORRECTIVE = `Your prior response claimed that background monitoring or future work had started, but no background job was created and that response was not shown to the user. Start the needed background work now. Your first action must be run_background_job. Use a build job if the work may merge, push, deploy, edit, or otherwise mutate; use a plan job only when all work is read-only. Do not claim that work is monitoring until run_background_job returns a job ID.`;
 
 const DONE_CORRECTIVE = `Your prior response reported status=done, but this turn called no tools — so nothing was implemented and no validation command was actually run, and that response was not shown to the user. Do the work now with your file and bash tools, run every validation command you intend to claim, and only then report status=done. If the task cannot be completed this turn, report status=blocked or status=failed with the real reason.`;
 
-const TODOS_CORRECTIVE = `The session still has pending or in-progress todos, so your prior response was not shown to the user. Continue the remaining work now. Do not stop merely because there is a next step: use tools, fix failures, or start run_job for genuine external waiting. You may stop only after clearing or completing every todo, or with status=blocked/status=failed for a concrete hard blocker such as unavailable credentials, network, model, required user input, or a runtime error.`;
+const TODOS_CORRECTIVE = `The session still has pending or in-progress todos, so your prior response was not shown to the user. Continue the remaining work now. Do not stop merely because there is a next step: use tools, fix failures, or start run_background_job for genuine external waiting. You may stop only after clearing or completing every todo, or with status=blocked/status=failed for a concrete hard blocker such as unavailable credentials, network, model, required user input, or a runtime error.`;
 
 const blockedReport = (summary: string): string =>
   JSON.stringify({
@@ -44,12 +44,12 @@ export const claimsActiveDeferredWork = (text: string): boolean => {
   return ACTIVE_DEFERRED_WORK.test(candidate) && !NEGATED_DEFERRED_WORK.test(candidate);
 };
 
-/** A job is real only when the existing run_job tool returned its started-ID result. */
+/** A job is real only when the existing run_background_job tool returned its started-ID result. */
 export const hasStartedBackgroundJob = (result: RunResult): boolean =>
   result.steps.some((step) =>
     step.toolResults.some(
       (toolResult) =>
-        toolResult.name === "run_job" &&
+        toolResult.name === "run_background_job" &&
         !toolResult.isError &&
         typeof toolResult.output === "string" &&
         /^Started background job\s+\S+/u.test(toolResult.output),
@@ -107,7 +107,7 @@ export interface CompletionState {
  */
 interface GroundingViolation {
   correctivePrompt: string;
-  requiredFirstTool?: "run_job";
+  requiredFirstTool?: "run_background_job";
   /** True once the retry actually grounds the claim in tool activity. */
   isResolved(retry: RunResult): boolean;
   /** Returned immediately when a retry cannot ground the claim (no runner). */
@@ -129,7 +129,7 @@ const detectViolation = (
   ) {
     return {
       correctivePrompt: BACKGROUND_CORRECTIVE,
-      requiredFirstTool: "run_job",
+      requiredFirstTool: "run_background_job",
       isResolved: hasStartedBackgroundJob,
       noRetryFailure: blockedReport(
         "No background job was started because this session has no background-job runner.",
@@ -137,7 +137,7 @@ const detectViolation = (
       unresolvedFailure: blockedReport(
         "No background job was started, so AgentJ is not monitoring this work.",
       ),
-      canRetry: Boolean(request.tools.run_job),
+      canRetry: Boolean(request.tools.run_background_job),
     };
   }
 
@@ -176,7 +176,7 @@ const detectViolation = (
 
 /**
  * Keep a final response from claiming work the turn never did. A response that
- * says it is monitoring must have started a run_job; a status=done report must
+ * says it is monitoring must have started a run_background_job; a status=done report must
  * have called at least one tool. When a claim is ungrounded, the model gets one
  * deterministic corrective retry, then the failure is stated explicitly instead
  * of becoming an unbounded loop or a false success.

@@ -205,7 +205,7 @@ export interface CreateAgentOptions {
   onSubagentProgress?(event: SubagentProgressEvent): void | Promise<void>;
   /**
    * Primary-only: lets the model detach a task into the session's
-   * background-job runner (run_job) instead of blocking its turn on it.
+   * background-job runner (run_background_job) instead of blocking its turn on it.
    * Delegates and background children never inherit this.
    */
   jobs?: BackgroundJobPort;
@@ -467,8 +467,8 @@ export async function createAgentTools(
       ? {
           ...(opts.jobs
             ? {
-                run_job: createBackgroundJobTool(opts.jobs, mode),
-                check_job: createCheckJobTool(opts.jobs),
+                run_background_job: createBackgroundJobTool(opts.jobs, mode),
+                check_background_job: createCheckJobTool(opts.jobs),
               }
             : {}),
           ...(opts.todos ? { update_todos: createTodoTool(opts.todos) } : {}),

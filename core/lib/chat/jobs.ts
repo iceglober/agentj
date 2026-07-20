@@ -6,7 +6,7 @@ import type { ChatEvent, JobView } from "./events";
 
 /**
  * Background jobs: one detached agent run per job, started by the user (input
- * beginning with `&`) or by the primary agent through its run_job tool — the
+ * beginning with `&`) or by the primary agent through its run_background_job tool — the
  * tool exists so "wait for CI, then fix it" detaches here instead of
  * sleep-polling in the foreground turn. The composition root injects the
  * executor — plan jobs run a read-only agent in the session cwd; build jobs
