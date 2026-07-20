@@ -37,6 +37,8 @@ const middleEllipsis = (text: string, max: number): string => {
 
 export interface StatusSectionState {
   sessionId: string;
+  /** Package version shown beside the session root. */
+  version: string;
   /** Display path of the directory the session started in — the root the
    *  session orchestrates from, however many worktrees the work fans into. */
   root: string;
@@ -125,7 +127,13 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
   const right = left.length + 2 + labeled.length <= width ? labeled : compact;
   const identity = splitEnds(left, right, width);
 
-  const location = middleEllipsis(state.root, width);
+  const version = `aj ${state.version}`;
+  const rootWidth = Math.max(0, width - version.length - 2);
+  const location = splitEnds(
+    rootWidth > 0 ? middleEllipsis(state.root, rootWidth) : "",
+    version,
+    width,
+  );
 
   const jobRows = state.jobs.map((job) => {
     const firstLine = job.prompt.split("\n")[0] ?? "";

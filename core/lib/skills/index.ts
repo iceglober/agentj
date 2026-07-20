@@ -1,6 +1,10 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import z from "zod";
+
+/** Shipped product skills, discovered after project and global overrides. */
+export const embeddedSkillsRoot = fileURLToPath(new URL("./embedded", import.meta.url));
 
 /**
  * Agent Skills (the agentskills.io format): a skill is a directory holding a
@@ -144,7 +148,7 @@ export interface SkillDiscovery {
 
 /**
  * Scan skill roots in precedence order — the first root to define a name wins,
- * so callers pass [project, global]. Malformed entries become issues instead
+ * so callers pass [project, global, embedded]. Malformed entries become issues instead
  * of failures: one broken skill must not take down the session.
  */
 export async function discoverSkills(options: {

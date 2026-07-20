@@ -173,20 +173,19 @@ describe("composePrompt", () => {
     expect(build.instructions).toContain("Verify behavior");
   });
 
-  test("12. hash pin: the purpose→mode collapse left build prompts byte-identical", () => {
-    // Versions captured 2026-07-19 after the plan-handoff prompt edit
-    // (PLAN_BLOCK close-with-next-action, COMMS_STOP_BLOCK don't-ask-the-
-    // obvious). A failure here means prompt CONTENT changed — a separate,
-    // eval-validated decision, never a refactor side effect. luna/nano ride
-    // the compact/standalone templates and are unaffected.
+  test("12. hash pin: background-job rules are reflected in build prompts", () => {
+    // Versions captured 2026-07-20 after the background-job invariant was
+    // added. A failure here means prompt CONTENT changed — a separate,
+    // eval-validated decision, never a refactor side effect. Nano's delegate
+    // uses its standalone template and is unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "34f1970bb6ba", delegate: "34f1970bb6ba" },
-      "gpt-5.6-terra": { primary: "7bae30614f1a", delegate: "7bae30614f1a" },
-      "gpt-5.6-luna": { primary: "091e4245c22f", delegate: "091e4245c22f" },
-      "gpt-5.4": { primary: "982a69102473", delegate: "982a69102473" },
-      "gpt-5.4-nano": { primary: "230eb206d795", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "63f972bea560", delegate: "63f972bea560" },
-      "claude-x": { primary: "c6472e7ae15d", delegate: "c6472e7ae15d" },
+      "gpt-5.6-sol": { primary: "e27e5fdb0631", delegate: "e27e5fdb0631" },
+      "gpt-5.6-terra": { primary: "7c041060ebc9", delegate: "7c041060ebc9" },
+      "gpt-5.6-luna": { primary: "4620ac948ff0", delegate: "4620ac948ff0" },
+      "gpt-5.4": { primary: "ceed668e1dab", delegate: "ceed668e1dab" },
+      "gpt-5.4-nano": { primary: "d90b0d6ad9a2", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "a1281c4d09c0", delegate: "a1281c4d09c0" },
+      "claude-x": { primary: "ee811fde8f7f", delegate: "ee811fde8f7f" },
     };
     const pinCtx = {
       cwd: "/repo",

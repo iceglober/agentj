@@ -1,5 +1,6 @@
 import { COMPLETION_REPORT_INSTRUCTION } from "../report";
 import {
+  BACKGROUND_JOB_INVARIANT,
   BUILDER_BLOCK,
   COMMS_STOP_BLOCK,
   HALLUCINATION_GUARD,
@@ -109,6 +110,7 @@ contents or structure — read and verify with tools.
   environment-changing installs, or a material expansion of scope.
 
 ${COMPLETION_REPORT_INSTRUCTION}
+${BACKGROUND_JOB_INVARIANT}
 {{PROFILE_DELTA}}
 
 # Project rules

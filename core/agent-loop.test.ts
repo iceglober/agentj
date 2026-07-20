@@ -289,6 +289,7 @@ describe("shouldWarnContext", () => {
 describe("composeStatusSection", () => {
   const base = {
     sessionId: "204ed50c",
+    version: "0.1.0-next.32",
     root: "~/repos/agentj",
     model: "azure/gpt-5.6-sol",
     mode: "plan" as const,
@@ -305,7 +306,13 @@ describe("composeStatusSection", () => {
     expect(lines[0]?.startsWith("204ed50c · azure/gpt-5.6-sol · plan (tab↕)")).toBe(true);
     expect(lines[0]?.endsWith("in 12.4k ▸ out 3.1k · ctx 8.7k · 1m14s")).toBe(true);
     expect(lines[0]?.length).toBe(90);
-    expect(lines[1]).toBe("~/repos/agentj");
+    expect(lines[1]?.endsWith("aj 0.1.0-next.32")).toBe(true);
+    expect(lines[1]?.length).toBe(90);
+  });
+
+  test("pins the aj version to the right and shortens the root first", () => {
+    const lines = composeStatusSection({ ...base, root: "~/repos/very/deep/project/root" }, 35);
+    expect(lines[1]).toBe("~/repo…oject/root  aj 0.1.0-next.32");
   });
 
   test("narrow terminals drop counter labels before truncating anything", () => {
@@ -370,9 +377,10 @@ describe("composeStatusSection", () => {
       },
       90,
     );
-    expect(lines).toEqual([
-      expect.stringContaining("204ed50c · azure/gpt-5.6-sol · plan"),
-      "~/repos/agentj",
+    expect(lines[0]).toContain("204ed50c · azure/gpt-5.6-sol · plan");
+    expect(lines[1]).toContain("~/repos/agentj");
+    expect(lines[1]?.endsWith("aj 0.1.0-next.32")).toBe(true);
+    expect(lines.slice(2)).toEqual([
       "  ◐ [j1] build: Run the test suite  24s",
       "  ◐ [j2] plan: Investigate the failure  14s",
     ]);

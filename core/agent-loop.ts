@@ -81,6 +81,7 @@ import { createUndoStack } from "./lib/session/undo";
 import {
   composeSkillsPromptSection,
   discoverSkills,
+  embeddedSkillsRoot,
   renderSkillInvocation,
   type Skill,
   type SkillIssue,
@@ -404,7 +405,11 @@ async function composeChat(
   // names/descriptions ride the rules so every mode and entrypoint can
   // activate a skill by reading its SKILL.md (progressive disclosure).
   const skillsDiscovery = await discoverSkills({
-    roots: [join(root, ".aj", "skills"), join(homedir(), ".config", "agentj", "skills")],
+    roots: [
+      join(root, ".aj", "skills"),
+      join(homedir(), ".config", "agentj", "skills"),
+      embeddedSkillsRoot,
+    ],
   });
   const skillsSection = composeSkillsPromptSection(skillsDiscovery.skills);
   let agentConfig: AgentConfig = {
@@ -1255,6 +1260,7 @@ export async function runAgentjChat(
         composeStatusSection(
           {
             sessionId: log.id,
+            version: COMMAND_VERSION,
             root: rootDisplay,
             model: (({ provider, model }) => `${provider}/${model}`)(
               composition.modelFor(chat.pendingMode),

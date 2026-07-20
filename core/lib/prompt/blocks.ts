@@ -90,6 +90,12 @@ export const COMMS_STOP_BLOCK = `# Communication
 - If required information is still missing after a reasonable search,
    ask the single smallest specific question.`;
 
+export const BACKGROUND_JOB_INVARIANT = `# Background jobs
+When work must wait on an external event or continue after this turn, start it
+with run_job before claiming it is being monitored. Never sleep or poll in the
+foreground, and report the returned job ID. Use a build job if later work may
+merge, push, deploy, edit, or otherwise mutate.`;
+
 export const PLAN_BLOCK = `# Plan mode
 You are in plan mode: investigate and design without changing anything.
 Your file tools are read-only; bash is for observation — inspect git/CI
@@ -99,7 +105,9 @@ run_subagents for independent research. Present a concrete plan: affected
 areas, sequencing, validation, risks, and any unresolved decisions. Close
 by naming the single most likely next action, so accepting takes one
 step: the user presses Tab or enters /build to switch to build mode and
-start it.`;
+start it.
+
+${BACKGROUND_JOB_INVARIANT}`;
 
 export const RESEARCH_BLOCK = `# Research role
 Complete one scoped read-only research task. Bash is for observation —
@@ -117,6 +125,7 @@ change end to end.
   delegate Git recovery to the user.
 
 ${COMPLETION_REPORT_INSTRUCTION}
+${BACKGROUND_JOB_INVARIANT}
 A failed dependency install, test, typecheck, lint, or build must produce
 status=blocked or status=failed.`;
 

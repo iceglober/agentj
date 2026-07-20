@@ -59,3 +59,9 @@ unchanged.
   that catalog's narrow port through the existing execution boundary. The TUI
   receives completion results only and never imports Git, the filesystem, or
   host execution.
+- Background-work verification follows the same split: `skills/embedded/`
+  supplies reusable workflow guidance through the normal skill catalog,
+  `agent/deferred-work.ts` verifies claims against vendor-free `RunResult`
+  steps, and `llm/ai-sdk-adapter.ts` alone maps a required first tool to the
+  AI SDK. The existing chat JobRunner remains the sole job executor and source
+  of job IDs.
