@@ -10,6 +10,7 @@
     "auto-smart-compact",
     "bash-abort-signal",
     "biome-quality",
+    "bright-jobs-guide",
     "bright-updates",
     "chained-slash-completion",
     "chat-first-rewrite",
@@ -61,11 +62,13 @@
     "subagent-result-prompt-ui",
     "surface-failed-turns",
     "terminal-cost-report",
+    "tidy-tuis-dream",
     "tierify-model-knobs",
     "update-swr",
     "update-tui-refresh-and-spacing",
     "version-flag",
     "version-newline",
+    "visible-background-job-tool-activity",
     "visible-background-jobs"
   ]
 }
