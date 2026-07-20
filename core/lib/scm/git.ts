@@ -211,6 +211,15 @@ async function resolveExpectedCommit(
   return resolveCommit(sb, repoDir, assertExpectedCommitInput(expectedCommit));
 }
 
+/** Resolve Git's canonical top-level path, or null when the path is not a worktree. */
+async function resolveWorktreePath(sb: Sandbox, path: string): Promise<string | null> {
+  try {
+    return (await git(sb, path, ["rev-parse", "--show-toplevel"])).trim();
+  } catch {
+    return null;
+  }
+}
+
 /** Inspect a specific registered worktree without touching it. */
 export async function inspectWorktree(
   sb: Sandbox,
@@ -218,7 +227,11 @@ export async function inspectWorktree(
   path: string,
 ): Promise<{ path: string; head: string; branch: string | null } | null> {
   const worktrees = await listWorktrees(sb, repoDir);
-  return worktrees.find((worktree) => worktree.path === path) ?? null;
+  const exact = worktrees.find((worktree) => worktree.path === path);
+  if (exact) return exact;
+
+  const resolvedPath = await resolveWorktreePath(sb, path);
+  return worktrees.find((worktree) => worktree.path === resolvedPath) ?? null;
 }
 
 /**
