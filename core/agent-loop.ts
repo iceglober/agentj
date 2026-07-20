@@ -25,6 +25,7 @@ import {
   toGitDelegationResults,
 } from "./lib/agent/subagents";
 import type { TodoPort } from "./lib/agent/todos";
+import { createClackGuidedInput } from "./lib/chat/clack-guided-input-adapter";
 import {
   type ChatCommandContext,
   chatCommands,
@@ -175,7 +176,7 @@ function createProductionConfigUi(): () => Promise<number> {
       processStderr.write("Run `agentj config` in a terminal, or use `agentj config set <key>`.\n");
       return EXIT_FAILURE;
     }
-    const guided = createPromptsGuidedInput();
+    const guided = createClackGuidedInput();
     const silent = { write: () => {} };
     const handlers = createConfigCliHandlers({
       secretStore: createKeyringSecretStore({}),
