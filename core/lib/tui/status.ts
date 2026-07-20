@@ -1,5 +1,6 @@
 import type { ChatMode } from "../session/log";
-import { truncateWithNotice } from "../truncation";
+import { splitGraphemes } from "./editor";
+import { displayWidth, graphemeWidth, truncateToDisplayWidth } from "./terminal-editor";
 
 const SPINNER = ["◐", "◓", "◑", "◒"];
 
@@ -15,24 +16,58 @@ export const formatClock = (ms: number): string => {
   return `${seconds}s`;
 };
 
-/** 456 → "456", 2437 → "2.4k", 432_312 → "432.3k". */
-const formatStatusTokens = (count: number): string =>
-  count < 1000 ? `${count}` : `${(count / 1000).toFixed(1)}k`;
+/** 456 → "456", 2437 → "2.4k", 1_952_300 → "2.0m". */
+const formatStatusTokens = (count: number): string => {
+  if (count < 1000) return `${count}`;
+  if (count < 1_000_000) return `${(count / 1000).toFixed(1)}k`;
+  return `${(count / 1_000_000).toFixed(1)}m`;
+};
 
-/** Left and right hugging opposite edges; joined loosely when they cannot. */
+const normalizedWidth = (width: number): number => Math.max(0, Math.floor(width));
+
+const fitsTogether = (left: string, right: string, width: number): boolean =>
+  displayWidth(left) + displayWidth(right) + 2 <= width;
+
+/** Left and right hug opposite edges once both fit with a readable gap. */
 const splitEnds = (left: string, right: string, width: number): string => {
-  if (right.length === 0) return left;
-  const gap = width - left.length - right.length;
-  return gap >= 2 ? `${left}${" ".repeat(gap)}${right}` : `${left}  ${right}`;
+  if (right.length === 0) return truncateToDisplayWidth(left, width);
+  const gap = width - displayWidth(left) - displayWidth(right);
+  if (gap >= 2) return `${left}${" ".repeat(gap)}${right}`;
+  return truncateToDisplayWidth(`${left} ${right}`, width);
 };
 
 /** Long paths keep their head and leaf: ~/repos/…/nested/repo. */
-const middleEllipsis = (text: string, max: number): string => {
-  if (text.length <= max) return text;
-  if (max <= 1) return "…";
-  const head = Math.max(1, Math.floor((max - 1) * 0.4));
-  const tail = max - 1 - head;
-  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+const middleEllipsis = (text: string, maxWidth: number): string => {
+  const width = normalizedWidth(maxWidth);
+  if (displayWidth(text) <= width) return text;
+  if (width === 0) return "";
+  if (width === 1) return "…";
+
+  const graphemes = splitGraphemes(text);
+  const available = width - 1;
+  const headBudget = Math.max(1, Math.floor(available * 0.4));
+  let head = "";
+  let headWidth = 0;
+  let index = 0;
+  while (index < graphemes.length) {
+    const grapheme = graphemes[index] ?? "";
+    const nextWidth = headWidth + graphemeWidth(grapheme);
+    if (nextWidth > headBudget) break;
+    head += grapheme;
+    headWidth = nextWidth;
+    index += 1;
+  }
+
+  let tail = "";
+  let tailWidth = 0;
+  for (let tailIndex = graphemes.length - 1; tailIndex >= index; tailIndex -= 1) {
+    const grapheme = graphemes[tailIndex] ?? "";
+    const nextWidth = headWidth + tailWidth + graphemeWidth(grapheme);
+    if (nextWidth > available) break;
+    tail = `${grapheme}${tail}`;
+    tailWidth += graphemeWidth(grapheme);
+  }
+  return `${head}…${tail}`;
 };
 
 export interface StatusSectionState {
@@ -77,10 +112,10 @@ export const composeThinkingLine = (
     state.turnStartedAt === null
       ? ""
       : ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`;
-  return truncateWithNotice(
-    `${frame} ${state.interruptRequested ? "interrupting…" : "thinking"}${elapsed}${state.interruptRequested ? "" : " (esc)"}`,
-    width,
-  );
+  const activity = state.interruptRequested ? "interrupting…" : "thinking";
+  const full = `${frame} ${activity}${elapsed}${state.interruptRequested ? "" : " (esc)"}`;
+  if (displayWidth(full) <= width) return full;
+  return truncateToDisplayWidth(`${frame} ${activity}${elapsed}`, width);
 };
 
 /** Re-warn after enough growth to be useful without repeating every step. */
@@ -101,11 +136,13 @@ export const shouldWarnContext = (
   (lastWarnedContext === undefined ||
     ctx >= lastWarnedContext + contextWarningRearmThreshold(softLimit));
 
-export const composeStatusSection = (state: StatusSectionState, width: number): string[] => {
+export const composeStatusSection = (
+  state: StatusSectionState,
+  requestedWidth: number,
+): string[] => {
+  const width = normalizedWidth(requestedWidth);
   const now = state.now ?? Date.now();
   const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-
-  const left = `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`;
   const clock = formatClock(now - state.sessionStartedAt);
   const overLimit =
     state.contextSoftLimit !== undefined && state.usage.ctx >= state.contextSoftLimit;
@@ -116,7 +153,7 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
   ] as const;
   // Session-cumulative cache reads as a share of cumulative input: how much
   // of everything sent so far was served from the provider's prefix cache.
-  // Dropped in the compact form — width wins there.
+  // Dropped in compact layouts — width wins there.
   const cacheRead = state.usage.cacheRead;
   const cached =
     cacheRead === undefined || state.usage.in <= 0
@@ -124,22 +161,44 @@ export const composeStatusSection = (state: StatusSectionState, width: number): 
       : ` · cached ${formatStatusTokens(cacheRead)}(${Math.round((cacheRead / state.usage.in) * 100)}%)`;
   const labeled = `in ${counters[0]}${cached} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
   const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
-  const right = left.length + 2 + labeled.length <= width ? labeled : compact;
-  const identity = splitEnds(left, right, width);
+  const essential = `ctx ${counters[2]} · ${clock}`;
+  const identities = [
+    `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`,
+    `${state.sessionId} · ${state.mode} (tab↕)`,
+    `${state.mode} (tab↕)`,
+  ] as const;
+  const variants = [
+    [identities[0], labeled],
+    [identities[1], labeled],
+    [identities[1], compact],
+    [identities[2], essential],
+  ] as const;
+  const identity = variants.find(([left, right]) => fitsTogether(left, right, width));
+  const identityLine = identity
+    ? splitEnds(identity[0], identity[1], width)
+    : truncateToDisplayWidth(`${identities[2]} · ${essential}`, width);
 
   const version = `aj ${state.version}`;
-  const rootWidth = Math.max(0, width - version.length - 2);
-  const location = splitEnds(
-    rootWidth > 0 ? middleEllipsis(state.root, rootWidth) : "",
-    version,
-    width,
-  );
+  const versionWidth = displayWidth(version);
+  const rootWidth = width - versionWidth - 2;
+  const location =
+    versionWidth > width
+      ? truncateToDisplayWidth(version, width)
+      : rootWidth < 1
+        ? version
+        : splitEnds(middleEllipsis(state.root, rootWidth), version, width);
 
   const jobRows = state.jobs.map((job) => {
+    const prefix = `  ${frame} [${job.id}] ${job.mode}: `;
+    const suffix = `  ${formatClock(now - job.startedAt)}`;
+    const available = width - displayWidth(prefix) - displayWidth(suffix);
+    if (available < 0)
+      return truncateToDisplayWidth(`${frame} [${job.id}] ${suffix.trim()}`, width);
+
     const firstLine = job.prompt.split("\n")[0] ?? "";
-    const snippet = firstLine.length > 48 ? `${firstLine.slice(0, 47)}…` : firstLine;
-    return `  ${frame} [${job.id}] ${job.mode}: ${snippet}  ${formatClock(now - job.startedAt)}`;
+    const snippet = truncateToDisplayWidth(firstLine, Math.min(48, available));
+    return `${prefix}${snippet}${suffix}`;
   });
 
-  return [identity, location, ...jobRows];
+  return [identityLine, location, ...jobRows];
 };
