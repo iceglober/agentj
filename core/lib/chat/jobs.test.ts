@@ -39,6 +39,41 @@ describe("createJobRunner", () => {
     expect(notices[0]).toContain("did: refactor");
   });
 
+  test("parses completion reports before notifying the user and completing session state", async () => {
+    const notices: string[] = [];
+    const completed: ChatEvent[] = [];
+    const runner = createJobRunner({
+      runJob: async () => ({
+        text: JSON.stringify({
+          status: "done",
+          summary: "PR #124 merged successfully.",
+          changes: ["Merged after green CI"],
+          validation: [],
+          openQuestions: [],
+        }),
+      }),
+      addTurnNotice: (text) => {
+        notices.push(text);
+      },
+      onJobCompleted: (job) => {
+        completed.push({ type: "job-finished", job });
+      },
+    });
+
+    runner.start("build", "watch CI and merge the PR");
+    await new Promise((r) => setTimeout(r, 5));
+
+    const job = runner.inspect("j1");
+    expect(job).toMatchObject({
+      status: "done",
+      resultText: "PR #124 merged successfully.",
+      completion: { status: "done", summary: "PR #124 merged successfully." },
+    });
+    expect(notices[0]).toContain("PR #124 merged successfully.");
+    expect(notices[0]).not.toContain('{"status"');
+    expect(completed).toHaveLength(1);
+  });
+
   test("resolved executor failures are reported as failed", async () => {
     const notices: string[] = [];
     const runner = createJobRunner({

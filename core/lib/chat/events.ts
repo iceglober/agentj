@@ -1,6 +1,7 @@
 import type { PermissionRequest } from "../agent/permissions";
 import type { SubagentProgressEvent } from "../agent/subagents";
 import type { RunStep } from "../llm";
+import type { CompletionReport } from "../report";
 import type { ChatMode } from "../session/log";
 import type { TodoList } from "../todos";
 
@@ -18,6 +19,8 @@ export interface JobView {
   /** When set, `ping` fires at this time if the job is still running. */
   softTimeoutAt?: number;
   resultText?: string;
+  /** Parsed worker completion report, when the worker returned one. */
+  completion?: CompletionReport;
   /** Branch preserving work or cleanup state for recovery. */
   branch?: string;
   /** Non-fatal cleanup issues after job work completed. */

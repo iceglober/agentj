@@ -95,7 +95,7 @@ import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
-import { formatCompletionReportText } from "./lib/tui/completion-report";
+import { formatCompletionReport, formatCompletionReportText } from "./lib/tui/completion-report";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { renderMarkdownLite } from "./lib/tui/markdown";
@@ -240,7 +240,10 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       const result = event.job.resultText?.trim();
       const branch = event.job.branch ? `\nwork preserved on ${event.job.branch}` : "";
       const marker = event.job.status === "done" ? "✓" : event.job.status === "failed" ? "x" : "!";
-      return `${marker} [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${result ? `\n${truncateWithNotice(result, 2_000)}` : ""}${branch}`;
+      const completion = event.job.completion
+        ? `\n${formatCompletionReport(event.job.completion)}`
+        : "";
+      return `${marker} [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${completion || (result ? `\n${truncateWithNotice(result, 2_000)}` : "")}${branch}`;
     }
     case "notice":
       return event.text;
@@ -1228,6 +1231,9 @@ export async function runAgentjChat(
     const jobRunner = createJobRunner({
       onEvent: render,
       addTurnNotice: (text) => chat.addTurnNotice(text),
+      onJobCompleted: async (job) => {
+        if (job.status === "done" && job.completion?.status === "done") await todos.clear();
+      },
       runJob: ({ id, mode, prompt, abortSignal, onStep }) =>
         mode === "plan"
           ? composition.runPlanJob(prompt, abortSignal, `job ${id}`, onStep)
