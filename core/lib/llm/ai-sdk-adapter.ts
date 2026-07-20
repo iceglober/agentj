@@ -8,6 +8,7 @@ import {
   tool,
 } from "ai";
 import { type MetricsSink, recordModelUsage } from "../metrics";
+import { truncateUnknownWithSpill } from "../truncation";
 import { type AzureModelConfig, createAzureModelProvider } from "./azure-adapter";
 import type {
   AgentRuntime,
@@ -98,11 +99,44 @@ const mapStepUsage = (step: AiStepLike): { usage?: RunStep["usage"] } => {
   };
 };
 
-const mapStep = (step: AiStepLike): RunStep => ({
+const boundOutput = (
+  value: unknown,
+  req: Pick<GenerateRequest, "maxOutputChars" | "spill">,
+  label: string,
+): unknown =>
+  req.maxOutputChars === undefined
+    ? value
+    : truncateUnknownWithSpill(value, req.maxOutputChars, req.spill, label);
+
+const sanitizeHistory = (messages: unknown[], req: GenerateRequest): unknown[] =>
+  messages.map((message) => {
+    if (
+      !message ||
+      typeof message !== "object" ||
+      (message as { role?: unknown }).role !== "tool"
+    ) {
+      return message;
+    }
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) return message;
+    return {
+      ...(message as Record<string, unknown>),
+      content: content.map((part, index) => {
+        if (!part || typeof part !== "object") return part;
+        const record = part as Record<string, unknown>;
+        const outputKey = "output" in record ? "output" : "result" in record ? "result" : undefined;
+        return outputKey
+          ? { ...record, [outputKey]: boundOutput(record[outputKey], req, `history-tool-${index}`) }
+          : part;
+      }),
+    };
+  });
+
+const mapStep = (step: AiStepLike, req?: GenerateRequest): RunStep => ({
   ...mapStepUsage(step),
   toolCalls: step.toolCalls.map((c) => ({ name: c.toolName, input: c.input })),
   toolResults: step.toolResults.map((tr) => {
-    const output = tr.output;
+    const output = req ? boundOutput(tr.output, req, `tool-${tr.toolName}`) : tr.output;
     return {
       name: tr.toolName,
       output,
@@ -135,21 +169,30 @@ const stopConditions = (req: GenerateRequest): ReturnType<typeof stepCountIs>[] 
 ];
 
 /** Wrap one ToolDef as an ai `tool()`, forwarding call options verbatim. */
-const toAiTool = (def: ToolDef) =>
+const toAiTool = (def: ToolDef, req: Pick<GenerateRequest, "maxOutputChars" | "spill">) =>
   tool({
     description: def.description,
     inputSchema:
       def.jsonSchema !== undefined
         ? jsonSchema(def.jsonSchema as Parameters<typeof jsonSchema>[0])
         : def.inputSchema,
-    execute: (input, options) => def.execute(input, options),
+    execute: async (input, options) => {
+      try {
+        const output = await def.execute(input, options);
+        return boundOutput(output, req, "tool-output");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const bounded = boundOutput(`ERROR: ${message}`, req, "tool-error");
+        throw new Error(typeof bounded === "string" ? bounded : String(bounded));
+      }
+    },
   });
 
-const mapTools = (tools: ToolSet): AiToolSet =>
+const mapTools = (tools: ToolSet, req: GenerateRequest): AiToolSet =>
   Object.fromEntries(
     Object.keys(tools)
       .sort()
-      .map((name) => [name, toAiTool(tools[name])]),
+      .map((name) => [name, toAiTool(tools[name], req)]),
   ) as AiToolSet;
 
 const userMessage = (req: GenerateRequest): ModelMessage =>
@@ -218,7 +261,7 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
             : {}),
           ...(stopConditions(req).length > 0 ? { stopWhen: stopConditions(req) } : {}),
           toolOrder: Object.keys(req.tools).sort(),
-          tools: mapTools(req.tools),
+          tools: mapTools(req.tools, req),
           ...(requiredFirstTool
             ? {
                 prepareStep: ({ stepNumber }: { stepNumber: number }) =>
@@ -236,7 +279,9 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
         // Continuation: prior turns (opaque vendor messages) plus this turn's
         // prompt as the next user message; fresh turns send prompt alone.
         const input = userMessage(req);
-        const inputMessages = req.messages ? [...req.messages, input] : undefined;
+        const inputMessages = req.messages
+          ? [...sanitizeHistory(req.messages, req), input]
+          : undefined;
         // The continuation is opaque at the port; this vendor boundary is the
         // one place that re-asserts its true shape (same idiom as providerOptions).
         const result = await agent.generate({
@@ -246,7 +291,7 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
               ? { messages: [input] }
               : { prompt: req.prompt }),
           ...(req.abortSignal ? { abortSignal: req.abortSignal } : {}),
-          ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step)) } : {}),
+          ...(onStep ? { onStepFinish: (step) => onStep(mapStep(step, req)) } : {}),
         });
 
         const usage = (result as { totalUsage?: typeof result.usage }).totalUsage ?? result.usage;
@@ -278,9 +323,9 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
           (result as { response?: { messages?: unknown[] } }).response?.messages ?? [];
         return {
           text: result.text,
-          steps: result.steps.map(mapStep),
+          steps: result.steps.map((step) => mapStep(step, req)),
           usage: mappedUsage,
-          messages: [...(inputMessages ?? [input]), ...responseMessages],
+          messages: sanitizeHistory([...(inputMessages ?? [input]), ...responseMessages], req),
           ...(finishReason ? { finishReason } : {}),
           ...(result.steps.length >= stepLimit && result.text.trim() === ""
             ? { stepLimitReached: true }

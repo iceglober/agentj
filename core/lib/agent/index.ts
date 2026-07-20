@@ -87,8 +87,9 @@ export const agentConfigSchema = z.object({
   tools: z
     .object({
       /**
-       * Char cap on bash stdout/stderr and readFile content returned to the
-       * model (MCP results have their own `mcp.maxOutputChars`, same default).
+       * Final char cap on every tool result returned to the model (including
+       * structured and external tool output). Bash/read output and MCP results
+       * also apply earlier source-specific caps.
        * Over-cap output spills to a session file when spilling is wired, so
        * the cap bounds context growth without losing data.
        */
@@ -594,6 +595,8 @@ export async function createAgent(
           images: generateOpts?.images,
           messages: generateOpts?.messages,
           tools,
+          maxOutputChars: config.tools.maxOutputChars,
+          spill: opts.spill?.write,
           temperature: config.llm.temperature ?? composed.params.temperature,
           topP: config.llm.topP ?? composed.params.topP,
           providerOptions: composed.params.providerOptions,

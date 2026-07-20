@@ -331,6 +331,46 @@ describe("createAiSdkRuntime", () => {
     expect(result.messages).toEqual([user]);
   });
 
+  test("bounds tool outputs, preserves small objects, and spills oversized values", async () => {
+    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    const spilled: string[] = [];
+    await createAiSdkRuntime(config).generate({
+      ...request({
+        external: {
+          description: "external",
+          inputSchema: z.object({}),
+          execute: async () => ({ value: "x".repeat(100) }),
+        },
+      }),
+      maxOutputChars: 20,
+      spill: (label, value) => {
+        spilled.push(`${label}:${value.length}`);
+        return "/spill/full.json";
+      },
+    });
+    const agent = constructedAgents[0];
+    if (!agent) throw new Error("agent was not constructed");
+    const execute = (agent.tools as Record<string, { execute: () => Promise<unknown> }>).external
+      .execute;
+    const result = await execute();
+    expect(typeof result).toBe("string");
+    expect((result as string).length).toBeLessThanOrEqual(20);
+    expect(spilled).toEqual(["tool-output:112"]);
+  });
+
+  test("sanitizes oversized tool results in resumed history", async () => {
+    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
+    const history = [{ role: "tool", content: [{ type: "tool-result", output: "x".repeat(100) }] }];
+    await createAiSdkRuntime(config).generate({
+      ...request(),
+      messages: history,
+      maxOutputChars: 20,
+    });
+    const messages = generateCalls[0]?.messages as unknown[];
+    const output = (messages[0] as { content: { output: string }[] }).content[0].output;
+    expect(output.length).toBeLessThanOrEqual(20);
+  });
+
   test("continued turns send prior messages plus the prompt as the next user message", async () => {
     resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
     const history = [
