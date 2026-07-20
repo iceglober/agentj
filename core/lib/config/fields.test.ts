@@ -5,7 +5,7 @@ describe("configField", () => {
   test("reports schema-backed field kinds, enum values, and defaults", () => {
     expect(configField("agent.context.onLimit")).toMatchObject({
       kind: "enum",
-      enumValues: ["warn", "compact"],
+      enumValues: ["warn"],
     });
     expect(configField("agent.llm.tiers")).toMatchObject({ kind: "string-array" });
     expect(configField("agent.steps")).toMatchObject({ kind: "number", defaultValue: 100 });

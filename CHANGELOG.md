@@ -1,5 +1,31 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.35
+
+### Patch Changes
+
+- 95188a0: Ground completion claims in the turn's actual tool activity. AgentJ no longer reports `status=done` when it ran no tools that turn — such a report is fabricated (it fills the completion-report template from the plan text without doing or validating the work), so it is rejected and the model gets one corrective retry, then an explicit failure report. The same primitive still verifies background-job claims: saying it is monitoring work requires a started job. Both checks now live in one grounding gate (`completion-grounding.ts`) instead of separate per-symptom guards. The `gpt-5.6-sol` and `gpt-5.6-terra` profiles also re-enable the evidence rule (`hallucinationGuard`), which the subtractive 5.6 prompt guidance had dropped, so the model is told never to claim a test result it has not observed via a tool this session.
+- 95188a0: Remove auto-compaction. The `agent.context.onLimit` config no longer accepts `compact`; crossing the context soft limit always posts a wrap-up/delegate notice (`warn`). Auto-compaction flattened the full conversation into a single model-authored summary, which discarded out-of-band state (live background jobs, current plan/build mode) and left the model narrating a stale, authoritative-looking history. Deleting it also drops the delegate-tier compactor runtime and the `AgentRuntime.compact` / `Agent.compact` surface.
+
+## 0.1.0-next.34
+
+### Patch Changes
+
+- 59494e2: AgentJ now treats the controller-selected mode as authoritative on every turn. For example, after switching from plan to build, an older plan-mode refusal in the conversation no longer makes the agent claim that editing is unavailable.
+
+## 0.1.0-next.33
+
+### Minor Changes
+
+- 37504f9: The chat editor now fuzzy-completes slash commands and project file references wherever the token starts at the beginning of input or after whitespace. For example, type `review @agt` and press Tab to insert a matching project file, or type `review /bld` to complete `/build` without turning surrounding prose into a command. Slash commands use cyan, file references use green, and a leading `&` switches the editor to a clear yellow `BACKGROUND JOB` state. Structured agent completion reports now keep their changes, validation evidence, and open questions in the transcript instead of showing only a summary.
+- 746e38e: Projects can configure scoped Markdown instruction extensions, such as a plan-only architecture checklist in `.aj/extensions/plan.md`, and use typed `agentj.ts` configuration.
+- 06854b8: `agentj config` now organizes documented settings into nested searchable menus with Back navigation. Secret edits use the masked prompt and save to the OS keychain correctly.
+
+### Patch Changes
+
+- ec5096c: `/clear` now starts a fresh chat context instead of only erasing terminal output. It removes prior conversation history and foreground cost data from the active and resumed session, clears the terminal, and keeps the selected mode and running background jobs.
+- 06854b8: Background build jobs now use unique, repository-scoped child worktrees and report setup or integration failures as failed instead of incorrectly reporting them as done. For example, a stale temporary worktree from another project no longer prevents `run_job` from starting.
+
 ## 0.1.0-next.32
 
 ### Minor Changes

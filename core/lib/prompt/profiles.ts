@@ -64,14 +64,18 @@ export const profiles = {
   },
   "gpt-5.6-sol": {
     match: [/^gpt-5\.6-sol\b/],
-    flags: { workflowSteps: false, workflowOutcome: true },
+    // hallucinationGuard stays ON despite the subtractive framing: the 5.6
+    // family will otherwise fill the completion-report template from plan text
+    // without running the validation it claims.
+    flags: { workflowSteps: false, workflowOutcome: true, hallucinationGuard: true },
     params: { providerOptions: { openai: { reasoningEffort: "high", textVerbosity: "low" } } },
   },
   "gpt-5.6-terra": {
     // 5.6-family subtractive guidance (same outcome-first framing as sol), mid
-    // tier. Deployed on the user's Azure resource.
+    // tier. Deployed on the user's Azure resource. hallucinationGuard ON for the
+    // same reason as sol — see the note there.
     match: [/^gpt-5\.6-terra\b/],
-    flags: { workflowSteps: false, workflowOutcome: true },
+    flags: { workflowSteps: false, workflowOutcome: true, hallucinationGuard: true },
     params: { providerOptions: { openai: { reasoningEffort: "medium", textVerbosity: "low" } } },
   },
   "gpt-5.6-luna": {

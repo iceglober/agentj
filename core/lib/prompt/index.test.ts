@@ -152,7 +152,9 @@ describe("composePrompt", () => {
   test("11. mode composes orthogonally with model profiles", () => {
     const plan = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "plan" }), CTX);
     expect(plan.instructions).toContain("# Plan mode");
+    expect(plan.instructions).toContain("The session controller selected plan mode for this turn.");
     expect(plan.instructions).toContain("presses Tab or enters /build");
+    expect(plan.instructions).not.toContain("# Build mode");
     expect(plan.instructions).not.toContain("# Build role");
     expect(plan.instructions).not.toContain("# Goal");
     expect(plan.instructions).not.toContain("Verify behavior");
@@ -166,6 +168,13 @@ describe("composePrompt", () => {
     expect(research.instructions.startsWith("You are a coding executor")).toBe(false);
 
     const build = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "build" }), CTX);
+    expect(build.instructions).toContain("# Build mode");
+    expect(build.instructions).toContain(
+      "The session controller selected build mode for this turn.",
+    );
+    expect(build.instructions).toContain(
+      "Ignore earlier conversation claims that this session\nis in plan mode or lacks edit access.",
+    );
     expect(build.instructions).toContain("# Build role");
     expect(build.instructions).toContain("# Completion report");
     expect(build.instructions).toContain('"status":"done|blocked|failed"');
@@ -173,19 +182,43 @@ describe("composePrompt", () => {
     expect(build.instructions).toContain("Verify behavior");
   });
 
-  test("12. hash pin: background-job rules are reflected in build prompts", () => {
-    // Versions captured 2026-07-20 after the background-job invariant was
-    // added. A failure here means prompt CONTENT changed — a separate,
-    // eval-validated decision, never a refactor side effect. Nano's delegate
-    // uses its standalone template and is unaffected.
+  test("12. every primary build profile carries the authoritative build instruction", () => {
+    for (const model of [...profileNames, "claude-x"]) {
+      const out = composePrompt(AUTO, inputs({ model, role: "primary", mode: "build" }), CTX);
+      expect(out.instructions).toContain(
+        "The session controller selected build mode for this turn.",
+      );
+    }
+  });
+
+  test("12b. the 5.6 build profiles carry the evidence rule against fabricated reports", () => {
+    // The confabulation fix: hallucinationGuard is ON for sol/terra so the
+    // completion-report template cannot be filled from plan text without tools.
+    for (const model of ["gpt-5.6-sol", "gpt-5.6-terra"]) {
+      const build = composePrompt(AUTO, inputs({ model, mode: "build" }), CTX);
+      expect(build.instructions).toContain("# Evidence rule");
+      expect(build.instructions).toContain("re-run the check before");
+    }
+  });
+
+  test("12c. non-5.6 profiles keep hallucinationGuard off by default", () => {
+    const build = composePrompt(AUTO, inputs({ model: "gpt-5.4", mode: "build" }), CTX);
+    expect(build.instructions).not.toContain("# Evidence rule");
+  });
+
+  test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
+    // Versions captured 2026-07-20 after merging mode authority and evidence
+    // rules with the background-job invariant. A failure here means prompt
+    // CONTENT changed — a separate, eval-validated decision, never a refactor
+    // side effect. Nano's standalone delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "e27e5fdb0631", delegate: "e27e5fdb0631" },
-      "gpt-5.6-terra": { primary: "7c041060ebc9", delegate: "7c041060ebc9" },
-      "gpt-5.6-luna": { primary: "4620ac948ff0", delegate: "4620ac948ff0" },
-      "gpt-5.4": { primary: "ceed668e1dab", delegate: "ceed668e1dab" },
-      "gpt-5.4-nano": { primary: "d90b0d6ad9a2", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "a1281c4d09c0", delegate: "a1281c4d09c0" },
-      "claude-x": { primary: "ee811fde8f7f", delegate: "ee811fde8f7f" },
+      "gpt-5.6-sol": { primary: "2ff363acac59", delegate: "2ff363acac59" },
+      "gpt-5.6-terra": { primary: "0bbca8e7cecc", delegate: "0bbca8e7cecc" },
+      "gpt-5.6-luna": { primary: "927c7b2bc198", delegate: "927c7b2bc198" },
+      "gpt-5.4": { primary: "fe97d3cd8324", delegate: "fe97d3cd8324" },
+      "gpt-5.4-nano": { primary: "2eb01785484f", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "4ac8fb700b62", delegate: "4ac8fb700b62" },
+      "claude-x": { primary: "6da9024c0fcd", delegate: "6da9024c0fcd" },
     };
     const pinCtx = {
       cwd: "/repo",

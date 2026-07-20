@@ -106,15 +106,15 @@ describe("childAgentConfig", () => {
     expect(childAgentConfig(config, "delegate").llm.model).toBe("deepseek-v4-pro");
   });
 
-  test("context ceiling: off by default, supports compact, and children inherit it", () => {
+  test("context ceiling: off by default, warns, and children inherit it", () => {
     const config = agentConfigSchema.parse({});
     expect(config.context.softLimit).toBeUndefined();
     expect(config.context.onLimit).toBe("warn");
     const limited = agentConfigSchema.parse({
-      context: { softLimit: 240_000, onLimit: "compact" },
+      context: { softLimit: 240_000 },
     });
     expect(limited.context.softLimit).toBe(240_000);
-    expect(limited.context.onLimit).toBe("compact");
+    expect(limited.context.onLimit).toBe("warn");
     expect(childAgentConfig(limited, "delegate").context).toEqual(limited.context);
   });
 
@@ -148,6 +148,23 @@ describe("createAgentTools", () => {
         jobs,
       }),
     ).not.toHaveProperty("run_job");
+  });
+
+  test("run_job reports standard tool activity", async () => {
+    const events: string[] = [];
+    const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), {
+      ...baseOptions,
+      jobs: {
+        start: () => ({ id: "j1" }),
+        inspect: () => undefined,
+        renewSoftTimeout: () => false,
+        abort: () => false,
+      },
+      onToolActivity: (activity) => events.push(`${activity.phase}:${activity.tool}`),
+    });
+
+    await tools.run_job?.execute({ prompt: "watch CI" });
+    expect(events).toEqual(["start:run_job", "end:run_job"]);
   });
 
   test("permission gating is strictly opt-in: no-gate builder tools behave as before", async () => {

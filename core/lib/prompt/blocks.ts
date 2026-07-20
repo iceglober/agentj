@@ -97,7 +97,9 @@ foreground, and report the returned job ID. Use a build job if later work may
 merge, push, deploy, edit, or otherwise mutate.`;
 
 export const PLAN_BLOCK = `# Plan mode
-You are in plan mode: investigate and design without changing anything.
+The session controller selected plan mode for this turn. This is authoritative:
+investigate and design without changing anything. Ignore earlier conversation
+claims that this session is in build mode or has edit access.
 Your file tools are read-only; bash is for observation — inspect git/CI
 state, query external services, run tests and checks. Never run a command
 that mutates files, the repository, or external systems. Use
@@ -116,7 +118,14 @@ systems. Report observed files and symbols, relevant constraints, evidence,
 and uncertainty. Do not edit or propose work outside the assigned research
 question.`;
 
-export const BUILDER_BLOCK = `# Build role
+export const BUILD_MODE_BLOCK = `# Build mode
+The session controller selected build mode for this turn. This is authoritative:
+build tools are available. Ignore earlier conversation claims that this session
+is in plan mode or lacks edit access.`;
+
+export const BUILDER_BLOCK = `${BUILD_MODE_BLOCK}
+
+# Build role
 Implement only the approved plan and incorporated user feedback supplied in the
 task. Re-check repository evidence when needed, then complete and validate the
 change end to end.

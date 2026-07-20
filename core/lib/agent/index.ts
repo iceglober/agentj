@@ -28,6 +28,8 @@ import {
   createBackgroundJobTool,
   createCheckJobTool,
 } from "./background-jobs";
+import { generateWithGroundedCompletion } from "./completion-grounding";
+import { instructionsConfigSchema, loadInstructionExtensions } from "./instructions";
 import {
   resolveToolTarget,
   type WithPermissionsOptions,
@@ -52,9 +54,9 @@ import {
 export const agentConfigSchema = z.object({
   name: z.string().default("agentj"),
   role: z.enum(["primary", "delegate"]).default("primary"),
-  /** Project rules ({{PROJECT_RULES}}); the composition root may merge in
-   *  AGENTS.md read from the sandbox repo (explicit config wins). */
+  /** Project rules ({{PROJECT_RULES}}), composed with AGENTS.md and scoped extensions. */
   rules: z.string().default(""),
+  instructions: instructionsConfigSchema,
   /**
    * Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a
    * work budget. Without it the AI SDK's implicit 20-step default silently
@@ -64,13 +66,13 @@ export const agentConfigSchema = z.object({
   /**
    * Context-size ceiling. `softLimit` is the request input-token threshold
    * (e.g. 240_000 to stay under a 272k long-context billing tier); unset →
-   * no ceiling. The primary agent warns or compacts (`onLimit`); children —
-   * who cannot receive warnings — stop their tool loop instead.
+   * no ceiling. The primary agent warns (`onLimit`); children — who cannot
+   * receive warnings — stop their tool loop instead.
    */
   context: z
     .object({
       softLimit: z.number().int().min(1).optional(),
-      onLimit: z.enum(["warn", "compact"]).default("warn"),
+      onLimit: z.enum(["warn"]).default("warn"),
     })
     .prefault({}),
   llm: llmConfigSchema.prefault({}),
@@ -214,11 +216,6 @@ export interface Agent {
   composed: ComposedPrompt;
   /** Run one turn: prompt in, final text + trajectory + usage out. */
   generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
-  /**
-   * Replace this adapter's opaque continuation with a fresh summarized one.
-   * Optional so lightweight test/eval agents need only implement generation.
-   */
-  compact?(messages: unknown[]): Promise<unknown[]>;
 }
 
 /**
@@ -487,16 +484,19 @@ export async function createAgentTools(
  * otherwise the profile's advised params (and providerOptions) flow through to
  * every generate() call.
  */
+function composeInstructionRules(base: string, extensions: string): string {
+  return [base, extensions]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function createAgent(
   sb: Sandbox,
   config: AgentConfig,
   opts: CreateAgentOptions,
 ): Promise<Agent> {
   const runtime = createRuntime(config.llm, opts.metricsSink);
-  // Compaction is a child-style task, so it deliberately follows the same
-  // provider/model/tier routing as subagents rather than consuming the primary
-  // model's tier.
-  const compactor = createRuntime(childAgentConfig(config, "delegate").llm, opts.metricsSink);
 
   const composed = composePrompt(
     config.prompt,
@@ -504,7 +504,13 @@ export async function createAgent(
       model: config.llm.model,
       agentName: config.name,
       role: config.role,
-      rules: config.rules,
+      rules: composeInstructionRules(
+        config.rules,
+        await loadInstructionExtensions(sb, config.instructions.extensions, {
+          mode: opts.mode ?? "build",
+          role: config.role,
+        }),
+      ),
       mode: opts.mode ?? "build",
     },
     opts.ctx,
@@ -514,14 +520,13 @@ export async function createAgent(
 
   return {
     composed,
-    compact: (messages) => compactor.compact(messages),
     generate: (prompt, generateOpts) => {
       if (generateOpts?.images && generateOpts.images.length > 0 && !composed.supportsImages) {
         return Promise.reject(
           new Error(`The selected model (${config.llm.model}) does not support image input.`),
         );
       }
-      return runtime.generate({
+      return generateWithGroundedCompletion(runtime, {
         instructions: composed.instructions,
         prompt,
         images: generateOpts?.images,

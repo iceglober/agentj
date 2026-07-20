@@ -1,6 +1,7 @@
 import { COMPLETION_REPORT_INSTRUCTION } from "../report";
 import {
   BACKGROUND_JOB_INVARIANT,
+  BUILD_MODE_BLOCK,
   BUILDER_BLOCK,
   COMMS_STOP_BLOCK,
   HALLUCINATION_GUARD,
@@ -96,6 +97,8 @@ contents or structure — read and verify with tools.
 - Match the project's existing style, structure, and patterns.
 - Confirm a dependency exists (manifest or imports) before using it.
 - Change only what the task requires.
+
+${BUILD_MODE_BLOCK}
 
 # Workflow
 1. Understand: read the relevant files; batch independent reads.

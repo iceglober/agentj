@@ -233,6 +233,16 @@ describe("composeProgressLines", () => {
     ]);
   });
 
+  test("renders run_job through the standard tool-activity row", () => {
+    const lines = composeProgressLines({
+      activeTools: tools([[1, "run_job", "watch CI"]]),
+      dagBlocks: new Map(),
+      queued: [],
+      spinnerFrame: 0,
+    });
+    expect(lines).toEqual(["  ◐ run_job watch CI"]);
+  });
+
   test("concurrent owners keep their blocks separate, in tool start order", () => {
     const lines = composeProgressLines({
       activeTools: tools([
