@@ -15,7 +15,7 @@ export interface LiveRegionPort {
   onResize(listener: () => void): () => void;
   setBracketedPaste(enabled: boolean): void;
   paint(layout: LiveLayout): void;
-  printAbove(text: string): void;
+  printAbove(text: string, spacing?: "none" | "turn"): void;
   clear(): void;
   /** Clear the terminal viewport and forget the floating region. */
   clearScreen(): void;

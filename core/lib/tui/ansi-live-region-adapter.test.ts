@@ -34,19 +34,19 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
     expect(written).toContain("[1A");
   });
 
-  test("a transcript write adds one constant separator, never the region height", () => {
+  test("a transcript write adds no implicit spacing", () => {
     const { region, tap } = createRegion();
     // A tall live region (progress block + editor + status), like mid-turn.
     region.paint({ lines: ["p1", "p2", "p3", "editor", "status"], cursorRow: 3, cursorColumn: 0 });
 
     const written = tap(() => region.printAbove("row1"));
-    // Walks up to the region top, clears, writes the line + one blank separator.
-    expect(written).toContain("[3A"); // erase: up to region top (cursor was 3 rows down)
-    expect(written.endsWith("row1\r\n\r\n")).toBe(true);
-    expect(newlineCount(written)).toBe(2); // one line + one separator — NOT the 5-row height
+    // Walks up to the region top, clears, and writes only the event line.
+    expect(written).toContain("[3A");
+    expect(written.endsWith("row1\r\n")).toBe(true);
+    expect(newlineCount(written)).toBe(1);
   });
 
-  test("consecutive writes keep the same one-row separator regardless of region height", () => {
+  test("turn spacing is explicit and event writes remain adjacent", () => {
     const { region, tap } = createRegion();
     region.paint({ lines: ["p1", "p2", "editor", "status"], cursorRow: 2, cursorColumn: 0 });
 
@@ -54,10 +54,10 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
     region.paint({ lines: ["", "editor", "status"], cursorRow: 1, cursorColumn: 0 });
     const second = tap(() => region.printAbove("b"));
 
-    // Same constant separator whether the region was 4 rows or 3 — no height
-    // ever leaks in as extra padding.
-    expect(second.endsWith("b\r\n\r\n")).toBe(true);
-    expect(newlineCount(second)).toBe(2);
+    expect(second.endsWith("b\r\n")).toBe(true);
+    expect(newlineCount(second)).toBe(1);
+    const turn = tap(() => region.printAbove("next", "turn"));
+    expect(turn.endsWith("\r\nnext\r\n")).toBe(true);
   });
 
   test("a tall transcript block scrolls naturally with only the one separator", () => {
@@ -66,10 +66,9 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
     const block = Array.from({ length: 8 }, (_, i) => `L${i + 1}`).join("\r\n");
 
     const written = tap(() => region.printAbove(block));
-    // The block's own 7 newlines plus one separator; the terminal scrolls it
-    // into history on its own — the adapter adds no height-based padding.
-    expect(written.endsWith("L8\r\n\r\n")).toBe(true);
-    expect(newlineCount(written)).toBe(9);
+    // The block's own 7 newlines plus its terminating newline.
+    expect(written.endsWith("L8\r\n")).toBe(true);
+    expect(newlineCount(written)).toBe(8);
   });
 
   test("clearScreen clears the full viewport and homes the cursor", () => {

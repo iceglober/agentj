@@ -73,7 +73,7 @@ export interface ChatScreen extends GuidedInputPort {
   start(): void;
   stop(): void;
   /** Append sanitized plain or semantic transcript output above the live region. */
-  printAbove(text: string | UiBlock): void;
+  printAbove(text: string | UiBlock, spacing?: "none" | "turn"): void;
   /** Clear all rendered transcript output and repaint the live editor. */
   clearTranscript(): void;
   /** Restore a dequeued prompt, ahead of any draft already being edited. */
@@ -107,6 +107,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   let progressLines: UiTextLine[] = [];
   let thinkingLine: UiTextLine | null = null;
   let statusLines: UiTextLine[] = [];
+  let hasTranscript = false;
   let started = false;
   let removeResizeListener: (() => void) | null = null;
   let previousRawMode = false;
@@ -322,8 +323,12 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     liveRegion.clear();
   };
 
-  const printTranscript = (text: string | UiBlock): void => {
-    liveRegion.printAbove(styler.renderBlock(text).join("\r\n"));
+  const printTranscript = (text: string | UiBlock, spacing: "none" | "turn" = "none"): void => {
+    liveRegion.printAbove(
+      styler.renderBlock(text).join("\r\n"),
+      spacing === "turn" && hasTranscript ? "turn" : "none",
+    );
+    hasTranscript = true;
     paint();
   };
 
@@ -690,8 +695,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       }
     },
 
-    printAbove(text) {
-      printTranscript(text);
+    printAbove(text, spacing) {
+      printTranscript(text, spacing);
     },
 
     clearTranscript() {
@@ -699,6 +704,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       thinkingLine = null;
       statusLines = [];
       liveRegion.clearScreen();
+      hasTranscript = false;
       paint();
     },
 
