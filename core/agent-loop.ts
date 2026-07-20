@@ -1206,17 +1206,18 @@ export async function runAgentjChat(
     };
     emitChatEvent = render;
 
-    todos = createSessionTodos({
+    const sessionTodos = createSessionTodos({
       log,
       initial: resumed?.todos,
       onEvent: render,
     });
+    todos = sessionTodos;
     const chat: ChatSession = createChatSession(
       {
         agentFor,
         log,
         undo: undoStack,
-        todos,
+        todos: sessionTodos,
         onEvent: render,
       },
       resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
@@ -1321,7 +1322,7 @@ export async function runAgentjChat(
       config: interactiveConfig,
       cost: { rows: () => usageRows, prices: composition.evalPrices },
       activity: { list: () => completedActivities },
-      todos: { list: todos.list },
+      todos: { list: sessionTodos.list },
       models: {
         current: composition.modelSelections,
         providers: () => providerNames,
