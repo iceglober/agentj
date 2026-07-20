@@ -30,6 +30,16 @@ const AUTO: PromptConfig = { profile: "auto" };
 const prefix = (s: string) => s.slice(0, s.indexOf("# Project rules"));
 
 describe("composePrompt", () => {
+  test("guides primary agents toward bounded and DAG delegation", () => {
+    const plan = composePrompt(AUTO, inputs({ mode: "plan" }), CTX);
+    const build = composePrompt(AUTO, inputs({ mode: "build" }), CTX);
+
+    expect(plan.instructions).toContain("run_one_subagent for one bounded question");
+    expect(plan.instructions).toContain("run_subagents for a\nDAG");
+    expect(build.instructions).toContain("run_one_subagent for one bounded task");
+    expect(build.instructions).toContain("run_subagents for several tasks");
+  });
+
   test("1. deterministic: same inputs → identical instructions + version", () => {
     const a = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol" }), CTX);
     const b = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol" }), CTX);
@@ -207,18 +217,18 @@ describe("composePrompt", () => {
   });
 
   test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
-    // Versions captured 2026-07-20 after merging mode authority and evidence
-    // rules with the background-job invariant. A failure here means prompt
-    // CONTENT changed — a separate, eval-validated decision, never a refactor
-    // side effect. Nano's standalone delegate remains unaffected.
+    // Versions captured 2026-07-20 after adding bounded and DAG delegation
+    // guidance. A failure here means prompt CONTENT changed — a separate,
+    // eval-validated decision, never a refactor side effect. Nano's standalone
+    // delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "2ff363acac59", delegate: "2ff363acac59" },
-      "gpt-5.6-terra": { primary: "0bbca8e7cecc", delegate: "0bbca8e7cecc" },
+      "gpt-5.6-sol": { primary: "d71748993e77", delegate: "d71748993e77" },
+      "gpt-5.6-terra": { primary: "fee8220d625e", delegate: "fee8220d625e" },
       "gpt-5.6-luna": { primary: "927c7b2bc198", delegate: "927c7b2bc198" },
-      "gpt-5.4": { primary: "fe97d3cd8324", delegate: "fe97d3cd8324" },
-      "gpt-5.4-nano": { primary: "2eb01785484f", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "4ac8fb700b62", delegate: "4ac8fb700b62" },
-      "claude-x": { primary: "6da9024c0fcd", delegate: "6da9024c0fcd" },
+      "gpt-5.4": { primary: "f7f75d2aa28e", delegate: "f7f75d2aa28e" },
+      "gpt-5.4-nano": { primary: "0c8677fd33a5", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "382231a0fe0f", delegate: "382231a0fe0f" },
+      "claude-x": { primary: "924349594395", delegate: "924349594395" },
     };
     const pinCtx = {
       cwd: "/repo",

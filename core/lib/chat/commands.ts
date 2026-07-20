@@ -12,6 +12,7 @@ import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
 import { type ListEditorAction, type ListEditorState, reduceListEditor } from "../tui/list-editor";
 import { listOverflowFooter, windowList } from "../tui/list-window";
+import { formatDuration, formatToolActivityLabel } from "../tui/progress";
 import type { UpdateChannel } from "../update";
 import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
 import type { ChatEvent } from "./events";
@@ -87,6 +88,9 @@ export interface ChatCommandContext {
   cost?: {
     rows(): readonly UsageRecord[];
     prices: Readonly<Record<string, CostPrice>>;
+  };
+  activity?: {
+    list(): readonly { tool: string; detail: string; elapsedMs: number }[];
   };
   mcp?: {
     statuses(): readonly McpRuntimeStatus[];
@@ -666,6 +670,28 @@ export const chatCommands: Record<string, ChatCommand> = {
       context.emit({
         type: "notice",
         text: formatCostReport(context.cost.rows(), context.cost.prices),
+      });
+    },
+  },
+  activity: {
+    summary: "Show completed tool activity for this session",
+    run(context) {
+      if (!context.activity) {
+        context.emit({ type: "notice", text: "Activity history is unavailable in this session." });
+        return;
+      }
+      const entries = context.activity.list();
+      context.emit({
+        type: "notice",
+        text:
+          entries.length === 0
+            ? "No completed tool activity this session."
+            : entries
+                .map(
+                  ({ tool, detail, elapsedMs }) =>
+                    `✓ ${formatToolActivityLabel(tool, detail)} ${formatDuration(elapsedMs)}`,
+                )
+                .join("\n"),
       });
     },
   },

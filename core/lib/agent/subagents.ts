@@ -30,6 +30,12 @@ export const subagentsInputSchema = z.object({
 });
 export type SubagentsInput = z.infer<typeof subagentsInputSchema>;
 
+/** A low-friction path for one bounded task; the scheduler still owns execution. */
+export const runOneSubagentInputSchema = z.object({
+  prompt: z.string().min(1),
+});
+export type RunOneSubagentInput = z.infer<typeof runOneSubagentInputSchema>;
+
 export interface NormalizedSubagentTask {
   id: string;
   index: number;
@@ -171,6 +177,11 @@ export interface CreateSubagentsToolOptions {
 }
 
 const DEFAULT_CONCURRENCY = 4;
+
+const runOneSubagentTitle = (prompt: string): string => {
+  const firstLine = prompt.trim().split(/\r?\n/u)[0] ?? "";
+  return firstLine.slice(0, 80) || "Delegated task";
+};
 
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -317,6 +328,24 @@ async function runDelegationTask(
       });
     }
   }
+}
+
+export function createRunOneSubagentTool(options: CreateSubagentsToolOptions) {
+  const subagents = createSubagentsTool(options);
+  const research = options.execution.kind === "research";
+  return defineTool({
+    description: research
+      ? "Delegate one bounded read-only research task to a fresh-context subagent. Use this for a single independent question; use run_subagents for a DAG."
+      : "Delegate one bounded implementation task to an isolated-worktree subagent and integrate its changes. Use this for one independent task; use run_subagents for a DAG.",
+    inputSchema: runOneSubagentInputSchema,
+    execute: (input: RunOneSubagentInput, toolOptions?: unknown) =>
+      subagents.execute(
+        {
+          tasks: [{ title: runOneSubagentTitle(input.prompt), prompt: input.prompt, waitsOn: [] }],
+        },
+        toolOptions,
+      ),
+  });
 }
 
 export function createSubagentsTool(options: CreateSubagentsToolOptions) {
