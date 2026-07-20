@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildSession, ChildSessionFinalizeResult } from "../session";
 import {
+  createRunOneSubagentTool,
   createSubagentsTool,
   normalizeSubagentTasks,
   type SubagentProgressEvent,
@@ -48,6 +49,29 @@ describe("normalizeSubagentTasks", () => {
     ],
   ])("rejects invalid graphs", (tasks, message) => {
     expect(() => normalizeSubagentTasks(input(tasks))).toThrow(message);
+  });
+});
+
+describe("run one subagent", () => {
+  test("wraps one prompt as a single scheduler task", async () => {
+    const prompts: string[] = [];
+    const tool = createRunOneSubagentTool({
+      execution: {
+        kind: "research",
+        createWorker: async () => ({
+          generate: async (prompt) => {
+            prompts.push(prompt);
+            return run("finding");
+          },
+        }),
+      },
+    });
+
+    const result = await tool.execute({ prompt: "Inspect the command router\nThen report risks." });
+    expect(prompts).toEqual(["Inspect the command router\nThen report risks."]);
+    expect(result).toMatchObject({
+      results: [{ id: "t1", title: "Inspect the command router", outcome: "completed" }],
+    });
   });
 });
 

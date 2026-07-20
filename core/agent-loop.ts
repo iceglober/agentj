@@ -104,7 +104,6 @@ import {
   composeProgressLines,
   createProgressTracker,
   formatDuration,
-  formatToolActivityLabel,
   type ProgressTracker,
 } from "./lib/tui/progress";
 import {
@@ -200,6 +199,9 @@ function createProductionConfigUi(): () => Promise<number> {
     return EXIT_SUCCESS;
   };
 }
+
+export const formatActivityReceipt = (count: number, elapsedMs: number): string =>
+  `✓ ${count} ${count === 1 ? "tool" : "tools"} · ${formatDuration(elapsedMs)} · /activity for details`;
 
 /** Render a ChatEvent as transcript text. */
 export const formatChatEvent = (event: ChatEvent): string | null => {
@@ -873,13 +875,14 @@ export async function runAgentjChat(
   let lastContextWarning: number | undefined;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
   let sessionTodos: TodoList = [];
+  const completedActivities: Array<{ tool: string; detail: string; elapsedMs: number }> = [];
+  let turnActivityCount = 0;
 
   // DAG progress nests under the tool activity that owns it, one tracker per
   // owner so concurrent run_subagents calls stay apart. NO_ACTIVITY collects
   // events that carried no owner id — they render un-nested, above the tools.
   const NO_ACTIVITY = -1;
   const dagTrackers = new Map<number, ProgressTracker>();
-  const frozenDagBlocks = new Map<number, string[]>();
   const dagIndent = (owner: number): number => (owner === NO_ACTIVITY ? 2 : 4);
   const dagBlockLines = (): Map<number, string[]> => {
     const blocks = new Map<number, string[]>();
@@ -923,26 +926,16 @@ export async function runAgentjChat(
     } else {
       const started = activeTools.get(activity.id);
       activeTools.delete(activity.id);
-      const elapsed = started ? ` ${formatDuration(Date.now() - started.startedAt)}` : "";
-      // A tool that owned a DAG freezes as its head row with the children
-      // nested beneath; an aborted DAG (no dag-completed) freezes its last
-      // live state the same way instead of orphaning the rows.
-      const live = dagTrackers.get(activity.id);
-      const block =
-        frozenDagBlocks.get(activity.id) ??
-        (live?.live ? live.lines(spinnerFrame, dagIndent(activity.id)) : []);
-      frozenDagBlocks.delete(activity.id);
+      const elapsedMs = started ? Date.now() - started.startedAt : 0;
       dagTrackers.delete(activity.id);
+      completedActivities.push({
+        tool: activity.tool,
+        detail: started?.detail ?? activity.detail,
+        elapsedMs,
+      });
+      if (completedActivities.length > 100) completedActivities.shift();
+      turnActivityCount += 1;
       turnProducedOutput = true;
-      screen?.printAbove([
-        [
-          {
-            text: `  ✓ ${formatToolActivityLabel(activity.tool, started?.detail ?? activity.detail)}${elapsed}`,
-            tone: "success",
-          },
-        ],
-        ...block.map((text) => [{ text }]),
-      ]);
     }
     refreshProgress();
     updateStatus();
@@ -1057,6 +1050,8 @@ export async function runAgentjChat(
         turnStartedAt = null;
         interruptRequested = false;
         turnProducedOutput = false;
+        turnActivityCount = 0;
+        completedActivities.length = 0;
         sessionStartedAt = Date.now();
         screen?.clearTranscript();
         refreshProgress();
@@ -1113,6 +1108,7 @@ export async function runAgentjChat(
         turnStartedAt = Date.now();
         interruptRequested = false;
         turnProducedOutput = false;
+        turnActivityCount = 0;
         turnModel = composition.modelFor(event.mode);
         turnUsage = { inputTokens: 0, outputTokens: 0, longContextRequests: 0 };
       }
@@ -1124,6 +1120,17 @@ export async function runAgentjChat(
         screen?.restoreInput(event.restoreText ?? event.text);
       }
       if (event.type === "turn-finished") {
+        const elapsedMs = turnStartedAt === null ? 0 : Date.now() - turnStartedAt;
+        if (turnActivityCount > 0) {
+          screen?.printAbove([
+            [
+              {
+                text: formatActivityReceipt(turnActivityCount, elapsedMs),
+                tone: "success",
+              },
+            ],
+          ]);
+        }
         turnStartedAt = null;
         interruptRequested = false;
         if (turnUsage && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
@@ -1146,20 +1153,7 @@ export async function runAgentjChat(
           dagTracker = createProgressTracker();
           dagTrackers.set(owner, dagTracker);
         }
-        const update = applyProgressEvent(
-          dagTracker,
-          event.progress,
-          spinnerFrame,
-          dagIndent(owner),
-        );
-        if (update.completedLines.length > 0) {
-          // Owned blocks wait for the tool-end row so the transcript reads
-          // parent-then-children; ownerless blocks freeze immediately.
-          if (owner === NO_ACTIVITY) {
-            turnProducedOutput = true;
-            screen?.printAbove(update.completedLines.join("\n"));
-          } else frozenDagBlocks.set(owner, update.completedLines);
-        }
+        applyProgressEvent(dagTracker, event.progress, spinnerFrame, dagIndent(owner));
         if (!dagTracker.live) dagTrackers.delete(owner);
         refreshProgress();
       }
@@ -1337,6 +1331,7 @@ export async function runAgentjChat(
       },
       config: interactiveConfig,
       cost: { rows: () => usageRows, prices: composition.evalPrices },
+      activity: { list: () => completedActivities },
       models: {
         current: composition.modelSelections,
         providers: () => providerNames,

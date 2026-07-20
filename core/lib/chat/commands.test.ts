@@ -60,6 +60,7 @@ describe("suggestChatCommands", () => {
       "update",
       "model",
       "cost",
+      "activity",
       "build",
       "jobs",
       "undo",
@@ -242,6 +243,7 @@ describe("runChatCommand", () => {
       "/config",
       "/update",
       "/model",
+      "/activity",
       "/build",
       "/jobs",
       "/undo",
@@ -252,6 +254,19 @@ describe("runChatCommand", () => {
       expect(text).toContain(name);
     }
     expect(text).toContain("complete a shown command");
+  });
+
+  test("activity reports completed tool work without adding transcript rows by default", async () => {
+    const { context, events } = makeContext();
+    context.activity = {
+      list: () => [{ tool: "run_one_subagent", detail: "inspect commands", elapsedMs: 1_200 }],
+    };
+
+    await runChatCommand(context, "activity", "");
+
+    expect((events.at(-1) as { text: string }).text).toBe(
+      "✓ run_one_subagent inspect commands 1.2s",
+    );
   });
 
   test("clear resets the session context and reports when a turn is active", async () => {

@@ -37,6 +37,8 @@ import {
   withRequestOrigin,
 } from "./permissions";
 import {
+  type CreateSubagentsToolOptions,
+  createRunOneSubagentTool,
   createSubagentsTool,
   type DelegationWiring,
   type NormalizedSubagentTask,
@@ -339,10 +341,10 @@ export async function createAgentTools(
       ? { model: `${childConfig.llm.provider}/${childConfig.llm.model}` }
       : {};
   const delegationTool: ToolSet = opts.delegation
-    ? {
-        run_subagents: createSubagentsTool({
+    ? (() => {
+        const subagentOptions: CreateSubagentsToolOptions = {
           execution: {
-            kind: "delegation",
+            kind: "delegation" as const,
             parentRef: opts.delegation.parentRef,
             createChildSession: opts.delegation.createChildSession,
             prepareBatch: opts.delegation.prepareBatch,
@@ -401,8 +403,12 @@ export async function createAgentTools(
           concurrency: opts.delegation.maxConcurrency,
           ...childModelLabel,
           onProgress: opts.onSubagentProgress,
-        }),
-      }
+        };
+        return {
+          run_one_subagent: createRunOneSubagentTool(subagentOptions),
+          run_subagents: createSubagentsTool(subagentOptions),
+        };
+      })()
     : {};
 
   const mode = opts.mode ?? "build";
@@ -456,14 +462,18 @@ export async function createAgentTools(
       ...jobsTool,
       ...todosTool,
       ...(opts.research
-        ? {
-            run_subagents: createSubagentsTool({
+        ? (() => {
+            const subagentOptions: CreateSubagentsToolOptions = {
               execution: { kind: "research", createWorker: opts.research.createWorker },
               concurrency: config.tools.subagents.concurrency,
               ...childModelLabel,
               onProgress: opts.research.onProgress,
-            }),
-          }
+            };
+            return {
+              run_one_subagent: createRunOneSubagentTool(subagentOptions),
+              run_subagents: createSubagentsTool(subagentOptions),
+            };
+          })()
         : {}),
     });
   }

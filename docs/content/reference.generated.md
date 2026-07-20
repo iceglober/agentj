@@ -12,6 +12,7 @@ In-session slash commands and key bindings — the same list `/help` prints, gen
 - `/update` — Update agentj and exit
 - `/model` — Choose primary or subagent models
 - `/cost` — Show foreground token usage and estimated cost
+- `/activity` — Show completed tool activity for this session
 - `/build` — Switch to build mode and implement the plan
 - `/jobs` — Inspect background jobs, or `/jobs abort <id>`
 - `/undo` — Revert the agent's last file changes
