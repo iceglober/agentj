@@ -318,6 +318,9 @@ describe("createAiSdkRuntime", () => {
 
     expect(generateCalls[0]).not.toHaveProperty("prompt");
     expect(generateCalls[0]?.messages).toEqual([...history, { role: "user", content: prompt }]);
+    // Instructions are installed on every freshly constructed SDK agent, not
+    // folded into adapter-owned continuation history.
+    expect(constructedAgents[0]?.instructions).toBe("stable instructions");
     expect(result.messages).toEqual([...history, { role: "user", content: prompt }, assistantTurn]);
   });
 

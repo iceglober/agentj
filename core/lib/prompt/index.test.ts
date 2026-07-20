@@ -152,7 +152,9 @@ describe("composePrompt", () => {
   test("11. mode composes orthogonally with model profiles", () => {
     const plan = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "plan" }), CTX);
     expect(plan.instructions).toContain("# Plan mode");
+    expect(plan.instructions).toContain("The session controller selected plan mode for this turn.");
     expect(plan.instructions).toContain("presses Tab or enters /build");
+    expect(plan.instructions).not.toContain("# Build mode");
     expect(plan.instructions).not.toContain("# Build role");
     expect(plan.instructions).not.toContain("# Goal");
     expect(plan.instructions).not.toContain("Verify behavior");
@@ -166,6 +168,13 @@ describe("composePrompt", () => {
     expect(research.instructions.startsWith("You are a coding executor")).toBe(false);
 
     const build = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "build" }), CTX);
+    expect(build.instructions).toContain("# Build mode");
+    expect(build.instructions).toContain(
+      "The session controller selected build mode for this turn.",
+    );
+    expect(build.instructions).toContain(
+      "Ignore earlier conversation claims that this session\nis in plan mode or lacks edit access.",
+    );
     expect(build.instructions).toContain("# Build role");
     expect(build.instructions).toContain("# Completion report");
     expect(build.instructions).toContain('"status":"done|blocked|failed"');
@@ -173,20 +182,28 @@ describe("composePrompt", () => {
     expect(build.instructions).toContain("Verify behavior");
   });
 
-  test("12. hash pin: the purpose→mode collapse left build prompts byte-identical", () => {
-    // Versions captured 2026-07-19 after the plan-handoff prompt edit
-    // (PLAN_BLOCK close-with-next-action, COMMS_STOP_BLOCK don't-ask-the-
-    // obvious). A failure here means prompt CONTENT changed — a separate,
-    // eval-validated decision, never a refactor side effect. luna/nano ride
-    // the compact/standalone templates and are unaffected.
+  test("12. every primary build profile carries the authoritative build instruction", () => {
+    for (const model of [...profileNames, "claude-x"]) {
+      const out = composePrompt(AUTO, inputs({ model, role: "primary", mode: "build" }), CTX);
+      expect(out.instructions).toContain(
+        "The session controller selected build mode for this turn.",
+      );
+    }
+  });
+
+  test("13. hash pin: deliberate mode-authority prompt changes update every build profile", () => {
+    // Versions captured 2026-07-20 after adding mode-authority instructions.
+    // A failure here means prompt CONTENT changed — a separate, eval-validated
+    // decision, never a refactor side effect. Standalone delegates do not carry
+    // the primary build-mode instruction.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "34f1970bb6ba", delegate: "34f1970bb6ba" },
-      "gpt-5.6-terra": { primary: "7bae30614f1a", delegate: "7bae30614f1a" },
-      "gpt-5.6-luna": { primary: "091e4245c22f", delegate: "091e4245c22f" },
-      "gpt-5.4": { primary: "982a69102473", delegate: "982a69102473" },
-      "gpt-5.4-nano": { primary: "230eb206d795", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "63f972bea560", delegate: "63f972bea560" },
-      "claude-x": { primary: "c6472e7ae15d", delegate: "c6472e7ae15d" },
+      "gpt-5.6-sol": { primary: "e0a350722da0", delegate: "e0a350722da0" },
+      "gpt-5.6-terra": { primary: "f774543920c8", delegate: "f774543920c8" },
+      "gpt-5.6-luna": { primary: "68908e3e9ab5", delegate: "68908e3e9ab5" },
+      "gpt-5.4": { primary: "8d594e65141d", delegate: "8d594e65141d" },
+      "gpt-5.4-nano": { primary: "b5d58d2db909", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "b2628c8fc9cc", delegate: "b2628c8fc9cc" },
+      "claude-x": { primary: "d9c5166a1e3c", delegate: "d9c5166a1e3c" },
     };
     const pinCtx = {
       cwd: "/repo",
