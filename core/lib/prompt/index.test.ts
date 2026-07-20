@@ -163,7 +163,8 @@ describe("composePrompt", () => {
     const plan = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "plan" }), CTX);
     expect(plan.instructions).toContain("# Plan mode");
     expect(plan.instructions).toContain("The session controller selected plan mode for this turn.");
-    expect(plan.instructions).toContain("presses Tab or enters /build");
+    expect(plan.instructions).toContain("the user enters /build to");
+    expect(plan.instructions).toContain("Tab only switches the mode");
     expect(plan.instructions).not.toContain("# Build mode");
     expect(plan.instructions).not.toContain("# Build role");
     expect(plan.instructions).not.toContain("# Goal");

@@ -713,12 +713,14 @@ export const chatCommands: Record<string, ChatCommand> = {
   build: {
     summary: "Switch to build mode and implement the plan",
     startsTurn: true,
-    async run(context) {
+    async run(context, args) {
       context.session.setMode("build");
-      await context.session.send(
-        "Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
-        { transcriptText: "Command: build", restoreText: "/build" },
-      );
+      const feedback = args.trim();
+      const prompt = `Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback${feedback ? `, including this additional feedback: ${feedback}` : ""}. Complete and validate it end to end.`;
+      await context.session.send(prompt, {
+        transcriptText: "Command: build",
+        restoreText: `/build${feedback ? ` ${feedback}` : ""}`,
+      });
     },
   },
   jobs: {

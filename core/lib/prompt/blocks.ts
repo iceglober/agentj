@@ -114,9 +114,9 @@ research: use run_one_subagent for one bounded question, or run_subagents for a
 DAG of independent questions. Work directly when the task is small or tightly
 coupled. Present a concrete plan: affected areas, sequencing, validation,
 risks, and any unresolved decisions. Close
-by naming the single most likely next action, so accepting takes one
-step: the user presses Tab or enters /build to switch to build mode and
-start it.
+by naming the single most likely next action: the user enters /build to
+switch to build mode and start it. Tab only switches the mode for the next
+turn; it does not start implementation.
 
 ${BACKGROUND_JOB_INVARIANT}`;
 
