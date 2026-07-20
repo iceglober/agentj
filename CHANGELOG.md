@@ -1,5 +1,18 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.43
+
+### Minor Changes
+
+- 1833603: Add model-only `creating-agent-skills` and `using-the-browser` embedded skills. The browser skill includes Playwright CLI guidance, references, and its Apache-2.0 license.
+- b20dae5: Plan mode can now run named, parallel reflections after it first drafts a plan. Configure `agent.reflections.prompts` with reviews such as an architecture check and a testing check; AgentJ shows their live progress, records a compact `Reflections: …` transcript marker, and uses their findings to produce one revised plan while retaining the original draft if reflection fails.
+- 95bb66a: Interactive agentj chats can now ask focused structured questions with described choices, multi-select answers, or free text. For example, when a request leaves scope unclear, agentj can present CLI and TUI options with short descriptions and return the selected answer before it continues work.
+- a575786: Agentj can now research the public web in any model mode without a model-provider web feature or API key: `web_search` finds current sources through the built-in anonymous search service, while `web_fetch` reads a specific public URL as text. For example, an agent can search for a library’s current release notes, then fetch its documentation page to verify an API detail; fetched content is marked untrusted and outbound web access can be allowed, asked, or denied with `permissions.web`.
+
+### Patch Changes
+
+- 2b6b1ee: Improve the status area on narrow terminals by preserving session and labeled token details where they fit, such as showing `in 2.0m ▸ out 24.6k · ctx 60.0k`, while safely shortening paths, job prompts, and Unicode text without clipping. Standard-width layouts remain unchanged.
+
 ## 0.1.0-next.42
 
 ### Minor Changes
