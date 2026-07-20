@@ -79,7 +79,7 @@ Keys and commands:
   **`/mcp:docs:summarize`**; built-in commands always win. Invoking one collects its arguments
   interactively, then sends bounded, explicitly labeled external content as a normal user turn.
   Successful configuration changes reload automatically and become available on the next foreground turn.
-- **`/config get|set|delete`** — inspect or update global configuration with path/value completion.
+- **`/config get|set|delete`** — inspect or update canonical global configuration with path/value completion.
   Omitting a sensitive value opens a masked prompt.
 - **`/model [primary|subagents]`** — choose a provider and model in a guided prompt. Changes are
   saved globally and apply to new turns/jobs immediately; subagents can instead inherit the primary.
@@ -135,17 +135,23 @@ stdio or Streamable HTTP. Interactive startup does not wait for MCP: servers con
 in the background, and one failed server cannot block Agentj or another server. MCP capabilities are
 available only to the primary agent; subagents and background jobs do not inherit the connection.
 
-Configure a local stdio server by setting one server object in the global config:
+Configure a project-local stdio server in `.aj/config.json`:
 
-```sh
-./bin/agentj config set mcp.servers.github '{
-  "transport":"stdio",
-  "command":"github-mcp-server",
-  "args":[],
-  "envFrom":{"GITHUB_TOKEN":"GITHUB_TOKEN"},
-  "tools":{"plan":["search_*","get_*"],"build":["*"],"direct":["search_code"]},
-  "resources":{"plan":["docs*"],"build":["*"]}
-}'
+```json
+{
+  "mcp": {
+    "servers": {
+      "github": {
+        "transport": "stdio",
+        "command": "github-mcp-server",
+        "args": [],
+        "envFrom": { "GITHUB_TOKEN": "GITHUB_TOKEN" },
+        "tools": { "plan": ["search_*", "get_*"], "build": ["*"], "direct": ["search_code"] },
+        "resources": { "plan": ["docs*"], "build": ["*"] }
+      }
+    }
+  }
+}
 ```
 
 `envFrom` maps a child-process variable to a source variable in agentj's environment. Relative

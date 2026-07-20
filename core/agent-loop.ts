@@ -393,7 +393,8 @@ async function composeChat(
   const projectSource = await resolveProjectSource(process.cwd());
   const root = projectSource.projectRoot;
   const commonGitDir = projectSource.commonGitDir;
-  const loadedConfig = await loadChatConfig(configPath);
+  const configLoadOptions = { baseConfigPath: configPath, projectRoot: root };
+  const loadedConfig = await loadChatConfig(undefined, configLoadOptions);
   const config = loadedConfig.config;
   let mcpConfigIssues = loadedConfig.mcpIssues;
   const secretStore = createKeyringSecretStore({});
@@ -643,7 +644,7 @@ async function composeChat(
     for (const issue of issueStatuses()) onMcpStatus?.(issue);
   };
   const reloadMcp = async (name?: string): Promise<void> => {
-    const latest = await loadChatConfig(configPath);
+    const latest = await loadChatConfig(undefined, configLoadOptions);
     mcpConfigIssues = latest.mcpIssues;
     publishConfigIssues();
     await mcp.reload(latest.config.mcp, name, { skip: [...invalidServerNames()] });
@@ -653,7 +654,7 @@ async function composeChat(
     name: string,
     hooks?: { onAuthorizationUrl?(url: string): void },
   ): Promise<McpOAuthFlowResult> => {
-    const latest = await loadChatConfig(configPath);
+    const latest = await loadChatConfig(undefined, configLoadOptions);
     const server = latest.config.mcp.servers[name];
     if (!server) return { ok: false, reason: `no MCP server named ${name} is configured` };
     if (server.transport !== "http") {

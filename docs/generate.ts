@@ -73,7 +73,7 @@ export function renderConfigMarkdown(docs: readonly ConfigDoc[] = CONFIG_DOCS): 
   return [
     "## Configuration reference",
     "",
-    "Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Stored in `~/.config/agentj/config.json`. Defaults come straight from the schema.",
+    "Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Global writes use `~/.config/aj/config.json`; project settings layer from `.aj/config.json` and `.aj/config.local.json`. Defaults come straight from the schema.",
     "",
     ":::details Show all configuration keys",
     "",

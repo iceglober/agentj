@@ -34,7 +34,7 @@ agentj run --allow-all "fix the tests"      # one task; permission asks auto-res
 
 :::details Change models, tiers, or permissions
 
-Settings live in `~/.config/agentj/config.json`; edit them with the `config` subcommand:
+Settings layer from `~/.config/aj/config.json`, then `.aj/config.json`, then `.aj/config.local.json` in the current Git worktree. The legacy `~/.config/agentj/config.json` is read only when the canonical global file is absent. Use the `config` subcommand to edit canonical global settings:
 
 ```
 agentj config set agent.llm.model gpt-5.6-sol

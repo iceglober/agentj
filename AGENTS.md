@@ -19,7 +19,7 @@
 - `core/lib/tools/` — agent tools: `bash/`, `edit/` (exact|batch|hash modes), `read/`, `search/`. Defined against the sandbox port; no vendor SDK imports.
 - `core/lib/llm/` — port + adapters (`ai-sdk-adapter.ts`, `azure-adapter.ts`). `GenerateRequest.messages`/`RunResult.messages` carry the chat continuation as an opaque token only the adapter understands. Token usage preserves Azure prompt-cache detail; tool names sorted for provider caching.
 - `core/lib/prompt/` — pure prompt composition: per-model profiles, `mode` (plan/build) × `role` (primary/delegate) template flags, promptVersion hashing (pinned by test against accidental content drift).
-- `core/lib/config/` — composes domain schemas; global config in `~/.config/agentj/config.json`.
+- `core/lib/config/` — composes domain schemas; config layers are project-local `.aj/config.local.json` and `.aj/config.json`, canonical global `~/.config/aj/config.json`, then legacy `~/.config/agentj/config.json` fallback.
 - `core/lib/skills/` — Agent Skills (agentskills.io format): discovery over `.aj/skills/` (project) and `~/.config/agentj/skills/` (global), spec-compliant SKILL.md frontmatter validation, `/name` invocation rendering, and the progressive-disclosure prompt section appended to the rules.
 - `core/lib/secrets/` — `SecretStore` port + keychain adapter; env → keychain precedence; no plaintext fallback; values never printed.
 - `core/lib/metrics/` — content-free OTel sink, `AGENTJ_OTEL_METRICS=1` gated.
