@@ -89,6 +89,24 @@ describe("hasAnyToolCall", () => {
 describe("generateWithGroundedCompletion — background jobs", () => {
   const request: GenerateRequest = { instructions: "rules", prompt: "wait for CI", tools };
 
+  test("requires a started job before accepting an in-progress report", async () => {
+    let calls = 0;
+    const output = await generateWithGroundedCompletion(
+      {
+        async generate() {
+          calls += 1;
+          return calls === 1
+            ? result(report("Waiting for a result.", "in_progress"))
+            : result(report("Job j4 is running.", "in_progress"), { steps: [runJobStep()] });
+        },
+      },
+      request,
+    );
+
+    expect(calls).toBe(2);
+    expect(output.text).toContain("Job j4 is running.");
+  });
+
   test("retries one false monitoring claim with run_job forced first", async () => {
     const requests: GenerateRequest[] = [];
     const runtime = {

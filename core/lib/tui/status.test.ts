@@ -95,12 +95,12 @@ describe("composeStatusSection", () => {
     expect(narrow).not.toContain("cached");
   });
 
-  test("flags context at the configured soft limit", () => {
+  test("shows context against the configured soft limit without a warning glyph", () => {
     expect(composeStatusSection({ ...base, contextSoftLimit: 10_000 }, 120)[0]).toContain(
-      "ctx 8.7k ·",
+      "ctx 8.7k/10.0k ·",
     );
     expect(composeStatusSection({ ...base, contextSoftLimit: 8_000 }, 120)[0]).toContain(
-      "ctx 8.7k!",
+      "ctx 8.7k/8.0k",
     );
   });
 

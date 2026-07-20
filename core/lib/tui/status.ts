@@ -84,7 +84,7 @@ export interface StatusSectionState {
   /** Cumulative request/response tokens; ctx is the latest request's size and
    *  cacheRead the session's cumulative provider-cache read tokens. */
   usage: { in: number; out: number; ctx: number; cacheRead?: number };
-  /** When set and ctx has reached it, the ctx counter renders flagged. */
+  /** When set, ctx displays against this soft limit (for example, 8.7k/8.0k). */
   contextSoftLimit?: number;
   sessionStartedAt: number;
   /** Running background jobs only — each gets its own row. */
@@ -144,12 +144,12 @@ export const composeStatusSection = (
   const now = state.now ?? Date.now();
   const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
   const clock = formatClock(now - state.sessionStartedAt);
-  const overLimit =
-    state.contextSoftLimit !== undefined && state.usage.ctx >= state.contextSoftLimit;
   const counters = [
     formatStatusTokens(state.usage.in),
     formatStatusTokens(state.usage.out),
-    `${formatStatusTokens(state.usage.ctx)}${overLimit ? "!" : ""}`,
+    state.contextSoftLimit === undefined
+      ? formatStatusTokens(state.usage.ctx)
+      : `${formatStatusTokens(state.usage.ctx)}/${formatStatusTokens(state.contextSoftLimit)}`,
   ] as const;
   // Session-cumulative cache reads as a share of cumulative input: how much
   // of everything sent so far was served from the provider's prefix cache.

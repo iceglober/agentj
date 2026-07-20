@@ -16,6 +16,7 @@ const blockedReport = (summary: string): string =>
     summary,
     changes: [],
     validation: [],
+    nextSteps: [],
     openQuestions: ["No background job is active."],
   });
 
@@ -25,12 +26,13 @@ const failedReport = (summary: string): string =>
     summary,
     changes: [],
     validation: [],
+    nextSteps: [],
     openQuestions: ["No tool ran this turn, so nothing was implemented or validated."],
   });
 
 const reportText = (text: string): string => {
   const report = parseCompletionReport(text);
-  return report ? [report.summary, ...report.openQuestions].join("\n") : text;
+  return report ? [report.summary, ...report.nextSteps, ...report.openQuestions].join("\n") : text;
 };
 
 /** A narrow check for a claim that external work is already being monitored. */
@@ -109,7 +111,11 @@ const detectViolation = (
   result: RunResult,
   request: GenerateRequest,
 ): GroundingViolation | null => {
-  if (claimsActiveDeferredWork(result.text) && !hasStartedBackgroundJob(result)) {
+  const report = parseCompletionReport(result.text);
+  if (
+    (report?.status === "in_progress" || claimsActiveDeferredWork(result.text)) &&
+    !hasStartedBackgroundJob(result)
+  ) {
     return {
       correctivePrompt: BACKGROUND_CORRECTIVE,
       requiredFirstTool: "run_job",
@@ -124,7 +130,6 @@ const detectViolation = (
     };
   }
 
-  const report = parseCompletionReport(result.text);
   if (report?.status === "done" && !hasAnyToolCall(result)) {
     return {
       correctivePrompt: DONE_CORRECTIVE,

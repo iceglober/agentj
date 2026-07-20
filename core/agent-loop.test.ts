@@ -190,11 +190,12 @@ describe("formatChatEvent", () => {
           summary: "plan ready",
           changes: ["Scanned editor tokens"],
           validation: [{ command: "bun test core", outcome: "passed", evidence: "green" }],
+          nextSteps: [],
           openQuestions: ["None"],
         }),
       }),
     ).toBe(
-      "✓ plan ready\n\nChanges:\n- Scanned editor tokens\n\nValidation:\n- ✓ bun test core: green\n\nOpen questions:\n- None",
+      "Done — plan ready\n\nChanges:\n- Scanned editor tokens\n\nValidation:\n- Passed — bun test core: green\n\nOpen questions:\n- None",
     );
   });
 
@@ -236,7 +237,7 @@ describe("formatChatEvent", () => {
           resultText: "Package published.",
         },
       }),
-    ).toBe("✓ [j2] done in 1m14s — monitor the release workflow\nPackage published.");
+    ).toBe("[j2] Finished in 1m14s — monitor the release workflow\nPackage published.");
   });
 
   test("formats structured job completions without exposing JSON", () => {
@@ -256,12 +257,13 @@ describe("formatChatEvent", () => {
             summary: "Package published.",
             changes: ["Merged PR #124"],
             validation: [{ command: "gh pr checks 124", outcome: "passed", evidence: "green" }],
+            nextSteps: [],
             openQuestions: [],
           },
         },
       }),
     ).toBe(
-      "✓ [j2] done in 1s — monitor the release workflow\n✓ Package published.\n\nChanges:\n- Merged PR #124\n\nValidation:\n- ✓ gh pr checks 124: green",
+      "[j2] Finished in 1s — monitor the release workflow\nDone — Package published.\n\nChanges:\n- Merged PR #124\n\nValidation:\n- Passed — gh pr checks 124: green",
     );
   });
 
@@ -279,7 +281,7 @@ describe("formatChatEvent", () => {
           resultText: "Child worktree setup failed.",
         },
       }),
-    ).toBe("✗ [j2] failed in 1s — monitor the release workflow\nChild worktree setup failed.");
+    ).toBe("[j2] Failed in 1s — monitor the release workflow\nChild worktree setup failed.");
   });
 });
 

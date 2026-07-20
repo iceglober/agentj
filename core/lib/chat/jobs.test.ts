@@ -35,7 +35,7 @@ describe("createJobRunner", () => {
 
     expect(runner.list()[0]).toMatchObject({ status: "done" });
     expect(events.map((event) => event.type)).toEqual(["job-started", "job-finished"]);
-    expect(notices[0]).toContain("[j1] done");
+    expect(notices[0]).toContain("[j1] finished");
     expect(notices[0]).toContain("did: refactor");
   });
 

@@ -251,12 +251,16 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       const elapsed = formatClock((event.job.endedAt ?? Date.now()) - event.job.startedAt);
       const result = event.job.resultText?.trim();
       const branch = event.job.branch ? `\nwork preserved on ${event.job.branch}` : "";
-      const marker =
-        event.job.status === "done" ? "✓" : event.job.status === "failed" ? "✗" : "!";
+      const status =
+        event.job.status === "done"
+          ? "Finished"
+          : event.job.status === "failed"
+            ? "Failed"
+            : "Aborted";
       const completion = event.job.completion
         ? `\n${formatCompletionReport(event.job.completion)}`
         : "";
-      return `${marker} [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${completion || (result ? `\n${truncateWithNotice(result, 2_000)}` : "")}${branch}`;
+      return `[${event.job.id}] ${status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${completion || (result ? `\n${truncateWithNotice(result, 2_000)}` : "")}${branch}`;
     }
     case "notice":
       return event.text;
@@ -268,22 +272,27 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
 /** Keep activity state legible in monochrome while giving active outcomes a semantic tone. */
 const presentActivityLine = (text: string): UiTextLine => {
   const trimmed = text.trimStart();
-  const tone = trimmed.startsWith("✓")
-    ? "success"
-    : trimmed.startsWith("x") || trimmed.startsWith("✗")
-      ? "danger"
-      : trimmed.startsWith("!")
-        ? "warning"
-        : trimmed.startsWith("↳ queued")
-        ? "warning"
-        : trimmed.startsWith("◐") ||
-            trimmed.startsWith("◓") ||
-            trimmed.startsWith("◑") ||
-            trimmed.startsWith("◒")
-          ? "accent"
-          : trimmed.startsWith("·")
-            ? "muted"
-            : undefined;
+  const tone =
+    trimmed.startsWith("✓") || trimmed.startsWith("Done") || trimmed.includes("] Finished")
+      ? "success"
+      : trimmed.startsWith("x") ||
+          trimmed.startsWith("✗") ||
+          trimmed.startsWith("Failed") ||
+          trimmed.includes("] Failed")
+        ? "danger"
+        : trimmed.startsWith("!") || trimmed.startsWith("Blocked") || trimmed.includes("] Aborted")
+          ? "warning"
+          : trimmed.startsWith("↳ queued")
+            ? "warning"
+            : trimmed.startsWith("In progress") ||
+                trimmed.startsWith("◐") ||
+                trimmed.startsWith("◓") ||
+                trimmed.startsWith("◑") ||
+                trimmed.startsWith("◒")
+              ? "accent"
+              : trimmed.startsWith("·")
+                ? "muted"
+                : undefined;
   return tone ? [{ text, tone }] : text;
 };
 
