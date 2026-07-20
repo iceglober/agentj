@@ -206,20 +206,19 @@ describe("composePrompt", () => {
     expect(build.instructions).not.toContain("# Evidence rule");
   });
 
-  test("13. hash pin: mode-authority (#103) plus the sol/terra evidence rule", () => {
-    // Base hashes are #103's mode-authority versions (2026-07-20); sol and terra
-    // additionally shift because hallucinationGuard is now ON for them (the
-    // fabricated status=done fix). A failure here means prompt CONTENT changed —
-    // a separate, eval-validated decision, never a refactor side effect.
-    // Standalone delegates do not carry the primary build-mode instruction.
+  test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
+    // Versions captured 2026-07-20 after merging mode authority and evidence
+    // rules with the background-job invariant. A failure here means prompt
+    // CONTENT changed — a separate, eval-validated decision, never a refactor
+    // side effect. Nano's standalone delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "9c39d3d759f0", delegate: "9c39d3d759f0" },
-      "gpt-5.6-terra": { primary: "be98e3067986", delegate: "be98e3067986" },
-      "gpt-5.6-luna": { primary: "68908e3e9ab5", delegate: "68908e3e9ab5" },
-      "gpt-5.4": { primary: "8d594e65141d", delegate: "8d594e65141d" },
-      "gpt-5.4-nano": { primary: "b5d58d2db909", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "b2628c8fc9cc", delegate: "b2628c8fc9cc" },
-      "claude-x": { primary: "d9c5166a1e3c", delegate: "d9c5166a1e3c" },
+      "gpt-5.6-sol": { primary: "2ff363acac59", delegate: "2ff363acac59" },
+      "gpt-5.6-terra": { primary: "0bbca8e7cecc", delegate: "0bbca8e7cecc" },
+      "gpt-5.6-luna": { primary: "927c7b2bc198", delegate: "927c7b2bc198" },
+      "gpt-5.4": { primary: "fe97d3cd8324", delegate: "fe97d3cd8324" },
+      "gpt-5.4-nano": { primary: "2eb01785484f", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "4ac8fb700b62", delegate: "4ac8fb700b62" },
+      "claude-x": { primary: "6da9024c0fcd", delegate: "6da9024c0fcd" },
     };
     const pinCtx = {
       cwd: "/repo",

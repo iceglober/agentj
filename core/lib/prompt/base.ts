@@ -1,5 +1,6 @@
 import { COMPLETION_REPORT_INSTRUCTION } from "../report";
 import {
+  BACKGROUND_JOB_INVARIANT,
   BUILD_MODE_BLOCK,
   BUILDER_BLOCK,
   COMMS_STOP_BLOCK,
@@ -112,6 +113,7 @@ ${BUILD_MODE_BLOCK}
   environment-changing installs, or a material expansion of scope.
 
 ${COMPLETION_REPORT_INSTRUCTION}
+${BACKGROUND_JOB_INVARIANT}
 {{PROFILE_DELTA}}
 
 # Project rules

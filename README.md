@@ -63,7 +63,8 @@ Keys and commands:
   detaches the wait instead of blocking the conversation. A job may carry a renewable soft
   timeout: if it is still running at the deadline the agent gets pinged, inspects the job's
   recent activity (`check_job`), and either extends the deadline or aborts a stuck job — the
-  job itself keeps running throughout.
+  job itself keeps running throughout. The bundled `/running-background-work` skill documents
+  this workflow for waits, reviews, releases, deploys, and delayed merges.
 - **`@path/to/file`** — attach a file's contents to your message. Type `@` after whitespace to
   fuzzy-match project files; Tab or Enter inserts the selected path. Supported image files (`.png`,
   `.jpg`, `.jpeg`, `.gif`, `.webp`) are sent as vision input. Quote paths with spaces as

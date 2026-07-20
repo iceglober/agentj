@@ -59,3 +59,6 @@ unchanged.
   that catalog's narrow port through the existing execution boundary. The TUI
   receives completion results only and never imports Git, the filesystem, or
   host execution.
+- Background-work guidance is a shipped skill in `skills/embedded/`,
+  discovered through the normal skill catalog. The existing chat JobRunner
+  remains the sole job executor and source of job IDs.

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   composeSkillsPromptSection,
   discoverSkills,
+  embeddedSkillsRoot,
   parseSkillMarkdown,
   renderSkillInvocation,
   type Skill,
@@ -161,6 +162,19 @@ describe("discoverSkills", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  test("ships the running-background-work skill through the normal discovery path", async () => {
+    const { skills, issues } = await discoverSkills({ roots: [embeddedSkillsRoot] });
+    expect(issues).toEqual([]);
+    expect(skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "running-background-work",
+          metadata: { "agentj-mode": "build" },
+        }),
+      ]),
+    );
   });
 });
 
