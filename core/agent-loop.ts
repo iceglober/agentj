@@ -1230,7 +1230,7 @@ export async function runAgentjChat(
       onEvent: render,
       addTurnNotice: (text) => chat.addTurnNotice(text),
       onJobCompleted: async (job) => {
-        if (job.status === "done" && job.completion?.status === "done") await todos.clear();
+        if (job.status === "done" && job.completion?.status === "done") await sessionTodos.clear();
       },
       runJob: ({ id, mode, prompt, abortSignal, onStep }) =>
         mode === "plan"
