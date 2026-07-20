@@ -27,6 +27,12 @@ export default defineConfig({
         },
       },
     },
+    reflections: {
+      prompts: {
+        architecture:
+          "Ensure you outline how we will leave the code better than we found it. Which existing abstractions will we use? Which will we extend? Which will we remove or create? Leave the code simpler, cleaner, and with a more sound architecture.",
+      },
+    },
     tools: {
       edit: {
         mode: "batch",
