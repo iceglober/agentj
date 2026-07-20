@@ -187,7 +187,7 @@ describe("composePrompt", () => {
     );
     expect(build.instructions).toContain("# Build role");
     expect(build.instructions).toContain("# Completion report");
-    expect(build.instructions).toContain('"status":"done|blocked|failed"');
+    expect(build.instructions).toContain('"status":"done|in_progress|blocked|failed"');
     expect(build.instructions).toContain("# Goal");
     expect(build.instructions).toContain("Verify behavior");
   });
@@ -222,13 +222,13 @@ describe("composePrompt", () => {
     // eval-validated decision, never a refactor side effect. Nano's standalone
     // delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "d71748993e77", delegate: "d71748993e77" },
-      "gpt-5.6-terra": { primary: "fee8220d625e", delegate: "fee8220d625e" },
-      "gpt-5.6-luna": { primary: "927c7b2bc198", delegate: "927c7b2bc198" },
-      "gpt-5.4": { primary: "f7f75d2aa28e", delegate: "f7f75d2aa28e" },
-      "gpt-5.4-nano": { primary: "0c8677fd33a5", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "382231a0fe0f", delegate: "382231a0fe0f" },
-      "claude-x": { primary: "924349594395", delegate: "924349594395" },
+      "gpt-5.6-sol": { primary: "e0a2f2d29bce", delegate: "e0a2f2d29bce" },
+      "gpt-5.6-terra": { primary: "3079bf87de2b", delegate: "3079bf87de2b" },
+      "gpt-5.6-luna": { primary: "e368c4917a7e", delegate: "e368c4917a7e" },
+      "gpt-5.4": { primary: "8d4bdb46026c", delegate: "8d4bdb46026c" },
+      "gpt-5.4-nano": { primary: "018414cc96bd", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "5a9676332544", delegate: "5a9676332544" },
+      "claude-x": { primary: "daa491494c5e", delegate: "daa491494c5e" },
     };
     const pinCtx = {
       cwd: "/repo",

@@ -79,7 +79,9 @@ export interface JobRunner {
 
 const summarize = (job: JobView): string => {
   const seconds = job.endedAt ? Math.round((job.endedAt - job.startedAt) / 1000) : 0;
-  const head = `[${job.id}] ${job.status} in ${seconds}s — ${job.prompt.slice(0, 60)}`;
+  const status =
+    job.status === "done" ? "finished" : job.status === "failed" ? "failed" : "aborted";
+  const head = `[${job.id}] ${status} in ${seconds}s — ${job.prompt.slice(0, 60)}`;
   const firstLine = job.resultText?.split("\n").find((line) => line.trim()) ?? "";
   const branch = job.branch ? ` (work preserved on ${job.branch})` : "";
   const warning = job.warnings?.[0] ? ` (warning: ${job.warnings[0].slice(0, 120)})` : "";
