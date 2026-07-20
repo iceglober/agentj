@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.34
+
+### Patch Changes
+
+- 59494e2: AgentJ now treats the controller-selected mode as authoritative on every turn. For example, after switching from plan to build, an older plan-mode refusal in the conversation no longer makes the agent claim that editing is unavailable.
+
 ## 0.1.0-next.33
 
 ### Minor Changes
