@@ -37,6 +37,7 @@ import {
   withPermissions,
   withRequestOrigin,
 } from "./permissions";
+import { reflectionsConfigSchema } from "./reflections";
 import {
   type CreateSubagentsToolOptions,
   createRunOneSubagentTool,
@@ -81,6 +82,7 @@ export const agentConfigSchema = z.object({
     .prefault({}),
   llm: llmConfigSchema.prefault({}),
   prompt: promptConfigSchema.prefault({}),
+  reflections: reflectionsConfigSchema,
   tools: z
     .object({
       /**
@@ -241,17 +243,40 @@ export function subagentModel(config: AgentConfig): string | undefined {
  * The config a child (subagent / planning worker) runs under: the parent's,
  * with the given role and any configured subagent provider/model overrides.
  */
-export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"]): AgentConfig {
-  const { provider } = config.tools.subagents;
-  const model = subagentModel(config);
+function routedChildAgentConfig(
+  config: AgentConfig,
+  role: AgentConfig["role"],
+  route: { provider?: AgentConfig["llm"]["provider"]; model?: string },
+): AgentConfig {
   return {
     ...config,
     role,
     llm:
-      provider || model
-        ? { ...config.llm, ...(provider ? { provider } : {}), ...(model ? { model } : {}) }
+      route.provider || route.model
+        ? {
+            ...config.llm,
+            ...(route.provider ? { provider: route.provider } : {}),
+            ...(route.model ? { model: route.model } : {}),
+          }
         : config.llm,
   };
+}
+
+export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"]): AgentConfig {
+  return routedChildAgentConfig(config, role, {
+    provider: config.tools.subagents.provider,
+    model: subagentModel(config),
+  });
+}
+
+/** Reflection routing wins over subagent routing, then inherits the plan model. */
+export function reflectionAgentConfig(config: AgentConfig): AgentConfig {
+  const { provider, model, tier } = config.reflections;
+  return routedChildAgentConfig(config, "delegate", {
+    provider: provider ?? config.tools.subagents.provider,
+    model:
+      model ?? (tier === undefined ? subagentModel(config) : resolveTierModel(config.llm, tier)),
+  });
 }
 
 export function withAgentModelSelection(

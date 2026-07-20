@@ -348,6 +348,135 @@ export function createRunOneSubagentTool(options: CreateSubagentsToolOptions) {
   });
 }
 
+export async function runSubagentTasks(
+  options: CreateSubagentsToolOptions,
+  input: SubagentsInput,
+  toolOptions?: unknown,
+): Promise<SubagentsResult> {
+  const tasks = normalizeSubagentTasks(input);
+  const now = options.now ?? Date.now;
+  const startedAt = now();
+  const { abortSignal, activityId: parentActivityId } =
+    (toolOptions as { abortSignal?: AbortSignal; activityId?: number } | undefined) ?? {};
+  const emit = async (event: SubagentProgressEvent): Promise<void> => {
+    await options.onProgress?.(
+      parentActivityId === undefined ? event : { ...event, parentActivityId },
+    );
+  };
+  await emit({
+    type: "dag-started",
+    concurrency: options.concurrency ?? DEFAULT_CONCURRENCY,
+    startedAt,
+    tasks: tasks.map(({ id, title, waitsOn }) => ({
+      id,
+      title,
+      waitsOn,
+      ...(options.model ? { model: options.model } : {}),
+    })),
+  });
+
+  const execution = options.execution;
+  const prepared = execution.kind === "delegation" ? await execution.prepareBatch?.() : null;
+  const wiring: DelegationWiring | null =
+    execution.kind === "delegation"
+      ? {
+          ...execution,
+          ...(prepared
+            ? {
+                parentRef: prepared.parentRef,
+                createChildSession: prepared.createChildSession ?? execution.createChildSession,
+              }
+            : {}),
+        }
+      : null;
+
+  const results = await scheduleTasks<NormalizedSubagentTask, SubagentResult>({
+    tasks,
+    concurrency: Math.min(tasks.length, options.concurrency ?? DEFAULT_CONCURRENCY),
+    abortSignal,
+    id: (task) => task.id,
+    dependencies: (task) => task.waitsOn,
+    dependencySucceeded: (result) =>
+      result.outcome === "completed" || result.outcome === "changed" || result.outcome === "clean",
+    blocked: async (task, failedDependencies) => {
+      const error = `Blocked by: ${failedDependencies.join(", ")}`;
+      await emit({
+        type: "task-blocked",
+        id: task.id,
+        title: task.title,
+        elapsedMs: 0,
+        message: error,
+        error,
+      });
+      return baseResult(task, "blocked", { error });
+    },
+    abortedBeforeStart: (task) =>
+      baseResult(task, "aborted", { error: "Aborted before this task started." }),
+    run: async (task, completed) => {
+      const taskStartedAt = now();
+      await emit({
+        type: "task-started",
+        id: task.id,
+        title: task.title,
+        startedAt: taskStartedAt,
+      });
+      let inputTokens = 0;
+      let outputTokens = 0;
+      const onStep = (step: RunStep): void => {
+        if (!step.usage) return;
+        inputTokens += step.usage.inputTokens;
+        outputTokens += step.usage.outputTokens;
+        void emit({
+          type: "task-usage",
+          id: task.id,
+          inputTokens,
+          outputTokens,
+          contextTokens: step.usage.inputTokens,
+        });
+      };
+      const prompt = withFindings(task, completed);
+      let result: SubagentResult;
+      if (wiring) {
+        result = await runDelegationTask(task, prompt, wiring, abortSignal, onStep);
+      } else if (execution.kind === "research") {
+        try {
+          if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
+          const worker = await execution.createWorker(task);
+          const run = await worker.generate(prompt, { abortSignal, onStep });
+          result = baseResult(task, "completed", { text: run.text });
+        } catch (error) {
+          if (isAbort(error, abortSignal)) throw error;
+          result = baseResult(task, "failed", { error: errorText(error) });
+        }
+      } else {
+        result = baseResult(task, "failed", { error: "No execution wiring" });
+      }
+      const elapsedMs = now() - taskStartedAt;
+      const eventType =
+        result.outcome === "failed" || result.outcome === "aborted"
+          ? "task-failed"
+          : "task-completed";
+      await emit({
+        type: eventType,
+        id: task.id,
+        title: task.title,
+        elapsedMs,
+        message:
+          result.error ??
+          result.text ??
+          (eventType === "task-completed" ? "Completed." : "Task failed."),
+        ...(result.error ? { error: result.error } : {}),
+      });
+      return result;
+    },
+  });
+
+  await emit({ type: "dag-completed", elapsedMs: now() - startedAt });
+  return {
+    results,
+    ...(prepared ? { integration: await prepared.integrate(results) } : {}),
+  };
+}
 export function createSubagentsTool(options: CreateSubagentsToolOptions) {
   const research = options.execution.kind === "research";
   return defineTool({
@@ -355,132 +484,7 @@ export function createSubagentsTool(options: CreateSubagentsToolOptions) {
       ? "Fan out read-only research subagents as a task DAG. waitsOn lists task ids that must finish first; their findings are threaded into dependent prompts."
       : "Fan out autonomous subagents as a task DAG, each in an isolated worktree; completed changesets are integrated back as a batch. waitsOn lists task ids that must finish first.",
     inputSchema: subagentsInputSchema,
-    async execute(input: SubagentsInput, toolOptions?: unknown): Promise<SubagentsResult> {
-      const tasks = normalizeSubagentTasks(input);
-      const now = options.now ?? Date.now;
-      const startedAt = now();
-      const { abortSignal, activityId: parentActivityId } =
-        (toolOptions as { abortSignal?: AbortSignal; activityId?: number } | undefined) ?? {};
-      const emit = async (event: SubagentProgressEvent): Promise<void> => {
-        await options.onProgress?.(
-          parentActivityId === undefined ? event : { ...event, parentActivityId },
-        );
-      };
-      await emit({
-        type: "dag-started",
-        concurrency: options.concurrency ?? DEFAULT_CONCURRENCY,
-        startedAt,
-        tasks: tasks.map(({ id, title, waitsOn }) => ({
-          id,
-          title,
-          waitsOn,
-          ...(options.model ? { model: options.model } : {}),
-        })),
-      });
-
-      const execution = options.execution;
-      const prepared = execution.kind === "delegation" ? await execution.prepareBatch?.() : null;
-      const wiring: DelegationWiring | null =
-        execution.kind === "delegation"
-          ? {
-              ...execution,
-              ...(prepared
-                ? {
-                    parentRef: prepared.parentRef,
-                    createChildSession: prepared.createChildSession ?? execution.createChildSession,
-                  }
-                : {}),
-            }
-          : null;
-
-      const results = await scheduleTasks<NormalizedSubagentTask, SubagentResult>({
-        tasks,
-        concurrency: Math.min(tasks.length, options.concurrency ?? DEFAULT_CONCURRENCY),
-        abortSignal,
-        id: (task) => task.id,
-        dependencies: (task) => task.waitsOn,
-        dependencySucceeded: (result) =>
-          result.outcome === "completed" ||
-          result.outcome === "changed" ||
-          result.outcome === "clean",
-        blocked: async (task, failedDependencies) => {
-          const error = `Blocked by: ${failedDependencies.join(", ")}`;
-          await emit({
-            type: "task-blocked",
-            id: task.id,
-            title: task.title,
-            elapsedMs: 0,
-            message: error,
-            error,
-          });
-          return baseResult(task, "blocked", { error });
-        },
-        abortedBeforeStart: (task) =>
-          baseResult(task, "aborted", { error: "Aborted before this task started." }),
-        run: async (task, completed) => {
-          const taskStartedAt = now();
-          await emit({
-            type: "task-started",
-            id: task.id,
-            title: task.title,
-            startedAt: taskStartedAt,
-          });
-          let inputTokens = 0;
-          let outputTokens = 0;
-          const onStep = (step: RunStep): void => {
-            if (!step.usage) return;
-            inputTokens += step.usage.inputTokens;
-            outputTokens += step.usage.outputTokens;
-            void emit({
-              type: "task-usage",
-              id: task.id,
-              inputTokens,
-              outputTokens,
-              contextTokens: step.usage.inputTokens,
-            });
-          };
-          const prompt = withFindings(task, completed);
-          let result: SubagentResult;
-          if (wiring) {
-            result = await runDelegationTask(task, prompt, wiring, abortSignal, onStep);
-          } else if (execution.kind === "research") {
-            try {
-              if (abortSignal?.aborted) throw new DOMException("Aborted", "AbortError");
-              const worker = await execution.createWorker(task);
-              const run = await worker.generate(prompt, { abortSignal, onStep });
-              result = baseResult(task, "completed", { text: run.text });
-            } catch (error) {
-              if (isAbort(error, abortSignal)) throw error;
-              result = baseResult(task, "failed", { error: errorText(error) });
-            }
-          } else {
-            result = baseResult(task, "failed", { error: "No execution wiring" });
-          }
-          const elapsedMs = now() - taskStartedAt;
-          const eventType =
-            result.outcome === "failed" || result.outcome === "aborted"
-              ? "task-failed"
-              : "task-completed";
-          await emit({
-            type: eventType,
-            id: task.id,
-            title: task.title,
-            elapsedMs,
-            message:
-              result.error ??
-              result.text ??
-              (eventType === "task-completed" ? "Completed." : "Task failed."),
-            ...(result.error ? { error: result.error } : {}),
-          });
-          return result;
-        },
-      });
-
-      await emit({ type: "dag-completed", elapsedMs: now() - startedAt });
-      return {
-        results,
-        ...(prepared ? { integration: await prepared.integrate(results) } : {}),
-      };
-    },
+    execute: (input: SubagentsInput, toolOptions?: unknown) =>
+      runSubagentTasks(options, input, toolOptions),
   });
 }

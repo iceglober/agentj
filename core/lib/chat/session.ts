@@ -31,6 +31,12 @@ export interface ChatSessionDependencies {
    * returns opaque messages; session logic never interprets either shape.
    */
   transformContinuation?(messages: unknown[], mode: ChatMode): Promise<unknown[]> | unknown[];
+  /** Optional one-shot plan refinement after a durable draft plan. */
+  refinePlan?(input: {
+    request: string;
+    draft: string;
+    abortSignal: AbortSignal;
+  }): Promise<{ text: string; transcriptText: string } | { notice: string } | null>;
   now?: () => string;
 }
 
@@ -98,14 +104,15 @@ export function createChatSession(
     void deps.onEvent?.(event);
   };
 
-  const runTurn = async (
+  const runExchange = async (
     text: string,
     transcriptText?: string,
     images?: readonly ImageAttachment[],
-  ): Promise<void> => {
-    mode = pendingMode;
-    busy = true;
+    fixedMode?: ChatMode,
+  ): Promise<{ succeeded: boolean; mode: ChatMode; text?: string }> => {
+    mode = fixedMode ?? pendingMode;
     turnAbort = new AbortController();
+    const abort = turnAbort;
     emit({ type: "turn-started", mode, text, ...(transcriptText ? { transcriptText } : {}) });
 
     const drained = notices.splice(0);
@@ -115,7 +122,7 @@ export function createChatSession(
       if (mode === "build") await deps.undo?.snapshot("pre-turn");
       const agent = await deps.agentFor(mode);
       const result = await agent.generate(content, {
-        abortSignal: turnAbort.signal,
+        abortSignal: abort.signal,
         onStep: (step) => {
           for (const call of step.toolCalls) emit({ type: "tool-call", call });
           for (const toolResult of step.toolResults)
@@ -142,30 +149,61 @@ export function createChatSession(
         ts: now(),
         ...(transcriptText ? { transcriptText } : {}),
       });
-      if (deps.transformContinuation) {
-        messages = await deps.transformContinuation(messages, mode);
-      }
+      if (deps.transformContinuation) messages = await deps.transformContinuation(messages, mode);
       await deps.log.append({ type: "state", messages, mode, ts: now() });
+      return { succeeded: true, mode, text: result.text };
     } catch (error) {
-      if (turnAbort.signal.aborted) {
+      if (abort.signal.aborted) {
         emit({ type: "turn-aborted" });
-        // The model should know the turn was cut short on the next turn.
         notices.push(`[note] The previous turn ("${text.slice(0, 60)}") was interrupted.`);
       } else {
         const message = error instanceof Error ? error.message : String(error);
         emit({ type: "turn-error", error: message });
-        // A failed turn leaves no trace in the continuation — its user message
-        // never joined the messages. Carry the request forward so "try again"
-        // means something on the next turn.
         notices.push(
           `[note] The previous turn failed (${message.slice(0, 200)}) before completing. Its request was: "${text.slice(0, 2_000)}". If the user asks to retry or continue, act on that request.`,
         );
       }
+      return { succeeded: false, mode };
+    } finally {
+      if (turnAbort === abort) turnAbort = null;
+      emit({ type: "turn-finished" });
+    }
+  };
+
+  const runTurn = async (
+    text: string,
+    transcriptText?: string,
+    images?: readonly ImageAttachment[],
+  ): Promise<void> => {
+    busy = true;
+    try {
+      const draft = await runExchange(text, transcriptText, images);
+      if (!draft.succeeded || draft.mode !== "plan" || !deps.refinePlan) return;
+
+      const refinementAbort = new AbortController();
+      turnAbort = refinementAbort;
+      try {
+        const followUp = await deps.refinePlan({
+          request: text,
+          draft: draft.text ?? "",
+          abortSignal: refinementAbort.signal,
+        });
+        if (followUp && "notice" in followUp) emit({ type: "notice", text: followUp.notice });
+        else if (followUp)
+          await runExchange(followUp.text, followUp.transcriptText, undefined, "plan");
+      } catch (error) {
+        if (refinementAbort.signal.aborted) emit({ type: "turn-aborted" });
+        else
+          emit({
+            type: "notice",
+            text: `Reflections failed; keeping draft. (${error instanceof Error ? error.message : String(error)})`,
+          });
+      } finally {
+        if (turnAbort === refinementAbort) turnAbort = null;
+      }
     } finally {
       busy = false;
-      turnAbort = null;
       if (pendingMode !== mode) emit({ type: "mode-changed", mode: pendingMode, pending: false });
-      emit({ type: "turn-finished" });
     }
   };
 
