@@ -63,8 +63,9 @@ Keys and commands:
   detaches the wait instead of blocking the conversation. A job may carry a renewable soft
   timeout: if it is still running at the deadline the agent gets pinged, inspects the job's
   recent activity (`check_job`), and either extends the deadline or aborts a stuck job — the
-  job itself keeps running throughout. The bundled `/running-background-work` skill documents
-  this workflow for waits, reviews, releases, deploys, and delayed merges.
+  job itself keeps running throughout. The bundled `running-background-work` skill guides the
+  model through this workflow for waits, reviews, releases, deploys, and delayed merges; it is not
+  a slash command.
 - **`@path/to/file`** — attach a file's contents to your message. Type `@` after whitespace to
   fuzzy-match project files; Tab or Enter inserts the selected path. Supported image files (`.png`,
   `.jpg`, `.jpeg`, `.gif`, `.webp`) are sent as vision input. Quote paths with spaces as
@@ -91,6 +92,9 @@ Keys and commands:
   the current release track.
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
+
+Skills in `.aj/skills/<name>/SKILL.md` are available to the model. They register a `/name` command
+by default; set `user-invocable: false` in the SKILL.md frontmatter to keep a skill model-only.
 
 Editor shortcuts: Ctrl+V pastes copied local files as `@file` references or screenshots as
 `[pasted image #N]` markers. Prompts with pasted images are not added to prompt history.

@@ -15,8 +15,10 @@ export const embeddedSkillsRoot = fileURLToPath(new URL("./embedded", import.met
  * activates a skill by reading its SKILL.md, and an explicit `/name`
  * invocation injects the full body as the turn prompt (renderSkillInvocation).
  *
- * agentj-specific behavior rides the spec's `metadata` escape hatch:
- *   metadata.agentj-mode: plan | build   — mode to switch to on /name
+ * agentj-specific behavior uses both frontmatter and the spec's `metadata`
+ * escape hatch:
+ *   user-invocable: false — do not register a /name command
+ *   metadata.agentj-mode: plan | build — mode to switch to on /name
  *   metadata.agentj-model-invocation: disabled — omit from the prompt listing
  */
 
@@ -32,6 +34,7 @@ export const skillFrontmatterSchema = z.object({
   license: z.string().optional(),
   compatibility: z.string().min(1).max(500).optional(),
   "allowed-tools": z.string().optional(),
+  "user-invocable": z.boolean().prefault(true),
   metadata: z.record(z.string(), z.string()).prefault({}),
 });
 
@@ -47,6 +50,8 @@ export interface Skill {
   dir: string;
   /** The Markdown instructions after the frontmatter. */
   body: string;
+  /** Whether this skill registers a user-facing /name command. */
+  userInvocable: boolean;
   metadata: Record<string, string>;
 }
 
@@ -86,6 +91,18 @@ const unquote = (value: string): string => {
   return quoted ? trimmed.slice(1, -1) : trimmed;
 };
 
+const parseTopLevelScalar = (value: string): string | boolean => {
+  const trimmed = value.trim();
+  const quoted =
+    trimmed.length >= 2 &&
+    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+      (trimmed.startsWith("'") && trimmed.endsWith("'")));
+  if (quoted) return trimmed.slice(1, -1);
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  return trimmed;
+};
+
 /**
  * The YAML subset the spec's frontmatter needs: top-level `key: value`
  * scalars plus one level of block mapping (`metadata:`). Comments and
@@ -102,7 +119,7 @@ const parseFrontmatterYaml = (text: string): Record<string, unknown> => {
     if (!top) continue;
     const value = (top[2] ?? "").trim();
     if (value) {
-      data[top[1] ?? ""] = unquote(value);
+      data[top[1] ?? ""] = parseTopLevelScalar(value);
       continue;
     }
     const nested: Record<string, string> = {};
@@ -117,7 +134,10 @@ const parseFrontmatterYaml = (text: string): Record<string, unknown> => {
   return data;
 };
 
-export type ParsedSkill = Pick<Skill, "name" | "description" | "body" | "metadata">;
+export type ParsedSkill = Pick<
+  Skill,
+  "name" | "description" | "body" | "userInvocable" | "metadata"
+>;
 
 /** Parse one SKILL.md; a failure returns the issue detail instead of a skill. */
 export function parseSkillMarkdown(source: string): ParsedSkill | { detail: string } {
@@ -136,6 +156,7 @@ export function parseSkillMarkdown(source: string): ParsedSkill | { detail: stri
   return {
     name: parsed.data.name,
     description: parsed.data.description,
+    userInvocable: parsed.data["user-invocable"],
     metadata: parsed.data.metadata,
     body: (match[2] ?? "").trim(),
   };
@@ -222,7 +243,7 @@ export function composeSkillsPromptSection(skills: readonly Skill[]): string {
   if (eligible.length === 0) return "";
   return [
     "# Skills",
-    "Named workflows configured for this project. When a task matches a skill's description, read its SKILL.md and follow it before improvising your own approach. The user can also invoke a skill explicitly as /<name>.",
+    "Named workflows configured for this project. When a task matches a skill's description, read its SKILL.md and follow it before improvising your own approach. The user can also invoke some skills explicitly as /<name>.",
     ...eligible.map((skill) => `- ${skill.name} — ${skill.description} (${skill.path})`),
   ].join("\n");
 }

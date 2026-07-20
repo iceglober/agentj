@@ -20,6 +20,7 @@ const makeSkill = (overrides: Partial<Skill> = {}): Skill => ({
   path: "/repo/.aj/skills/ship/SKILL.md",
   dir: "/repo/.aj/skills/ship",
   body: "Open a PR.",
+  userInvocable: true,
   metadata: {},
   ...overrides,
 });
@@ -43,6 +44,7 @@ describe("parseSkillMarkdown", () => {
     expect(parsed).toEqual({
       name: "pdf-processing",
       description: "Extract PDF text. Use when handling PDFs.",
+      userInvocable: true,
       metadata: { author: "example-org", version: "1.0", "agentj-mode": "build" },
       body: "Step one.\n\nStep two.",
     });
@@ -59,6 +61,18 @@ describe("parseSkillMarkdown", () => {
     }
     expect(parseSkillMarkdown(skillSource("name: ship\ndescription:"))).toHaveProperty("detail");
     expect(parseSkillMarkdown(skillSource("name: ship"))).toHaveProperty("detail");
+  });
+
+  test("parses user-invocable as a boolean and rejects string values", () => {
+    expect(
+      parseSkillMarkdown(skillSource("name: ship\ndescription: Ship.\nuser-invocable: false")),
+    ).toMatchObject({ name: "ship", userInvocable: false });
+    expect(
+      parseSkillMarkdown(skillSource('name: ship\ndescription: Ship.\nuser-invocable: "false"')),
+    ).toEqual({
+      detail:
+        "invalid frontmatter — user-invocable: Invalid input: expected boolean, received string",
+    });
   });
 
   test("rejects an unknown agentj-mode while tolerating unknown top-level fields", () => {
@@ -171,7 +185,8 @@ describe("discoverSkills", () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: "running-background-work",
-          metadata: { "agentj-mode": "build" },
+          userInvocable: false,
+          metadata: {},
         }),
       ]),
     );
@@ -191,6 +206,17 @@ describe("invocation and prompt section", () => {
     expect(bare).not.toContain("Arguments:");
     expect(bare).toContain('Skill "ship" invoked');
     expect(bare).toContain("/repo/.aj/skills/ship");
+  });
+
+  test("prompt section lists model-eligible skills regardless of user invocation", () => {
+    const nonInvocable = makeSkill({
+      name: "background-work",
+      description: "Continue work after this turn.",
+      userInvocable: false,
+    });
+    const section = composeSkillsPromptSection([makeSkill(), nonInvocable]);
+    expect(section).toContain("- background-work — Continue work after this turn.");
+    expect(section).toContain("some skills explicitly as /<name>");
   });
 
   test("prompt section lists eligible skills and omits disabled ones", () => {

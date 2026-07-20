@@ -8,8 +8,37 @@ import {
   formatClock,
   formatResumeCommand,
   shouldWarnContext,
+  toSkillCommands,
   truncateLineWithNotice,
 } from "./agent-loop";
+
+describe("skill command catalog", () => {
+  test("excludes model-only skills from slash-command routing", () => {
+    const commands = toSkillCommands([
+      {
+        name: "ship",
+        description: "Ship finished work.",
+        path: "/repo/.aj/skills/ship/SKILL.md",
+        dir: "/repo/.aj/skills/ship",
+        body: "Ship it.",
+        userInvocable: true,
+        metadata: { "agentj-mode": "build" },
+      },
+      {
+        name: "running-background-work",
+        description: "Continue work after this turn.",
+        path: "/repo/.aj/skills/running-background-work/SKILL.md",
+        dir: "/repo/.aj/skills/running-background-work",
+        body: "Use run_job.",
+        userInvocable: false,
+        metadata: {},
+      },
+    ]);
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ name: "ship", mode: "build" });
+  });
+});
 
 describe("update restart", () => {
   test("inherits terminal streams and marks the restarted process", () => {

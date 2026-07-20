@@ -304,6 +304,20 @@ export {
   shouldWarnContext,
 } from "./lib/tui/status";
 
+/** Convert discovered skills into the catalog available to slash-command routing. */
+export const toSkillCommands = (skills: readonly Skill[]): SkillCommand[] =>
+  skills
+    .filter((skill) => skill.userInvocable)
+    .map((skill) => {
+      const mode = skillMode(skill);
+      return {
+        name: skill.name,
+        summary: skill.description,
+        ...(mode ? { mode } : {}),
+        prompt: (args) => renderSkillInvocation(skill, args),
+      };
+    });
+
 interface ChatComposition {
   root: string;
   commonGitDir: string;
@@ -1279,6 +1293,7 @@ export async function runAgentjChat(
         stderr: { write: configOutput },
       },
     });
+    const skillCommands = toSkillCommands(composition.skills);
     const commandContext: ChatCommandContext = {
       session: chat,
       jobs: jobRunner,
@@ -1325,18 +1340,11 @@ export async function runAgentjChat(
       guided: {
         askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
       },
-      skills: composition.skills.map(
-        (skill): SkillCommand => ({
-          name: skill.name,
-          summary: skill.description,
-          ...(skillMode(skill) ? { mode: skillMode(skill) } : {}),
-          prompt: (args) => renderSkillInvocation(skill, args),
-        }),
-      ),
+      skills: skillCommands,
     };
     const skillNotices = [
       ...composition.skillIssues.map(({ path, detail }) => `skill ${path}: ${detail}`),
-      ...composition.skills
+      ...skillCommands
         .filter(({ name }) => name in chatCommands)
         .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
     ];

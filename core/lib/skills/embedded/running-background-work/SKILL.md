@@ -1,8 +1,7 @@
 ---
 name: running-background-work
 description: Run work that must continue after this turn, such as waiting for CI, releases, reviews, deploys, or delayed merges. Use when the user asks to wait, monitor, or continue after an external event.
-metadata:
-  agentj-mode: build
+user-invocable: false
 ---
 
 # Running background work
