@@ -409,7 +409,7 @@ async function composeChat(
   const skillsSection = composeSkillsPromptSection(skillsDiscovery.skills);
   let agentConfig: AgentConfig = {
     ...config.agent,
-    rules: [config.agent.rules || agentsMd || "", skillsSection].filter(Boolean).join("\n\n"),
+    rules: [agentsMd, config.agent.rules, skillsSection].filter(Boolean).join("\n\n"),
     llm: {
       ...config.agent.llm,
       providers: {
@@ -786,7 +786,7 @@ async function composeChat(
 /** The interactive chat session (the default command). */
 export async function runAgentjChat(
   options: { resume?: string; continueLatest?: boolean } = {},
-  configPath: string = new URL("./agentj.json", import.meta.url).pathname,
+  configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
   update?: (channel: UpdateChannel) => Promise<void>,
 ): Promise<number> {
   let requestedUpdate: UpdateChannel | undefined;
@@ -1499,7 +1499,7 @@ export async function runAgentjChat(
 export async function runAgentjOnce(
   task: string,
   options: { plan: boolean; allowAll: boolean; signal: AbortSignal },
-  configPath: string = new URL("./agentj.json", import.meta.url).pathname,
+  configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
 ): Promise<number> {
   const gate: PermissionGate = async (request) => {
     if (options.allowAll) return "allow";
