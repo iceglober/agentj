@@ -7,6 +7,7 @@ describe("highlightEditorLine", () => {
       highlightEditorLine("> inspect /build and @src/main.ts", {
         background: false,
         firstRow: true,
+        matchesSlashCommand: (query) => query === "build",
       }),
     ).toEqual([
       { text: "> " },
@@ -17,8 +18,24 @@ describe("highlightEditorLine", () => {
     ]);
   });
 
+  test("leaves unmatched slash tokens unstyled", () => {
+    expect(
+      highlightEditorLine("> /b /bz", {
+        background: false,
+        firstRow: true,
+        matchesSlashCommand: (query) => query === "b",
+      }),
+    ).toEqual([{ text: "> " }, { text: "/b", tone: "accent" }, { text: " " }, { text: "/bz" }]);
+  });
+
   test("marks a leading background job without treating embedded & specially", () => {
-    expect(highlightEditorLine("> & run tests", { background: true, firstRow: true })).toEqual([
+    expect(
+      highlightEditorLine("> & run tests", {
+        background: true,
+        firstRow: true,
+        matchesSlashCommand: () => false,
+      }),
+    ).toEqual([
       { text: "> ", tone: "warning", bold: true },
       { text: "&", tone: "warning", bold: true },
       { text: " run tests" },

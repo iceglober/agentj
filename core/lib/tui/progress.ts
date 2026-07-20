@@ -12,6 +12,13 @@ const SPINNER = ["◐", "◓", "◑", "◒"];
 const truncateLine = (value: string, maxLength: number): string =>
   truncateWithNotice(value.replace(/\r\n?|\n/gu, " "), maxLength);
 
+/** A bounded, single-line tool label shared by live and completed activity rows. */
+export const formatToolActivityLabel = (
+  tool: string,
+  detail: string,
+  maxDetailLength = 120,
+): string => `${tool}${detail ? ` ${truncateLine(detail, maxDetailLength)}` : ""}`;
+
 interface TrackedTask {
   id: string;
   title: string;
@@ -189,9 +196,7 @@ export const composeProgressLines = (state: {
   const owned = new Set<number>();
   const toolRows: string[] = [];
   for (const [id, { tool, detail }] of state.activeTools) {
-    toolRows.push(
-      `  ${frame} ${tool}${detail && tool !== "run_subagents" ? ` ${truncateLine(detail, 40)}` : ""}`,
-    );
+    toolRows.push(`  ${frame} ${formatToolActivityLabel(tool, detail, 80)}`);
     const block = state.dagBlocks.get(id);
     if (block) {
       owned.add(id);
