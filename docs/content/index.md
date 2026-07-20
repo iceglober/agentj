@@ -17,7 +17,7 @@ Start a session in any git repository:
 agentj
 ```
 
-You begin in **plan mode**: the agent's tools are read-only, so it investigates, fans out research subagents, and proposes a plan without changing anything. Press **Tab** to switch to **build mode** (full tools), or enter **`/build`** to switch and have it implement what the conversation agreed on. That is the whole loop — talk, plan, build. Type `/help` in a session to see every command and key.
+You begin in **plan mode**: the agent's tools are read-only, so it investigates, fans out research subagents, and proposes a plan without changing anything. Press **Tab** to switch to **build mode** (full tools), or enter **`/build`** to switch and have it implement what the conversation agreed on. That is the whole loop — talk, plan, build. The interactive primary agent can also ask focused structured questions with described choices, multi-select answers, or free text; one-shot runs, background jobs, and subagents cannot. Type `/help` in a session to see every command and key.
 
 :::details Resume a session, or run one-shot from a script
 

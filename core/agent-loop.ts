@@ -17,6 +17,7 @@ import {
   type PermissionGate,
   withRequestOrigin,
 } from "./lib/agent/permissions";
+import type { QuestionPort } from "./lib/agent/questions";
 import { createPlanReflectionFollowUp } from "./lib/agent/reflections";
 import {
   runSubagentTasks,
@@ -48,6 +49,7 @@ import {
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { runOnboarding } from "./lib/chat/onboarding";
 import { createPromptsGuidedInput } from "./lib/chat/prompts-guided-input-adapter";
+import { createQuestionPort } from "./lib/chat/questions";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { createSessionTodos } from "./lib/chat/todos";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
@@ -234,6 +236,13 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       return "(turn interrupted)";
     case "turn-error":
       return `error: ${event.error}`;
+    case "questions-answered":
+      return event.answers
+        .map(
+          ({ header, answers }) =>
+            `${header}: ${answers.length > 0 ? answers.join(", ") : "(none)"}`,
+        )
+        .join("\n");
     case "mode-changed":
       return event.pending ? `(mode → ${event.mode} at next turn)` : `(mode → ${event.mode})`;
     case "job-started":
@@ -368,6 +377,7 @@ interface ChatComposition {
   attachInteractiveCapabilities(options: {
     jobs: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">;
     todos: TodoPort;
+    questions: QuestionPort;
   }): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
@@ -588,6 +598,7 @@ async function composeChat(
   let agentMcpVersion = mcp.snapshot().version;
   let jobsRuntime: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort"> | undefined;
   let todosRuntime: TodoPort | undefined;
+  let questionsRuntime: QuestionPort | undefined;
   const jobsPort = {
     start: (
       mode: "plan" | "build",
@@ -606,6 +617,12 @@ async function composeChat(
     replace: async (items) => {
       if (!todosRuntime) throw new Error("Session todos are unavailable in this session.");
       await todosRuntime.replace(items);
+    },
+  };
+  const questionsPort: QuestionPort = {
+    ask: async (questions) => {
+      if (!questionsRuntime) throw new Error("User questions are unavailable in this session.");
+      return questionsRuntime.ask(questions);
     },
   };
   const agentFor = async (mode: ChatMode): Promise<Agent> => {
@@ -634,7 +651,7 @@ async function composeChat(
             onToolActivity,
             permissions: { config: config.permissions, gate },
             jobs: jobsPort,
-            ...(entrypoint === "chat" ? { todos: todosPort } : {}),
+            ...(entrypoint === "chat" ? { todos: todosPort, questions: questionsPort } : {}),
           })
         : createProductionAgent(environment, agentConfigFor("build"), {
             root,
@@ -651,7 +668,7 @@ async function composeChat(
             onSubagentProgress: onDagProgress,
             onToolActivity,
             jobs: jobsPort,
-            ...(entrypoint === "chat" ? { todos: todosPort } : {}),
+            ...(entrypoint === "chat" ? { todos: todosPort, questions: questionsPort } : {}),
           });
     agents.set(mode, agent);
     return agent;
@@ -844,9 +861,10 @@ async function composeChat(
       }),
     runBuildJob,
     runPlanJob,
-    attachInteractiveCapabilities: ({ jobs, todos }) => {
+    attachInteractiveCapabilities: ({ jobs, todos, questions }) => {
       jobsRuntime = jobs;
       todosRuntime = todos;
+      questionsRuntime = questions;
     },
     environment,
     stateRoot,
@@ -1256,6 +1274,11 @@ export async function runAgentjChat(
     };
     emitChatEvent = render;
 
+    const guidedInput = {
+      askInput: (inputOptions: Parameters<ChatScreen["askInput"]>[0]) =>
+        screen?.askInput(inputOptions) ?? Promise.resolve(null),
+    };
+    const questionPort = createQuestionPort({ guided: guidedInput, onEvent: render });
     const sessionTodos = createSessionTodos({
       log,
       initial: resumed?.todos,
@@ -1294,7 +1317,7 @@ export async function runAgentjChat(
       },
     });
     jobs = jobRunner;
-    composition.attachInteractiveCapabilities({ jobs: jobRunner, todos });
+    composition.attachInteractiveCapabilities({ jobs: jobRunner, todos, questions: questionPort });
 
     const home = homedir();
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;
@@ -1408,9 +1431,7 @@ export async function runAgentjChat(
         reload: composition.reloadMcp,
         authorize: composition.authorizeMcp,
       },
-      guided: {
-        askInput: (inputOptions) => screen?.askInput(inputOptions) ?? Promise.resolve(null),
-      },
+      guided: guidedInput,
       skills: skillCommands,
     };
     const skillNotices = [

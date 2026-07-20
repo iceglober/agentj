@@ -386,6 +386,25 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("guided-input renders choice descriptions", async () => {
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    const answer = screen.askInput({
+      label: "Pick one",
+      choices: [
+        { label: "CLI", value: "cli", description: "Change the command-line interface." },
+        { label: "TUI", value: "tui", description: "Change the terminal interface." },
+      ],
+    });
+    await settle();
+    const shown = renderScreen(text()).join("\n");
+    expect(shown).toContain("CLI");
+    expect(shown).toContain("Change the command-line interface.");
+    input.write("\r");
+    await expect(answer).resolves.toBe("cli");
+    screen.stop();
+  });
+
   test("guided-input choices beyond the window stay reachable and visible", async () => {
     const choices = Array.from({ length: 12 }, (_, i) => `choice-${String(i).padStart(2, "0")}`);
     const { screen, input, text } = makeScreen();

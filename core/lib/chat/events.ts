@@ -1,4 +1,5 @@
 import type { PermissionRequest } from "../agent/permissions";
+import type { QuestionAnswer } from "../agent/questions";
 import type { SubagentProgressEvent } from "../agent/subagents";
 import type { RunStep } from "../llm";
 import type { CompletionReport } from "../report";
@@ -47,6 +48,7 @@ export type ChatEvent =
   /** The session continuation and durable visible history were reset. */
   | { type: "context-cleared" }
   | { type: "todos-updated"; items: TodoList }
+  | { type: "questions-answered"; answers: QuestionAnswer[] }
   | { type: "mode-changed"; mode: ChatMode; pending: boolean }
   | { type: "subagent-progress"; progress: SubagentProgressEvent }
   | { type: "permission-ask"; request: PermissionRequest }

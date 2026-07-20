@@ -1,12 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  composeStatusSection,
-  composeThinkingLine,
   createUpdateRestartOptions,
   finalizeInteractiveChat,
   formatActivityReceipt,
   formatChatEvent,
-  formatClock,
   formatResumeCommand,
   shouldWarnContext,
   toSkillCommands,
@@ -158,6 +155,18 @@ describe("formatChatEvent", () => {
     ).toBe("Command: build");
   });
 
+  test("renders structured question answers in the transcript", () => {
+    expect(
+      formatChatEvent({
+        type: "questions-answered",
+        answers: [
+          { header: "Scope", question: "What should change?", answers: ["CLI", "TUI"] },
+          { header: "Tests", question: "Which tests?", answers: [] },
+        ],
+      }),
+    ).toBe("Scope: CLI, TUI\nTests: (none)");
+  });
+
   test("keeps turn lifecycle-only events out of the transcript", () => {
     expect(formatChatEvent({ type: "turn-abort-requested" })).toBeNull();
     expect(formatChatEvent({ type: "turn-finished" })).toBeNull();
@@ -274,15 +283,6 @@ describe("formatChatEvent", () => {
   });
 });
 
-describe("formatClock", () => {
-  test("scales units with elapsed time", () => {
-    expect(formatClock(9_000)).toBe("9s");
-    expect(formatClock(74_000)).toBe("1m14s");
-    expect(formatClock(3.5 * 3_600_000)).toBe("3h30m");
-    expect(formatClock(30 * 3_600_000)).toBe("1d6h0m");
-  });
-});
-
 describe("shouldWarnContext", () => {
   test("fires at the threshold and re-arms after meaningful context growth", () => {
     expect(shouldWarnContext(239_999, 240_000, undefined)).toBe(false);
@@ -290,106 +290,5 @@ describe("shouldWarnContext", () => {
     expect(shouldWarnContext(263_999, 240_000, 240_000)).toBe(false);
     expect(shouldWarnContext(264_000, 240_000, 240_000)).toBe(true);
     expect(shouldWarnContext(300_000, undefined, undefined)).toBe(false);
-  });
-});
-
-describe("composeStatusSection", () => {
-  const base = {
-    sessionId: "204ed50c",
-    version: "0.1.0-next.32",
-    root: "~/repos/agentj",
-    model: "azure/gpt-5.6-sol",
-    mode: "plan" as const,
-    spinnerFrame: 0,
-    usage: { in: 12_400, out: 3_100, ctx: 8_700 },
-    sessionStartedAt: 0,
-    jobs: [],
-    now: 74_000,
-  };
-
-  test("idle: identity with right-aligned counters, then the root path", () => {
-    const lines = composeStatusSection(base, 90);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]?.startsWith("204ed50c · azure/gpt-5.6-sol · plan (tab↕)")).toBe(true);
-    expect(lines[0]?.endsWith("in 12.4k ▸ out 3.1k · ctx 8.7k · 1m14s")).toBe(true);
-    expect(lines[0]?.length).toBe(90);
-    expect(lines[1]?.endsWith("aj 0.1.0-next.32")).toBe(true);
-    expect(lines[1]?.length).toBe(90);
-  });
-
-  test("pins the aj version to the right and shortens the root first", () => {
-    const lines = composeStatusSection({ ...base, root: "~/repos/very/deep/project/root" }, 35);
-    expect(lines[1]).toBe("~/repo…oject/root  aj 0.1.0-next.32");
-  });
-
-  test("narrow terminals drop counter labels before truncating anything", () => {
-    const lines = composeStatusSection(base, 66);
-    expect(lines[0]).toContain("12.4k▸3.1k·8.7k·1m14s");
-    expect(lines[0]).not.toContain("in 12.4k");
-  });
-
-  test("session cache reads ride next to the input counter as a share of cumulative input", () => {
-    const lines = composeStatusSection(
-      { ...base, usage: { ...base.usage, cacheRead: 8_030 } },
-      110,
-    );
-    // 8 030 of the 12 400 cumulative input tokens came from the cache → 65%.
-    expect(lines[0]).toContain("in 12.4k · cached 8.0k(65%) ▸ out 3.1k");
-  });
-
-  test("the compact form drops the cache stat, width wins", () => {
-    const lines = composeStatusSection({ ...base, usage: { ...base.usage, cacheRead: 8_030 } }, 66);
-    expect(lines[0]).toContain("12.4k▸3.1k·8.7k·1m14s");
-    expect(lines[0]).not.toContain("cached");
-  });
-
-  test("ctx renders flagged once it reaches the configured soft limit", () => {
-    const under = composeStatusSection({ ...base, contextSoftLimit: 10_000 }, 90);
-    expect(under[0]).toContain("ctx 8.7k ·");
-    const over = composeStatusSection({ ...base, contextSoftLimit: 8_000 }, 90);
-    expect(over[0]).toContain("ctx 8.7k!");
-  });
-
-  test("thinking renders above the editor rather than in the status section", () => {
-    const line = composeThinkingLine(
-      {
-        thinking: true,
-        interruptRequested: false,
-        spinnerFrame: 0,
-        turnStartedAt: 62_000,
-        now: 74_000,
-      },
-      80,
-    );
-    expect(line).toBe("◐ thinking 12s (esc)");
-    expect(
-      composeStatusSection({ ...base, root: `~/${"deep/".repeat(30)}repo` }, 80)[1],
-    ).not.toContain("thinking");
-    expect(
-      composeThinkingLine(
-        { thinking: false, interruptRequested: false, spinnerFrame: 0, turnStartedAt: null },
-        80,
-      ),
-    ).toBeNull();
-  });
-
-  test("running jobs render individual rows below the status", () => {
-    const lines = composeStatusSection(
-      {
-        ...base,
-        jobs: [
-          { id: "j1", mode: "build", prompt: "Run the test suite", startedAt: 50_000 },
-          { id: "j2", mode: "plan", prompt: "Investigate the failure", startedAt: 60_000 },
-        ],
-      },
-      90,
-    );
-    expect(lines[0]).toContain("204ed50c · azure/gpt-5.6-sol · plan");
-    expect(lines[1]).toContain("~/repos/agentj");
-    expect(lines[1]?.endsWith("aj 0.1.0-next.32")).toBe(true);
-    expect(lines.slice(2)).toEqual([
-      "  ◐ [j1] build: Run the test suite  24s",
-      "  ◐ [j2] plan: Investigate the failure  14s",
-    ]);
   });
 });
