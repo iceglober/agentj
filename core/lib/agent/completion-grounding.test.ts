@@ -11,7 +11,7 @@ import {
 
 const usage = { inputTokens: 1, outputTokens: 2, totalTokens: 3 };
 const tools: ToolSet = {
-  run_job: {
+  run_background_job: {
     description: "start a job",
     inputSchema: z.object({}),
     execute: async () => "",
@@ -31,9 +31,12 @@ const doneReport = (summary: string): string =>
   });
 
 const runJobStep = () => ({
-  toolCalls: [{ name: "run_job", input: {} }],
+  toolCalls: [{ name: "run_background_job", input: {} }],
   toolResults: [
-    { name: "run_job", output: "Started background job j4 (build). Do not wait for it." },
+    {
+      name: "run_background_job",
+      output: "Started background job j4 (build). Do not wait for it.",
+    },
   ],
 });
 
@@ -62,16 +65,18 @@ describe("claimsActiveDeferredWork", () => {
 });
 
 describe("hasStartedBackgroundJob", () => {
-  test("requires the existing run_job started-ID result", () => {
+  test("requires the existing run_background_job started-ID result", () => {
     expect(hasStartedBackgroundJob(result("", { steps: [runJobStep()] }))).toBe(true);
-    // An "unavailable" run_job result is not a started job.
+    // An "unavailable" run_background_job result is not a started job.
     expect(
       hasStartedBackgroundJob(
         result("", {
           steps: [
             {
-              toolCalls: [{ name: "run_job", input: {} }],
-              toolResults: [{ name: "run_job", output: "Background jobs are unavailable." }],
+              toolCalls: [{ name: "run_background_job", input: {} }],
+              toolResults: [
+                { name: "run_background_job", output: "Background jobs are unavailable." },
+              ],
             },
           ],
         }),
@@ -108,7 +113,7 @@ describe("generateWithGroundedCompletion — background jobs", () => {
     expect(output.text).toContain("Job j4 is running.");
   });
 
-  test("retries one false monitoring claim with run_job forced first", async () => {
+  test("retries one false monitoring claim with run_background_job forced first", async () => {
     const requests: GenerateRequest[] = [];
     const runtime = {
       async generate(next: GenerateRequest) {
@@ -126,7 +131,7 @@ describe("generateWithGroundedCompletion — background jobs", () => {
 
     expect(requests).toHaveLength(2);
     expect(requests[1]).toMatchObject({
-      requiredFirstTool: "run_job",
+      requiredFirstTool: "run_background_job",
       messages: [{ role: "assistant" }],
     });
     expect(output.steps).toHaveLength(1);
@@ -134,7 +139,7 @@ describe("generateWithGroundedCompletion — background jobs", () => {
     expect(output.text).toContain("Started monitoring.");
   });
 
-  test("does not retry a verified run_job start", async () => {
+  test("does not retry a verified run_background_job start", async () => {
     let calls = 0;
     const runtime = {
       async generate() {

@@ -46,7 +46,7 @@ const recordingPort = (
   };
 };
 
-describe("run_job tool", () => {
+describe("run_background_job tool", () => {
   test("build agents default to build jobs and report the id without waiting", async () => {
     const port = recordingPort();
     const tool = createBackgroundJobTool(port, "build");
@@ -93,7 +93,7 @@ describe("run_job tool", () => {
   });
 });
 
-describe("check_job tool", () => {
+describe("check_background_job tool", () => {
   test("unknown jobs report cleanly", async () => {
     const tool = createCheckJobTool(recordingPort());
     expect(await tool.execute({ id: "j9" })).toBe("No background job j9 in this session.");

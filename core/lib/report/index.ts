@@ -51,6 +51,6 @@ export const parseCompletionReport = (text: string): CompletionReport | null => 
 export const COMPLETION_REPORT_INSTRUCTION = `# Completion report
 Your final response must be JSON only:
 {"status":"done|in_progress|blocked|failed","summary":"...","changes":["..."],"validation":[{"command":"exact command run","outcome":"passed|failed|not_run","evidence":"..."}],"nextSteps":["..."],"openQuestions":["..."]}
-Use status=in_progress only after run_job returns a job ID; put that job ID and what it will do in nextSteps.
+Use status=in_progress only for detached work that continues after this turn, and only after run_background_job returns a job ID; put that job ID and what it will do in nextSteps.
 Use status=done only when every claimed passing validation command was actually
 run and succeeded.`;

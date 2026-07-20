@@ -27,7 +27,7 @@ describe("skill command catalog", () => {
         description: "Continue work after this turn.",
         path: "/repo/.aj/skills/running-background-work/SKILL.md",
         dir: "/repo/.aj/skills/running-background-work",
-        body: "Use run_job.",
+        body: "Use run_background_job.",
         userInvocable: false,
         metadata: {},
       },

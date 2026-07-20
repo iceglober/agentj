@@ -6,7 +6,7 @@ user-invocable: false
 
 # Running background work
 
-Use `run_job` before saying that work is being monitored or will continue after
+Use `run_background_job` before saying that work is being monitored or will continue after
 this turn. Report the returned job ID. Never sleep, poll, or wait in the
 foreground.
 

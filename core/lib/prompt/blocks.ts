@@ -88,8 +88,8 @@ export const COMMS_STOP_BLOCK = `# Communication
 - Stop early only for a concrete hard blocker: required user input or approval,
   unavailable credentials, network or model, or a runtime failure. Report it as
   status=blocked or status=failed with the exact reason.
-- When external work must wait, start run_job; do not ask the user to send
-  continue after a job completes.
+- When external work must wait, use the foreground/background routing rule below; do
+  not ask the user to send continue after a job completes.
 - When the conversation already implies the answer, state the assumption
   and act on it (build) or name it in one line (plan) rather than asking
   the user to confirm the obvious. This never overrides permission gates
@@ -97,10 +97,13 @@ export const COMMS_STOP_BLOCK = `# Communication
 - If required information is still missing after a reasonable search,
    ask the single smallest specific question.`;
 
-export const BACKGROUND_JOB_INVARIANT = `# Background jobs
-When work must wait on an external event or continue after this turn, start it
-with run_job before claiming it is being monitored. Never sleep or poll in the
-foreground, and report the returned job ID. Use a build job if later work may
+export const BACKGROUND_JOB_INVARIANT = `# Foreground delegation and background jobs
+Use run_one_subagent or run_subagents when the current turn needs the result; wait
+for their task or integration result even when the work is lengthy. Use
+run_background_job only when work must wait on an external event or the user
+explicitly wants it detached beyond this turn. Never sleep or poll in the
+foreground. After starting a background job, report its returned job ID; use
+check_background_job for its later status. Use a build job if later work may
 merge, push, deploy, edit, or otherwise mutate.`;
 
 export const PLAN_BLOCK = `# Plan mode

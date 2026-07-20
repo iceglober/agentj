@@ -148,7 +148,7 @@ describe("childAgentConfig", () => {
 });
 
 describe("createAgentTools", () => {
-  test("run_job and check_job exist only for a primary agent given a jobs port", async () => {
+  test("run_background_job and check_background_job exist only for a primary agent given a jobs port", async () => {
     const config = agentConfigSchema.parse({});
     const jobs = {
       start: () => ({ id: "j1" }),
@@ -157,21 +157,23 @@ describe("createAgentTools", () => {
       abort: () => false,
     };
     const withJobs = await createAgentTools(sandbox, config, { ...baseOptions, jobs });
-    expect(withJobs).toHaveProperty("run_job");
-    expect(withJobs).toHaveProperty("check_job");
+    expect(withJobs).toHaveProperty("run_background_job");
+    expect(withJobs).toHaveProperty("check_background_job");
     expect(
       await createAgentTools(sandbox, config, { ...baseOptions, mode: "plan", jobs }),
-    ).toHaveProperty("run_job");
-    expect(await createAgentTools(sandbox, config, baseOptions)).not.toHaveProperty("run_job");
+    ).toHaveProperty("run_background_job");
+    expect(await createAgentTools(sandbox, config, baseOptions)).not.toHaveProperty(
+      "run_background_job",
+    );
     expect(
       await createAgentTools(sandbox, childAgentConfig(config, "delegate"), {
         ...baseOptions,
         jobs,
       }),
-    ).not.toHaveProperty("run_job");
+    ).not.toHaveProperty("run_background_job");
   });
 
-  test("run_job reports standard tool activity", async () => {
+  test("run_background_job reports standard tool activity", async () => {
     const events: string[] = [];
     const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), {
       ...baseOptions,
@@ -184,8 +186,8 @@ describe("createAgentTools", () => {
       onToolActivity: (activity) => events.push(`${activity.phase}:${activity.tool}`),
     });
 
-    await tools.run_job?.execute({ prompt: "watch CI" });
-    expect(events).toEqual(["start:run_job", "end:run_job"]);
+    await tools.run_background_job?.execute({ prompt: "watch CI" });
+    expect(events).toEqual(["start:run_background_job", "end:run_background_job"]);
   });
 
   test("permission gating is strictly opt-in: no-gate builder tools behave as before", async () => {

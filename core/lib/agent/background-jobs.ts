@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../llm";
 
 /**
- * The run_job / check_job tools: detach one prompt into the session's
+ * The run_background_job / check_background_job tools: detach one prompt into the session's
  * background-job runner — the same runner behind `&`-prefixed user input —
  * and manage it afterwards. The composition root injects the port; only an
  * interactive session provides a live runner, so one-shot runs report
@@ -70,11 +70,12 @@ export const createBackgroundJobTool = (port: BackgroundJobPort, agentMode: "pla
       "returning immediately with a job id. The job's outcome is shown to the user when it",
       "finishes and reported to you as a notice at the start of a later turn — never wait or",
       "poll for it yourself.",
-      "Use this instead of sleeping or polling in the foreground whenever a task must wait on",
-      "something external (a CI run, a code review, a deploy) or is long and independent of",
-      'the current conversation, e.g. "wait for checks on PR 12, then fix any failures".',
+      "Use this only when work must wait on something external (a CI run, a code review, a",
+      "deploy) or when the user explicitly wants it detached from this turn. If the current",
+      "turn needs the result, use a foreground tool or subagent instead, even when the task is",
+      'long. Example: "wait for checks on PR 12, then fix any failures".',
       "When you can estimate the duration, set softTimeoutMinutes a little above it: if the",
-      "job is still running then, you are pinged to check_job it — the job keeps running, and",
+      "job is still running then, you are pinged to check_background_job it — the job keeps running, and",
       "you either renew the soft timeout (progressing, just slow) or abort it (stuck).",
       "mode plan runs an observe-only agent in the session directory — it reads, searches,",
       "and runs non-mutating commands (CI status, git state, tests) but cannot edit; mode",
@@ -105,7 +106,7 @@ export const createBackgroundJobTool = (port: BackgroundJobPort, agentMode: "pla
 export const createCheckJobTool = (port: BackgroundJobPort, now: () => number = Date.now) =>
   defineTool({
     description: [
-      "Inspect a background job (started with run_job, or by the user with `&`): status,",
+      "Inspect a background job (started with run_background_job, or by the user with `&`): status,",
       "elapsed time, recent tool activity, and its result when finished. When a soft-timeout",
       "ping asked you to check a job, decide from the activity trail: set",
       "renewSoftTimeoutMinutes to keep a healthy-but-slow job running (you will be pinged",

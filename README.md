@@ -59,10 +59,10 @@ Keys and commands:
   editor character, the editor turns yellow and shows `BACKGROUND JOB`. Jobs run in their own
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
   and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one. The agent can also start
-  jobs itself (`run_job`) — asked to wait on something external like a CI run or a review, it
+  jobs itself (`run_background_job`) — asked to wait on something external like a CI run or a review, it
   detaches the wait instead of blocking the conversation. A job may carry a renewable soft
   timeout: if it is still running at the deadline the agent gets pinged, inspects the job's
-  recent activity (`check_job`), and either extends the deadline or aborts a stuck job — the
+  recent activity (`check_background_job`), and either extends the deadline or aborts a stuck job — the
   job itself keeps running throughout. The bundled `running-background-work` skill guides the
   model through this workflow for waits, reviews, releases, deploys, and delayed merges; it is not
   a slash command.
