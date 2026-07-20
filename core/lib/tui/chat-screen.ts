@@ -63,6 +63,8 @@ export interface CreateChatScreenOptions {
   initialHistory?: readonly string[];
   /** Context-aware options for slash and @ tokens in the editor. */
   editorCompletionOptions?: EditorCompletionProvider;
+  /** Whether a slash token still matches a command available in this chat. */
+  matchesSlashCommand(query: string): boolean;
   /** Controls whether a submitted chat input is retained in in-memory history. */
   shouldRememberInput?(text: string): boolean;
 }
@@ -259,7 +261,13 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     const layout = windowEditorLayout(renderEditorLayout(editor, contentWidth()), 10);
     const background = editor.text.startsWith("&");
     const editorRows = layout.rows.map((row, index) =>
-      safeLine(highlightEditorLine(row, { background, firstRow: index === 0 })),
+      safeLine(
+        highlightEditorLine(row, {
+          background,
+          firstRow: index === 0,
+          matchesSlashCommand: options.matchesSlashCommand,
+        }),
+      ),
     );
     const backgroundLines = background
       ? [safeLine([{ text: "BACKGROUND JOB", tone: "warning", bold: true }])]

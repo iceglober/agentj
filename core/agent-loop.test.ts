@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  composeProgressLines,
   composeStatusSection,
   composeThinkingLine,
   createUpdateRestartOptions,
@@ -209,71 +208,6 @@ describe("formatChatEvent", () => {
         },
       }),
     ).toBe("x [j2] failed in 1s — monitor the release workflow\nChild worktree setup failed.");
-  });
-});
-
-describe("composeProgressLines", () => {
-  const tools = (
-    entries: Array<[number, string, string?]>,
-  ): Array<[number, { tool: string; detail: string }]> =>
-    entries.map(([id, tool, detail]) => [id, { tool, detail: detail ?? "" }]);
-
-  test("a tool's DAG block nests directly beneath its head row", () => {
-    const lines = composeProgressLines({
-      activeTools: tools([[1, "run_subagents", '{"tasks":[…]}']]),
-      dagBlocks: new Map([[1, ["    ◐ t1 One", "    · t2 Two"]]]),
-      queued: ["  ↳ queued: next"],
-      spinnerFrame: 0,
-    });
-    expect(lines).toEqual([
-      "  ◐ run_subagents",
-      "    ◐ t1 One",
-      "    · t2 Two",
-      "  ↳ queued: next",
-    ]);
-  });
-
-  test("renders run_job through the standard tool-activity row", () => {
-    const lines = composeProgressLines({
-      activeTools: tools([[1, "run_job", "watch CI"]]),
-      dagBlocks: new Map(),
-      queued: [],
-      spinnerFrame: 0,
-    });
-    expect(lines).toEqual(["  ◐ run_job watch CI"]);
-  });
-
-  test("concurrent owners keep their blocks separate, in tool start order", () => {
-    const lines = composeProgressLines({
-      activeTools: tools([
-        [1, "run_subagents"],
-        [2, "readFile", "a.ts"],
-        [3, "run_subagents"],
-      ]),
-      dagBlocks: new Map([
-        [3, ["    ◐ y1 Late"]],
-        [1, ["    ◐ x1 Early"]],
-      ]),
-      queued: [],
-      spinnerFrame: 0,
-    });
-    expect(lines).toEqual([
-      "  ◐ run_subagents",
-      "    ◐ x1 Early",
-      "  ◐ readFile a.ts",
-      "  ◐ run_subagents",
-      "    ◐ y1 Late",
-    ]);
-  });
-
-  test("ownerless blocks render first, un-nested", () => {
-    const lines = composeProgressLines({
-      activeTools: tools([[5, "bash", "ls"]]),
-      dagBlocks: new Map([[-1, ["  ◐ t1 Orphan"]]]),
-      queued: [],
-      spinnerFrame: 0,
-    });
-    expect(lines).toEqual(["  ◐ t1 Orphan", "  ◐ bash ls"]);
   });
 });
 

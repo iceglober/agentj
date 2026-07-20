@@ -5,7 +5,12 @@ import type { UiLine } from "./styles";
 /** Apply semantic editor colors without putting ANSI into editor state or layout. */
 export const highlightEditorLine = (
   row: string,
-  options: { background: boolean; firstRow: boolean },
+  options: {
+    background: boolean;
+    firstRow: boolean;
+    /** Uses the command catalog owned by the composition root. */
+    matchesSlashCommand(query: string): boolean;
+  },
 ): UiLine => {
   const prefix = options.firstRow && row.startsWith("> ") ? "> " : "";
   const content = prefix ? row.slice(prefix.length) : row;
@@ -17,9 +22,14 @@ export const highlightEditorLine = (
   let offset = 0;
   for (const token of findEditorTokens(content)) {
     if (token.start > offset) spans.push({ text: graphemes.slice(offset, token.start).join("") });
+    const text = graphemes.slice(token.start, token.end).join("");
     spans.push({
-      text: graphemes.slice(token.start, token.end).join(""),
-      tone: token.sigil === "/" ? "accent" : "success",
+      text,
+      ...(token.sigil === "/" && options.matchesSlashCommand(token.query)
+        ? { tone: "accent" }
+        : token.sigil === "@"
+          ? { tone: "success" }
+          : {}),
     });
     offset = token.end;
   }

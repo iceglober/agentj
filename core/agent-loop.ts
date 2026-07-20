@@ -101,6 +101,7 @@ import {
   composeProgressLines,
   createProgressTracker,
   formatDuration,
+  formatToolActivityLabel,
   type ProgressTracker,
 } from "./lib/tui/progress";
 import {
@@ -900,7 +901,12 @@ export async function runAgentjChat(
       dagTrackers.delete(activity.id);
       turnProducedOutput = true;
       screen?.printAbove([
-        [{ text: `  ✓ ${activity.tool}${elapsed}`, tone: "success" }],
+        [
+          {
+            text: `  ✓ ${formatToolActivityLabel(activity.tool, started?.detail ?? activity.detail)}${elapsed}`,
+            tone: "success",
+          },
+        ],
         ...block.map((text) => [{ text }]),
       ]);
     }
@@ -1343,6 +1349,7 @@ export async function runAgentjChat(
     screen = createChatScreen({
       liveRegion,
       initialHistory: promptHistory.entries,
+      matchesSlashCommand: (query) => suggestChatInputRoots(query, commandContext).length > 0,
       editorCompletionOptions: createEditorCompletionProvider({
         completeInitialSlash: (state) =>
           completeChatInput(state.text, state.cursor, commandContext),

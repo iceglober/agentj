@@ -24,7 +24,10 @@ function makeScreen(
   over: Partial<ChatScreenCallbacks> = {},
   initialHistory: readonly string[] = [],
   screenOptions: Partial<
-    Pick<CreateChatScreenOptions, "editorCompletionOptions" | "shouldRememberInput"> & {
+    Pick<
+      CreateChatScreenOptions,
+      "editorCompletionOptions" | "matchesSlashCommand" | "shouldRememberInput"
+    > & {
       terminalHeight?: number;
       terminalWidth?: number;
     }
@@ -43,6 +46,7 @@ function makeScreen(
     escapeFlushMs: 5,
     quitWindowMs: 100,
     initialHistory,
+    matchesSlashCommand: (query) => suggestChatCommands(query).length > 0,
     editorCompletionOptions: (state) => {
       const token = findEditorToken(state);
       if (token?.sigil !== "/" || token.start !== state.text.search(/\S/u)) return null;

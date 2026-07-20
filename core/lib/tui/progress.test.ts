@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { SubagentProgressEvent } from "../agent/subagents";
-import { applyProgressEvent, createProgressTracker, formatDuration } from "./progress";
+import {
+  applyProgressEvent,
+  composeProgressLines,
+  createProgressTracker,
+  formatDuration,
+  formatToolActivityLabel,
+} from "./progress";
 
 const apply = (tracker: ReturnType<typeof createProgressTracker>, event: SubagentProgressEvent) =>
   applyProgressEvent(tracker, event);
@@ -169,6 +175,72 @@ test("tasks launched on a different model carry the label in the right column", 
   const lines = tracker.lines();
   expect(lines[0]).toContain("(azure/gpt-5-mini)");
   expect(lines[1]).not.toContain("(azure/gpt-5-mini)");
+});
+
+describe("tool activity", () => {
+  const tools = (
+    entries: Array<[number, string, string?]>,
+  ): Array<[number, { tool: string; detail: string }]> =>
+    entries.map(([id, tool, detail]) => [id, { tool, detail: detail ?? "" }]);
+
+  test("keeps each tool's basic arguments on live rows", () => {
+    const lines = composeProgressLines({
+      activeTools: tools([
+        [1, "bash", "git status --short"],
+        [2, "run_subagents", "3 tasks"],
+      ]),
+      dagBlocks: new Map([[2, ["    ◐ t1 Map modules"]]]),
+      queued: [],
+      spinnerFrame: 0,
+    });
+    expect(lines).toEqual([
+      "  ◐ bash git status --short",
+      "  ◐ run_subagents 3 tasks",
+      "    ◐ t1 Map modules",
+    ]);
+  });
+
+  test("keeps DAG blocks with their owner in tool start order", () => {
+    const lines = composeProgressLines({
+      activeTools: tools([
+        [1, "run_subagents", "2 tasks"],
+        [2, "readFile", "a.ts"],
+        [3, "run_subagents", "1 task"],
+      ]),
+      dagBlocks: new Map([
+        [3, ["    ◐ y1 Late"]],
+        [1, ["    ◐ x1 Early"]],
+      ]),
+      queued: [],
+      spinnerFrame: 0,
+    });
+    expect(lines).toEqual([
+      "  ◐ run_subagents 2 tasks",
+      "    ◐ x1 Early",
+      "  ◐ readFile a.ts",
+      "  ◐ run_subagents 1 task",
+      "    ◐ y1 Late",
+    ]);
+  });
+
+  test("renders ownerless blocks first", () => {
+    expect(
+      composeProgressLines({
+        activeTools: tools([[5, "bash", "ls"]]),
+        dagBlocks: new Map([[-1, ["  ◐ t1 Orphan"]]]),
+        queued: [],
+        spinnerFrame: 0,
+      }),
+    ).toEqual(["  ◐ t1 Orphan", "  ◐ bash ls"]);
+  });
+
+  test("formats completed labels as safe one-line previews", () => {
+    expect(formatToolActivityLabel("bash", "git status\n--short")).toBe("bash git status --short");
+    const preview = formatToolActivityLabel("bash", "x".repeat(200), 20);
+    expect(preview).toStartWith("bash ");
+    expect(preview).toContain("[trunc");
+    expect(preview).not.toContain("\n");
+  });
 });
 
 test("formatDuration uses ms under a second", () => {

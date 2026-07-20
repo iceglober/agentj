@@ -103,6 +103,13 @@ describe("completeChatInput", () => {
     expect(server?.hint).toContain("reload all");
   });
 
+  test("returns no root candidates once a slash query cannot match", () => {
+    expect(suggestChatInputRoots("bld")).toContainEqual(
+      expect.objectContaining({ label: "/build" }),
+    );
+    expect(suggestChatInputRoots("no-such-command")).toEqual([]);
+  });
+
   test("recognizes namespaced MCP prompt invocations without shadowing built-ins", () => {
     const promptContext = {
       ...context,
