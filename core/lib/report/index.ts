@@ -21,6 +21,24 @@ export const completionReportSchema = z.object({
 
 export type CompletionReport = z.infer<typeof completionReportSchema>;
 
+const executorResultSchema = z.object({
+  status: z.string(),
+  changes: z.array(z.record(z.string(), z.unknown())),
+  evidence: z.array(z.record(z.string(), z.unknown())),
+  open_questions: z.array(z.string()),
+});
+
+export type ExecutorResult = z.infer<typeof executorResultSchema>;
+
+/** Parse the executor's machine-readable background-job result. */
+export const parseExecutorResult = (text: string): ExecutorResult | null => {
+  try {
+    return executorResultSchema.parse(JSON.parse(text));
+  } catch {
+    return null;
+  }
+};
+
 /** Parse the agent's deliberately machine-readable final response. */
 export const parseCompletionReport = (text: string): CompletionReport | null => {
   try {

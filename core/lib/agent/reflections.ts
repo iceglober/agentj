@@ -4,9 +4,21 @@ import type { AgentConfig } from ".";
 import type { SubagentProgressEvent, SubagentRunner, SubagentsResult } from "./subagents";
 import { runSubagentTasks } from "./subagents";
 
-/** Optional parallel reviews that revise a completed plan exactly once. */
+export const reflectionEvents = [
+  "plan.once.pre_turn",
+  "plan.each.pre_turn",
+  "plan.once.post_turn",
+  "plan.each.post_turn",
+] as const;
+
+export type ReflectionEvent = (typeof reflectionEvents)[number];
+export const reflectionEventSchema = z.enum(reflectionEvents);
+
+/** Optional parallel reviews scheduled around plan turns. */
 export const reflectionsConfigSchema = z
   .object({
+    /** Reflection hooks. Empty disables scheduling. */
+    events: z.array(reflectionEventSchema).default(["plan.once.post_turn"]),
     /** Named review instructions. An empty map disables plan reflections. */
     prompts: z
       .record(
@@ -28,6 +40,10 @@ export const reflectionsConfigSchema = z
   .prefault({});
 
 export type ReflectionFollowUp = { text: string; transcriptText: string };
+export type ReflectionPreparation =
+  | ReflectionFollowUp
+  | { context: string; transcriptText: string }
+  | { notice: string };
 
 export interface CreatePlanReflectionsOptions {
   config: AgentConfig;
@@ -35,6 +51,7 @@ export interface CreatePlanReflectionsOptions {
   parentModel?: { provider: string; model: string };
   request: string;
   draft: string;
+  phase?: "pre_turn" | "post_turn";
   abortSignal: AbortSignal;
   createWorker(task: { id: string }): Promise<SubagentRunner>;
   onProgress?(event: SubagentProgressEvent): void | Promise<void>;
@@ -46,13 +63,13 @@ const summary = (results: SubagentsResult["results"]): string =>
     .join(" · ")}`;
 
 /**
- * Run independent read-only reviews and turn successful findings into one
- * internal follow-up for the primary plan agent. Worker failures are reported
- * in the transcript summary but never discard the already-persisted draft.
+ * Run independent read-only reviews and turn successful findings into either
+ * context for the current plan turn or one internal follow-up. Worker failures
+ * never discard an already-persisted draft.
  */
 export async function createPlanReflectionFollowUp(
   options: CreatePlanReflectionsOptions,
-): Promise<ReflectionFollowUp | { notice: string } | null> {
+): Promise<ReflectionPreparation | null> {
   const entries = Object.entries(options.config.reflections.prompts);
   if (entries.length === 0) return null;
 
@@ -76,9 +93,9 @@ export async function createPlanReflectionFollowUp(
         title: `Review ${id}`,
         prompt: [
           prompt,
-          "Review the following user request and draft plan. Return concise, concrete findings for the primary agent; do not write code.",
+          `Review the following user request and ${options.phase === "pre_turn" ? "repo context" : "draft plan"}. Return concise, concrete findings for the primary agent; do not write code.`,
           `User request:\n${options.request}`,
-          `Draft plan:\n${options.draft}`,
+          ...(options.phase === "pre_turn" ? [] : [`Draft plan:\n${options.draft}`]),
         ].join("\n\n"),
         waitsOn: [],
       })),
@@ -97,8 +114,18 @@ export async function createPlanReflectionFollowUp(
   const findings = successful
     .map(({ id, text }) => `${id}:\n${truncateWithNotice(text, cap)}`)
     .join("\n\n");
+  const transcriptText = summary(result.results);
+  if (options.phase === "pre_turn") {
+    return {
+      transcriptText,
+      context: [
+        "Use these independent reflections while preparing the plan. Do not mention the reflection process unless useful.",
+        `Reflections:\n${findings}`,
+      ].join("\n\n"),
+    };
+  }
   return {
-    transcriptText: summary(result.results),
+    transcriptText,
     text: [
       "Revise your preceding plan using the independent reflections below. Return a complete revised plan, not a diff. Keep valid parts, correct weak parts, and do not claim work is implemented.",
       `Original user request:\n${options.request}`,
