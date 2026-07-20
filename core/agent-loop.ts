@@ -8,6 +8,7 @@ import {
   type AgentConfig,
   childAgentConfig,
   createAgent as createProductionAgent,
+  reflectionAgentConfig,
   type ToolActivity,
   withAgentModelSelection,
 } from "./lib/agent";
@@ -17,8 +18,9 @@ import {
   withRequestOrigin,
 } from "./lib/agent/permissions";
 import type { QuestionPort } from "./lib/agent/questions";
+import { createPlanReflectionFollowUp } from "./lib/agent/reflections";
 import {
-  createSubagentsTool,
+  runSubagentTasks,
   type SubagentProgressEvent,
   toGitDelegationResults,
 } from "./lib/agent/subagents";
@@ -354,6 +356,11 @@ interface ChatComposition {
   /** The eval $/Mtok map, reused by /cost for terminal pricing. */
   evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
+  refinePlan(input: {
+    request: string;
+    draft: string;
+    abortSignal: AbortSignal;
+  }): ReturnType<typeof createPlanReflectionFollowUp>;
   runBuildJob(
     prompt: string,
     abortSignal: AbortSignal,
@@ -520,24 +527,38 @@ async function composeChat(
             model: resolveTierModel(agentConfig.llm, agentConfig.llm.modes[mode]),
           },
         };
-  // Research workers are plan-mode children: subagent overrides/tier first,
-  // else they inherit the plan tier's model. Derived per call so runtime
-  // model selection applies to the next worker. Their observation bash
-  // answers to the same session gate, labeled with who is asking.
-  const createResearchWorker = async (origin?: string) =>
-    createProductionAgent(environment, childAgentConfig(agentConfigFor("plan"), "delegate"), {
-      root,
-      ctx,
-      metricsSink,
-      spill,
-      web,
-      mode: "plan",
-      stopContextTokens: config.agent.context.softLimit,
-      permissions: {
-        config: config.permissions,
-        gate: origin ? withRequestOrigin(gate, origin) : gate,
-      },
-    });
+  // Research workers are plan-mode children. Each run gets a scoped MCP lease
+  // so reflection and user-requested research share the same safe inspection tools.
+  const createResearchWorker = async (
+    origin?: string,
+    workerConfig = childAgentConfig(agentConfigFor("plan"), "delegate"),
+  ) => ({
+    generate: async (
+      prompt: string,
+      options?: { abortSignal?: AbortSignal; onStep?: (step: RunStep) => void },
+    ) => {
+      const externalLease = await mcp.createChildConnection(root, options?.abortSignal);
+      try {
+        const worker = await createProductionAgent(environment, workerConfig, {
+          root,
+          ctx,
+          metricsSink,
+          spill,
+          web,
+          mode: "plan",
+          stopContextTokens: config.agent.context.softLimit,
+          childExternalTools: externalLease.externalTools,
+          permissions: {
+            config: config.permissions,
+            gate: origin ? withRequestOrigin(gate, origin) : gate,
+          },
+        });
+        return await worker.generate(prompt, options);
+      } finally {
+        await externalLease.close();
+      }
+    },
+  });
 
   const mcp = createMcpRuntime(config.mcp, {
     root,
@@ -721,61 +742,61 @@ async function composeChat(
     origin = "job",
     onStep?: (step: RunStep) => void,
   ) => {
-    const tool = createSubagentsTool({
-      execution: {
-        kind: "delegation",
-        ...delegation,
-        createChildAgent: async ({ session, abortSignal: childAbortSignal }) => {
-          const externalLease = await mcp.createChildConnection(
-            session.path,
-            childAbortSignal ?? abortSignal,
-          );
-          let child: Agent;
-          try {
-            child = await createProductionAgent(
-              environment,
-              childAgentConfig(agentConfigFor("build"), "delegate"),
-              {
-                root: session.path,
-                ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
-                metricsSink,
-                spill,
-                web,
-                stopContextTokens: config.agent.context.softLimit,
-                childExternalTools: externalLease.externalTools,
-                // Background builds answer to the same session gate, labeled.
-                permissions: {
-                  config: config.permissions,
-                  gate: withRequestOrigin(gate, origin),
-                },
-              },
+    const outcome = (await runSubagentTasks(
+      {
+        execution: {
+          kind: "delegation",
+          ...delegation,
+          createChildAgent: async ({ session, abortSignal: childAbortSignal }) => {
+            const externalLease = await mcp.createChildConnection(
+              session.path,
+              childAbortSignal ?? abortSignal,
             );
-          } catch (error) {
-            await externalLease.close();
-            throw error;
-          }
-          return {
-            generate: async (childPrompt, opts) => {
-              try {
-                return await child.generate(childPrompt, {
-                  abortSignal: opts?.abortSignal,
-                  // Tee steps to the job runner's activity trail alongside the
-                  // scheduler's own usage tracking.
-                  onStep: (step) => {
-                    opts?.onStep?.(step);
-                    onStep?.(step);
+            let child: Agent;
+            try {
+              child = await createProductionAgent(
+                environment,
+                childAgentConfig(agentConfigFor("build"), "delegate"),
+                {
+                  root: session.path,
+                  ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
+                  metricsSink,
+                  spill,
+                  web,
+                  stopContextTokens: config.agent.context.softLimit,
+                  childExternalTools: externalLease.externalTools,
+                  // Background builds answer to the same session gate, labeled.
+                  permissions: {
+                    config: config.permissions,
+                    gate: withRequestOrigin(gate, origin),
                   },
-                });
-              } finally {
-                await externalLease.close();
-              }
-            },
-          };
+                },
+              );
+            } catch (error) {
+              await externalLease.close();
+              throw error;
+            }
+            return {
+              generate: async (childPrompt, opts) => {
+                try {
+                  return await child.generate(childPrompt, {
+                    abortSignal: opts?.abortSignal,
+                    // Tee steps to the job runner's activity trail alongside the
+                    // scheduler's own usage tracking.
+                    onStep: (step) => {
+                      opts?.onStep?.(step);
+                      onStep?.(step);
+                    },
+                  });
+                } finally {
+                  await externalLease.close();
+                }
+              },
+            };
+          },
         },
+        concurrency: 1,
       },
-      concurrency: 1,
-    });
-    const outcome = (await tool.execute(
       { tasks: [{ title: prompt.slice(0, 72), prompt, waitsOn: [] }] },
       { abortSignal },
     )) as {
@@ -824,6 +845,20 @@ async function composeChat(
     contextSoftLimit: config.agent.context.softLimit,
     evalPrices: config.eval.prices,
     agentFor,
+    refinePlan: ({ request, draft, abortSignal }) =>
+      createPlanReflectionFollowUp({
+        config: reflectionAgentConfig(agentConfigFor("plan")),
+        parentModel: agentConfigFor("plan").llm,
+        request,
+        draft,
+        abortSignal,
+        createWorker: (task) =>
+          createResearchWorker(
+            `reflection ${task.id}`,
+            reflectionAgentConfig(agentConfigFor("plan")),
+          ),
+        onProgress: onDagProgress,
+      }),
     runBuildJob,
     runPlanJob,
     attachInteractiveCapabilities: ({ jobs, todos, questions }) => {
@@ -849,7 +884,6 @@ async function composeChat(
     },
     close: async () => {
       await mcp.close();
-      await web.search.close();
       await metricsProvider?.shutdown();
       spillSink.close();
     },
@@ -1257,6 +1291,7 @@ export async function runAgentjChat(
         log,
         undo: undoStack,
         todos: sessionTodos,
+        refinePlan: composition.refinePlan,
         onEvent: render,
       },
       resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
@@ -1364,7 +1399,6 @@ export async function runAgentjChat(
       config: interactiveConfig,
       cost: { rows: () => usageRows, prices: composition.evalPrices },
       activity: { list: () => completedActivities },
-      todos: { list: sessionTodos.list },
       models: {
         current: composition.modelSelections,
         providers: () => providerNames,
@@ -1602,6 +1636,7 @@ export async function runAgentjOnce(
         agentFor: composition.agentFor,
         log,
         undo,
+        refinePlan: composition.refinePlan,
         onEvent: (event) => {
           if (event.type === "assistant") {
             resultText = event.text;

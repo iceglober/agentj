@@ -10,6 +10,10 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 - `agent.llm.tiers` (default: `[]`) — Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.
 - `agent.llm.modes.plan` (default: `0`) — Ladder tier plan mode runs on. Defaults to the frontier tier (0).
 - `agent.llm.modes.build` (default: `1`) — Ladder tier build mode runs on.
+- `agent.reflections.prompts` (default: `{}`) — Named parallel reviews applied once after a plan draft. Empty by default; add prompts to enable reflections.
+- `agent.reflections.tier` (default: unset) — Ladder tier reflection workers run on. Reflection model and provider overrides win; otherwise subagent routing applies.
+- `agent.reflections.model` (default: unset) — Explicit model for reflection workers; wins over reflections.tier.
+- `agent.reflections.provider` (default: unset) — Provider override for reflection workers; otherwise subagent routing applies.
 - `agent.tools.subagents.tier` (default: unset) — Ladder tier subagents and planning workers run on — route fan-out to a cheaper rung.
 - `agent.tools.subagents.model` (default: unset) — Explicit model for subagents (deprecated — prefer `tier`; wins over it when set).
 - `agent.tools.subagents.concurrency` (default: `2`) — Maximum subagents run at once within a single fan-out.

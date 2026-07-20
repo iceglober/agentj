@@ -29,6 +29,24 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   },
   { path: "agent.llm.modes.build", description: "Ladder tier build mode runs on." },
   {
+    path: "agent.reflections.prompts",
+    description:
+      "Named parallel reviews applied once after a plan draft. Empty by default; add prompts to enable reflections.",
+  },
+  {
+    path: "agent.reflections.tier",
+    description:
+      "Ladder tier reflection workers run on. Reflection model and provider overrides win; otherwise subagent routing applies.",
+  },
+  {
+    path: "agent.reflections.model",
+    description: "Explicit model for reflection workers; wins over reflections.tier.",
+  },
+  {
+    path: "agent.reflections.provider",
+    description: "Provider override for reflection workers; otherwise subagent routing applies.",
+  },
+  {
     path: "agent.tools.subagents.tier",
     description:
       "Ladder tier subagents and planning workers run on — route fan-out to a cheaper rung.",
