@@ -1,5 +1,16 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.41
+
+### Minor Changes
+
+- b77a352: Add a `/release` skill that finds the open Changesets `Version Packages` pull request, safely squash-merges its recorded revision, and reports the released package versions and generated changelog; for example, it replies that nothing needs releasing when no such pull request is open.
+- b51bac8: Agentj can now delegate one independent task with `run_one_subagent` or coordinate several with `run_subagents`, making small delegation as easy as sending a prompt while retaining DAG support for larger work. The interactive chat also stays quiet while tools run: it prints one completion receipt such as `✓ 3 tools · 2.1s · /activity for details`, and `/activity` shows the completed tool history when you want it.
+
+### Patch Changes
+
+- 7ef3207: Multiline prompts now keep their line breaks in the interactive transcript. For example, sending a prompt with a blank line between two paragraphs now displays that same blank line above the agent response instead of joining the paragraphs onto one row.
+
 ## 0.1.0-next.40
 
 ### Minor Changes
