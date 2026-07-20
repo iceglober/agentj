@@ -1,5 +1,18 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.48
+
+### Minor Changes
+
+- 82f6cc7: Improve the live TUI layout by keeping todos inside their bordered panel, showing overflow as a footer, and placing tool and message progress above the todos while thinking remains directly above the editor.
+
+### Patch Changes
+
+- e14e98d: Prevent oversized tool results and resumed tool history from exceeding model-provider input limits by bounding model-bound output while preserving full content in spill files.
+- dbff49c: Clarify that Tab only changes mode, while `/build` starts implementation; `/build` also forwards any additional feedback into the implementation turn.
+- a8ab61a: Increase retry coverage for transient model responses such as rate limits, giving requests more time to recover while preserving cancellation and existing network retry behavior.
+- 0dc5740: Render structured background-job results as readable labeled text instead of raw JSON.
+
 ## 0.1.0-next.47
 
 ### Patch Changes
