@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.47
+
+### Patch Changes
+
+- 588ea2c: Release pull requests now use the repository's trusted release token, so a Changesets version PR can run its checks without waiting for manual workflow approval.
+
 ## 0.1.0-next.46
 
 ### Minor Changes
