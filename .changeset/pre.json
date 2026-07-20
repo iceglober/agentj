@@ -62,6 +62,7 @@
     "subagent-permissions",
     "subagent-result-prompt-ui",
     "surface-failed-turns",
+    "teal-tool-details",
     "terminal-cost-report",
     "tidy-tuis-dream",
     "tierify-model-knobs",
