@@ -29,9 +29,14 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   },
   { path: "agent.llm.modes.build", description: "Ladder tier build mode runs on." },
   {
+    path: "agent.reflections.events",
+    description:
+      "Reflection hooks: plan.once or plan.each, before or after a plan turn. Defaults to one post-turn review; an empty array disables scheduling.",
+  },
+  {
     path: "agent.reflections.prompts",
     description:
-      "Named parallel reviews applied once after a plan draft. Empty by default; add prompts to enable reflections.",
+      "Named parallel review instructions. Empty by default; add prompts to enable reflections.",
   },
   {
     path: "agent.reflections.tier",

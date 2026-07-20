@@ -101,7 +101,11 @@ import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
-import { formatCompletionReport, formatCompletionReportText } from "./lib/tui/completion-report";
+import {
+  formatCompletionReport,
+  formatCompletionReportText,
+  formatExecutorResultText,
+} from "./lib/tui/completion-report";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { renderMarkdownLite } from "./lib/tui/markdown";
@@ -260,8 +264,10 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
             : "Aborted";
       const completion = event.job.completion
         ? `\n${formatCompletionReport(event.job.completion)}`
-        : "";
-      return `[${event.job.id}] ${status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${completion || (result ? `\n${truncateWithNotice(result, 2_000)}` : "")}${branch}`;
+        : result
+          ? `\n${truncateWithNotice(formatExecutorResultText(result) ?? result, 2_000)}`
+          : "";
+      return `[${event.job.id}] ${status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${completion}${branch}`;
     }
     case "notice":
       return event.text;
@@ -383,9 +389,11 @@ interface ChatComposition {
   /** The eval $/Mtok map, reused by /cost for terminal pricing. */
   evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
-  refinePlan(input: {
+  reflectionEvents: AgentConfig["reflections"]["events"];
+  reflectPlan(input: {
     request: string;
     draft: string;
+    phase: "pre_turn" | "post_turn";
     abortSignal: AbortSignal;
   }): ReturnType<typeof createPlanReflectionFollowUp>;
   runBuildJob(
@@ -873,12 +881,14 @@ async function composeChat(
     contextSoftLimit: config.agent.context.softLimit,
     evalPrices: config.eval.prices,
     agentFor,
-    refinePlan: ({ request, draft, abortSignal }) =>
+    reflectionEvents: agentConfig.reflections.events,
+    reflectPlan: ({ request, draft, phase, abortSignal }) =>
       createPlanReflectionFollowUp({
         config: reflectionAgentConfig(agentConfigFor("plan")),
         parentModel: agentConfigFor("plan").llm,
         request,
         draft,
+        phase,
         abortSignal,
         createWorker: (task) =>
           createResearchWorker(
@@ -1320,10 +1330,17 @@ export async function runAgentjChat(
         log,
         undo: undoStack,
         todos: sessionTodos,
-        refinePlan: composition.refinePlan,
+        reflectionEvents: composition.reflectionEvents,
+        reflectPlan: composition.reflectPlan,
         onEvent: emit,
       },
-      resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
+      resumed?.state
+        ? {
+            messages: resumed.state.messages,
+            mode: resumed.state.mode,
+            reflectionOnce: resumed.state.reflectionOnce,
+          }
+        : {},
     );
 
     const jobRunner = createJobRunner({
@@ -1668,7 +1685,8 @@ export async function runAgentjOnce(
         agentFor: composition.agentFor,
         log,
         undo,
-        refinePlan: composition.refinePlan,
+        reflectionEvents: composition.reflectionEvents,
+        reflectPlan: composition.reflectPlan,
         onEvent: (event) => {
           if (event.type === "assistant") {
             resultText = event.text;

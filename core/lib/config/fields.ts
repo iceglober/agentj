@@ -77,7 +77,11 @@ const kindFor = (schema: InternalSchema): ConfigFieldKind => {
   if (def?.type === "boolean") return "boolean";
   if (def?.type === "number") return "number";
   if (def?.type === "record") return "record";
-  if (def?.type === "array" && def.element && unwrap(def.element)._zod?.def?.type === "string") {
+  if (
+    def?.type === "array" &&
+    def.element &&
+    ["string", "enum"].includes(unwrap(def.element)._zod?.def?.type ?? "")
+  ) {
     return "string-array";
   }
   return "string";
@@ -91,7 +95,14 @@ export function configField(path: string): ConfigField {
   const schema = schemaAtPath(segments);
   if (!schema) throw new Error(`Unknown configuration path: ${path}`);
   const def = schema._zod?.def;
-  const enumValues = def?.type === "enum" ? Object.values(def.entries ?? {}) : undefined;
+  const elementDef =
+    def?.type === "array" && def.element ? unwrap(def.element)._zod?.def : undefined;
+  const enumValues =
+    def?.type === "enum"
+      ? Object.values(def.entries ?? {})
+      : elementDef?.type === "enum"
+        ? Object.values(elementDef.entries ?? {})
+        : undefined;
   const description = DESCRIPTIONS.get(path);
   return {
     path,

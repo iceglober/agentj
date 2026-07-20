@@ -295,6 +295,38 @@ describe("formatChatEvent", () => {
     );
   });
 
+  test("formats executor JSON job results without exposing JSON", () => {
+    const result = JSON.stringify({
+      status: "SUCCESS",
+      changes: [{ type: "merge", pr: 149, command: "gh pr merge 149 --squash --auto" }],
+      evidence: [
+        {
+          command: "gh pr checks 149 --watch",
+          exitCode: 0,
+          stdout: "core-tests\tpass\neval-selftest\tpass",
+        },
+      ],
+      open_questions: [],
+    });
+    const rendered = formatChatEvent({
+      type: "job-finished",
+      job: {
+        id: "j2",
+        mode: "build",
+        prompt: "monitor the release workflow",
+        status: "done",
+        startedAt: 0,
+        endedAt: 1_000,
+        resultText: result,
+      },
+    });
+    expect(rendered).toContain("SUCCESS");
+    expect(rendered).toContain("Changes:\n- Type: merge\n  Pr: 149");
+    expect(rendered).toContain("Evidence:\n- Command: gh pr checks 149 --watch");
+    expect(rendered).toContain("  Stdout:\n    core-tests\tpass\n    eval-selftest\tpass");
+    expect(rendered).not.toContain('"status"');
+  });
+
   test("marks failed jobs as failures", () => {
     expect(
       formatChatEvent({
