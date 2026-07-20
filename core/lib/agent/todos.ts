@@ -4,6 +4,8 @@ import { type TodoList, todoListSchema } from "../todos";
 
 /** A narrow session capability; agents never depend on chat or TUI code. */
 export interface TodoPort {
+  /** Current durable work state, used by completion grounding. */
+  list(): TodoList;
   replace(items: TodoList): Promise<void>;
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { GenerateRequest, RunResult, ToolSet } from "../llm";
+import type { TodoList } from "../todos";
 import {
   claimsActiveDeferredWork,
   generateWithGroundedCompletion,
@@ -171,6 +172,96 @@ describe("generateWithGroundedCompletion — background jobs", () => {
     expect(calls).toBe(2);
     expect(output.text).toContain("No background job was started");
     expect(output.text).toContain("not monitoring");
+  });
+});
+
+describe("generateWithGroundedCompletion — open todos", () => {
+  const request: GenerateRequest = { instructions: "rules", prompt: "finish it", tools };
+
+  test("retries with the opaque continuation until todos are completed", async () => {
+    let items: TodoList = [{ id: "ship", text: "Ship the change", status: "in_progress" }];
+    const requests: GenerateRequest[] = [];
+    const runtime = {
+      async generate(next: GenerateRequest) {
+        requests.push(next);
+        if (requests.length === 1)
+          return result("I am done.", { messages: [{ role: "assistant" }] });
+        items = [{ ...items[0]!, status: "completed" }];
+        return result(doneReport("Finished and validated."), {
+          steps: [editStep()],
+          messages: [{ role: "assistant" }, { role: "tool" }],
+        });
+      },
+    };
+
+    const output = await generateWithGroundedCompletion(runtime, request, {
+      todos: { list: () => items, replace: async () => {} },
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages).toEqual([{ role: "assistant" }]);
+    expect(requests[1]?.prompt).toContain("session still has pending");
+    expect(output.text).toContain("Finished and validated.");
+  });
+
+  test("allows a real background job to own open deferred work", async () => {
+    let calls = 0;
+    const output = await generateWithGroundedCompletion(
+      {
+        async generate() {
+          calls += 1;
+          return result(report("Started the deployment monitor."), { steps: [runJobStep()] });
+        },
+      },
+      request,
+      {
+        todos: {
+          list: () => [{ id: "deploy", text: "Monitor deploy", status: "pending" }],
+          replace: async () => {},
+        },
+      },
+    );
+
+    expect(calls).toBe(1);
+    expect(output.text).toContain("Started the deployment monitor.");
+  });
+
+  test("returns an honest failure when a retry leaves todos open without a blocker", async () => {
+    const output = await generateWithGroundedCompletion(
+      { generate: async () => result("Stopped early.") },
+      request,
+      {
+        todos: {
+          list: () => [{ id: "test", text: "Run tests", status: "pending" }],
+          replace: async () => {},
+        },
+      },
+    );
+
+    expect(output.text).toContain('"status":"failed"');
+    expect(output.text).toContain("open session todos");
+  });
+
+  test("allows an explicit blocker with open todos", async () => {
+    let calls = 0;
+    const output = await generateWithGroundedCompletion(
+      {
+        async generate() {
+          calls += 1;
+          return result(report("The model provider is unavailable.", "blocked"));
+        },
+      },
+      request,
+      {
+        todos: {
+          list: () => [{ id: "test", text: "Run tests", status: "pending" }],
+          replace: async () => {},
+        },
+      },
+    );
+
+    expect(calls).toBe(1);
+    expect(output.text).toContain("model provider is unavailable");
   });
 });
 

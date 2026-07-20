@@ -47,7 +47,7 @@ export interface JobRunnerDependencies {
   onEvent?(event: ChatEvent): void | Promise<void>;
   /** Receives one summary line per finished job for the next user turn. */
   addTurnNotice(text: string): void;
-  /** Persists session state derived from a completed job before it is shown. */
+  /** Runs after the completion notice is queued; jobs never mutate parent todos. */
   onJobCompleted?(job: JobView): void | Promise<void>;
   /** Fires once when a job passes its soft timeout while still running. */
   ping?(job: JobView): void;
@@ -170,16 +170,16 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
         .finally(async () => {
           clearTimeout(entry.softTimer);
           view.endedAt = now();
+          emit({ type: "job-finished", job: { ...view } });
+          deps.addTurnNotice(summarize(view));
           try {
             await deps.onJobCompleted?.({ ...view });
           } catch (error) {
             view.warnings = [
               ...(view.warnings ?? []),
-              `Could not update session state: ${error instanceof Error ? error.message : String(error)}`,
+              `Could not resume session work: ${error instanceof Error ? error.message : String(error)}`,
             ];
           }
-          emit({ type: "job-finished", job: { ...view } });
-          deps.addTurnNotice(summarize(view));
         });
 
       return { ...view };

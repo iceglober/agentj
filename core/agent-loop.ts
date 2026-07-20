@@ -626,6 +626,7 @@ async function composeChat(
     abort: (id: string) => jobsRuntime?.abort(id) ?? false,
   };
   const todosPort: TodoPort = {
+    list: () => todosRuntime?.list() ?? [],
     replace: async (items) => {
       if (!todosRuntime) throw new Error("Session todos are unavailable in this session.");
       await todosRuntime.replace(items);
@@ -1312,8 +1313,8 @@ export async function runAgentjChat(
     const jobRunner = createJobRunner({
       onEvent: render,
       addTurnNotice: (text) => chat.addTurnNotice(text),
-      onJobCompleted: async (job) => {
-        if (job.status === "done" && job.completion?.status === "done") await sessionTodos.clear();
+      onJobCompleted: (job) => {
+        if (job.status !== "aborted") chat.resumePendingWork();
       },
       runJob: ({ id, mode, prompt, abortSignal, onStep }) =>
         mode === "plan"

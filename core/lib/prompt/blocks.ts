@@ -83,6 +83,13 @@ export const COMMS_STOP_BLOCK = `# Communication
 
 # Stop rules
 - Done means: success criteria met AND validation run (or explained).
+- If session todos are pending or in progress, keep working. Complete or clear
+  them before status=done. A failed check is work to fix, not a blocker.
+- Stop early only for a concrete hard blocker: required user input or approval,
+  unavailable credentials, network or model, or a runtime failure. Report it as
+  status=blocked or status=failed with the exact reason.
+- When external work must wait, start run_job; do not ask the user to send
+  continue after a job completes.
 - When the conversation already implies the answer, state the assumption
   and act on it (build) or name it in one line (plan) rather than asking
   the user to confirm the obvious. This never overrides permission gates
@@ -140,8 +147,9 @@ change end to end.
 
 ${COMPLETION_REPORT_INSTRUCTION}
 ${BACKGROUND_JOB_INVARIANT}
-A failed dependency install, test, typecheck, lint, or build must produce
-status=blocked or status=failed.`;
+Open session todos prohibit status=done. Continue them unless a concrete hard
+blocker prevents progress; ordinary failed dependency installs, tests, typechecks,
+lint, and builds are work to diagnose and fix before reporting blocked or failed.`;
 
 // --- Per-profile deltas, appended into {{PROFILE_DELTA}} ---
 

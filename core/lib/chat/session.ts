@@ -5,8 +5,12 @@ import type { UndoStack } from "../session/undo";
 import type { ChatEvent } from "./events";
 
 export interface SessionTodoLifecycle {
+  list(): ReadonlyArray<{ status: "pending" | "in_progress" | "completed" }>;
   clear(): Promise<void>;
 }
+
+const hasOpenTodos = (todos: SessionTodoLifecycle | undefined): boolean =>
+  todos?.list().some((todo) => todo.status !== "completed") ?? false;
 
 /**
  * The persistent chat loop's core: one foreground turn at a time over an
@@ -75,6 +79,8 @@ export interface ChatSession {
   dequeue(): string | null;
   /** Queue a notice prepended to the next user turn (job completions). */
   addTurnNotice(text: string): void;
+  /** Continue open work after a non-aborted background job, coalescing completions. */
+  resumePendingWork(): void;
   /** Start a fresh model context and durable visible history. Returns false while busy. */
   clearContext(): Promise<boolean>;
   /** The resumable continuation for the session log. */
@@ -92,6 +98,8 @@ export function createChatSession(
   let busy = false;
   let turnAbort: AbortController | null = null;
   const notices: string[] = [];
+  let resumeRunning = false;
+  let resumeRequested = false;
   const queue: Array<{
     text: string;
     transcriptText?: string;
@@ -216,6 +224,52 @@ export function createChatSession(
     }
   };
 
+  const send: ChatSession["send"] = async (text, options) => {
+    const transcriptText = options?.transcriptText;
+    const restoreText = options?.restoreText;
+    const images = options?.images;
+    if (busy) {
+      emit({
+        type: "turn-queued",
+        text,
+        ...(transcriptText ? { transcriptText } : {}),
+        ...(restoreText ? { restoreText } : {}),
+      });
+      await new Promise<void>((resolve) => {
+        queue.push({
+          text,
+          ...(transcriptText ? { transcriptText } : {}),
+          ...(restoreText ? { restoreText } : {}),
+          ...(images && images.length > 0 ? { images } : {}),
+          resolve,
+        });
+      });
+      return;
+    }
+    await runTurn(text, transcriptText, images);
+    await drainQueue();
+  };
+
+  const resumePendingWork = (): void => {
+    if (!hasOpenTodos(deps.todos)) return;
+    resumeRequested = true;
+    if (resumeRunning) return;
+    resumeRunning = true;
+    void (async () => {
+      try {
+        while (resumeRequested && hasOpenTodos(deps.todos)) {
+          resumeRequested = false;
+          await send(
+            "[system] A background job finished. Continue the open session todos now. Do not wait or ask the user to send continue unless work is truly blocked.",
+            { transcriptText: "[system] Background job completed — continuing open work" },
+          );
+        }
+      } finally {
+        resumeRunning = false;
+      }
+    })();
+  };
+
   return {
     get mode() {
       return mode;
@@ -234,31 +288,7 @@ export function createChatSession(
       return pendingMode;
     },
 
-    async send(text, options) {
-      const transcriptText = options?.transcriptText;
-      const restoreText = options?.restoreText;
-      const images = options?.images;
-      if (busy) {
-        emit({
-          type: "turn-queued",
-          text,
-          ...(transcriptText ? { transcriptText } : {}),
-          ...(restoreText ? { restoreText } : {}),
-        });
-        await new Promise<void>((resolve) => {
-          queue.push({
-            text,
-            ...(transcriptText ? { transcriptText } : {}),
-            ...(restoreText ? { restoreText } : {}),
-            ...(images && images.length > 0 ? { images } : {}),
-            resolve,
-          });
-        });
-        return;
-      }
-      await runTurn(text, transcriptText, images);
-      await drainQueue();
-    },
+    send,
 
     abort() {
       if (!turnAbort) return false;
@@ -284,6 +314,8 @@ export function createChatSession(
     addTurnNotice(text) {
       notices.push(text);
     },
+
+    resumePendingWork,
 
     async clearContext() {
       if (busy) return false;
