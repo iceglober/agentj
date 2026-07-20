@@ -234,6 +234,31 @@ describe("tool activity", () => {
     ).toEqual(["  ◐ t1 Orphan", "  ◐ bash ls"]);
   });
 
+  test("separates the todo panel from live activity only when both exist", () => {
+    const base = {
+      activeTools: tools([[1, "bash", "git status --short"]]),
+      dagBlocks: new Map<number, string[]>(),
+      queued: [],
+      spinnerFrame: 0,
+    };
+    expect(
+      composeProgressLines({
+        ...base,
+        todos: ["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect"],
+      }),
+    ).toEqual(["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect", "", "  ◐ bash git status --short"]);
+    expect(composeProgressLines({ ...base, todos: [] })).toEqual(["  ◐ bash git status --short"]);
+    expect(
+      composeProgressLines({
+        todos: ["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect"],
+        activeTools: [],
+        dagBlocks: new Map(),
+        queued: [],
+        spinnerFrame: 0,
+      }),
+    ).toEqual(["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect"]);
+  });
+
   test("formats completed labels as safe one-line previews", () => {
     expect(formatToolActivityLabel("bash", "git status\n--short")).toBe("bash git status --short");
     const preview = formatToolActivityLabel("bash", "x".repeat(200), 20);

@@ -772,7 +772,7 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("keeps one blank transcript row and reserves the second editor row for activity", async () => {
+  test("keeps one blank transcript row and separates todo, activity, and thinking lines", async () => {
     const { screen, text } = makeScreen();
     screen.start();
     screen.printAbove("earlier transcript item");
@@ -790,13 +790,21 @@ describe("createChatScreen", () => {
     ]);
     expect(rendered.slice(latest + 1, idleEditor)).toEqual(["", ""]);
 
-    screen.setProgressLines(["  ◐ tool running"]);
+    screen.setProgressLines([
+      "  ╭─ Todos 0/1 done · 1 active",
+      "  ╰─ → Inspect configs",
+      "",
+      "  ◐ tool running",
+    ]);
     screen.setThinkingLine("◐ thinking 1s (esc)");
     await settle();
     rendered = renderScreen(text());
+    const todo = rendered.findIndex((line) => line.includes("Inspect configs"));
     const tool = rendered.findIndex((line) => line.includes("tool running"));
     const thinking = rendered.findIndex((line) => line.includes("thinking 1s"));
     const activeEditor = rendered.findIndex((line) => line.startsWith("> "));
+    expect(todo).toBeLessThan(tool);
+    expect(rendered.slice(todo + 1, tool)).toEqual([""]);
     expect(tool).toBeLessThan(thinking);
     expect(thinking).toBe(activeEditor - 1);
     screen.stop();

@@ -187,6 +187,7 @@ export function createProgressTracker(): ProgressTracker {
   };
 }
 export const composeProgressLines = (state: {
+  todos?: string[];
   activeTools: Iterable<[number, { tool: string; detail: string }]>;
   dagBlocks: ReadonlyMap<number, string[]>;
   queued: string[];
@@ -206,5 +207,9 @@ export const composeProgressLines = (state: {
   const orphanRows = [...state.dagBlocks]
     .filter(([id]) => !owned.has(id))
     .flatMap(([, block]) => block);
-  return [...orphanRows, ...toolRows, ...state.queued];
+  const activityRows = [...orphanRows, ...toolRows, ...state.queued];
+  const todoRows = state.todos ?? [];
+  return todoRows.length > 0 && activityRows.length > 0
+    ? [...todoRows, "", ...activityRows]
+    : [...todoRows, ...activityRows];
 };

@@ -284,7 +284,7 @@ describe("runChatCommand", () => {
 
     expect(events).toEqual([
       { type: "command", name: "todos" },
-      { type: "notice", text: "Todos 1/2\n✓ Inspect\n◐ Build" },
+      { type: "notice", text: "Todos 1/2 done · 1 active\n✓ Inspect\n→ Build" },
     ]);
   });
 
