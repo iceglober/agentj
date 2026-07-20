@@ -124,7 +124,7 @@ const permissionKind = (tool: string): PermissionRequest["kind"] | undefined => 
 };
 
 /** Human-readable summary of a tool input: the command, the path, a task
- *  count for fan-out tools, or JSON as the last resort. */
+ *  count for fan-out or question tools, or JSON as the last resort. */
 export const describeToolInput = (input: unknown): string => {
   if (typeof input === "object" && input !== null) {
     const record = input as Record<string, unknown>;
@@ -132,6 +132,7 @@ export const describeToolInput = (input: unknown): string => {
     if (typeof record.path === "string") return record.path;
     if (typeof record.tool === "string") return record.tool;
     if (Array.isArray(record.tasks)) return `${record.tasks.length} tasks`;
+    if (Array.isArray(record.questions)) return `${record.questions.length} questions`;
   }
   return JSON.stringify(input) ?? "";
 };

@@ -280,13 +280,14 @@ describe("withPermissions", () => {
 });
 
 describe("describeToolInput", () => {
-  test("summarizes commands, paths, tool targets, task fan-outs, and falls back to JSON", () => {
+  test("summarizes commands, paths, tool targets, task and question batches, and falls back to JSON", () => {
     expect(describeToolInput({ command: "git status" })).toBe("git status");
     expect(describeToolInput({ path: "src/a.ts" })).toBe("src/a.ts");
     expect(describeToolInput({ tool: "github::get_issue", arguments: {} })).toBe(
       "github::get_issue",
     );
     expect(describeToolInput({ tasks: [{}, {}, {}] })).toBe("3 tasks");
+    expect(describeToolInput({ questions: [{}, {}] })).toBe("2 questions");
     expect(describeToolInput({ other: 1 })).toBe('{"other":1}');
   });
 

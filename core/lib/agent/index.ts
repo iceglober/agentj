@@ -36,6 +36,7 @@ import {
   withPermissions,
   withRequestOrigin,
 } from "./permissions";
+import { createQuestionTool, type QuestionPort } from "./questions";
 import {
   type CreateSubagentsToolOptions,
   createRunOneSubagentTool,
@@ -204,6 +205,8 @@ export interface CreateAgentOptions {
   jobs?: BackgroundJobPort;
   /** Primary interactive-session todo capability; never inherited by children. */
   todos?: TodoPort;
+  /** Primary interactive-session question capability; never inherited by children. */
+  questions?: QuestionPort;
 }
 
 /** Per-turn hooks for a single generate() call. */
@@ -429,15 +432,19 @@ export async function createAgentTools(
     });
   };
 
-  const jobsTool: ToolSet =
-    config.role === "primary" && opts.jobs
+  const primarySessionTools: ToolSet =
+    config.role === "primary"
       ? {
-          run_job: createBackgroundJobTool(opts.jobs, mode),
-          check_job: createCheckJobTool(opts.jobs),
+          ...(opts.jobs
+            ? {
+                run_job: createBackgroundJobTool(opts.jobs, mode),
+                check_job: createCheckJobTool(opts.jobs),
+              }
+            : {}),
+          ...(opts.todos ? { update_todos: createTodoTool(opts.todos) } : {}),
+          ...(opts.questions ? { ask_user: createQuestionTool(opts.questions) } : {}),
         }
       : {};
-  const todosTool: ToolSet =
-    config.role === "primary" && opts.todos ? { update_todos: createTodoTool(opts.todos) } : {};
 
   if (mode === "plan") {
     // Plan agents observe but never edit: of the bash-tool trio they get only
@@ -459,8 +466,7 @@ export async function createAgentTools(
         ...(opts.spill ? { extraRoots: [opts.spill.dir] } : {}),
       }),
       ...createSearchTools(sb, { root: opts.root }),
-      ...jobsTool,
-      ...todosTool,
+      ...primarySessionTools,
       ...(opts.research
         ? (() => {
             const subagentOptions: CreateSubagentsToolOptions = {
@@ -487,8 +493,7 @@ export async function createAgentTools(
     ...createSearchTools(sb, { root: opts.root }),
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
-    ...jobsTool,
-    ...todosTool,
+    ...primarySessionTools,
   });
 }
 
