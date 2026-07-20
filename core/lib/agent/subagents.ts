@@ -51,6 +51,8 @@ export const subagentResultSchema = z.object({
   commit: z.string().nullable(),
   /** Build-mode recovery evidence when work was preserved on a branch. */
   preserved: z.boolean(),
+  /** Cleanup warnings after the child result was safely verified. */
+  warnings: z.array(z.string()),
 });
 export type SubagentResult = z.infer<typeof subagentResultSchema>;
 
@@ -71,6 +73,7 @@ export function toGitDelegationResults(results: readonly SubagentResult[]): Arra
   outcome: "changed" | "clean" | "failure" | "aborted";
   commit: string | null;
   branch: string | null;
+  preserved: boolean;
 }> {
   return results.map((result) => ({
     index: result.index,
@@ -82,6 +85,7 @@ export function toGitDelegationResults(results: readonly SubagentResult[]): Arra
           : "failure",
     commit: result.commit,
     branch: result.branch,
+    preserved: result.preserved,
   }));
 }
 
@@ -243,6 +247,7 @@ const baseResult = (
   branch: null,
   commit: null,
   preserved: false,
+  warnings: [],
   ...over,
 });
 
@@ -278,11 +283,12 @@ async function runDelegationTask(
         branch: finalized.branch,
         commit: finalized.commit,
         preserved: finalized.preserved,
+        warnings: finalized.warnings ?? [],
       });
     }
     return baseResult(task, "failed", {
       text: run.text,
-      error: "Child run finished, but finalization was uncertain.",
+      error: finalized.detail ?? "Child run finished, but finalization was uncertain.",
       branch: finalized.branch ?? session.branch,
       commit: finalized.commit,
       preserved: true,

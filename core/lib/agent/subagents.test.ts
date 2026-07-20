@@ -274,6 +274,33 @@ describe("delegation execution", () => {
     expect(integrated).toEqual([[["changed", "changed"]][0]]);
   });
 
+  test("a cleanup warning preserves verified child work as changed", async () => {
+    const tool = createSubagentsTool({
+      execution: {
+        kind: "delegation",
+        parentRef: "parent-ref",
+        createChildSession: async ({ id }) =>
+          makeSession(id, {
+            ...changed(id),
+            worktreeRemoved: false,
+            preserved: true,
+            warnings: ["git worktree remove --force /child/t1 exited 1: busy"],
+          } as ChildSessionFinalizeResult),
+        createChildAgent: async () => ({ generate: async () => run("built") }),
+      },
+    });
+
+    const { results } = await (tool.execute({
+      tasks: [{ id: "t1", title: "Task", prompt: "build", waitsOn: [] }],
+    }) as Promise<SubagentsResult>);
+
+    expect(results[0]).toMatchObject({
+      outcome: "changed",
+      preserved: true,
+      warnings: ["git worktree remove --force /child/t1 exited 1: busy"],
+    });
+  });
+
   test("a failing child preserves its branch and blocks dependents", async () => {
     const tool = createSubagentsTool({
       execution: {

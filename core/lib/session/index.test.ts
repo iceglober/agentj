@@ -619,7 +619,7 @@ describe("createChildSession", () => {
     expect(laterDestructiveCalls).toHaveLength(0);
   });
 
-  test("changed lane remove failure with worktree still present preserves that uncertainty and skips branch deletion", async () => {
+  test("changed lane remove failure keeps verified work as changed with a preservation warning", async () => {
     const { sb, session } = await makeChildSession({
       initialStatus: " M src/index.ts",
       removeWorktreeFails: true,
@@ -628,20 +628,19 @@ describe("createChildSession", () => {
     await expect(
       session.finalize({ outcome: "success", commitMessage: "child commit" }),
     ).resolves.toEqual({
-      outcome: "preserved",
-      reason: "uncertain",
+      outcome: "changed",
       id: sb.childId,
       path: sb.childPath,
       branch: sb.childBranch,
       base: sb.resolvedParentSha,
       parentRef: sb.parentRef,
       head: sb.committedSha,
-      status: "",
+      status: " M src/index.ts",
       commit: sb.committedSha,
       worktreeRemoved: false,
       branchDeleted: false,
       preserved: true,
-      detail: `git worktree remove --force ${sb.childPath} exited 1: worktree remove failed`,
+      warnings: [`git worktree remove --force ${sb.childPath} exited 1: worktree remove failed`],
     });
 
     const branchDeleteCalls = matchingCalls(
@@ -653,7 +652,7 @@ describe("createChildSession", () => {
     expect(branchDeleteCalls).toHaveLength(0);
   });
 
-  test("changed lane remove error can still report worktreeRemoved when inspection proves it gone", async () => {
+  test("changed lane remove error stays successful when inspection proves the worktree gone", async () => {
     const { sb, session } = await makeChildSession({
       initialStatus: " M src/index.ts",
       removeWorktreeFailsAfterRemoval: true,
@@ -662,20 +661,19 @@ describe("createChildSession", () => {
     await expect(
       session.finalize({ outcome: "success", commitMessage: "child commit" }),
     ).resolves.toEqual({
-      outcome: "preserved",
-      reason: "uncertain",
+      outcome: "changed",
       id: sb.childId,
       path: sb.childPath,
       branch: sb.childBranch,
       base: sb.resolvedParentSha,
       parentRef: sb.parentRef,
       head: sb.committedSha,
-      status: "",
+      status: " M src/index.ts",
       commit: sb.committedSha,
       worktreeRemoved: true,
       branchDeleted: false,
-      preserved: true,
-      detail: `git worktree remove --force ${sb.childPath} exited 1: worktree remove failed`,
+      preserved: false,
+      warnings: [`git worktree remove --force ${sb.childPath} exited 1: worktree remove failed`],
     });
 
     const branchDeleteCalls = matchingCalls(
@@ -760,15 +758,14 @@ describe("createChildSession", () => {
     expect(destructive).toHaveLength(0);
   });
 
-  test("branch tip mismatch yields preserved uncertain state and skips force deletion", async () => {
+  test("branch tip mismatch reports a cleanup warning without failing verified clean work", async () => {
     const branchTipSha = "3333333333333333333333333333333333333333";
     const { sb, session } = await makeChildSession({ branchTipSha });
 
     const result = await session.finalize({ outcome: "success", commitMessage: "unused" });
 
     expect(result).toEqual({
-      outcome: "preserved",
-      reason: "uncertain",
+      outcome: "clean",
       id: sb.childId,
       path: sb.childPath,
       branch: sb.childBranch,
@@ -780,7 +777,9 @@ describe("createChildSession", () => {
       worktreeRemoved: true,
       branchDeleted: false,
       preserved: true,
-      detail: `Refusing to delete disposable branch ${sb.childBranch}: expected ${sb.resolvedParentSha}, found ${branchTipSha}`,
+      warnings: [
+        `Refusing to delete disposable branch ${sb.childBranch}: expected ${sb.resolvedParentSha}, found ${branchTipSha}`,
+      ],
     });
 
     const branchDeleteCalls = matchingCalls(
@@ -790,14 +789,13 @@ describe("createChildSession", () => {
     expect(branchDeleteCalls).toHaveLength(0);
   });
 
-  test("delete failure after worktree removal still reports worktreeRemoved accurately", async () => {
+  test("delete failure after worktree removal reports a cleanup warning", async () => {
     const { sb, session } = await makeChildSession({ deleteBranchFails: true });
 
     const result = await session.finalize({ outcome: "success", commitMessage: "unused" });
 
     expect(result).toEqual({
-      outcome: "preserved",
-      reason: "uncertain",
+      outcome: "clean",
       id: sb.childId,
       path: sb.childPath,
       branch: sb.childBranch,
@@ -809,7 +807,7 @@ describe("createChildSession", () => {
       worktreeRemoved: true,
       branchDeleted: false,
       preserved: true,
-      detail: `git branch -D ${sb.childBranch} exited 1: branch delete failed`,
+      warnings: [`git branch -D ${sb.childBranch} exited 1: branch delete failed`],
     });
   });
 

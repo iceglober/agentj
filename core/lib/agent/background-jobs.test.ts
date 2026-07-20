@@ -134,16 +134,18 @@ describe("check_job tool", () => {
     expect(port.renewals).toEqual([]);
   });
 
-  test("a finished job shows its result", async () => {
+  test("a finished job shows its result and cleanup warnings", async () => {
     const port = recordingPort({
       status: "done",
       endedAt: 6 * 60_000,
       resultText: "all 443 tests passed",
+      warnings: ["git worktree remove --force /child exited 1: busy"],
     });
     const tool = createCheckJobTool(port, () => 9 * 60_000);
     const result = (await tool.execute({ id: "j1" })) as string;
     expect(result).toContain("[j1] done — 6m0s");
     expect(result).toContain("result: all 443 tests passed");
+    expect(result).toContain("warnings:\n  git worktree remove --force /child exited 1: busy");
     expect(result).not.toContain("soft timeout");
   });
 });

@@ -711,6 +711,8 @@ export const chatCommands: Record<string, ChatCommand> = {
           lines.push("recent tool calls:", ...job.recentActivity.map((entry) => `  ${entry}`));
         }
         if (job.resultText) lines.push("result:", job.resultText);
+        if (job.warnings?.length)
+          lines.push("warnings:", ...job.warnings.map((warning) => `  ${warning}`));
         if (job.branch) lines.push(`work preserved on ${job.branch}`);
         context.emit({ type: "notice", text: lines.join("\n") });
         return;

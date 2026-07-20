@@ -155,16 +155,25 @@ describe("createJobRunner", () => {
     expect(runner.inspect("j9")).toBeUndefined();
   });
 
-  test("preserved branches surface in the notice", async () => {
+  test("cleanup warnings and preserved branches surface without failing the job", async () => {
     const notices: string[] = [];
     const runner = createJobRunner({
-      runJob: async () => ({ text: "blocked integration", branch: "agentj/j1-work" }),
+      runJob: async () => ({
+        text: "completed",
+        branch: "agentj/j1-work",
+        warnings: ["git worktree remove --force /child exited 1: busy"],
+      }),
       addTurnNotice: (text) => {
         notices.push(text);
       },
     });
     runner.start("build", "big refactor");
     await new Promise((r) => setTimeout(r, 5));
+    expect(runner.inspect("j1")).toMatchObject({
+      status: "done",
+      warnings: ["git worktree remove --force /child exited 1: busy"],
+    });
     expect(notices[0]).toContain("work preserved on agentj/j1-work");
+    expect(notices[0]).toContain("warning: git worktree remove --force /child exited 1: busy");
   });
 });

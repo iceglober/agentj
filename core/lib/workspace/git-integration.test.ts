@@ -44,12 +44,16 @@ test("snapshots dirty parent state and integrates child commits without changing
       outcome: "changed",
       branch: "agentj-child",
       commit: childCommit,
+      preserved: true,
     };
     await expect(
       integrateGitDelegation(environment, root, "test-session", snapshot, [result]),
     ).resolves.toMatchObject({ outcome: "applied" });
     expect(await readFile(path.join(root, "source.txt"), "utf8")).toBe("base dirty\nchild\n");
     expect(await git(root, "write-tree")).toBe(indexBefore);
+    await expect(git(root, "show-ref", "--verify", "refs/heads/agentj-child")).resolves.toContain(
+      childCommit,
+    );
     await expect(git(root, "show-ref", "--verify", snapshot.ref)).rejects.toThrow();
   } finally {
     await git(root, "worktree", "remove", "--force", child).catch(() => undefined);

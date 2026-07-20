@@ -24,6 +24,8 @@ export interface BackgroundJobInspection {
   resultText?: string;
   /** Branch preserving the job's work when integration was blocked. */
   branch?: string;
+  /** Non-fatal cleanup issues after job work completed. */
+  warnings?: string[];
   /** Bounded tail of the job's tool calls, oldest first. */
   recentActivity: string[];
 }
@@ -129,6 +131,8 @@ export const createCheckJobTool = (port: BackgroundJobPort, now: () => number = 
         lines.push("recent tool calls:", ...job.recentActivity.map((entry) => `  ${entry}`));
       }
       if (job.resultText) lines.push(`result: ${job.resultText.slice(0, 2_000)}`);
+      if (job.warnings?.length)
+        lines.push("warnings:", ...job.warnings.map((warning) => `  ${warning}`));
       if (job.branch) lines.push(`work preserved on ${job.branch}`);
       if (abort) {
         lines.push(port.abort(id) ? `Aborted ${id}.` : `${id} is not running; nothing to abort.`);
