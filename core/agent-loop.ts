@@ -114,6 +114,7 @@ import {
 } from "./lib/tui/status";
 import type { UiTextLine } from "./lib/tui/styles";
 import { formatTodoLines } from "./lib/tui/todos";
+import { formatUserTurnBlock } from "./lib/tui/transcript";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
   createNpmInstaller,
@@ -1160,16 +1161,7 @@ export async function runAgentjChat(
       // Chat styling (interactive only): a blank line + colored prefix separates
       // turns; assistant markdown renders lightly.
       if (event.type === "turn-started") {
-        if (event.transcriptText) screen?.printAbove(event.transcriptText);
-        else {
-          screen?.printAbove([
-            [
-              { text: "❯", tone: "accent", bold: true },
-              { text: " " },
-              { text: event.text, bold: true },
-            ],
-          ]);
-        }
+        screen?.printAbove(formatUserTurnBlock(event.text, event.transcriptText));
         updateStatus();
         return;
       }
@@ -1472,7 +1464,7 @@ export async function runAgentjChat(
     updateStatus();
     for (const notice of skillNotices) render({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
-      screen.printAbove(turn.transcriptText ?? `> ${turn.user}`);
+      screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText));
       screen.printAbove(turn.assistant);
     }
     void composition.startMcp().catch((error) => {
