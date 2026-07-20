@@ -279,7 +279,7 @@ describe("formatChatEvent", () => {
           resultText: "Child worktree setup failed.",
         },
       }),
-    ).toBe("x [j2] failed in 1s — monitor the release workflow\nChild worktree setup failed.");
+    ).toBe("✗ [j2] failed in 1s — monitor the release workflow\nChild worktree setup failed.");
   });
 });
 

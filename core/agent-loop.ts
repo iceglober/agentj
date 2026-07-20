@@ -251,7 +251,8 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       const elapsed = formatClock((event.job.endedAt ?? Date.now()) - event.job.startedAt);
       const result = event.job.resultText?.trim();
       const branch = event.job.branch ? `\nwork preserved on ${event.job.branch}` : "";
-      const marker = event.job.status === "done" ? "✓" : event.job.status === "failed" ? "x" : "!";
+      const marker =
+        event.job.status === "done" ? "✓" : event.job.status === "failed" ? "✗" : "!";
       const completion = event.job.completion
         ? `\n${formatCompletionReport(event.job.completion)}`
         : "";
@@ -269,9 +270,11 @@ const presentActivityLine = (text: string): UiTextLine => {
   const trimmed = text.trimStart();
   const tone = trimmed.startsWith("✓")
     ? "success"
-    : trimmed.startsWith("x")
+    : trimmed.startsWith("x") || trimmed.startsWith("✗")
       ? "danger"
-      : trimmed.startsWith("↳ queued")
+      : trimmed.startsWith("!")
+        ? "warning"
+        : trimmed.startsWith("↳ queued")
         ? "warning"
         : trimmed.startsWith("◐") ||
             trimmed.startsWith("◓") ||
