@@ -1,5 +1,15 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.42
+
+### Minor Changes
+
+- afc8ae2: Completed session todos now collapse to a compact summary such as `Todos 3/3`, keeping the live chat area clear until new work is added. When a longer active list does not fit, `/todos` prints every current todo so you can inspect the full plan.
+
+### Patch Changes
+
+- d3c13cc: Background jobs now render structured completion reports as normal status, change, and validation text instead of raw JSON; for example, a completed ship job reports its merged pull request and checks cleanly while clearing the completed session checklist.
+
 ## 0.1.0-next.41
 
 ### Minor Changes
