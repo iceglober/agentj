@@ -153,6 +153,26 @@ describe("createAiSdkRuntime", () => {
     expect(Object.keys(constructedAgents[0].tools as object)).toEqual(["alpha", "middle", "zebra"]);
   });
 
+  test("forces only the first step when the port requires a tool", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    await createAiSdkRuntime(config).generate({
+      ...request({
+        run_job: { description: "start", inputSchema: z.object({}), execute: async () => "" },
+      }),
+      requiredFirstTool: "run_job",
+    });
+
+    const prepareStep = constructedAgents[0]?.prepareStep as
+      | ((context: { stepNumber: number }) => Record<string, unknown>)
+      | undefined;
+    expect(prepareStep).toBeDefined();
+    expect(prepareStep?.({ stepNumber: 0 })).toEqual({
+      activeTools: ["run_job"],
+      toolChoice: { type: "tool", toolName: "run_job" },
+    });
+    expect(prepareStep?.({ stepNumber: 1 })).toEqual({});
+  });
+
   test("maps provider-neutral JSON Schema through the AI SDK helper", async () => {
     resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
     const schema = {
@@ -322,33 +342,5 @@ describe("createAiSdkRuntime", () => {
     // folded into adapter-owned continuation history.
     expect(constructedAgents[0]?.instructions).toBe("stable instructions");
     expect(result.messages).toEqual([...history, { role: "user", content: prompt }, assistantTurn]);
-  });
-
-  test("compacts adapter-owned history into a fresh summary continuation", async () => {
-    resetResult({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
-    nextResult.text = "User needs issue #24 implemented; context limit was crossed.";
-    const history = [
-      { role: "user", content: "implement it" },
-      { role: "assistant", content: "working" },
-    ];
-
-    const compacted = await createAiSdkRuntime(config).compact(history);
-
-    expect(generateCalls[0]?.messages).toEqual([
-      ...history,
-      {
-        role: "user",
-        content: "Create the handoff summary now. This replaces the prior conversation context.",
-      },
-    ]);
-    expect(compacted).toEqual([
-      {
-        role: "user",
-        content:
-          "Conversation handoff summary follows. Continue from it as if you had the full history.",
-      },
-      { role: "assistant", content: nextResult.text },
-    ]);
-    expect(JSON.stringify(compacted)).not.toContain("implement it");
   });
 });

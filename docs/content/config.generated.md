@@ -16,7 +16,7 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 - `agent.tools.edit.mode` (default: `"batch"`) — Edit-tool strategy: `exact`, `batch`, or `hash`.
 - `agent.tools.maxOutputChars` (default: `30000`) — Character cap on tool output returned to the model. Over-cap output spills to a session file so nothing is lost.
 - `agent.context.softLimit` (default: unset) — Request input-token threshold that triggers `onLimit`. Unset means no ceiling.
-- `agent.context.onLimit` (default: `"warn"`) — Behavior when a request crosses the soft limit: `warn` or `compact` (summarize history).
+- `agent.context.onLimit` (default: `"warn"`) — Behavior when a request crosses the soft limit: `warn` posts a notice to wrap up or delegate.
 - `agent.steps` (default: `100`) — Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.
 - `permissions.edit` (default: `"allow"`) — Policy for file edits in build mode: `allow`, `ask`, or `deny`.
 - `permissions.bash.default` (default: `"ask"`) — Default policy for bash commands, before the allow/deny lists.

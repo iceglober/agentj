@@ -58,7 +58,7 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   {
     path: "agent.context.onLimit",
     description:
-      "Behavior when a request crosses the soft limit: `warn` or `compact` (summarize history).",
+      "Behavior when a request crosses the soft limit: `warn` posts a notice to wrap up or delegate.",
   },
   {
     path: "agent.steps",
