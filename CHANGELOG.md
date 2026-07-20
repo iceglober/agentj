@@ -1,5 +1,15 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.44
+
+### Minor Changes
+
+- 81526df: Plan-mode reflections now ask agents to describe how a proposed change will leave the code simpler, including which existing abstractions they will reuse, extend, remove, or create. For example, a refactor plan now identifies the shared boundary it will use instead of adding another duplicate helper.
+
+### Patch Changes
+
+- ce0e874: Use clear words for agent status, validation, jobs, and context limits. For example, an active background job now reports “In progress” with its next step instead of a bare `!`.
+
 ## 0.1.0-next.43
 
 ### Minor Changes
