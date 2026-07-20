@@ -230,6 +230,32 @@ describe("formatChatEvent", () => {
     ).toBe("✓ [j2] done in 1m14s — monitor the release workflow\nPackage published.");
   });
 
+  test("formats structured job completions without exposing JSON", () => {
+    expect(
+      formatChatEvent({
+        type: "job-finished",
+        job: {
+          id: "j2",
+          mode: "build",
+          prompt: "monitor the release workflow",
+          status: "done",
+          startedAt: 0,
+          endedAt: 1_000,
+          resultText: "Package published.",
+          completion: {
+            status: "done",
+            summary: "Package published.",
+            changes: ["Merged PR #124"],
+            validation: [{ command: "gh pr checks 124", outcome: "passed", evidence: "green" }],
+            openQuestions: [],
+          },
+        },
+      }),
+    ).toBe(
+      "✓ [j2] done in 1s — monitor the release workflow\n✓ Package published.\n\nChanges:\n- Merged PR #124\n\nValidation:\n- ✓ gh pr checks 124: green",
+    );
+  });
+
   test("marks failed jobs as failures", () => {
     expect(
       formatChatEvent({
