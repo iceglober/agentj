@@ -48,6 +48,19 @@ describe("fetchWithRequestDeadline", () => {
 });
 
 describe("fetchWithRequestDeadline retry", () => {
+  test("does not retry HTTP error responses", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response("rate limited", { status: 429 });
+    }) as unknown as typeof fetch;
+
+    const response = await fetchWithRequestDeadline("https://example.test");
+
+    expect(response.status).toBe(429);
+    expect(calls).toBe(1);
+  });
+
   test("retries a timed-out request and returns the recovered response", async () => {
     let calls = 0;
     globalThis.fetch = (async () => {
