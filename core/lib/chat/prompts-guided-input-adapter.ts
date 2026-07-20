@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { fuzzyFilter } from "./fuzzy";
+import { fuzzyFilter } from "../fuzzy";
 import { type GuidedInputPort, guidedChoice } from "./guided-input";
 
 /** `prompts` implementation of the guided-input port for short standalone CLI flows. */

@@ -8,15 +8,15 @@ import {
   replaceEditorRange,
   splitGraphemes,
 } from "./editor";
+import type {
+  EditorCompletionProvider,
+  EditorCompletionSuggestion,
+  EditorCompletionToken,
+} from "./editor-completion";
+import { highlightEditorLine } from "./editor-highlighting";
 import { TerminalKeyDecoder } from "./key-decoder";
 import { listOverflowFooter, windowList } from "./list-window";
 import type { LiveLayout, LiveRegionPort } from "./live-region";
-import {
-  findSlashCommandToken,
-  type SlashCompletionProvider,
-  type SlashCompletionSuggestion,
-  type SlashCompletionToken,
-} from "./slash-completion";
 import { createTerminalStyler, type UiBlock, type UiTextLine } from "./styles";
 import {
   displayWidth,
@@ -50,11 +50,6 @@ export interface ChatScreenCallbacks {
   onQuit(): void;
 }
 
-export interface SlashCommandSuggestion {
-  name: string;
-  summary: string;
-}
-
 export interface CreateChatScreenOptions {
   stdin?: Readable;
   /** Terminal output port, selected by the composition root. */
@@ -66,10 +61,8 @@ export interface CreateChatScreenOptions {
   quitWindowMs?: number;
   /** Previously submitted prompts, oldest first. */
   initialHistory?: readonly string[];
-  /** Context-aware options for any slash-command token. */
-  slashCommandOptions?: SlashCompletionProvider;
-  /** Legacy initial-command suggestions. Prefer `slashCommandOptions`. */
-  slashCommandSuggestions?(query: string): readonly SlashCommandSuggestion[];
+  /** Context-aware options for slash and @ tokens in the editor. */
+  editorCompletionOptions?: EditorCompletionProvider;
   /** Controls whether a submitted chat input is retained in in-memory history. */
   shouldRememberInput?(text: string): boolean;
 }
@@ -138,13 +131,11 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const safeLine = (line: UiTextLine): string => styler.renderLine(line, contentWidth());
 
   interface ActiveCompletion {
-    token: SlashCompletionToken;
-    suggestions: readonly SlashCompletionSuggestion[];
+    token: Pick<EditorCompletionToken, "start" | "end">;
+    suggestions: readonly EditorCompletionSuggestion[];
     selectedIndex: number;
     signature: string;
     hint?: string;
-    legacy: boolean;
-    legacyMovePastSeparator: boolean;
   }
 
   const editorSignature = (): string => `${editor.cursor}\u0000${editor.text}`;
@@ -152,44 +143,20 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const activeCompletion = (): ActiveCompletion | null => {
     const signature = editorSignature();
     if (dismissedCompletion === signature) return null;
-
-    if (options.slashCommandOptions) {
-      const completion = options.slashCommandOptions(editor);
-      if (!completion || (completion.suggestions.length === 0 && !completion.hint)) return null;
-      const length = splitGraphemes(editor.text).length;
-      const start = Math.max(0, Math.min(completion.token.start, completion.token.end, length));
-      const end = Math.max(
-        start,
-        Math.min(Math.max(completion.token.start, completion.token.end), length),
-      );
-      const suggestions = completion.suggestions;
-      return {
-        token: { start, end },
-        suggestions,
-        selectedIndex: Math.max(0, Math.min(completionIndex, suggestions.length - 1)),
-        signature,
-        hint: completion.hint,
-        legacy: false,
-        legacyMovePastSeparator: false,
-      };
-    }
-
-    const token = findSlashCommandToken(editor);
-    if (!token || !options.slashCommandSuggestions) return null;
-    const hasSeparator = token.end < splitGraphemes(editor.text).length;
-    const suggestions = options.slashCommandSuggestions(token.query).map(({ name, summary }) => ({
-      value: `/${name}${hasSeparator ? "" : " "}`,
-      label: `/${name}`,
-      summary,
-    }));
-    if (suggestions.length === 0) return null;
+    const completion = options.editorCompletionOptions?.(editor);
+    if (!completion || (completion.suggestions.length === 0 && !completion.hint)) return null;
+    const length = splitGraphemes(editor.text).length;
+    const start = Math.max(0, Math.min(completion.token.start, completion.token.end, length));
+    const end = Math.max(
+      start,
+      Math.min(Math.max(completion.token.start, completion.token.end), length),
+    );
     return {
-      token,
-      suggestions,
-      selectedIndex: Math.min(completionIndex, suggestions.length - 1),
+      token: { start, end },
+      suggestions: completion.suggestions,
+      selectedIndex: Math.max(0, Math.min(completionIndex, completion.suggestions.length - 1)),
       signature,
-      legacy: true,
-      legacyMovePastSeparator: hasSeparator,
+      hint: completion.hint,
     };
   };
 
@@ -288,6 +255,13 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       };
     }
     const layout = windowEditorLayout(renderEditorLayout(editor, contentWidth()), 10);
+    const background = editor.text.startsWith("&");
+    const editorRows = layout.rows.map((row, index) =>
+      safeLine(highlightEditorLine(row, { background, firstRow: index === 0 })),
+    );
+    const backgroundLines = background
+      ? [safeLine([{ text: "BACKGROUND JOB", tone: "warning", bold: true }])]
+      : [];
     const completion = activeCompletion();
     const suggestionWindow = completion
       ? windowList(completion.suggestions, completion.selectedIndex)
@@ -307,7 +281,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       ? wrapToDisplayWidth(escapeTerminalText(completion.hint), contentWidth())
       : [];
     return {
-      lines: [...editorLead, ...layout.rows, ...completionLines, ...hintLines, ...safeStatus],
+      lines: [
+        ...editorLead,
+        ...editorRows,
+        ...completionLines,
+        ...hintLines,
+        ...backgroundLines,
+        ...safeStatus,
+      ],
       cursorRow: editorLead.length + layout.cursorRow,
       cursorColumn: layout.cursorColumn,
     };
@@ -484,11 +465,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       completion.token.end,
       selected.value,
     );
-    if (completion.legacyMovePastSeparator) editor = { ...editor, cursor: editor.cursor + 1 };
     historyIndex = null;
     completionIndex = 0;
-    dismissedCompletion =
-      !completion.legacy && selected.value.endsWith(" ") ? null : editorSignature();
+    dismissedCompletion = selected.value.endsWith(" ") ? null : editorSignature();
     paint();
   };
 
@@ -557,9 +536,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           ? splitGraphemes(editor.text).slice(completion.token.start, completion.token.end).join("")
           : "";
         const selectedValue = completion?.suggestions[completion.selectedIndex]?.value;
-        const exact = completion?.legacy
-          ? selectedValue?.trimEnd().toLowerCase() === tokenText.toLowerCase()
-          : selectedValue?.trimEnd() === tokenText;
+        const exact = selectedValue?.trimEnd() === tokenText;
         if (completion?.suggestions.length && !exact) {
           acceptCompletion(completion);
           return;

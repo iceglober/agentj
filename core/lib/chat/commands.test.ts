@@ -6,6 +6,7 @@ import {
   runChatCommand,
   shouldRememberChatInput,
   suggestChatCommands,
+  suggestChatInputRoots,
 } from "./commands";
 import type { ChatEvent } from "./events";
 import type { GuidedInputOptions } from "./guided-input";
@@ -119,6 +120,9 @@ describe("completeChatInput", () => {
     expect(
       completeChatInput("/mcp ", 5, promptContext)?.suggestions.map(({ label }) => label),
     ).toContain("add");
+    expect(suggestChatInputRoots("mds", promptContext)).toContainEqual(
+      expect.objectContaining({ label: "/mcp:docs:summarize" }),
+    );
   });
 
   test("completes model targets and guided handoff", () => {

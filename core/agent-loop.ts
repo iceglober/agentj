@@ -31,6 +31,7 @@ import {
   runChatCommand,
   type SkillCommand,
   shouldRememberChatInput,
+  suggestChatInputRoots,
 } from "./lib/chat/commands";
 import { type ConfigUiPort, runConfigUi } from "./lib/chat/config-ui";
 import { LONG_CONTEXT_INPUT_TOKENS, type UsageRecord } from "./lib/chat/cost";
@@ -38,6 +39,7 @@ import type { ChatEvent } from "./lib/chat/events";
 import {
   createPastedImageRegistry,
   expandFileAttachments,
+  formatFileReference,
   formatFileReferences,
 } from "./lib/chat/file-attachments";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
@@ -89,7 +91,9 @@ import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
+import { formatCompletionReportText } from "./lib/tui/completion-report";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
+import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { renderMarkdownLite } from "./lib/tui/markdown";
 import {
   applyProgressEvent,
@@ -119,7 +123,9 @@ import {
   createGitDelegationSnapshot,
   integrateGitDelegation,
 } from "./lib/workspace/git-integration";
+import { createGitProjectFileSource } from "./lib/workspace/git-project-file-source";
 import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
+import { createProjectFileCatalog } from "./lib/workspace/project-files";
 import { resolveProjectSource } from "./lib/workspace/project-source";
 
 const COMMAND_VERSION = packageJson.version;
@@ -203,11 +209,8 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
     case "tool-call":
       return null; // superseded by live tool-activity lines
     case "assistant": {
-      // Builder turns end in a JSON completion report; show its summary.
-      try {
-        const report = JSON.parse(event.text) as { summary?: string; status?: string };
-        if (report.summary) return `${report.status === "done" ? "✓" : "!"} ${report.summary}`;
-      } catch {}
+      const completion = formatCompletionReportText(event.text);
+      if (completion) return completion;
       // Trimmed, and null when empty (tool-only or interrupted turns) — a raw
       // body would stack blank transcript rows around the turn separators.
       const body = event.text.trim();
@@ -1346,10 +1349,22 @@ export async function runAgentjChat(
     const liveRegion = createAnsiLiveRegionAdapter({ stdout: processStdout });
     const clipboardAttachments = createCrosscopyClipboardAttachments();
     const pastedImages = createPastedImageRegistry();
+    const projectFiles = createProjectFileCatalog(createGitProjectFileSource(environment, root));
+    await projectFiles.refresh();
     screen = createChatScreen({
       liveRegion,
       initialHistory: promptHistory.entries,
-      slashCommandOptions: (state) => completeChatInput(state.text, state.cursor, commandContext),
+      editorCompletionOptions: createEditorCompletionProvider({
+        completeInitialSlash: (state) =>
+          completeChatInput(state.text, state.cursor, commandContext),
+        suggestInlineSlash: (query) => suggestChatInputRoots(query, commandContext),
+        suggestFiles: (query) =>
+          projectFiles.suggest(query).map((path) => ({
+            value: formatFileReference(path),
+            label: formatFileReference(path),
+            summary: "Project file",
+          })),
+      }),
       shouldRememberInput: (text) =>
         shouldRememberChatInput(text) && !pastedImages.hasReference(text),
       callbacks: {

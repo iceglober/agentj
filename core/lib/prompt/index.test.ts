@@ -180,13 +180,13 @@ describe("composePrompt", () => {
     // eval-validated decision, never a refactor side effect. luna/nano ride
     // the compact/standalone templates and are unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "c2f1d2b9ecc7", delegate: "c2f1d2b9ecc7" },
-      "gpt-5.6-terra": { primary: "00e3c1bafa71", delegate: "00e3c1bafa71" },
-      "gpt-5.6-luna": { primary: "f91c9447de64", delegate: "f91c9447de64" },
-      "gpt-5.4": { primary: "bd74c44e7e83", delegate: "bd74c44e7e83" },
-      "gpt-5.4-nano": { primary: "35ae181e4740", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "c0ae5d4eda8f", delegate: "c0ae5d4eda8f" },
-      "claude-x": { primary: "6e77742d4d29", delegate: "6e77742d4d29" },
+      "gpt-5.6-sol": { primary: "34f1970bb6ba", delegate: "34f1970bb6ba" },
+      "gpt-5.6-terra": { primary: "7bae30614f1a", delegate: "7bae30614f1a" },
+      "gpt-5.6-luna": { primary: "091e4245c22f", delegate: "091e4245c22f" },
+      "gpt-5.4": { primary: "982a69102473", delegate: "982a69102473" },
+      "gpt-5.4-nano": { primary: "230eb206d795", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "63f972bea560", delegate: "63f972bea560" },
+      "claude-x": { primary: "c6472e7ae15d", delegate: "c6472e7ae15d" },
     };
     const pinCtx = {
       cwd: "/repo",
