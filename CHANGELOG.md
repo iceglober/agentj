@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.45
+
+### Minor Changes
+
+- 6189528: AgentJ now continues work while session todos remain open instead of ending a turn early. For example, after a background CI job finishes, AgentJ receives its result and resumes the remaining verification and follow-up work without waiting for you to type `continue`.
+
 ## 0.1.0-next.44
 
 ### Minor Changes
