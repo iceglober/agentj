@@ -22,7 +22,7 @@ export type ChatLogRecord =
       ts: string;
       transcriptText?: string;
     }
-  | { type: "state"; messages: unknown[]; mode: ChatMode; ts: string }
+  | { type: "state"; messages: unknown[]; mode: ChatMode; ts: string; reset?: true }
   | {
       type: "usage";
       provider: string;
@@ -118,7 +118,13 @@ export async function loadChatLog(options: {
     if (record.type === "meta") meta ??= record;
     else if (record.type === "turn") turns.push(record);
     else if (record.type === "usage") usage.push(record);
-    else if (record.type === "state") state = record;
+    else if (record.type === "state") {
+      if (record.reset) {
+        turns.length = 0;
+        usage.length = 0;
+      }
+      state = record;
+    }
   }
   return meta ? { meta, turns, usage, state } : null;
 }

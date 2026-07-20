@@ -82,8 +82,6 @@ export interface ChatCommandContext {
   quit(): void;
   /** Requests a self-update and then allows the caller to exit cleanly. */
   requestUpdate?(channel: UpdateChannel): Promise<void> | void;
-  /** Clears the visible transcript (screen-level concern). */
-  clear?(): void;
   config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
   models?: ModelController;
   cost?: {
@@ -756,9 +754,11 @@ export const chatCommands: Record<string, ChatCommand> = {
     },
   },
   clear: {
-    summary: "Clear the transcript view",
-    run(context) {
-      context.clear?.();
+    summary: "Start a fresh conversation context",
+    async run(context) {
+      if (!(await context.session.clearContext())) {
+        context.emit({ type: "notice", text: "Cannot clear context while a turn is running." });
+      }
     },
   },
   quit: {

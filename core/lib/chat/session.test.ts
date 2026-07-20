@@ -74,6 +74,58 @@ describe("createChatSession", () => {
     });
   });
 
+  test("clears continuation, notices, and durable history before the next turn", async () => {
+    await withLog(async (log, root) => {
+      const prompts: Array<{ prompt: string; messages: unknown[] | undefined }> = [];
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt, options) => {
+            prompts.push({ prompt, messages: options?.messages });
+            return result("done", { messages: [{ prompt }] });
+          }),
+        log,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      await session.send("old request");
+      session.addTurnNotice("[note] old notice");
+      expect(await session.clearContext()).toBe(true);
+      await session.send("fresh request");
+
+      expect(prompts).toEqual([
+        { prompt: "old request", messages: [] },
+        { prompt: "fresh request", messages: [] },
+      ]);
+      expect(events).toContainEqual({ type: "context-cleared" });
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.turns.map((turn) => turn.user)).toEqual(["fresh request"]);
+      expect(loaded?.state?.messages).toEqual([{ prompt: "fresh request" }]);
+    });
+  });
+
+  test("does not clear context while a turn is running", async () => {
+    await withLog(async (log) => {
+      let release: (() => void) | undefined;
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async () => {
+            await new Promise<void>((resolve) => (release = resolve));
+            return result("done");
+          }),
+        log,
+      });
+
+      const turn = session.send("slow request");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(await session.clearContext()).toBe(false);
+      release?.();
+      await turn;
+    });
+  });
+
   test("persists a transformed opaque continuation after the turn", async () => {
     await withLog(async (log, root) => {
       const original = [{ vendor: "full-history" }];

@@ -130,5 +130,9 @@ export function createAnsiLiveRegionAdapter(
       eraseRegion();
       lastLayout = null;
     },
+    clearScreen() {
+      write(csi("2J") + csi("H"));
+      lastLayout = null;
+    },
   };
 }

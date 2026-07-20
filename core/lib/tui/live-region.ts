@@ -17,4 +17,6 @@ export interface LiveRegionPort {
   paint(layout: LiveLayout): void;
   printAbove(text: string): void;
   clear(): void;
+  /** Clear the terminal viewport and forget the floating region. */
+  clearScreen(): void;
 }
