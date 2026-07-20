@@ -85,4 +85,8 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
     path: "permissions.mcp.default",
     description: "Default policy for MCP tool calls, before the allow/deny lists.",
   },
+  {
+    path: "permissions.web",
+    description: "Policy for outbound web searches and URL fetches: `allow`, `ask`, or `deny`.",
+  },
 ];

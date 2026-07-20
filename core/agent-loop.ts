@@ -92,6 +92,8 @@ import {
   skillMode,
 } from "./lib/skills";
 import { createSpillSink } from "./lib/tools/spill";
+import { createExaWebSearch } from "./lib/tools/web/exa-adapter";
+import { createHttpWebFetch } from "./lib/tools/web/http-adapter";
 import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
@@ -431,6 +433,12 @@ async function composeChat(
   // their truncation notices so the model can slice it back in.
   const spillSink = createSpillSink(join(tmpdir(), "agentj-spill", entrypoint));
   const spill = { dir: spillSink.dir, write: spillSink.write };
+  // Web capabilities are client-side and model-provider independent. Exa only
+  // backs the search port; direct URL fetching never flows through an LLM API.
+  const web = {
+    search: createExaWebSearch({ maxOutputChars: config.agent.tools.maxOutputChars }),
+    fetch: createHttpWebFetch(),
+  };
 
   let agentsMd = "";
   try {
@@ -522,6 +530,7 @@ async function composeChat(
       ctx,
       metricsSink,
       spill,
+      web,
       mode: "plan",
       stopContextTokens: config.agent.context.softLimit,
       permissions: {
@@ -611,6 +620,7 @@ async function composeChat(
             ctx,
             metricsSink,
             spill,
+            web,
             mode: "plan",
             externalTools: mcpSnapshot.externalTools,
             research: {
@@ -627,6 +637,7 @@ async function composeChat(
             ctx,
             metricsSink,
             spill,
+            web,
             delegation,
             mode: "build",
             externalTools: mcpSnapshot.externalTools,
@@ -729,6 +740,7 @@ async function composeChat(
                 ctx: { ...ctx, cwd: session.path, gitBranch: session.branch },
                 metricsSink,
                 spill,
+                web,
                 stopContextTokens: config.agent.context.softLimit,
                 childExternalTools: externalLease.externalTools,
                 // Background builds answer to the same session gate, labeled.
@@ -837,6 +849,7 @@ async function composeChat(
     },
     close: async () => {
       await mcp.close();
+      await web.search.close();
       await metricsProvider?.shutdown();
       spillSink.close();
     },

@@ -869,6 +869,7 @@ const configKeySummary: Record<string, string> = {
   "agent.tools.subagents.provider": "Subagent model provider",
   "permissions.edit": "Edit permission policy",
   "permissions.bash.default": "Default bash permission policy",
+  "permissions.web": "Web research permission policy",
   "mcp.maxOutputChars": "Maximum MCP result size",
   "update.auto": "Automatically check for updates",
   "update.channel": "Release channel to follow",
@@ -883,6 +884,7 @@ const choiceValues: Record<string, readonly string[]> = {
   "agent.tools.edit.mode": ["batch", "exact", "hash"],
   "permissions.edit": ["allow", "ask", "deny"],
   "permissions.bash.default": ["allow", "ask", "deny"],
+  "permissions.web": ["allow", "ask", "deny"],
   "update.auto": ["true", "false"],
   "update.channel": ["auto", "next", "latest"],
 };
