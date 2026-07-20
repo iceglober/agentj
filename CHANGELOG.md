@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.49
+
+### Patch Changes
+
+- 5ba7e3b: Rename the primary agent's background-job tools to `run_background_job` and `check_background_job` to distinguish detached work from foreground subagent delegation.
+
 ## 0.1.0-next.48
 
 ### Minor Changes
