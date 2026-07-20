@@ -6,6 +6,7 @@
   },
   "changesets": [
     "agent-skills",
+    "authoritative-mode-prompts",
     "auto-smart-compact",
     "bash-abort-signal",
     "biome-quality",
