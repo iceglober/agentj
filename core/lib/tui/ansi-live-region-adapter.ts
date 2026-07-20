@@ -117,14 +117,13 @@ export function createAnsiLiveRegionAdapter(
       );
       lastLayout = fitted;
     },
-    printAbove(text) {
-      // Erase the region, drop `text` below the transcript with the single blank
-      // separator the transcript owns, and let the terminal scroll naturally as
-      // it overflows. The next paint() redraws the region right after — no
-      // height-dependent padding, so the separator is always exactly one row.
+    printAbove(text, spacing = "none") {
+      // Spacing is semantic: related events are adjacent, while a new user turn
+      // gets one leading blank. The live layout supplies the single separator
+      // below the transcript when it is painted.
       eraseRegion();
       lastLayout = null;
-      write(`${text}\r\n\r\n`);
+      write(`${spacing === "turn" ? "\r\n" : ""}${text}\r\n`);
     },
     clear() {
       eraseRegion();

@@ -785,10 +785,9 @@ describe("createChatScreen", () => {
     const idleEditor = rendered.findIndex((line) => line.startsWith("> "));
     expect(rendered.slice(earlier, latest + 1)).toEqual([
       "earlier transcript item",
-      "",
       "latest transcript item",
     ]);
-    expect(rendered.slice(latest + 1, idleEditor)).toEqual(["", ""]);
+    expect(rendered.slice(latest + 1, idleEditor)).toEqual([""]);
 
     screen.setProgressLines([
       "  ◐ tool running",

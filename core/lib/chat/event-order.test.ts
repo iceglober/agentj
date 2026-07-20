@@ -21,7 +21,7 @@ describe("createChatEventOrderer", () => {
     expect(events).toEqual([{ type: "job-finished", job: job("j1") }]);
   });
 
-  test("keeps starts immediate and completion after a foreground submission", () => {
+  test("renders every event immediately during a foreground submission", () => {
     const events: ChatEvent[] = [];
     const orderer = createChatEventOrderer((event) => events.push(event));
 
@@ -29,7 +29,12 @@ describe("createChatEventOrderer", () => {
     orderer.emit({ type: "job-started", job: { ...job("j1"), status: "running" } });
     orderer.emit({ type: "assistant", mode: "build", text: "done" });
     orderer.emit({ type: "job-finished", job: job("j1") });
-    expect(events.map((event) => event.type)).toEqual(["turn-started", "job-started", "assistant"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "turn-started",
+      "job-started",
+      "assistant",
+      "job-finished",
+    ]);
 
     orderer.emit({ type: "submission-finished" });
 
@@ -37,12 +42,12 @@ describe("createChatEventOrderer", () => {
       "turn-started",
       "job-started",
       "assistant",
-      "submission-finished",
       "job-finished",
+      "submission-finished",
     ]);
   });
 
-  test("keeps completion order and flushes before the next submission starts", () => {
+  test("preserves completion order across submissions", () => {
     const events: ChatEvent[] = [];
     const orderer = createChatEventOrderer((event) => events.push(event));
 
@@ -54,10 +59,10 @@ describe("createChatEventOrderer", () => {
 
     expect(
       events.map((event) => (event.type === "job-finished" ? event.job.id : event.type)),
-    ).toEqual(["turn-started", "submission-finished", "j1", "j2", "turn-started"]);
+    ).toEqual(["turn-started", "j1", "j2", "submission-finished", "turn-started"]);
   });
 
-  test("keeps completions buffered through a plan reflection exchange", () => {
+  test("preserves completion order through a plan reflection exchange", () => {
     const events: ChatEvent[] = [];
     const orderer = createChatEventOrderer((event) => events.push(event));
 
@@ -74,11 +79,11 @@ describe("createChatEventOrderer", () => {
     ).toEqual([
       "turn-started",
       "turn-finished",
+      "j1",
       "notice",
       "turn-started",
       "assistant",
       "submission-finished",
-      "j1",
     ]);
   });
 });

@@ -1265,7 +1265,7 @@ export async function runAgentjChat(
       // Chat styling (interactive only): a blank line + colored prefix separates
       // turns; assistant markdown renders lightly.
       if (event.type === "turn-started") {
-        screen?.printAbove(formatUserTurnBlock(event.text, event.transcriptText));
+        screen?.printAbove(formatUserTurnBlock(event.text, event.transcriptText), "turn");
         updateStatus();
         return;
       }
@@ -1587,7 +1587,7 @@ export async function runAgentjChat(
     }
     for (const notice of skillNotices) emit({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
-      screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText));
+      screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText), "turn");
       screen.printAbove(turn.assistant);
     }
     void composition.startMcp().catch((error) => {
