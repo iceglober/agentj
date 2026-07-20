@@ -12,8 +12,8 @@ import type { ChatEvent, JobView } from "./events";
  * executor — plan jobs run a read-only agent in the session cwd; build jobs
  * run inside a child worktree via the same snapshot→integrate path as
  * subagents, so they cannot race the checkout or the foreground turn.
- * Completions surface twice: a transcript event now, and a notice prepended
- * to the next user turn so the model learns the outcome without any push
+ * Completions surface twice: a transcript event (after any active foreground
+ * submission), and a notice prepended to the next user turn so the model learns the outcome without any push
  * mechanism. A job may also carry a soft timeout: when it is still running at
  * the deadline, `ping` fires once — the job keeps running, and the agent
  * decides whether to renew the deadline or abort. No persistence across

@@ -45,6 +45,8 @@ export type ChatEvent =
   | { type: "turn-aborted" }
   | { type: "turn-error"; error: string }
   | { type: "turn-finished" }
+  /** A submitted foreground turn, including plan reflection, has settled. */
+  | { type: "submission-finished" }
   /** The session continuation and durable visible history were reset. */
   | { type: "context-cleared" }
   | { type: "todos-updated"; items: TodoList }

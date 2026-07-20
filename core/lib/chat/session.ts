@@ -212,6 +212,7 @@ export function createChatSession(
     } finally {
       busy = false;
       if (pendingMode !== mode) emit({ type: "mode-changed", mode: pendingMode, pending: false });
+      emit({ type: "submission-finished" });
     }
   };
 

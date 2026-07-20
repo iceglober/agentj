@@ -71,7 +71,8 @@ describe("createChatSession", () => {
       expect(loaded?.state?.messages).toEqual([{ turn: 1 }, { turn: 2 }]);
       expect(events.filter((event) => event.type === "assistant")).toHaveLength(2);
       expect(events.filter((event) => event.type === "turn-finished")).toHaveLength(2);
-      expect(events.at(-1)?.type).toBe("turn-finished");
+      expect(events.filter((event) => event.type === "submission-finished")).toHaveLength(2);
+      expect(events.at(-1)?.type).toBe("submission-finished");
     });
   });
 
@@ -310,9 +311,21 @@ describe("createChatSession", () => {
       expect(modes).toEqual(["plan", "build"]); // queued turn ran in the new mode
       expect(
         events
-          .filter((event) => event.type === "turn-started" || event.type === "turn-finished")
+          .filter(
+            (event) =>
+              event.type === "turn-started" ||
+              event.type === "turn-finished" ||
+              event.type === "submission-finished",
+          )
           .map((event) => event.type),
-      ).toEqual(["turn-started", "turn-finished", "turn-started", "turn-finished"]);
+      ).toEqual([
+        "turn-started",
+        "turn-finished",
+        "submission-finished",
+        "turn-started",
+        "turn-finished",
+        "submission-finished",
+      ]);
     });
   });
 
@@ -391,10 +404,11 @@ describe("createChatSession", () => {
             (event) =>
               event.type === "turn-abort-requested" ||
               event.type === "turn-aborted" ||
-              event.type === "turn-finished",
+              event.type === "turn-finished" ||
+              event.type === "submission-finished",
           )
           .map((event) => event.type),
-      ).toEqual(["turn-abort-requested", "turn-aborted", "turn-finished"]);
+      ).toEqual(["turn-abort-requested", "turn-aborted", "turn-finished", "submission-finished"]);
 
       await session.send("next");
       expect(prompts[1]).toContain("was interrupted");
@@ -522,7 +536,7 @@ describe("createChatSession", () => {
 
       await session.send("boom");
       expect(events.some((event) => event.type === "turn-error")).toBe(true);
-      expect(events.at(-1)?.type).toBe("turn-finished");
+      expect(events.at(-1)?.type).toBe("submission-finished");
       expect(session.busy).toBe(false);
 
       await session.send("again");
