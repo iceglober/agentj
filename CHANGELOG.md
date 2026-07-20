@@ -1,5 +1,16 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.36
+
+### Minor Changes
+
+- fee71df: Add the built-in `/running-background-work` skill so aj can guide long-running work such as waiting for CI or deploying: it starts an appropriate background job instead of claiming that it will wait in the foreground.
+
+### Patch Changes
+
+- fee71df: Show the current aj version at the right of the TUI status path row.
+- fca59d8: Show `run_job` in the terminal's normal tool activity transcript, so starting a background task now produces a row such as `✓ run_job` alongside its existing job start and completion updates.
+
 ## 0.1.0-next.35
 
 ### Patch Changes
