@@ -1,3 +1,4 @@
+import { COMPLETION_REPORT_INSTRUCTION } from "../report";
 import {
   BUILDER_BLOCK,
   COMMS_STOP_BLOCK,
@@ -107,11 +108,7 @@ contents or structure — read and verify with tools.
 - Ask first: pushes, destructive or history-rewriting git commands,
   environment-changing installs, or a material expansion of scope.
 
-# Completion report
-Final response: JSON only —
-{"status":"done|blocked|failed","summary":"...","changes":["..."],"validation":[{"command":"exact command run","outcome":"passed|blocked","evidence":"..."}],"openQuestions":["..."]}
-Use status=done only when every claimed passing validation command was
-actually run and succeeded.
+${COMPLETION_REPORT_INSTRUCTION}
 {{PROFILE_DELTA}}
 
 # Project rules

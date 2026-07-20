@@ -52,3 +52,10 @@ unchanged.
   `z.enum(...)`, so adding an entry updates the schema automatically.
 - Composition roots (`core/agent-loop.ts`, `core/eval/run.ts`) are the only
   places that pick adapters and wire ports together.
+- Editor completion follows the same boundary: neutral `fuzzy.ts` owns shared
+  ranking; `tui/editor-completion.ts` owns pure token ranges and the callback
+  contract; `workspace/project-files.ts` owns the bounded file catalog;
+  `workspace/git-project-file-source.ts` adapts
+  that catalog's narrow port through the existing execution boundary. The TUI
+  receives completion results only and never imports Git, the filesystem, or
+  host execution.

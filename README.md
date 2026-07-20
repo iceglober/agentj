@@ -45,17 +45,18 @@ approval phrase.
 
 Keys and commands:
 
-- **Tab** — complete the selected slash-command suggestion, or toggle plan/build when no suggestions
-  are shown (applies at the next turn if one is running).
+- **Tab** — complete the selected slash-command or `@file` suggestion, or toggle plan/build when
+  no suggestions are shown (applies at the next turn if one is running).
 - **Esc** — dismiss slash-command suggestions, dequeue the newest waiting message back into the
   editor, or interrupt the running turn. The session survives; the model is told it was cut short.
 - **Ctrl+C** — clear the input; on empty input it interrupts, and a double press quits.
 - **Enter** — complete the selected slash command, or send when the command is exact or no
   suggestions are shown. **Shift+Return** — newline. Outer whitespace is trimmed when routing a
   message; internal blank lines are preserved. Messages typed mid-turn are queued.
-- **↑/↓** or **Ctrl+P/N** — select a shown slash command, or browse recent submitted prompts from
-  an empty editor.
-- **`& <task>`** — run the task as a background job in the current mode. Jobs run in their own
+- **↑/↓** or **Ctrl+P/N** — select a shown slash-command or file suggestion, or browse recent
+  submitted prompts from an empty editor.
+- **`& <task>`** — run the task as a background job in the current mode. When `&` is the first
+  editor character, the editor turns yellow and shows `BACKGROUND JOB`. Jobs run in their own
   worktree (build) or read-only (plan), never race your checkout, and report into the transcript
   and the next turn. `/jobs` lists them; `/jobs abort <id>` stops one. The agent can also start
   jobs itself (`run_job`) — asked to wait on something external like a CI run or a review, it
@@ -63,12 +64,14 @@ Keys and commands:
   timeout: if it is still running at the deadline the agent gets pinged, inspects the job's
   recent activity (`check_job`), and either extends the deadline or aborts a stuck job — the
   job itself keeps running throughout.
-- **`@path/to/file`** — attach a file's contents to your message. Supported image files (`.png`,
+- **`@path/to/file`** — attach a file's contents to your message. Type `@` after whitespace to
+  fuzzy-match project files; Tab or Enter inserts the selected path. Supported image files (`.png`,
   `.jpg`, `.jpeg`, `.gif`, `.webp`) are sent as vision input. Quote paths with spaces as
   **`@"path/to/my file.md"`**. **Ctrl+V** inserts copied local files or copied screenshots as
   editable references.
-- **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/` as
-  the first non-whitespace input token shows fuzzy-matched command suggestions.
+- **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/`
+  after whitespace shows fuzzy-matched command suggestions; inline tokens complete and highlight
+  but only a top-level slash command executes locally.
 - **`/mcp`** — inspect MCP status; guided completions provide `add`, `auth`, `reload`, `remove`,
   and advanced `set` actions. Server prompt templates appear as namespaced commands such as
   **`/mcp:docs:summarize`**; built-in commands always win. Invoking one collects its arguments

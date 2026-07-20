@@ -1,5 +1,6 @@
 import { type ConfigField, configField } from "../config/fields";
 import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
+import { fuzzyFilter } from "../fuzzy";
 import { providerNames } from "../llm";
 import {
   type McpPromptCatalogEntry,
@@ -14,7 +15,6 @@ import { listOverflowFooter, windowList } from "../tui/list-window";
 import type { UpdateChannel } from "../update";
 import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
 import type { ChatEvent } from "./events";
-import { fuzzyFilter } from "./fuzzy";
 import type { GuidedInputPort } from "./guided-input";
 import type { JobRunner } from "./jobs";
 import type { ChatSession } from "./session";
@@ -789,6 +789,33 @@ export interface ChatInputCompletion {
   hint?: string;
 }
 
+export type ChatInputSuggestion = ChatInputCompletion["suggestions"][number];
+
+/** Root slash candidates shared by top-level and inline command completion. */
+export const suggestChatInputRoots = (
+  query: string,
+  context?: Partial<Pick<ChatCommandContext, "mcp" | "skills">>,
+): ChatInputSuggestion[] => {
+  const commands = suggestChatCommands(query, context?.skills).map(({ name, summary }) => ({
+    value: `/${name} `,
+    label: `/${name}`,
+    summary,
+  }));
+  const prompts = fuzzyFilter(
+    query,
+    (context?.mcp?.prompts?.() ?? []).map((prompt) => ({
+      name: `mcp:${prompt.server}:${prompt.name}`,
+      summary: prompt.description ?? prompt.title ?? "MCP prompt",
+    })),
+    (prompt) => prompt.name,
+  ).map((prompt) => ({
+    value: `/${prompt.name} `,
+    label: `/${prompt.name}`,
+    summary: `${prompt.summary} (MCP prompt)`,
+  }));
+  return [...commands, ...prompts];
+};
+
 const configKeySummary: Record<string, string> = {
   "agent.llm.model": "Model name",
   "agent.llm.provider": "Model provider",
@@ -849,27 +876,8 @@ export function completeChatInput(
     .filter(Boolean);
   const token = { start, end };
 
-  if (start === first) {
-    const commands = suggestChatCommands(prefix.slice(1), context?.skills).map(
-      ({ name, summary }) => ({
-        value: `/${name} `,
-        label: `/${name}`,
-        summary,
-      }),
-    );
-    const prompts = (context?.mcp?.prompts?.() ?? [])
-      .map((prompt) => ({
-        name: `mcp:${prompt.server}:${prompt.name}`,
-        summary: prompt.description ?? prompt.title ?? "MCP prompt",
-      }))
-      .filter((prompt) => prompt.name.toLowerCase().startsWith(prefix.slice(1).toLowerCase()))
-      .map((prompt) => ({
-        value: `/${prompt.name} `,
-        label: `/${prompt.name}`,
-        summary: `${prompt.summary} (MCP prompt)`,
-      }));
-    return { token, suggestions: [...commands, ...prompts] };
-  }
+  if (start === first)
+    return { token, suggestions: suggestChatInputRoots(prefix.slice(1), context) };
 
   const [command, ...args] = prior;
   if (command && !(command in chatCommands)) {

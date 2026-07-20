@@ -5,6 +5,8 @@
  * product here — edit with care, the profiles were tuned against this text.
  */
 
+import { COMPLETION_REPORT_INSTRUCTION } from "../report";
+
 /** Steps 1–3 of the default workflow; the 4–5 verify tail lives in base.ts so
  *  both the steps and outcome-first variants share it. Step 2 is gated on the
  *  PLANNING flag rather than a separate constant. */
@@ -114,12 +116,9 @@ change end to end.
   the remaining integration or implementation in the parent workspace. Do not
   delegate Git recovery to the user.
 
-# Completion report
-Your final response must be JSON only:
-{"status":"done|blocked|failed","summary":"...","changes":["..."],"validation":[{"command":"exact command run","outcome":"passed|blocked","evidence":"..."}],"openQuestions":["..."]}
-Use status=done only when every claimed passing validation command was actually
-run and succeeded. A failed dependency install, test, typecheck, lint, or build
-must produce status=blocked or status=failed.`;
+${COMPLETION_REPORT_INSTRUCTION}
+A failed dependency install, test, typecheck, lint, or build must produce
+status=blocked or status=failed.`;
 
 // --- Per-profile deltas, appended into {{PROFILE_DELTA}} ---
 

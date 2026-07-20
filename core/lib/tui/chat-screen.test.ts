@@ -7,6 +7,7 @@ import {
   type CreateChatScreenOptions,
   createChatScreen,
 } from "./chat-screen";
+import { createEditorCompletionProvider, findEditorToken } from "./editor-completion";
 import { displayWidth } from "./terminal-editor";
 
 class FakeInput extends PassThrough {
@@ -23,7 +24,7 @@ function makeScreen(
   over: Partial<ChatScreenCallbacks> = {},
   initialHistory: readonly string[] = [],
   screenOptions: Partial<
-    Pick<CreateChatScreenOptions, "slashCommandOptions" | "shouldRememberInput"> & {
+    Pick<CreateChatScreenOptions, "editorCompletionOptions" | "shouldRememberInput"> & {
       terminalHeight?: number;
       terminalWidth?: number;
     }
@@ -42,7 +43,18 @@ function makeScreen(
     escapeFlushMs: 5,
     quitWindowMs: 100,
     initialHistory,
-    slashCommandSuggestions: suggestChatCommands,
+    editorCompletionOptions: (state) => {
+      const token = findEditorToken(state);
+      if (token?.sigil !== "/" || token.start !== state.text.search(/\S/u)) return null;
+      return {
+        token,
+        suggestions: suggestChatCommands(token.query).map(({ name, summary }) => ({
+          value: `/${name} `,
+          label: `/${name}`,
+          summary,
+        })),
+      };
+    },
     ...chatScreenOptions,
     callbacks: {
       onSubmit: (text) => calls.submit.push(text),
@@ -276,7 +288,7 @@ describe("createChatScreen", () => {
 
   test("shows next-argument options after accepting an advancing completion", async () => {
     const { screen, input, calls, text } = makeScreen({}, [], {
-      slashCommandOptions: (state) => completeChatInput(state.text, state.cursor),
+      editorCompletionOptions: (state) => completeChatInput(state.text, state.cursor),
     });
     screen.start();
 
@@ -300,7 +312,7 @@ describe("createChatScreen", () => {
   test("replaces a nested token and renders its contextual hint", async () => {
     const seen: Array<{ text: string; cursor: number }> = [];
     const { screen, input, calls, text } = makeScreen({}, [], {
-      slashCommandOptions: (state) => {
+      editorCompletionOptions: (state) => {
         seen.push({ text: state.text, cursor: state.cursor });
         if (!state.text.startsWith("/config set ")) return null;
         return {
@@ -333,7 +345,7 @@ describe("createChatScreen", () => {
       (_, i) => `agent.param.${String(i).padStart(2, "0")}`,
     );
     const { screen, input, calls, text } = makeScreen({}, [], {
-      slashCommandOptions: (state) => {
+      editorCompletionOptions: (state) => {
         if (!state.text.startsWith("/config set")) return null;
         return {
           token: { start: 12, end: state.text.length },
@@ -401,6 +413,34 @@ describe("createChatScreen", () => {
     await settle();
     expect(calls.submit).toEqual(["/jobs "]);
     expect(calls.tab).toBe(1);
+    screen.stop();
+  });
+
+  test("completes inline slash and @ tokens through one provider", async () => {
+    const { screen, input, calls } = makeScreen({}, [], {
+      editorCompletionOptions: createEditorCompletionProvider({
+        completeInitialSlash: (state) => completeChatInput(state.text, state.cursor),
+        suggestInlineSlash: (query) =>
+          query === "bld" ? [{ value: "/build ", label: "/build", summary: "Build mode" }] : [],
+        suggestFiles: (query) =>
+          query === "src"
+            ? [{ value: "@src/main.ts", label: "@src/main.ts", summary: "Project file" }]
+            : [],
+      }),
+    });
+    screen.start();
+    input.write("review /bld\t @src\t\r");
+    await settle();
+    expect(calls.submit).toEqual(["review /build  @src/main.ts"]);
+    screen.stop();
+  });
+
+  test("shows a background-job cue only for a leading ampersand", async () => {
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    input.write("& run tests");
+    await settle();
+    expect(renderScreen(text()).join("\n")).toContain("BACKGROUND JOB");
     screen.stop();
   });
 

@@ -135,6 +135,24 @@ describe("formatChatEvent", () => {
     expect(formatChatEvent({ type: "assistant", mode: "plan", text: "\na\n\nb\n" })).toBe("a\n\nb");
   });
 
+  test("renders every completion-report field instead of only its summary", () => {
+    expect(
+      formatChatEvent({
+        type: "assistant",
+        mode: "plan",
+        text: JSON.stringify({
+          status: "done",
+          summary: "plan ready",
+          changes: ["Scanned editor tokens"],
+          validation: [{ command: "bun test core", outcome: "passed", evidence: "green" }],
+          openQuestions: ["None"],
+        }),
+      }),
+    ).toBe(
+      "✓ plan ready\n\nChanges:\n- Scanned editor tokens\n\nValidation:\n- ✓ bun test core: green\n\nOpen questions:\n- None",
+    );
+  });
+
   test("a step-limited turn is announced instead of ending silently", () => {
     expect(
       formatChatEvent({ type: "assistant", mode: "build", text: "", stepLimitReached: true }),
