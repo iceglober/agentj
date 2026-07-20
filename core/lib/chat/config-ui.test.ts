@@ -47,12 +47,12 @@ describe("runConfigUi", () => {
 
   test("navigates nested groups and edits an enum key", async () => {
     const { port, applied, prompts } = scriptedPort({
-      inputs: ["agent", "context", "onLimit", "compact", "Back", "Back", "Back", null],
+      inputs: ["agent", "context", "onLimit", "warn", "Back", "Back", "Back", null],
     });
     await runConfigUi(port);
-    expect(applied).toEqual([{ path: "agent.context.onLimit", value: "compact" }]);
+    expect(applied).toEqual([{ path: "agent.context.onLimit", value: "warn" }]);
     expect(labels(prompts[1]!)).toContain("context");
-    expect(labels(prompts[3]!)).toEqual(["warn", "compact", "Back"]);
+    expect(labels(prompts[3]!)).toEqual(["warn", "Back"]);
   });
 
   test("edits a string-array key: add then save persists JSON", async () => {

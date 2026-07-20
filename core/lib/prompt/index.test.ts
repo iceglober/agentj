@@ -191,14 +191,30 @@ describe("composePrompt", () => {
     }
   });
 
-  test("13. hash pin: deliberate mode-authority prompt changes update every build profile", () => {
-    // Versions captured 2026-07-20 after adding mode-authority instructions.
-    // A failure here means prompt CONTENT changed — a separate, eval-validated
-    // decision, never a refactor side effect. Standalone delegates do not carry
-    // the primary build-mode instruction.
+  test("12b. the 5.6 build profiles carry the evidence rule against fabricated reports", () => {
+    // The confabulation fix: hallucinationGuard is ON for sol/terra so the
+    // completion-report template cannot be filled from plan text without tools.
+    for (const model of ["gpt-5.6-sol", "gpt-5.6-terra"]) {
+      const build = composePrompt(AUTO, inputs({ model, mode: "build" }), CTX);
+      expect(build.instructions).toContain("# Evidence rule");
+      expect(build.instructions).toContain("re-run the check before");
+    }
+  });
+
+  test("12c. non-5.6 profiles keep hallucinationGuard off by default", () => {
+    const build = composePrompt(AUTO, inputs({ model: "gpt-5.4", mode: "build" }), CTX);
+    expect(build.instructions).not.toContain("# Evidence rule");
+  });
+
+  test("13. hash pin: mode-authority (#103) plus the sol/terra evidence rule", () => {
+    // Base hashes are #103's mode-authority versions (2026-07-20); sol and terra
+    // additionally shift because hallucinationGuard is now ON for them (the
+    // fabricated status=done fix). A failure here means prompt CONTENT changed —
+    // a separate, eval-validated decision, never a refactor side effect.
+    // Standalone delegates do not carry the primary build-mode instruction.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "e0a350722da0", delegate: "e0a350722da0" },
-      "gpt-5.6-terra": { primary: "f774543920c8", delegate: "f774543920c8" },
+      "gpt-5.6-sol": { primary: "9c39d3d759f0", delegate: "9c39d3d759f0" },
+      "gpt-5.6-terra": { primary: "be98e3067986", delegate: "be98e3067986" },
       "gpt-5.6-luna": { primary: "68908e3e9ab5", delegate: "68908e3e9ab5" },
       "gpt-5.4": { primary: "8d594e65141d", delegate: "8d594e65141d" },
       "gpt-5.4-nano": { primary: "b5d58d2db909", delegate: "096ae64c4caf" },

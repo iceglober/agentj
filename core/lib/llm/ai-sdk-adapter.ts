@@ -149,11 +149,6 @@ const mapTools = (tools: ToolSet): AiToolSet =>
       .map((name) => [name, toAiTool(tools[name])]),
   ) as AiToolSet;
 
-const COMPACTION_INSTRUCTIONS = `Summarize the conversation so another coding agent can continue it accurately. Preserve the user's goals, decisions, constraints, relevant discoveries, current implementation state, and remaining work. Be concise but include exact paths, commands, errors, and identifiers that matter. Do not mention this compaction request.`;
-
-const COMPACTION_PROMPT =
-  "Create the handoff summary now. This replaces the prior conversation context.";
-
 const userMessage = (req: GenerateRequest): ModelMessage =>
   req.images && req.images.length > 0
     ? {
@@ -180,26 +175,6 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
   const model = createModel(config);
 
   return {
-    async compact(messages: unknown[]): Promise<unknown[]> {
-      const agent = new ToolLoopAgent({
-        model,
-        instructions: COMPACTION_INSTRUCTIONS,
-      });
-      // `messages` is opaque above this adapter. We pass its vendor shape back
-      // to the SDK only here, then intentionally retain only the summary.
-      const result = await agent.generate({
-        messages: [...messages, { role: "user", content: COMPACTION_PROMPT }] as ModelMessage[],
-      });
-      return [
-        {
-          role: "user",
-          content:
-            "Conversation handoff summary follows. Continue from it as if you had the full history.",
-        },
-        { role: "assistant", content: result.text },
-      ];
-    },
-
     async generate(req: GenerateRequest): Promise<RunResult> {
       const startedAt = Date.now();
       const recordUsage = (outcome: "success" | "error", usage?: TokenUsage) => {
@@ -223,6 +198,7 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
       };
 
       try {
+        const requiredFirstTool = req.requiredFirstTool;
         const agent = new ToolLoopAgent({
           model,
           instructions: req.instructions,
@@ -239,6 +215,17 @@ export const createAiSdkRuntime = (config: LlmConfig, metricsSink?: MetricsSink)
           ...(stopConditions(req).length > 0 ? { stopWhen: stopConditions(req) } : {}),
           toolOrder: Object.keys(req.tools).sort(),
           tools: mapTools(req.tools),
+          ...(requiredFirstTool
+            ? {
+                prepareStep: ({ stepNumber }: { stepNumber: number }) =>
+                  stepNumber === 0
+                    ? {
+                        activeTools: [requiredFirstTool],
+                        toolChoice: { type: "tool" as const, toolName: requiredFirstTool },
+                      }
+                    : {},
+              }
+            : {}),
         });
 
         const onStep = req.onStep;
