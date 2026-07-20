@@ -178,18 +178,12 @@ describe("discoverSkills", () => {
     }
   });
 
-  test("ships the running-background-work skill through the normal discovery path", async () => {
+  test("ships embedded model-only skills through the normal discovery path", async () => {
+    const expectedNames = ["creating-agent-skills", "running-background-work", "using-the-browser"];
     const { skills, issues } = await discoverSkills({ roots: [embeddedSkillsRoot] });
     expect(issues).toEqual([]);
-    expect(skills).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "running-background-work",
-          userInvocable: false,
-          metadata: {},
-        }),
-      ]),
-    );
+    expect(skills.map((skill) => skill.name)).toEqual(expectedNames);
+    for (const skill of skills) expect(skill.userInvocable).toBe(false);
   });
 });
 
