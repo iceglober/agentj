@@ -5,7 +5,7 @@ import type { ChatEvent } from "./events";
 
 /** Durable, serialized session todo state. */
 export interface SessionTodos extends TodoPort {
-  readonly items: TodoList;
+  list(): TodoList;
   clear(): Promise<void>;
 }
 
@@ -30,9 +30,7 @@ export const createSessionTodos = (options: {
   };
 
   return {
-    get items() {
-      return items;
-    },
+    list: () => items,
     replace,
     clear: () => replace([]),
   };

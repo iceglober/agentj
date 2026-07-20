@@ -10,9 +10,11 @@ import {
 } from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
 import type { UndoStack } from "../session/undo";
+import type { TodoList } from "../todos";
 import { type ListEditorAction, type ListEditorState, reduceListEditor } from "../tui/list-editor";
 import { listOverflowFooter, windowList } from "../tui/list-window";
 import { formatDuration, formatToolActivityLabel } from "../tui/progress";
+import { formatTodoDetails } from "../tui/todos";
 import type { UpdateChannel } from "../update";
 import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
 import type { ChatEvent } from "./events";
@@ -91,6 +93,9 @@ export interface ChatCommandContext {
   };
   activity?: {
     list(): readonly { tool: string; detail: string; elapsedMs: number }[];
+  };
+  todos?: {
+    list(): TodoList;
   };
   mcp?: {
     statuses(): readonly McpRuntimeStatus[];
@@ -693,6 +698,16 @@ export const chatCommands: Record<string, ChatCommand> = {
                 )
                 .join("\n"),
       });
+    },
+  },
+  todos: {
+    summary: "Show all session todos",
+    run(context) {
+      if (!context.todos) {
+        context.emit({ type: "notice", text: "Todos are unavailable in this session." });
+        return;
+      }
+      context.emit({ type: "notice", text: formatTodoDetails(context.todos.list()) });
     },
   },
   build: {

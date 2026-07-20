@@ -61,6 +61,7 @@ describe("suggestChatCommands", () => {
       "model",
       "cost",
       "activity",
+      "todos",
       "build",
       "jobs",
       "undo",
@@ -244,6 +245,7 @@ describe("runChatCommand", () => {
       "/update",
       "/model",
       "/activity",
+      "/todos",
       "/build",
       "/jobs",
       "/undo",
@@ -267,6 +269,23 @@ describe("runChatCommand", () => {
     expect((events.at(-1) as { text: string }).text).toBe(
       "✓ run_one_subagent inspect commands 1.2s",
     );
+  });
+
+  test("todos prints the current full session list", async () => {
+    const { context, events } = makeContext();
+    context.todos = {
+      list: () => [
+        { id: "one", text: "Inspect", status: "completed" },
+        { id: "two", text: "Build", status: "in_progress" },
+      ],
+    };
+
+    await runChatCommand(context, "todos", "");
+
+    expect(events).toEqual([
+      { type: "command", name: "todos" },
+      { type: "notice", text: "Todos 1/2\n✓ Inspect\n◐ Build" },
+    ]);
   });
 
   test("clear resets the session context and reports when a turn is active", async () => {
