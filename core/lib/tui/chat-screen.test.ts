@@ -30,16 +30,18 @@ function makeScreen(
     > & {
       terminalHeight?: number;
       terminalWidth?: number;
+      color?: boolean;
     }
   > = {},
 ) {
   const input = new FakeInput();
-  const output = new PassThrough() as PassThrough & { columns: number };
+  const output = new PassThrough() as PassThrough & { columns: number; isTTY?: boolean };
   output.columns = 60;
   const chunks: Buffer[] = [];
   output.on("data", (chunk: Buffer) => chunks.push(chunk));
   const calls = { submit: [] as string[], tab: 0, escape: 0, quit: 0 };
-  const { terminalHeight, terminalWidth, ...chatScreenOptions } = screenOptions;
+  const { terminalHeight, terminalWidth, color, ...chatScreenOptions } = screenOptions;
+  output.isTTY = color ?? true;
   const screen = createChatScreen({
     stdin: input,
     liveRegion: createAnsiLiveRegionAdapter({ stdout: output, terminalHeight, terminalWidth }),
@@ -386,7 +388,7 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("guided-input renders choice descriptions", async () => {
+  test("guided-input differentiates choice labels and descriptions", async () => {
     const { screen, input, text } = makeScreen();
     screen.start();
     const answer = screen.askInput({
@@ -400,6 +402,24 @@ describe("createChatScreen", () => {
     const shown = renderScreen(text()).join("\n");
     expect(shown).toContain("CLI");
     expect(shown).toContain("Change the command-line interface.");
+    expect(text()).toContain("\u001b[1m\u001b[36m›\u001b[0m");
+    expect(text()).toContain("\u001b[1mCLI\u001b[0m");
+    expect(text()).toContain("\u001b[2mChange the command-line interface.\u001b[0m");
+    input.write("\r");
+    await expect(answer).resolves.toBe("cli");
+    screen.stop();
+  });
+
+  test("guided-input choice styling stays plain when color is disabled", async () => {
+    const { screen, input, text } = makeScreen({}, [], { color: false });
+    screen.start();
+    const answer = screen.askInput({
+      label: "Pick one",
+      choices: [{ label: "CLI", value: "cli", description: "Change the command-line interface." }],
+    });
+    await settle();
+    expect(text()).not.toContain("\u001b[1m");
+    expect(text()).not.toContain("\u001b[2m");
     input.write("\r");
     await expect(answer).resolves.toBe("cli");
     screen.stop();
