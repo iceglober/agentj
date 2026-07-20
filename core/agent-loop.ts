@@ -300,6 +300,20 @@ const presentActivityLine = (text: string): UiTextLine => {
 export const formatResumeCommand = (sessionId: string): string =>
   `Resume with: agentj --resume ${sessionId}\n`;
 
+export const notifyAvailableUpdate = async (
+  check: () => Promise<{ available?: string } | undefined>,
+  emit: (event: ChatEvent) => void,
+): Promise<void> => {
+  try {
+    const result = await check();
+    if (result?.available)
+      emit({
+        type: "notice",
+        text: `agentj ${result.available} is available. Run /update to install it.`,
+      });
+  } catch {}
+};
+
 export async function finalizeInteractiveChat(options: {
   sessionId: string | undefined;
   settle: Promise<unknown>;
@@ -908,6 +922,7 @@ export async function runAgentjChat(
   options: { resume?: string; continueLatest?: boolean } = {},
   configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
   update?: (channel: UpdateChannel) => Promise<void>,
+  checkForUpdate?: () => Promise<{ available?: string } | undefined>,
 ): Promise<number> {
   let requestedUpdate: UpdateChannel | undefined;
   let screen: ChatScreen | undefined;
@@ -1548,6 +1563,9 @@ export async function runAgentjChat(
     screen.start();
     refreshProgress();
     updateStatus();
+    if (checkForUpdate) {
+      void notifyAvailableUpdate(checkForUpdate, (event) => emitChatEvent?.(event));
+    }
     for (const notice of skillNotices) render({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
       screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText));
@@ -1709,6 +1727,12 @@ const createProductionUpdateService = async (): Promise<{
   };
 };
 
+const runProductionUpdateCheck = async (): Promise<{ available?: string } | undefined> => {
+  const { service, supported, auto } = await createProductionUpdateService();
+  if (!auto || !supported) return undefined;
+  return await service.checkFresh(COMMAND_VERSION);
+};
+
 const runProductionUpdate = async (channel: UpdateChannel): Promise<number> => {
   try {
     const { service } = await createProductionUpdateService();
@@ -1727,59 +1751,6 @@ const runProductionUpdate = async (channel: UpdateChannel): Promise<number> => {
   }
 };
 
-const shouldAutoUpdate = (argv: string[]): boolean =>
-  process.env.AGENTJ_UPDATE_RESTARTED !== "1" &&
-  argv[0] !== "update" &&
-  argv[0] !== "config" &&
-  argv[0] !== "eval" &&
-  !argv.includes("--help") &&
-  !argv.includes("-h") &&
-  !argv.includes("--version") &&
-  !argv.includes("-v");
-
-export interface UpdateRestartOptions {
-  cmd: string[];
-  stdin: "inherit";
-  stdout: "inherit";
-  stderr: "inherit";
-  env: Record<string, string | undefined>;
-}
-
-export const createUpdateRestartOptions = (
-  argv: string[],
-  options: {
-    executable?: string;
-    script?: string;
-    env?: Record<string, string | undefined>;
-  } = {},
-): UpdateRestartOptions => ({
-  cmd: [options.executable ?? process.execPath, options.script ?? process.argv[1]!, ...argv],
-  stdin: "inherit" as const,
-  stdout: "inherit" as const,
-  stderr: "inherit" as const,
-  env: { ...(options.env ?? process.env), AGENTJ_UPDATE_RESTARTED: "1" },
-});
-
-const autoUpdate = async (argv: string[]): Promise<number | undefined> => {
-  if (!shouldAutoUpdate(argv)) return undefined;
-  try {
-    const { service, supported, auto } = await createProductionUpdateService();
-    if (!auto || !supported) return undefined;
-    const result = await service.check(COMMAND_VERSION);
-    if (!result.available) return undefined;
-    const updated = await service.update(COMMAND_VERSION);
-    if (!updated.available) return undefined;
-    processStderr.write(`Updating agentj to ${updated.available} (${updated.channel})...\n`);
-    const child = Bun.spawn(createUpdateRestartOptions(argv));
-    return await child.exited;
-  } catch (error) {
-    processStderr.write(
-      `AgentJ auto-update skipped: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    return undefined;
-  }
-};
-
 const formatUnexpectedError = (error: unknown): string => {
   if (error instanceof Error) {
     return `${error.name}: ${error.message}`;
@@ -1790,12 +1761,6 @@ const formatUnexpectedError = (error: unknown): string => {
 
 const main = async (): Promise<void> => {
   const argv = process.argv.slice(2);
-  const autoUpdateExitCode = await autoUpdate(argv);
-  if (autoUpdateExitCode !== undefined) {
-    process.exitCode = autoUpdateExitCode;
-    return;
-  }
-
   const abortController = new AbortController();
   const handleSigint = (): void => {
     abortController.abort();
@@ -1821,11 +1786,16 @@ const main = async (): Promise<void> => {
       {
         version: COMMAND_VERSION,
         runChat: (options) =>
-          runAgentjChat(options, undefined, async (channel) => {
-            if ((await runProductionUpdate(channel)) !== EXIT_SUCCESS) {
-              throw new Error("AgentJ update failed.");
-            }
-          }),
+          runAgentjChat(
+            options,
+            undefined,
+            async (channel) => {
+              if ((await runProductionUpdate(channel)) !== EXIT_SUCCESS) {
+                throw new Error("AgentJ update failed.");
+              }
+            },
+            runProductionUpdateCheck,
+          ),
         runOnce: (task, options) => runAgentjOnce(task, options),
         update: ({ channel }) => runProductionUpdate(channel),
         createAbortSignal: () => abortController.signal,

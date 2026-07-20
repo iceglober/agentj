@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createUpdateRestartOptions,
   finalizeInteractiveChat,
   formatActivityReceipt,
   formatChatEvent,
   formatResumeCommand,
+  notifyAvailableUpdate,
   shouldWarnContext,
   toSkillCommands,
   truncateLineWithNotice,
@@ -38,21 +38,48 @@ describe("skill command catalog", () => {
   });
 });
 
-describe("update restart", () => {
-  test("inherits terminal streams and marks the restarted process", () => {
-    expect(
-      createUpdateRestartOptions(["--continue"], {
-        executable: "/bun",
-        script: "/app/bin/agentj",
-        env: { PATH: "/bin", AGENTJ_UPDATE_RESTARTED: undefined },
-      }),
-    ).toEqual({
-      cmd: ["/bun", "/app/bin/agentj", "--continue"],
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-      env: { PATH: "/bin", AGENTJ_UPDATE_RESTARTED: "1" },
-    });
+describe("update notices", () => {
+  test("emits a notice for an available update", async () => {
+    const events: unknown[] = [];
+    await notifyAvailableUpdate(
+      async () => ({ available: "0.1.0-next.44" }),
+      (event) => events.push(event),
+    );
+    expect(events).toEqual([
+      {
+        type: "notice",
+        text: "agentj 0.1.0-next.44 is available. Run /update to install it.",
+      },
+    ]);
+  });
+
+  test("stays silent for current versions and failed checks", async () => {
+    const events: unknown[] = [];
+    await notifyAvailableUpdate(
+      async () => undefined,
+      (event) => events.push(event),
+    );
+    await notifyAvailableUpdate(
+      async () => Promise.reject(new Error("registry unavailable")),
+      (event) => events.push(event),
+    );
+    expect(events).toEqual([]);
+  });
+
+  test("can suppress a late result after teardown", async () => {
+    let resolveCheck: ((value: { available: string }) => void) | undefined;
+    const events: unknown[] = [];
+    let active = true;
+    const pending = notifyAvailableUpdate(
+      () => new Promise((resolve) => (resolveCheck = resolve)),
+      (event) => {
+        if (active) events.push(event);
+      },
+    );
+    active = false;
+    resolveCheck?.({ available: "0.1.0-next.44" });
+    await pending;
+    expect(events).toEqual([]);
   });
 });
 

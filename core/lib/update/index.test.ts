@@ -68,6 +68,35 @@ describe("updates", () => {
     expect(installs).toEqual(["next"]);
   });
 
+  test("checkFresh bypasses a fresh cache and returns the registry result", async () => {
+    let calls = 0;
+    const service = createUpdateService({
+      config: updateConfigSchema.parse({}),
+      packageName: "@glrs-dev/aj",
+      registry: {
+        latest: async () => {
+          calls += 1;
+          return "0.1.0-next.16";
+        },
+      },
+      state: {
+        read: async () => ({
+          checkedAt: 10,
+          current: "0.1.0-next.15",
+          channel: "next" as const,
+        }),
+        write: async () => {},
+      },
+      now: () => 11,
+    });
+
+    expect(await service.checkFresh("0.1.0-next.15")).toMatchObject({
+      available: "0.1.0-next.16",
+      channel: "next",
+    });
+    expect(calls).toBe(1);
+  });
+
   test("a cache-served check revalidates in the background for the next launch", async () => {
     let cache: Awaited<
       ReturnType<NonNullable<Parameters<typeof createUpdateService>[0]["state"]>["read"]>

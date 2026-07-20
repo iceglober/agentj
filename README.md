@@ -117,10 +117,12 @@ and response size.
 
 ## Updates
 
-Installed CLIs check once per day before starting. Prerelease versions follow the `next` tag and
-stable versions follow `latest`; `agentj update --channel next|latest` and `/update` override that
-choice. Disable automatic checks with `agentj config set update.auto false`, or select a persistent
-channel with `agentj config set update.channel next`. Source checkouts are never modified.
+Installed interactive sessions check for updates after the TUI starts and notify you when one is
+available; they never auto-install or restart. Prerelease versions follow the `next` tag and stable
+versions follow `latest`. The check is controlled by `update.auto`:
+`agentj config set update.auto false` disables it, while `agentj config set update.channel next`
+selects a persistent channel. Use `/update [next|latest]` explicitly to install an update;
+source checkouts are never modified.
 
 ## Permissions
 
