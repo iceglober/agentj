@@ -27,6 +27,8 @@ interface FakeSandboxOptions {
   readonly postCommitStatusFails?: boolean;
   readonly postCommitHeadInspectionFails?: boolean;
   readonly committedSha?: string;
+  /** Path Git reports for the child in `worktree list`. */
+  readonly listedChildPath?: string;
   /** For createSession: whether isRepo returns true. */
   readonly isRepo?: boolean;
   /** For createSession: whether hasCommits returns true. */
@@ -43,6 +45,7 @@ class FakeSandbox implements Sandbox {
   readonly repoHeadSha: string;
   readonly committedSha: string;
   readonly postCommitStatus: string;
+  readonly listedChildPath: string;
   readonly calls: GitCall[] = [];
 
   private readonly createWorktreeFails: boolean;
@@ -72,6 +75,7 @@ class FakeSandbox implements Sandbox {
     this.initialBranchTipSha = options.branchTipSha ?? this.resolvedParentSha;
     this.committedSha = options.committedSha ?? "2222222222222222222222222222222222222222";
     this.postCommitStatus = options.postCommitStatus ?? "";
+    this.listedChildPath = options.listedChildPath ?? this.childPath;
     this.createWorktreeFails = options.createWorktreeFails ?? false;
     this.commitFails = options.commitFails ?? false;
     this.removeWorktreeFails = options.removeWorktreeFails ?? false;
@@ -130,6 +134,9 @@ class FakeSandbox implements Sandbox {
     }
 
     if (subcommand === "rev-parse") {
+      if (rest[0] === "--show-toplevel") {
+        return this.worktrees.has(cwd) ? ok(`${this.listedChildPath}\n`) : fail("not a worktree");
+      }
       if (rest[0] === "--is-inside-work-tree") {
         return this.isRepoResult ? ok("true\n") : fail("not a repo");
       }
@@ -175,7 +182,9 @@ class FakeSandbox implements Sandbox {
     }
 
     if (subcommand === "worktree" && rest[0] === "list" && rest[1] === "--porcelain") {
-      return ok(renderWorktreeList(this.worktrees));
+      return ok(
+        renderWorktreeList(this.worktrees, new Map([[this.childPath, this.listedChildPath]])),
+      );
     }
 
     if (subcommand === "worktree" && rest[0] === "remove") {
@@ -261,11 +270,15 @@ function stripCommitSuffix(ref: string): string {
   return ref.replace(/\^\{commit\}$/, "");
 }
 
-function renderWorktreeList(worktrees: Map<string, { branch: string; head: string }>): string {
+function renderWorktreeList(
+  worktrees: Map<string, { branch: string; head: string }>,
+  listedPaths: ReadonlyMap<string, string> = new Map(),
+): string {
   return [...worktrees.entries()]
     .map(([path, worktree]) => {
+      const listedPath = listedPaths.get(path) ?? path;
       return [
-        `worktree ${path}`,
+        `worktree ${listedPath}`,
         `HEAD ${worktree.head}`,
         `branch refs/heads/${worktree.branch}`,
         "",
@@ -429,6 +442,29 @@ describe("createChildSession", () => {
         );
       }),
     ).toBe(true);
+  });
+
+  test("clean success recognizes Git's canonical worktree path", async () => {
+    const root = "/var/folders/agentj";
+    const { sb, session } = await makeChildSession({
+      root,
+      listedChildPath: "/private/var/folders/agentj/child-1",
+    });
+
+    await expect(
+      session.finalize({ outcome: "success", commitMessage: "unused" }),
+    ).resolves.toMatchObject({
+      outcome: "clean",
+      worktreeRemoved: true,
+      branchDeleted: true,
+      preserved: false,
+    });
+
+    expect(sb.calls).toContainEqual({
+      raw: expect.any(String),
+      cwd: sb.childPath,
+      args: ["rev-parse", "--show-toplevel"],
+    });
   });
 
   test("clean success deletes even when repo HEAD diverged because proof checks exact branch tip and base", async () => {
