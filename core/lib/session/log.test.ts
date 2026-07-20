@@ -11,6 +11,11 @@ test("append, load with last-state-wins, and torn-tail tolerance", async () => {
     const log = await createChatLog({ root, projectRoot, title: "fix the flaky test" });
     await log.append({ type: "turn", mode: "plan", user: "hi", assistant: "hello", ts: "t1" });
     await log.append({ type: "state", messages: [{ role: "user" }], mode: "plan", ts: "t1" });
+    await log.append({
+      type: "todos",
+      items: [{ id: "inspect", text: "Inspect the issue", status: "in_progress" }],
+      ts: "t1",
+    });
     await log.append({ type: "turn", mode: "build", user: "go", assistant: "done", ts: "t2" });
     await log.append({
       type: "state",
@@ -25,6 +30,9 @@ test("append, load with last-state-wins, and torn-tail tolerance", async () => {
     expect(loaded?.turns.map((turn) => turn.user)).toEqual(["hi", "go"]);
     expect(loaded?.state?.mode).toBe("build");
     expect(loaded?.state?.messages).toHaveLength(2);
+    expect(loaded?.todos).toEqual([
+      { id: "inspect", text: "Inspect the issue", status: "in_progress" },
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -105,6 +113,11 @@ test("a reset state starts resumed history and usage at its boundary", async () 
       usage: { inputTokens: 10, outputTokens: 1, longContextRequests: 0 },
     });
     await log.append({ type: "state", messages: [{ old: true }], mode: "plan", ts: "t1" });
+    await log.append({
+      type: "todos",
+      items: [{ id: "old", text: "Old work", status: "pending" }],
+      ts: "t1",
+    });
     await log.append({ type: "state", messages: [], mode: "build", ts: "t2", reset: true });
     await log.append({
       type: "turn",
@@ -126,6 +139,7 @@ test("a reset state starts resumed history and usage at its boundary", async () 
     expect(loaded?.turns.map((turn) => turn.user)).toEqual(["new"]);
     expect(loaded?.usage.map((usage) => usage.model)).toEqual(["new-model"]);
     expect(loaded?.state).toMatchObject({ mode: "build", messages: [{ fresh: true }] });
+    expect(loaded?.todos).toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

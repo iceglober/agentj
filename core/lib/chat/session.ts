@@ -4,6 +4,10 @@ import type { ChatLog, ChatMode } from "../session/log";
 import type { UndoStack } from "../session/undo";
 import type { ChatEvent } from "./events";
 
+export interface SessionTodoLifecycle {
+  clear(): Promise<void>;
+}
+
 /**
  * The persistent chat loop's core: one foreground turn at a time over an
  * opaque message continuation, mode toggling between turns, message queueing,
@@ -18,6 +22,8 @@ export interface ChatSessionDependencies {
   log: ChatLog;
   /** Present in repos only; snapshots are taken before each build turn. */
   undo?: UndoStack;
+  /** Optional session-owned state cleared with model context and history. */
+  todos?: SessionTodoLifecycle;
   onEvent?(event: ChatEvent): void | Promise<void>;
   /**
    * Optional composition-root continuation transform run after a successful
@@ -245,6 +251,7 @@ export function createChatSession(
       if (busy) return false;
       messages = [];
       notices.length = 0;
+      await deps.todos?.clear();
       await deps.log.append({ type: "state", messages, mode, ts: now(), reset: true });
       emit({ type: "context-cleared" });
       return true;

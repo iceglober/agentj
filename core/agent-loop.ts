@@ -21,6 +21,7 @@ import {
   type SubagentProgressEvent,
   toGitDelegationResults,
 } from "./lib/agent/subagents";
+import type { TodoPort } from "./lib/agent/todos";
 import {
   type ChatCommandContext,
   chatCommands,
@@ -46,6 +47,7 @@ import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { runOnboarding } from "./lib/chat/onboarding";
 import { createPromptsGuidedInput } from "./lib/chat/prompts-guided-input-adapter";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
+import { createSessionTodos } from "./lib/chat/todos";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
@@ -87,6 +89,7 @@ import {
   type SkillIssue,
   skillMode,
 } from "./lib/skills";
+import type { TodoList } from "./lib/todos";
 import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
@@ -111,6 +114,7 @@ import {
   shouldWarnContext,
 } from "./lib/tui/status";
 import type { UiTextLine } from "./lib/tui/styles";
+import { formatTodoLines } from "./lib/tui/todos";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
   createNpmInstaller,
@@ -346,10 +350,11 @@ interface ChatComposition {
     origin?: string,
     onStep?: (step: RunStep) => void,
   ): Promise<{ text: string }>;
-  /** Late-binds the interactive job runner behind the model's run_job and
-   *  check_job tools. Never attached in one-shot runs: detached work would
-   *  outlive the process. */
-  attachJobs(runner: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">): void;
+  /** Late-binds interactive capabilities behind primary-agent tools. */
+  attachInteractiveCapabilities(options: {
+    jobs: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">;
+    todos: TodoPort;
+  }): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
   /** Discovered Agent Skills and the malformed entries worth surfacing. */
@@ -379,7 +384,7 @@ interface ChatComposition {
  */
 async function composeChat(
   configPath: string,
-  sessionId: string,
+  entrypoint: "chat" | "run",
   gate: PermissionGate,
   onDagProgress: (progress: SubagentProgressEvent) => void,
   onToolActivity?: (activity: ToolActivity) => void,
@@ -408,7 +413,7 @@ async function composeChat(
   const environment = await createHostExecutionEnvironment(root);
   // Over-cap tool output spills here in full; tools reference the file in
   // their truncation notices so the model can slice it back in.
-  const spillSink = createSpillSink(join(tmpdir(), "agentj-spill", sessionId));
+  const spillSink = createSpillSink(join(tmpdir(), "agentj-spill", entrypoint));
   const spill = { dir: spillSink.dir, write: spillSink.write };
 
   let agentsMd = "";
@@ -463,14 +468,14 @@ async function composeChat(
     createChildSession: async ({ id, parentRef }: { id: string; parentRef: string }) =>
       createChildSession(environment, sessionConfig, { id: nextChildId(id), parentRef }),
     prepareBatch: async () => {
-      const snapshot = await createGitDelegationSnapshot(environment, root, sessionId);
+      const snapshot = await createGitDelegationSnapshot(environment, root, entrypoint);
       return {
         parentRef: snapshot.commit,
         integrate: (results: readonly Parameters<typeof toGitDelegationResults>[0][number][]) =>
           integrateGitDelegation(
             environment,
             root,
-            sessionId,
+            entrypoint,
             snapshot,
             toGitDelegationResults(results),
           ),
@@ -546,6 +551,7 @@ async function composeChat(
   };
   let agentMcpVersion = mcp.snapshot().version;
   let jobsRuntime: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort"> | undefined;
+  let todosRuntime: TodoPort | undefined;
   const jobsPort = {
     start: (
       mode: "plan" | "build",
@@ -559,6 +565,12 @@ async function composeChat(
     renewSoftTimeout: (id: string, softTimeoutMs: number) =>
       jobsRuntime?.renewSoftTimeout(id, softTimeoutMs) ?? false,
     abort: (id: string) => jobsRuntime?.abort(id) ?? false,
+  };
+  const todosPort: TodoPort = {
+    replace: async (items) => {
+      if (!todosRuntime) throw new Error("Session todos are unavailable in this session.");
+      await todosRuntime.replace(items);
+    },
   };
   const agentFor = async (mode: ChatMode): Promise<Agent> => {
     await mcp.activatePending();
@@ -585,6 +597,7 @@ async function composeChat(
             onToolActivity,
             permissions: { config: config.permissions, gate },
             jobs: jobsPort,
+            ...(entrypoint === "chat" ? { todos: todosPort } : {}),
           })
         : createProductionAgent(environment, agentConfigFor("build"), {
             root,
@@ -600,6 +613,7 @@ async function composeChat(
             onSubagentProgress: onDagProgress,
             onToolActivity,
             jobs: jobsPort,
+            ...(entrypoint === "chat" ? { todos: todosPort } : {}),
           });
     agents.set(mode, agent);
     return agent;
@@ -777,8 +791,9 @@ async function composeChat(
     agentFor,
     runBuildJob,
     runPlanJob,
-    attachJobs: (runner) => {
-      jobsRuntime = runner;
+    attachInteractiveCapabilities: ({ jobs, todos }) => {
+      jobsRuntime = jobs;
+      todosRuntime = todos;
     },
     environment,
     stateRoot,
@@ -856,6 +871,7 @@ export async function runAgentjChat(
   };
   let lastContextWarning: number | undefined;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
+  let sessionTodos: TodoList = [];
 
   // DAG progress nests under the tool activity that owns it, one tracker per
   // owner so concurrent run_subagents calls stay apart. NO_ACTIVITY collects
@@ -884,12 +900,15 @@ export async function runAgentjChat(
 
   const refreshProgress = (): void => {
     screen?.setProgressLines(
-      composeProgressLines({
-        activeTools,
-        dagBlocks: dagBlockLines(),
-        queued: queuedLines(),
-        spinnerFrame,
-      }).map(presentActivityLine),
+      [
+        ...formatTodoLines(sessionTodos),
+        ...composeProgressLines({
+          activeTools,
+          dagBlocks: dagBlockLines(),
+          queued: queuedLines(),
+          spinnerFrame,
+        }),
+      ].map(presentActivityLine),
     );
   };
 
@@ -1021,6 +1040,11 @@ export async function runAgentjChat(
     });
 
     const render = (event: ChatEvent): void => {
+      if (event.type === "todos-updated") {
+        sessionTodos = event.items;
+        refreshProgress();
+        return;
+      }
       if (event.type === "context-cleared") {
         usageRows.length = 0;
         turnUsage = null;
@@ -1197,11 +1221,18 @@ export async function runAgentjChat(
     };
     emitChatEvent = render;
 
+    const todos = createSessionTodos({
+      log,
+      initial: resumed?.todos,
+      onEvent: render,
+    });
+    sessionTodos = todos.items;
     const chat: ChatSession = createChatSession(
       {
         agentFor,
         log,
         undo: undoStack,
+        todos,
         onEvent: render,
       },
       resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
@@ -1224,7 +1255,7 @@ export async function runAgentjChat(
       },
     });
     jobs = jobRunner;
-    composition.attachJobs(jobRunner);
+    composition.attachInteractiveCapabilities({ jobs: jobRunner, todos });
 
     const home = homedir();
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;
@@ -1441,6 +1472,7 @@ export async function runAgentjChat(
     });
 
     screen.start();
+    refreshProgress();
     updateStatus();
     for (const notice of skillNotices) render({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
