@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.35
+
+### Patch Changes
+
+- 6b96d83: AgentJ now verifies a build-mode `done` report against tools it actually ran. For example, a response that claims tests passed without a matching successful bash command is retried once and then shown as an explicit failure instead of a completed task.
+
 ## 0.1.0-next.34
 
 ### Patch Changes

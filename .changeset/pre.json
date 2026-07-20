@@ -62,6 +62,7 @@
     "tierify-model-knobs",
     "update-swr",
     "update-tui-refresh-and-spacing",
+    "verified-build-completions",
     "version-flag",
     "version-newline",
     "visible-background-jobs"
