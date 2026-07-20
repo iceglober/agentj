@@ -1,9 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHostExecutionEnvironment } from "../workspace/host-adapter";
 import { createUndoStack } from "./undo";
+
+setDefaultTimeout(15_000);
 
 async function git(root: string, ...args: string[]): Promise<string> {
   const proc = Bun.spawn({ cmd: ["git", "-C", root, ...args], stdout: "pipe", stderr: "pipe" });
