@@ -1,5 +1,6 @@
 import { describeToolInput } from "../agent/permissions";
 import type { RunStep } from "../llm";
+import { parseCompletionReport } from "../report";
 import type { ChatMode } from "../session/log";
 import type { ChatEvent, JobView } from "./events";
 
@@ -46,6 +47,8 @@ export interface JobRunnerDependencies {
   onEvent?(event: ChatEvent): void | Promise<void>;
   /** Receives one summary line per finished job for the next user turn. */
   addTurnNotice(text: string): void;
+  /** Persists session state derived from a completed job before it is shown. */
+  onJobCompleted?(job: JobView): void | Promise<void>;
   /** Fires once when a job passes its soft timeout while still running. */
   ping?(job: JobView): void;
   now?: () => number;
@@ -149,8 +152,12 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
           onStep: (step) => recordStep(entry, step),
         })
         .then((outcome) => {
-          view.status = abort.signal.aborted ? "aborted" : (outcome.status ?? "done");
-          view.resultText = outcome.text;
+          const completion = parseCompletionReport(outcome.text);
+          view.status = abort.signal.aborted
+            ? "aborted"
+            : (outcome.status ?? (completion && completion.status !== "done" ? "failed" : "done"));
+          view.resultText = completion?.summary ?? outcome.text;
+          if (completion) view.completion = completion;
           if (outcome.branch) view.branch = outcome.branch;
           if (outcome.warnings?.length) view.warnings = outcome.warnings;
         })
@@ -158,9 +165,17 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
           view.status = abort.signal.aborted ? "aborted" : "failed";
           view.resultText = error instanceof Error ? error.message : String(error);
         })
-        .finally(() => {
+        .finally(async () => {
           clearTimeout(entry.softTimer);
           view.endedAt = now();
+          try {
+            await deps.onJobCompleted?.({ ...view });
+          } catch (error) {
+            view.warnings = [
+              ...(view.warnings ?? []),
+              `Could not update session state: ${error instanceof Error ? error.message : String(error)}`,
+            ];
+          }
           emit({ type: "job-finished", job: { ...view } });
           deps.addTurnNotice(summarize(view));
         });
