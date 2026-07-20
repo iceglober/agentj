@@ -235,16 +235,21 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       );
       const choiceFooter = listOverflowFooter(choiceWindow);
       const choiceLines = [
-        ...choiceWindow.items.flatMap((choice, index) => [
-          safeLine(
-            `${choiceWindow.start + index === prompt.selectedIndex ? "›" : " "} ${choice.label}`,
-          ),
-          ...(choice.description
-            ? wrapToDisplayWidth(`  ${escapeTerminalText(choice.description)}`, contentWidth()).map(
-                safeLine,
-              )
-            : []),
-        ]),
+        ...choiceWindow.items.flatMap((choice, index) => {
+          const selected = choiceWindow.start + index === prompt.selectedIndex;
+          return [
+            safeLine([
+              { text: selected ? "›" : " ", tone: selected ? "accent" : undefined, bold: selected },
+              { text: " " },
+              { text: choice.label, bold: true },
+            ]),
+            ...(choice.description
+              ? wrapToDisplayWidth(choice.description, Math.max(1, contentWidth() - 2)).map(
+                  (line) => safeLine([{ text: "  " }, { text: line, tone: "muted" }]),
+                )
+              : []),
+          ];
+        }),
         ...(choiceFooter ? [safeLine(choiceFooter)] : []),
       ];
       const errorLines = prompt.error
