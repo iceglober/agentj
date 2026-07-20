@@ -19,6 +19,7 @@
     "config-field-layer",
     "cost-optimization",
     "editor-inline-completion",
+    "fix-background-job-finalization-warnings",
     "fix-delegated-job-failures",
     "float-live-region",
     "grounded-completions",
