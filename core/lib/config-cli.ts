@@ -28,31 +28,6 @@ export interface MaskedSecretPrompt {
   askSecret(): Promise<string | null>;
 }
 
-/** The production MaskedSecretPrompt: masked entry via the prompts package. */
-export const createMaskedSecretPrompt = (): MaskedSecretPrompt => ({
-  async askSecret(): Promise<string | null> {
-    const { createRequire } = await import("node:module");
-    const prompts = createRequire(import.meta.url)("prompts") as (
-      question: { type: "password"; name: "secret"; message: string },
-      options: { onCancel: () => void },
-    ) => Promise<{ secret?: unknown }>;
-
-    let cancelled = false;
-    const answer = await prompts(
-      { type: "password", name: "secret", message: "Secret value" },
-      {
-        onCancel: () => {
-          cancelled = true;
-        },
-      },
-    );
-    if (cancelled || typeof answer.secret !== "string" || answer.secret.length === 0) {
-      return null;
-    }
-    return answer.secret;
-  },
-});
-
 export interface ConfigCliDependencies {
   config?: GlobalConfigOptions;
   mutateConfig?: (
@@ -112,6 +87,8 @@ export type ConfigCliResult =
 export interface ConfigCliHandlers {
   get(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   set(input: ConfigSetInput): Promise<ConfigCliResult>;
+  /** Persist a secret collected by another masked UI. */
+  setSecret(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   add(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   remove(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   delete(input: ConfigDeleteInput): Promise<ConfigCliResult>;
@@ -316,6 +293,21 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
     }
   };
 
+  const storeSecret = async (key: string, secret: string): Promise<ConfigCliResult> => {
+    if (key !== AZURE_API_KEY_KEY && !isSecretPath(parsePath(key) ?? [])) {
+      return writeError(dependencies.writers, "unknown_key", key);
+    }
+    if (secret.trim().length === 0)
+      return writeError(dependencies.writers, "prompt_cancelled", key);
+    try {
+      await dependencies.secretStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, secret);
+      dependencies.writers.stdout.write("Stored providers.azure.api_key in the secure keychain.\n");
+      return { ok: true, key, storage: "keychain", changed: true };
+    } catch {
+      return writeError(dependencies.writers, "secret_store_failed", key);
+    }
+  };
+
   return {
     async get(input) {
       if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
@@ -349,15 +341,7 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
         if (secret === null || secret.trim().length === 0) {
           return writeError(dependencies.writers, "prompt_cancelled", input.key);
         }
-        try {
-          await dependencies.secretStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, secret);
-          dependencies.writers.stdout.write(
-            "Stored providers.azure.api_key in the secure keychain.\n",
-          );
-          return { ok: true, key: input.key, storage: "keychain", changed: true };
-        } catch {
-          return writeError(dependencies.writers, "secret_store_failed", input.key);
-        }
+        return storeSecret(input.key, secret);
       }
       if (input.secret)
         return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
@@ -368,6 +352,10 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       const parsed = parseCliValue(resolved.schema, input.value);
       if (!parsed.success) return writeError(dependencies.writers, "invalid_value", input.key);
       return write(input.key, [{ type: "set", path: resolved.path, value: parsed.data }]);
+    },
+
+    async setSecret(input) {
+      return storeSecret(input.key, input.value ?? "");
     },
 
     async add(input) {

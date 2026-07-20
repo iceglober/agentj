@@ -342,6 +342,24 @@ describe("createConfigCliHandlers", () => {
     expect(stdout.text()).toBe("Stored providers.azure.api_key in the secure keychain.\n");
   });
 
+  test("stores a masked UI secret through the dedicated write", async () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const { stdout, stderr, writers } = createWriters();
+    const handlers = createConfigCliHandlers(
+      createDependencies(config, fake.store, undefined, writers),
+    );
+
+    const result = await handlers.setSecret({
+      key: "agent.llm.providers.azure.apiKey",
+      value: SECRET_FIXTURE,
+    });
+
+    expect(result).toMatchObject({ ok: true, storage: "keychain" });
+    expect(fake.sets).toEqual([["agentj", "azure-api-key", SECRET_FIXTURE]]);
+    expect(`${stdout.text()}${stderr.text()}`).not.toContain(SECRET_FIXTURE);
+  });
+
   test("redacts unknown keys and unavailable secret stores", async () => {
     const unknownConfig = createConfigPort();
     const unknownStore = createStore();

@@ -6,6 +6,7 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 
 - `agent.llm.model` (default: `"gpt-5.6-sol"`) — The primary model id the agent runs on.
 - `agent.llm.provider` (default: `"azure"`) — Model provider. Azure AI Foundry is wired in.
+- `agent.llm.providers.azure.apiKey` (default: unset) — Azure AI Foundry API key, stored only in your OS keychain.
 - `agent.llm.tiers` (default: `[]`) — Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.
 - `agent.llm.modes.plan` (default: `0`) — Ladder tier plan mode runs on. Defaults to the frontier tier (0).
 - `agent.llm.modes.build` (default: `1`) — Ladder tier build mode runs on.

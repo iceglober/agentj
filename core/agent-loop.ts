@@ -42,15 +42,11 @@ import {
 } from "./lib/chat/file-attachments";
 import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
 import { runOnboarding } from "./lib/chat/onboarding";
+import { createPromptsGuidedInput } from "./lib/chat/prompts-guided-input-adapter";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
-import {
-  createConfigCliHandlers,
-  createMaskedSecretPrompt,
-  LLM_MODEL_KEY,
-  SUBAGENT_LLM_MODEL_KEY,
-} from "./lib/config-cli";
+import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import { providerNames, type RunStep, resolveTierModel } from "./lib/llm";
 import type { McpPromptCatalogEntry, McpPromptResult } from "./lib/mcp";
@@ -164,44 +160,28 @@ function createProductionConfigUi(): () => Promise<number> {
       processStderr.write("Run `agentj config` in a terminal, or use `agentj config set <key>`.\n");
       return EXIT_FAILURE;
     }
-    const { createRequire } = await import("node:module");
-    const prompts = createRequire(import.meta.url)("prompts") as (
-      question: Record<string, unknown>,
-      options: { onCancel: () => void },
-    ) => Promise<{ v?: unknown }>;
-    const ask = async (question: Record<string, unknown>): Promise<unknown> => {
-      let cancelled = false;
-      const answer = await prompts(
-        { ...question, name: "v" },
-        {
-          onCancel: () => {
-            cancelled = true;
-          },
-        },
-      );
-      return cancelled ? null : (answer.v ?? null);
-    };
+    const guided = createPromptsGuidedInput();
     const silent = { write: () => {} };
     const handlers = createConfigCliHandlers({
       secretStore: createKeyringSecretStore({}),
-      prompt: createMaskedSecretPrompt(),
+      prompt: {
+        askSecret: () => guided.askInput({ label: "Secret value · <Esc> Back", masked: true }),
+      },
       writers: { stdout: silent, stderr: silent },
     });
     const port: ConfigUiPort = {
-      select: (message, choices) =>
-        ask({
-          type: "select",
-          message,
-          choices: choices.map((choice) => ({ title: choice.label, value: choice.value })),
-        }) as Promise<string | null>,
-      text: (message, initial) => ask({ type: "text", message, initial }) as Promise<string | null>,
-      secret: (message) => ask({ type: "password", message }) as Promise<string | null>,
+      ...guided,
       read: async (path) => {
         const result = await handlers.get({ key: path });
         return result.ok ? result.value : undefined;
       },
-      apply: async (path, value, options) => {
-        const result = await handlers.set({ key: path, value, secret: options?.secret });
+      apply: async (path, value) => {
+        const result = await handlers.set({ key: path, value });
+        if (!result.ok) processStdout.write(`Could not set ${path}.\n`);
+        return result.ok;
+      },
+      applySecret: async (path, value) => {
+        const result = await handlers.setSecret({ key: path, value });
         if (!result.ok) processStdout.write(`Could not set ${path}.\n`);
         return result.ok;
       },
@@ -934,10 +914,11 @@ export async function runAgentjChat(
   // Interactive TTY only — `agentj run` and pipes keep the clean error.
   if (processStdout.isTTY) {
     const onboardingStore = createKeyringSecretStore({});
-    const maskedPrompt = createMaskedSecretPrompt();
+    const guided = createPromptsGuidedInput();
     const onboarding = await runOnboarding({
       hasKey: () => hasAzureApiKey({ store: onboardingStore }),
-      askSecret: () => maskedPrompt.askSecret(),
+      askSecret: () =>
+        guided.askInput({ label: "Azure AI Foundry API key · <Esc> Back", masked: true }),
       storeKey: (value) => onboardingStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, value),
       write: (text) => processStdout.write(text),
     });
@@ -1700,9 +1681,12 @@ const main = async (): Promise<void> => {
     stdout: processStdout,
     stderr: processStderr,
   };
+  const guided = createPromptsGuidedInput();
   const configHandlers = createConfigCliHandlers({
     secretStore: createKeyringSecretStore({}),
-    prompt: createMaskedSecretPrompt(),
+    prompt: {
+      askSecret: () => guided.askInput({ label: "Secret value · <Esc> Back", masked: true }),
+    },
     writers,
   });
 

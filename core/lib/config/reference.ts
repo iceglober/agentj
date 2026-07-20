@@ -15,6 +15,10 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   { path: "agent.llm.model", description: "The primary model id the agent runs on." },
   { path: "agent.llm.provider", description: "Model provider. Azure AI Foundry is wired in." },
   {
+    path: "agent.llm.providers.azure.apiKey",
+    description: "Azure AI Foundry API key, stored only in your OS keychain.",
+  },
+  {
     path: "agent.llm.tiers",
     description:
       "Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.",
