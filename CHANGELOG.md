@@ -1,5 +1,18 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.33
+
+### Minor Changes
+
+- 37504f9: The chat editor now fuzzy-completes slash commands and project file references wherever the token starts at the beginning of input or after whitespace. For example, type `review @agt` and press Tab to insert a matching project file, or type `review /bld` to complete `/build` without turning surrounding prose into a command. Slash commands use cyan, file references use green, and a leading `&` switches the editor to a clear yellow `BACKGROUND JOB` state. Structured agent completion reports now keep their changes, validation evidence, and open questions in the transcript instead of showing only a summary.
+- 746e38e: Projects can configure scoped Markdown instruction extensions, such as a plan-only architecture checklist in `.aj/extensions/plan.md`, and use typed `agentj.ts` configuration.
+- 06854b8: `agentj config` now organizes documented settings into nested searchable menus with Back navigation. Secret edits use the masked prompt and save to the OS keychain correctly.
+
+### Patch Changes
+
+- ec5096c: `/clear` now starts a fresh chat context instead of only erasing terminal output. It removes prior conversation history and foreground cost data from the active and resumed session, clears the terminal, and keeps the selected mode and running background jobs.
+- 06854b8: Background build jobs now use unique, repository-scoped child worktrees and report setup or integration failures as failed instead of incorrectly reporting them as done. For example, a stale temporary worktree from another project no longer prevents `run_job` from starting.
+
 ## 0.1.0-next.32
 
 ### Minor Changes
