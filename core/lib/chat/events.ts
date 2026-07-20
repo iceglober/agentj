@@ -38,6 +38,8 @@ export type ChatEvent =
   | { type: "turn-aborted" }
   | { type: "turn-error"; error: string }
   | { type: "turn-finished" }
+  /** The session continuation and durable visible history were reset. */
+  | { type: "context-cleared" }
   | { type: "mode-changed"; mode: ChatMode; pending: boolean }
   | { type: "subagent-progress"; progress: SubagentProgressEvent }
   | { type: "permission-ask"; request: PermissionRequest }

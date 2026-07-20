@@ -72,6 +72,12 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
     expect(newlineCount(written)).toBe(9);
   });
 
+  test("clearScreen clears the full viewport and homes the cursor", () => {
+    const { region, tap } = createRegion();
+    region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
+    expect(tap(() => region.clearScreen())).toBe("\u001b[2J\u001b[H");
+  });
+
   test("clear erases the drawn region and forgets it", () => {
     const { region, tap } = createRegion();
     region.paint({ lines: ["a", "b", "editor"], cursorRow: 2, cursorColumn: 0 });

@@ -84,3 +84,49 @@ test("usage records round-trip and logs without them load with an empty list", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("a reset state starts resumed history and usage at its boundary", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const projectRoot = "/repo/example";
+  try {
+    const log = await createChatLog({ root, projectRoot, id: "reset" });
+    await log.append({
+      type: "turn",
+      mode: "plan",
+      user: "old",
+      assistant: "old answer",
+      ts: "t1",
+    });
+    await log.append({
+      type: "usage",
+      provider: "azure",
+      model: "old-model",
+      ts: "t1",
+      usage: { inputTokens: 10, outputTokens: 1, longContextRequests: 0 },
+    });
+    await log.append({ type: "state", messages: [{ old: true }], mode: "plan", ts: "t1" });
+    await log.append({ type: "state", messages: [], mode: "build", ts: "t2", reset: true });
+    await log.append({
+      type: "turn",
+      mode: "build",
+      user: "new",
+      assistant: "new answer",
+      ts: "t3",
+    });
+    await log.append({
+      type: "usage",
+      provider: "azure",
+      model: "new-model",
+      ts: "t3",
+      usage: { inputTokens: 20, outputTokens: 2, longContextRequests: 0 },
+    });
+    await log.append({ type: "state", messages: [{ fresh: true }], mode: "build", ts: "t3" });
+
+    const loaded = await loadChatLog({ root, projectRoot, id: log.id });
+    expect(loaded?.turns.map((turn) => turn.user)).toEqual(["new"]);
+    expect(loaded?.usage.map((usage) => usage.model)).toEqual(["new-model"]);
+    expect(loaded?.state).toMatchObject({ mode: "build", messages: [{ fresh: true }] });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

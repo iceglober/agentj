@@ -758,6 +758,23 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("clears rendered transcript and repaints the live editor", async () => {
+    const { screen, text } = makeScreen();
+    screen.start();
+    screen.printAbove("old transcript");
+    screen.setStatusLines(["old status"]);
+    await settle();
+    const before = text().length;
+
+    screen.clearTranscript();
+    const cleared = text().slice(before);
+    expect(cleared).toContain("\u001b[2J\u001b[H");
+    expect(renderScreen(cleared).some((line) => line.includes("old transcript"))).toBe(false);
+    expect(renderScreen(cleared).some((line) => line.includes("old status"))).toBe(false);
+    expect(renderScreen(cleared).some((line) => line.startsWith("> "))).toBe(true);
+    screen.stop();
+  });
+
   test("status and progress lines render in the live region", async () => {
     const { screen, text } = makeScreen();
     screen.start();

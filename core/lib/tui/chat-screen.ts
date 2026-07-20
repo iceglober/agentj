@@ -72,6 +72,8 @@ export interface ChatScreen extends GuidedInputPort {
   stop(): void;
   /** Append sanitized plain or semantic transcript output above the live region. */
   printAbove(text: string | UiBlock): void;
+  /** Clear all rendered transcript output and repaint the live editor. */
+  clearTranscript(): void;
   /** Restore a dequeued prompt, ahead of any draft already being edited. */
   restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
@@ -672,6 +674,14 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     printAbove(text) {
       printTranscript(text);
+    },
+
+    clearTranscript() {
+      progressLines = [];
+      thinkingLine = null;
+      statusLines = [];
+      liveRegion.clearScreen();
+      paint();
     },
 
     restoreInput(text) {

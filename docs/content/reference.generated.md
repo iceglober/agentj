@@ -16,7 +16,7 @@ In-session slash commands and key bindings — the same list `/help` prints, gen
 - `/jobs` — Inspect background jobs, or `/jobs abort <id>`
 - `/undo` — Revert the agent's last file changes
 - `/redo` — Re-apply reverted changes
-- `/clear` — Clear the transcript view
+- `/clear` — Start a fresh conversation context
 - `/quit` — End the session
 
 ### Input & keys

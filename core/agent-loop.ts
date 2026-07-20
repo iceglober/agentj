@@ -827,7 +827,7 @@ export async function runAgentjChat(
   // nothing, which looks identical to a freeze.
   let turnProducedOutput = false;
   let spinnerFrame = 0;
-  const sessionStartedAt = Date.now();
+  let sessionStartedAt = Date.now();
   const turnTokens: { in: number; out: number; ctx: number; cacheRead?: number } = {
     in: 0,
     out: 0,
@@ -1003,6 +1003,24 @@ export async function runAgentjChat(
     });
 
     const render = (event: ChatEvent): void => {
+      if (event.type === "context-cleared") {
+        usageRows.length = 0;
+        turnUsage = null;
+        turnTokens.in = 0;
+        turnTokens.out = 0;
+        turnTokens.ctx = 0;
+        delete turnTokens.cacheRead;
+        lastContextWarning = undefined;
+        compactPending = false;
+        turnStartedAt = null;
+        interruptRequested = false;
+        turnProducedOutput = false;
+        sessionStartedAt = Date.now();
+        screen?.clearTranscript();
+        refreshProgress();
+        updateStatus();
+        return;
+      }
       if (event.type === "turn-usage") {
         turnTokens.in += event.usage.inputTokens;
         turnTokens.out += event.usage.outputTokens;

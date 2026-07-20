@@ -63,6 +63,8 @@ export interface ChatSession {
   dequeue(): string | null;
   /** Queue a notice prepended to the next user turn (job completions). */
   addTurnNotice(text: string): void;
+  /** Start a fresh model context and durable visible history. Returns false while busy. */
+  clearContext(): Promise<boolean>;
   /** The resumable continuation for the session log. */
   snapshot(): { messages: unknown[]; mode: ChatMode };
 }
@@ -237,6 +239,15 @@ export function createChatSession(
 
     addTurnNotice(text) {
       notices.push(text);
+    },
+
+    async clearContext() {
+      if (busy) return false;
+      messages = [];
+      notices.length = 0;
+      await deps.log.append({ type: "state", messages, mode, ts: now(), reset: true });
+      emit({ type: "context-cleared" });
+      return true;
     },
 
     snapshot() {

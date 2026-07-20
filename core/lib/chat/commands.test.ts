@@ -247,6 +247,27 @@ describe("runChatCommand", () => {
     expect(text).toContain("complete a shown command");
   });
 
+  test("clear resets the session context and reports when a turn is active", async () => {
+    const { context, events } = makeContext();
+    let clearCalls = 0;
+    context.session = {
+      clearContext: async () => {
+        clearCalls += 1;
+        return clearCalls === 1;
+      },
+    } as ChatCommandContext["session"];
+
+    await runChatCommand(context, "clear", "");
+    expect(clearCalls).toBe(1);
+    expect(events).toEqual([{ type: "command", name: "clear" }]);
+
+    await runChatCommand(context, "clear", "");
+    expect(events.at(-1)).toEqual({
+      type: "notice",
+      text: "Cannot clear context while a turn is running.",
+    });
+  });
+
   test("build switches mode before sending an implementation turn", async () => {
     const { context } = makeContext();
     const calls: string[] = [];
