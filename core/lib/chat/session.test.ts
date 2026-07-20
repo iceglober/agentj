@@ -74,6 +74,32 @@ describe("createChatSession", () => {
     });
   });
 
+  test("resumed build mode selects the build agent despite a stale plan refusal", async () => {
+    await withLog(async (log) => {
+      const selected: string[] = [];
+      const stalePlanRefusal = [
+        { role: "assistant", content: "I cannot edit because this is plan mode." },
+      ];
+      const session = createChatSession(
+        {
+          agentFor: async (mode) => {
+            selected.push(mode);
+            return makeAgent(async (_prompt, options) => {
+              expect(options?.messages).toBe(stalePlanRefusal);
+              return result("implemented");
+            });
+          },
+          log,
+        },
+        { mode: "build", messages: stalePlanRefusal },
+      );
+
+      await session.send("finish the implementation");
+
+      expect(selected).toEqual(["build"]);
+    });
+  });
+
   test("clears continuation, notices, and durable history before the next turn", async () => {
     await withLog(async (log, root) => {
       const prompts: Array<{ prompt: string; messages: unknown[] | undefined }> = [];
