@@ -14,6 +14,8 @@ export interface GitDelegationResult {
   outcome: "changed" | "clean" | "failure" | "aborted";
   commit: string | null;
   branch: string | null;
+  /** Keep the branch while a child worktree is preserved for recovery. */
+  preserved: boolean;
 }
 
 const run = async (environment: Sandbox, command: string): Promise<string> => {
@@ -168,7 +170,7 @@ export async function integrateGitDelegation(
       return { outcome: "blocked", detail: "integrated workspace verification failed" };
     }
     for (const result of changed) {
-      if (result.branch) {
+      if (result.branch && !result.preserved) {
         await tryRun(
           environment,
           git(

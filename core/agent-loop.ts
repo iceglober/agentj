@@ -720,6 +720,8 @@ async function composeChat(
         error: string | null;
         branch: string | null;
         outcome: string;
+        preserved: boolean;
+        warnings: string[];
       }>;
       integration?: { outcome: string; detail: string | null };
     };
@@ -736,7 +738,8 @@ async function composeChat(
           .filter((detail): detail is string => Boolean(detail))
           .join("\n") || "no result",
       ...(failed ? { status: "failed" as const } : {}),
-      ...(failed && result?.branch ? { branch: result.branch } : {}),
+      ...(result?.preserved && result.branch ? { branch: result.branch } : {}),
+      ...(result?.warnings.length ? { warnings: result.warnings } : {}),
     };
   };
 

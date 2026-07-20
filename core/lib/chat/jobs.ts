@@ -37,6 +37,8 @@ export interface JobOutcome {
   status?: "failed";
   /** Branch preserving work after a failed child or blocked integration. */
   branch?: string;
+  /** Non-fatal cleanup issues after job work completed. */
+  warnings?: string[];
 }
 
 export interface JobRunnerDependencies {
@@ -77,7 +79,8 @@ const summarize = (job: JobView): string => {
   const head = `[${job.id}] ${job.status} in ${seconds}s — ${job.prompt.slice(0, 60)}`;
   const firstLine = job.resultText?.split("\n").find((line) => line.trim()) ?? "";
   const branch = job.branch ? ` (work preserved on ${job.branch})` : "";
-  return `${head}${firstLine ? `: ${firstLine.slice(0, 120)}` : ""}${branch}`;
+  const warning = job.warnings?.[0] ? ` (warning: ${job.warnings[0].slice(0, 120)})` : "";
+  return `${head}${firstLine ? `: ${firstLine.slice(0, 120)}` : ""}${branch}${warning}`;
 };
 
 /** Tool calls kept per job for `inspect`; older calls collapse to a count. */
@@ -149,6 +152,7 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
           view.status = abort.signal.aborted ? "aborted" : (outcome.status ?? "done");
           view.resultText = outcome.text;
           if (outcome.branch) view.branch = outcome.branch;
+          if (outcome.warnings?.length) view.warnings = outcome.warnings;
         })
         .catch((error) => {
           view.status = abort.signal.aborted ? "aborted" : "failed";

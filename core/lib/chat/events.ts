@@ -17,8 +17,10 @@ export interface JobView {
   /** When set, `ping` fires at this time if the job is still running. */
   softTimeoutAt?: number;
   resultText?: string;
-  /** Branch preserving the job's work when integration was blocked. */
+  /** Branch preserving work or cleanup state for recovery. */
   branch?: string;
+  /** Non-fatal cleanup issues after job work completed. */
+  warnings?: string[];
 }
 
 /**

@@ -68,9 +68,11 @@ export type ChildSessionFinalizeResult =
       head: string;
       status: string;
       commit: string;
-      worktreeRemoved: true;
+      worktreeRemoved: boolean;
       branchDeleted: false;
-      preserved: false;
+      preserved: boolean;
+      /** Cleanup errors after the committed work was verified. */
+      warnings?: string[];
     }
   | {
       outcome: "clean";
@@ -82,9 +84,11 @@ export type ChildSessionFinalizeResult =
       head: string;
       status: "";
       commit: null;
-      worktreeRemoved: true;
-      branchDeleted: true;
-      preserved: false;
+      worktreeRemoved: boolean;
+      branchDeleted: boolean;
+      preserved: boolean;
+      /** Cleanup errors after the clean worktree was verified. */
+      warnings?: string[];
     }
   | {
       outcome: "preserved";
@@ -184,6 +188,27 @@ async function readWorktreeEvidence(
   };
 }
 
+async function removeVerifiedWorktree(
+  sb: Sandbox,
+  repoDir: string,
+  path: string,
+): Promise<{ worktreeRemoved: boolean; warning?: string }> {
+  try {
+    await scm.removeWorktree(sb, repoDir, path);
+    return { worktreeRemoved: true };
+  } catch (error) {
+    const warning = describeError(error);
+    try {
+      return {
+        worktreeRemoved: (await scm.inspectWorktree(sb, repoDir, path)) === null,
+        warning,
+      };
+    } catch (inspectionError) {
+      return { worktreeRemoved: false, warning: `${warning}; ${describeError(inspectionError)}` };
+    }
+  }
+}
+
 function createSessionHandle(
   sb: Sandbox,
   id: string,
@@ -231,7 +256,10 @@ async function finalizeChildSession(
       worktreeRemoved: false,
       branchDeleted: false,
       preserved: true,
-      ...(result.outcome === "success" ? {} : { detail: result.detail }),
+      detail:
+        result.outcome === "success"
+          ? "child worktree is not registered; cannot verify finalization"
+          : result.detail,
     };
   }
 
@@ -255,10 +283,26 @@ async function finalizeChildSession(
   }
 
   if (evidence.status === "") {
-    let worktreeRemoved = false;
+    const cleanup = await removeVerifiedWorktree(sb, config.repoDir, session.path);
+    const warnings = cleanup.warning ? [cleanup.warning] : [];
+    if (!cleanup.worktreeRemoved) {
+      return {
+        outcome: "clean",
+        id: session.id,
+        path: session.path,
+        branch: session.branch,
+        base: session.base,
+        parentRef: session.parentRef,
+        head: evidence.head,
+        status: "",
+        commit: null,
+        worktreeRemoved: false,
+        branchDeleted: false,
+        preserved: true,
+        warnings,
+      };
+    }
     try {
-      await scm.removeWorktree(sb, config.repoDir, session.path);
-      worktreeRemoved = true;
       await scm.deleteProofCheckedDisposableBranch(
         sb,
         config.repoDir,
@@ -278,23 +322,23 @@ async function finalizeChildSession(
         worktreeRemoved: true,
         branchDeleted: true,
         preserved: false,
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     } catch (error) {
       return {
-        outcome: "preserved",
-        reason: "uncertain",
+        outcome: "clean",
         id: session.id,
         path: session.path,
         branch: session.branch,
         base: session.base,
         parentRef: session.parentRef,
         head: evidence.head,
-        status: evidence.status,
+        status: "",
         commit: null,
-        worktreeRemoved,
+        worktreeRemoved: true,
         branchDeleted: false,
         preserved: true,
-        detail: describeError(error),
+        warnings: [...warnings, describeError(error)],
       };
     }
   }
@@ -372,23 +416,8 @@ async function finalizeChildSession(
     return preserveUncertain(describeError(error));
   }
 
-  try {
-    await scm.removeWorktree(sb, config.repoDir, session.path);
-    worktreeRemoved = true;
-  } catch (error) {
-    try {
-      worktreeRemoved = (await scm.inspectWorktree(sb, config.repoDir, session.path)) === null;
-    } catch {
-      worktreeRemoved = false;
-    }
-    if (!worktreeRemoved) {
-      const refreshed = await refreshEvidence();
-      if (refreshed?.status === "") {
-        commit = refreshed.head;
-      }
-    }
-    return preserveUncertain(describeError(error));
-  }
+  const cleanup = await removeVerifiedWorktree(sb, config.repoDir, session.path);
+  worktreeRemoved = cleanup.worktreeRemoved;
 
   return {
     outcome: "changed",
@@ -400,9 +429,10 @@ async function finalizeChildSession(
     head,
     status: evidence.status,
     commit,
-    worktreeRemoved: true,
+    worktreeRemoved,
     branchDeleted: false,
-    preserved: false,
+    preserved: !worktreeRemoved,
+    ...(cleanup.warning ? { warnings: [cleanup.warning] } : {}),
   };
 }
 
