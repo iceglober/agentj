@@ -42,17 +42,17 @@ describe("runConfigUi", () => {
     const { port, applied, prompts } = scriptedPort({ inputs: [null] });
     await runConfigUi(port);
     expect(applied).toEqual([]);
-    expect(labels(prompts[0]!)).toEqual(["agent", "permissions", "Back"]);
+    expect(labels(prompts[0]!)).toEqual(["agent", "permissions"]);
   });
 
   test("navigates nested groups and edits an enum key", async () => {
     const { port, applied, prompts } = scriptedPort({
-      inputs: ["agent", "context", "onLimit", "warn", "Back", "Back", "Back", null],
+      inputs: ["agent", "context", "onLimit", "warn", null, null, null],
     });
     await runConfigUi(port);
     expect(applied).toEqual([{ path: "agent.context.onLimit", value: "warn" }]);
     expect(labels(prompts[1]!)).toContain("context");
-    expect(labels(prompts[3]!)).toEqual(["warn", "Back"]);
+    expect(labels(prompts[3]!)).toEqual(["warn"]);
   });
 
   test("edits a string-array key: add then save persists JSON", async () => {
@@ -64,8 +64,8 @@ describe("runConfigUi", () => {
         "add an item",
         "gpt-5.6-terra",
         "save (2 items)",
-        "Back",
-        "Back",
+        null,
+        null,
         null,
       ],
       values: { "agent.llm.tiers": ["gpt-5.6-sol"] },
@@ -85,10 +85,10 @@ describe("runConfigUi", () => {
         "azure",
         "apiKey",
         "sk-live",
-        "Back",
-        "Back",
-        "Back",
-        "Back",
+        null,
+        null,
+        null,
+        null,
         null,
       ],
     });

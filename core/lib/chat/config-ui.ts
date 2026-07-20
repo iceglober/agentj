@@ -23,8 +23,6 @@ interface ConfigMenuNode {
   doc?: ConfigDoc;
 }
 
-const BACK = "__back__";
-
 const display = (value: unknown): string => {
   if (value === undefined || value === null) return "unset";
   if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "empty";
@@ -49,8 +47,7 @@ const createMenuTree = (): ConfigMenuNode => {
   return root;
 };
 
-const backChoice = { label: "Back", value: BACK };
-const promptLabel = (label: string): string => `<Esc> Back · ${label}`;
+const promptLabel = (label: string): string => label;
 
 const editArray = async (port: ConfigUiPort, path: string): Promise<void> => {
   const current = await port.read(path);
@@ -62,10 +59,9 @@ const editArray = async (port: ConfigUiPort, path: string): Promise<void> => {
         "add an item",
         ...(items.length > 0 ? ["remove an item"] : []),
         `save (${items.length} item${items.length === 1 ? "" : "s"})`,
-        backChoice,
       ],
     });
-    if (action === null || action === BACK) return;
+    if (action === null) return;
     if (action.startsWith("save (")) {
       await port.apply(path, JSON.stringify(items));
       port.note("Reorder items with /config inside a session.");
@@ -78,9 +74,9 @@ const editArray = async (port: ConfigUiPort, path: string): Promise<void> => {
     }
     const which = await port.askInput({
       label: promptLabel(`Remove from ${path}`),
-      choices: [...items, backChoice],
+      choices: items,
     });
-    if (which !== null && which !== BACK) items.splice(items.indexOf(which), 1);
+    if (which !== null) items.splice(items.indexOf(which), 1);
   }
 };
 
@@ -100,19 +96,23 @@ const editKey = async (port: ConfigUiPort, path: string): Promise<void> => {
     return;
   }
   if (field.kind === "enum" && field.enumValues) {
+    const current = await port.read(path);
     const chosen = await port.askInput({
       label: promptLabel(field.description ?? path),
-      choices: [...field.enumValues, backChoice],
+      choices: field.enumValues,
+      ...(typeof current === "string" ? { initial: current } : {}),
     });
-    if (chosen !== null && chosen !== BACK) await port.apply(path, chosen);
+    if (chosen !== null) await port.apply(path, chosen);
     return;
   }
   if (field.kind === "boolean") {
+    const current = await port.read(path);
     const chosen = await port.askInput({
       label: promptLabel(field.description ?? path),
-      choices: ["true", "false", backChoice],
+      choices: ["true", "false"],
+      ...(typeof current === "boolean" ? { initial: String(current) } : {}),
     });
-    if (chosen !== null && chosen !== BACK) await port.apply(path, chosen);
+    if (chosen !== null) await port.apply(path, chosen);
     return;
   }
   const current = await port.read(path);
@@ -147,9 +147,9 @@ const browse = async (
     );
     const chosen = await port.askInput({
       label: promptLabel(segments.length === 0 ? "agentj configuration" : segments.join(".")),
-      choices: [...choices, backChoice],
+      choices,
     });
-    if (chosen === null || chosen === BACK) return;
+    if (chosen === null) return;
     const child = node.children.get(chosen);
     if (!child) continue;
     if (child.doc) await editKey(port, child.doc.path);
