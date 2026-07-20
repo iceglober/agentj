@@ -155,6 +155,18 @@ describe("formatChatEvent", () => {
     ).toBe("Command: build");
   });
 
+  test("renders structured question answers in the transcript", () => {
+    expect(
+      formatChatEvent({
+        type: "questions-answered",
+        answers: [
+          { header: "Scope", question: "What should change?", answers: ["CLI", "TUI"] },
+          { header: "Tests", question: "Which tests?", answers: [] },
+        ],
+      }),
+    ).toBe("Scope: CLI, TUI\nTests: (none)");
+  });
+
   test("keeps turn lifecycle-only events out of the transcript", () => {
     expect(formatChatEvent({ type: "turn-abort-requested" })).toBeNull();
     expect(formatChatEvent({ type: "turn-finished" })).toBeNull();

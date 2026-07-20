@@ -62,7 +62,7 @@ nav.toc .nav-h2 { padding-left:1.5rem; }
 agentj config set --secret providers.azure.api_key</code></pre>
 <p>Start a session in any git repository:</p>
 <pre><code>agentj</code></pre>
-<p>You begin in <strong>plan mode</strong>: the agent's tools are read-only, so it investigates, fans out research subagents, and proposes a plan without changing anything. Press <strong>Tab</strong> to switch to <strong>build mode</strong> (full tools), or enter <strong><code>/build</code></strong> to switch and have it implement what the conversation agreed on. That is the whole loop — talk, plan, build. Type <code>/help</code> in a session to see every command and key.</p>
+<p>You begin in <strong>plan mode</strong>: the agent's tools are read-only, so it investigates, fans out research subagents, and proposes a plan without changing anything. Press <strong>Tab</strong> to switch to <strong>build mode</strong> (full tools), or enter <strong><code>/build</code></strong> to switch and have it implement what the conversation agreed on. That is the whole loop — talk, plan, build. The interactive primary agent can also ask focused structured questions with described choices, multi-select answers, or free text; one-shot runs, background jobs, and subagents cannot. Type <code>/help</code> in a session to see every command and key.</p>
 <details><summary>Resume a session, or run one-shot from a script</summary>
 <pre><code>agentj --continue                          # reopen the newest session for this project
 agentj --resume &lt;id&gt;                        # reopen a specific session by id

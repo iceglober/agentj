@@ -74,6 +74,9 @@ Keys and commands:
 - **`/build`** — switch to build mode and implement the plan and discussion so far. Typing `/`
   after whitespace shows fuzzy-matched command suggestions; inline tokens complete and highlight
   but only a top-level slash command executes locally.
+- **Structured questions** — the interactive primary agent can ask focused questions with described
+  choices, multi-select answers, or free text. This is unavailable in one-shot runs, background
+  jobs, and subagents.
 - **`/mcp`** — inspect MCP status; guided completions provide `add`, `auth`, `reload`, `remove`,
   and advanced `set` actions. Server prompt templates appear as namespaced commands such as
   **`/mcp:docs:summarize`**; built-in commands always win. Invoking one collects its arguments

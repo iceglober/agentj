@@ -278,19 +278,29 @@ describe("createAgentTools", () => {
     }
   });
 
-  test("injects session todos for primary agents in both modes, never delegates", async () => {
+  test("injects interactive session tools for primary agents in both modes, never delegates", async () => {
     const primary = agentConfigSchema.parse({});
     const todos = { replace: async () => {} };
-    const plan = await createAgentTools(sandbox, primary, { ...baseOptions, mode: "plan", todos });
-    const build = await createAgentTools(sandbox, primary, { ...baseOptions, todos });
+    const questions = { ask: async () => [] };
+    const plan = await createAgentTools(sandbox, primary, {
+      ...baseOptions,
+      mode: "plan",
+      todos,
+      questions,
+    });
+    const build = await createAgentTools(sandbox, primary, { ...baseOptions, todos, questions });
     const delegate = await createAgentTools(sandbox, childAgentConfig(primary, "delegate"), {
       ...baseOptions,
       todos,
+      questions,
     });
 
     expect(plan).toHaveProperty("update_todos");
+    expect(plan).toHaveProperty("ask_user");
     expect(build).toHaveProperty("update_todos");
+    expect(build).toHaveProperty("ask_user");
     expect(delegate).not.toHaveProperty("update_todos");
+    expect(delegate).not.toHaveProperty("ask_user");
   });
 
   test("build mode (the default) retains mutation tools", async () => {

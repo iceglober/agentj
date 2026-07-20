@@ -37,6 +37,7 @@ import {
   withPermissions,
   withRequestOrigin,
 } from "./permissions";
+import { createQuestionTool, type QuestionPort } from "./questions";
 import {
   type CreateSubagentsToolOptions,
   createRunOneSubagentTool,
@@ -207,6 +208,8 @@ export interface CreateAgentOptions {
   jobs?: BackgroundJobPort;
   /** Primary interactive-session todo capability; never inherited by children. */
   todos?: TodoPort;
+  /** Primary interactive-session question capability; never inherited by children. */
+  questions?: QuestionPort;
 }
 
 /** Per-turn hooks for a single generate() call. */
@@ -433,15 +436,19 @@ export async function createAgentTools(
     });
   };
 
-  const jobsTool: ToolSet =
-    config.role === "primary" && opts.jobs
+  const primarySessionTools: ToolSet =
+    config.role === "primary"
       ? {
-          run_job: createBackgroundJobTool(opts.jobs, mode),
-          check_job: createCheckJobTool(opts.jobs),
+          ...(opts.jobs
+            ? {
+                run_job: createBackgroundJobTool(opts.jobs, mode),
+                check_job: createCheckJobTool(opts.jobs),
+              }
+            : {}),
+          ...(opts.todos ? { update_todos: createTodoTool(opts.todos) } : {}),
+          ...(opts.questions ? { ask_user: createQuestionTool(opts.questions) } : {}),
         }
       : {};
-  const todosTool: ToolSet =
-    config.role === "primary" && opts.todos ? { update_todos: createTodoTool(opts.todos) } : {};
   const webTools: ToolSet = opts.web
     ? createWebTools({
         ...opts.web,
@@ -471,8 +478,7 @@ export async function createAgentTools(
       }),
       ...createSearchTools(sb, { root: opts.root }),
       ...webTools,
-      ...jobsTool,
-      ...todosTool,
+      ...primarySessionTools,
       ...(opts.research
         ? (() => {
             const subagentOptions: CreateSubagentsToolOptions = {
@@ -500,8 +506,7 @@ export async function createAgentTools(
     ...webTools,
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
-    ...jobsTool,
-    ...todosTool,
+    ...primarySessionTools,
   });
 }
 
