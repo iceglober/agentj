@@ -318,15 +318,15 @@ describe("runChatCommand", () => {
         return mode ?? "plan";
       },
       send: async (text, options) => {
-        calls.push(`send:${options?.transcriptText}:${text}`);
+        calls.push(`send:${options?.transcriptText}:${options?.restoreText}:${text}`);
       },
     } as ChatCommandContext["session"];
 
-    await runChatCommand(context, "build", "");
+    await runChatCommand(context, "build", "please prioritize the API tests");
 
     expect(calls).toEqual([
       "mode:build",
-      "send:Command: build:Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback. Complete and validate it end to end.",
+      "send:Command: build:/build please prioritize the API tests:Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback, including this additional feedback: please prioritize the API tests. Complete and validate it end to end.",
     ]);
   });
 
