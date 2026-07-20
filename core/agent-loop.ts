@@ -89,7 +89,6 @@ import {
   type SkillIssue,
   skillMode,
 } from "./lib/skills";
-import type { TodoList } from "./lib/todos";
 import { createSpillSink } from "./lib/tools/spill";
 import { truncateWithNotice } from "./lib/truncation";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
@@ -113,7 +112,7 @@ import {
   shouldWarnContext,
 } from "./lib/tui/status";
 import type { UiTextLine } from "./lib/tui/styles";
-import { formatTodoLines } from "./lib/tui/todos";
+import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
@@ -875,7 +874,7 @@ export async function runAgentjChat(
   };
   let lastContextWarning: number | undefined;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
-  let sessionTodos: TodoList = [];
+  let todos: ReturnType<typeof createSessionTodos> | undefined;
   const completedActivities: Array<{ tool: string; detail: string; elapsedMs: number }> = [];
   let turnActivityCount = 0;
 
@@ -906,7 +905,7 @@ export async function runAgentjChat(
   const refreshProgress = (): void => {
     screen?.setProgressLines(
       [
-        ...formatTodoLines(sessionTodos),
+        ...formatTodoProgressLines(todos?.list() ?? []),
         ...composeProgressLines({
           activeTools,
           dagBlocks: dagBlockLines(),
@@ -1036,7 +1035,6 @@ export async function runAgentjChat(
 
     const render = (event: ChatEvent): void => {
       if (event.type === "todos-updated") {
-        sessionTodos = event.items;
         refreshProgress();
         return;
       }
@@ -1208,12 +1206,11 @@ export async function runAgentjChat(
     };
     emitChatEvent = render;
 
-    const todos = createSessionTodos({
+    todos = createSessionTodos({
       log,
       initial: resumed?.todos,
       onEvent: render,
     });
-    sessionTodos = todos.items;
     const chat: ChatSession = createChatSession(
       {
         agentFor,
@@ -1324,6 +1321,7 @@ export async function runAgentjChat(
       config: interactiveConfig,
       cost: { rows: () => usageRows, prices: composition.evalPrices },
       activity: { list: () => completedActivities },
+      todos: { list: todos.list },
       models: {
         current: composition.modelSelections,
         providers: () => providerNames,

@@ -282,7 +282,7 @@ describe("createChatScreen", () => {
     const shown = renderScreen(text()).join("\n");
     expect(shown).toContain("› /help — List commands and keys");
     expect(shown).toContain("/activity — Show completed tool activity for this session");
-    expect(shown).toContain("… ↓ 6 more");
+    expect(shown).toContain("… ↓ 7 more");
 
     input.write("bld\t\r");
     await settle();

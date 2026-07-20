@@ -30,5 +30,5 @@ test("session todos serialize durable updates and emit after persistence", async
     { type: "todos", items: [{ id: "two", text: "Second", status: "completed" }], ts: "now" },
   ]);
   expect(events).toEqual(["one", "two"]);
-  expect(todos.items).toEqual([{ id: "two", text: "Second", status: "completed" }]);
+  expect(todos.list()).toEqual([{ id: "two", text: "Second", status: "completed" }]);
 });
