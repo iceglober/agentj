@@ -100,6 +100,90 @@ describe("createChatSession", () => {
     });
   });
 
+  test("retries a build completion that claims done without observed evidence", async () => {
+    await withLog(async (log) => {
+      const reports = [
+        JSON.stringify({
+          status: "done",
+          summary: "claimed",
+          changes: ["claimed"],
+          validation: [],
+          openQuestions: [],
+        }),
+        JSON.stringify({
+          status: "done",
+          summary: "verified",
+          changes: ["changed"],
+          validation: [{ command: "bun test core", outcome: "passed", evidence: "ok" }],
+          openQuestions: [],
+        }),
+      ];
+      const prompts: string[] = [];
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            const text = reports.shift() ?? "";
+            return result(text, {
+              steps: text.includes("verified")
+                ? [
+                    {
+                      toolCalls: [{ name: "bash", input: { command: "bun test core" } }],
+                      toolResults: [{ name: "bash", output: { exitCode: 0 }, isError: false }],
+                    },
+                  ]
+                : [],
+            });
+          }),
+        log,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+      session.setMode("build");
+
+      await session.send("implement it");
+
+      expect(prompts).toHaveLength(2);
+      expect(prompts[1]).toContain("prior completion report was rejected");
+      expect(events.filter((event) => event.type === "notice")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "assistant")).toEqual([
+        expect.objectContaining({ text: expect.stringContaining('"summary":"verified"') }),
+      ]);
+    });
+  });
+
+  test("turns a second unverified build completion into an explicit failure", async () => {
+    await withLog(async (log, root) => {
+      let calls = 0;
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async () => {
+            calls += 1;
+            return result(
+              JSON.stringify({
+                status: "done",
+                summary: "claimed",
+                changes: [],
+                validation: [],
+                openQuestions: [],
+              }),
+            );
+          }),
+        log,
+      });
+      session.setMode("build");
+
+      await session.send("implement it");
+
+      expect(calls).toBe(2);
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.turns[0]?.assistant).toContain('"status":"failed"');
+      expect(loaded?.turns[0]?.assistant).toContain("rejected the completion report");
+    });
+  });
+
   test("clears continuation, notices, and durable history before the next turn", async () => {
     await withLog(async (log, root) => {
       const prompts: Array<{ prompt: string; messages: unknown[] | undefined }> = [];
@@ -271,7 +355,25 @@ describe("createChatSession", () => {
           return makeAgent(async () => {
             modes.push(mode);
             if (mode === "plan") await new Promise<void>((r) => (release = r));
-            return result(`${mode} done`);
+            return mode === "build"
+              ? result(
+                  JSON.stringify({
+                    status: "done",
+                    summary: "built",
+                    changes: ["changed"],
+                    validation: [{ command: "bun test core", outcome: "passed", evidence: "ok" }],
+                    openQuestions: [],
+                  }),
+                  {
+                    steps: [
+                      {
+                        toolCalls: [{ name: "bash", input: { command: "bun test core" } }],
+                        toolResults: [{ name: "bash", output: { exitCode: 0 }, isError: false }],
+                      },
+                    ],
+                  },
+                )
+              : result(`${mode} done`);
           });
         },
         log,
