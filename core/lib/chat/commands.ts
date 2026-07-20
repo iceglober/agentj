@@ -14,6 +14,7 @@ import { listOverflowFooter, windowList } from "../tui/list-window";
 import type { UpdateChannel } from "../update";
 import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
 import type { ChatEvent } from "./events";
+import { fuzzyFilter } from "./fuzzy";
 import type { GuidedInputPort } from "./guided-input";
 import type { JobRunner } from "./jobs";
 import type { ChatSession } from "./session";
@@ -768,65 +769,18 @@ export const chatCommands: Record<string, ChatCommand> = {
   },
 };
 
-interface FuzzyRank {
-  kind: number;
-  gaps: number;
-  start: number;
-}
-
-const fuzzyRank = (name: string, query: string): FuzzyRank | null => {
-  if (query.length === 0) return { kind: 0, gaps: 0, start: 0 };
-  if (name === query) return { kind: 0, gaps: 0, start: 0 };
-  if (name.startsWith(query)) return { kind: 1, gaps: 0, start: 0 };
-
-  let queryIndex = 0;
-  let start = -1;
-  let previous = -1;
-  let gaps = 0;
-  for (let nameIndex = 0; nameIndex < name.length && queryIndex < query.length; nameIndex += 1) {
-    if (name[nameIndex] !== query[queryIndex]) continue;
-    if (start === -1) start = nameIndex;
-    if (previous !== -1) gaps += nameIndex - previous - 1;
-    previous = nameIndex;
-    queryIndex += 1;
-  }
-  return queryIndex === query.length ? { kind: 2, gaps, start } : null;
-};
-
 /** Case-insensitive exact, prefix, then compact ordered-subsequence command matches. */
 export function suggestChatCommands(
   query: string,
   skills: readonly Pick<SkillCommand, "name" | "summary">[] = [],
 ): ChatCommandSuggestion[] {
-  const entries: ReadonlyArray<readonly [string, string]> = [
-    ...Object.entries(chatCommands).map(([name, command]) => [name, command.summary] as const),
+  const entries: ChatCommandSuggestion[] = [
+    ...Object.entries(chatCommands).map(([name, command]) => ({ name, summary: command.summary })),
     ...skills
       .filter(({ name }) => !(name in chatCommands))
-      .map(({ name, summary }) => [name, `${summary} (skill)`] as const),
+      .map(({ name, summary }) => ({ name, summary: `${summary} (skill)` })),
   ];
-  const normalized = query.toLowerCase();
-  if (normalized.length === 0) {
-    return entries.map(([name, summary]) => ({ name, summary }));
-  }
-  return entries
-    .map(([name, summary], index) => ({
-      name,
-      summary,
-      index,
-      rank: fuzzyRank(name.toLowerCase(), normalized),
-    }))
-    .filter(
-      (candidate): candidate is typeof candidate & { rank: FuzzyRank } => candidate.rank !== null,
-    )
-    .sort(
-      (left, right) =>
-        left.rank.kind - right.rank.kind ||
-        left.rank.gaps - right.rank.gaps ||
-        left.rank.start - right.rank.start ||
-        left.name.length - right.name.length ||
-        left.index - right.index,
-    )
-    .map(({ name, summary }) => ({ name, summary }));
+  return fuzzyFilter(query, entries, ({ name }) => name);
 }
 
 export interface ChatInputCompletion {

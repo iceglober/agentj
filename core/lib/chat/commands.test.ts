@@ -8,6 +8,7 @@ import {
   suggestChatCommands,
 } from "./commands";
 import type { ChatEvent } from "./events";
+import type { GuidedInputOptions } from "./guided-input";
 import type { JobRunner } from "./jobs";
 
 describe("parseInput", () => {
@@ -329,7 +330,7 @@ describe("runChatCommand", () => {
   test("edits string-array config values through guided list actions", async () => {
     const { context } = makeContext();
     const answers = ["add", "second", "edit", "updated", "save"];
-    const asks: Array<{ label: string; choices?: readonly string[] }> = [];
+    const asks: GuidedInputOptions[] = [];
     const sets: Array<{ key: string; value?: string }> = [];
     context.guided = {
       askInput: async (options) => {

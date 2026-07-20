@@ -1,6 +1,6 @@
 import type { Readable } from "node:stream";
 import type { PermissionPromptDecision, PermissionRequest } from "../agent/permissions";
-import type { GuidedInputOptions, GuidedInputPort } from "../chat/guided-input";
+import { type GuidedInputOptions, type GuidedInputPort, guidedChoice } from "../chat/guided-input";
 import {
   applyEditorCommand,
   createEditorState,
@@ -258,11 +258,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
           }
         : prompt.editor;
       const layout = windowEditorLayout(renderEditorLayout(displayed, contentWidth()), 10);
-      const choiceWindow = windowList(prompt.options.choices ?? [], prompt.selectedIndex);
+      const choiceWindow = windowList(
+        (prompt.options.choices ?? []).map(guidedChoice),
+        prompt.selectedIndex,
+      );
       const choiceFooter = listOverflowFooter(choiceWindow);
       const choiceLines = [
         ...choiceWindow.items.map((choice, index) =>
-          safeLine(`${choiceWindow.start + index === prompt.selectedIndex ? "›" : " "} ${choice}`),
+          safeLine(
+            `${choiceWindow.start + index === prompt.selectedIndex ? "›" : " "} ${choice.label}`,
+          ),
         ),
         ...(choiceFooter ? [safeLine(choiceFooter)] : []),
       ];
@@ -395,7 +400,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       settleModal(modal, null);
       return;
     }
-    const choices = modal.options.choices ?? [];
+    const choices = (modal.options.choices ?? []).map(guidedChoice);
     if ((command.type === "move-up" || command.type === "move-down") && choices.length > 0) {
       const direction = command.type === "move-up" ? -1 : 1;
       modal.selectedIndex = (modal.selectedIndex + direction + choices.length) % choices.length;
@@ -403,14 +408,16 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       return;
     }
     if (command.type === "tab" && choices.length > 0) {
-      modal.editor = createEditorState(choices[modal.selectedIndex] ?? "");
+      modal.editor = createEditorState(choices[modal.selectedIndex]?.value ?? "");
       modal.error = null;
       paint();
       return;
     }
     if (command.type === "submit") {
       const text =
-        modal.editor.text.length === 0 ? (choices[modal.selectedIndex] ?? "") : modal.editor.text;
+        modal.editor.text.length === 0
+          ? (choices[modal.selectedIndex]?.value ?? "")
+          : modal.editor.text;
       const error = modal.options.validate?.(text);
       if (error) {
         modal.error = error;
@@ -742,7 +749,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         const modal: PendingInput = {
           kind: "input",
           options: inputOptions,
-          editor: createEditorState(),
+          editor: createEditorState(inputOptions.initial),
           selectedIndex: 0,
           error: null,
           resolve,

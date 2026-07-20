@@ -33,7 +33,9 @@ export interface RunJobArgs {
 
 export interface JobOutcome {
   text: string;
-  /** Branch preserving the work when integration was blocked. */
+  /** A resolved executor failure; rejected promises remain failures too. */
+  status?: "failed";
+  /** Branch preserving work after a failed child or blocked integration. */
   branch?: string;
 }
 
@@ -144,7 +146,7 @@ export function createJobRunner(deps: JobRunnerDependencies): JobRunner {
           onStep: (step) => recordStep(entry, step),
         })
         .then((outcome) => {
-          view.status = abort.signal.aborted ? "aborted" : "done";
+          view.status = abort.signal.aborted ? "aborted" : (outcome.status ?? "done");
           view.resultText = outcome.text;
           if (outcome.branch) view.branch = outcome.branch;
         })
