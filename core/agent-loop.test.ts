@@ -197,6 +197,7 @@ describe("formatChatEvent", () => {
   test("keeps turn lifecycle-only events out of the transcript", () => {
     expect(formatChatEvent({ type: "turn-abort-requested" })).toBeNull();
     expect(formatChatEvent({ type: "turn-finished" })).toBeNull();
+    expect(formatChatEvent({ type: "submission-finished" })).toBeNull();
   });
 
   test("trims assistant bodies and drops empty ones (no blank transcript rows)", () => {

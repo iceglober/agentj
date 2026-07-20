@@ -39,6 +39,7 @@ import {
 } from "./lib/chat/commands";
 import { type ConfigUiPort, runConfigUi } from "./lib/chat/config-ui";
 import { LONG_CONTEXT_INPUT_TOKENS, type UsageRecord } from "./lib/chat/cost";
+import { createChatEventOrderer } from "./lib/chat/event-order";
 import type { ChatEvent } from "./lib/chat/events";
 import {
   createPastedImageRegistry,
@@ -1300,17 +1301,19 @@ export async function runAgentjChat(
       }
       updateStatus();
     };
-    emitChatEvent = render;
+    const orderedEvents = createChatEventOrderer(render);
+    emitChatEvent = (event) => orderedEvents.emit(event);
+    const emit = (event: ChatEvent): void => emitChatEvent?.(event);
 
     const guidedInput = {
       askInput: (inputOptions: Parameters<ChatScreen["askInput"]>[0]) =>
         screen?.askInput(inputOptions) ?? Promise.resolve(null),
     };
-    const questionPort = createQuestionPort({ guided: guidedInput, onEvent: render });
+    const questionPort = createQuestionPort({ guided: guidedInput, onEvent: emit });
     const sessionTodos = createSessionTodos({
       log,
       initial: resumed?.todos,
-      onEvent: render,
+      onEvent: emit,
     });
     todos = sessionTodos;
     const chat: ChatSession = createChatSession(
@@ -1320,13 +1323,13 @@ export async function runAgentjChat(
         undo: undoStack,
         todos: sessionTodos,
         refinePlan: composition.refinePlan,
-        onEvent: render,
+        onEvent: emit,
       },
       resumed?.state ? { messages: resumed.state.messages, mode: resumed.state.mode } : {},
     );
 
     const jobRunner = createJobRunner({
-      onEvent: render,
+      onEvent: emit,
       addTurnNotice: (text) => chat.addTurnNotice(text),
       onJobCompleted: (job) => {
         if (job.status !== "aborted") chat.resumePendingWork();
@@ -1401,7 +1404,7 @@ export async function runAgentjChat(
 
     const configOutput = (message: string): void => {
       const text = message.trim();
-      if (text) render({ type: "notice", text });
+      if (text) emit({ type: "notice", text });
     };
     const interactiveConfig = createConfigCliHandlers({
       secretStore: createKeyringSecretStore({}),
@@ -1419,7 +1422,7 @@ export async function runAgentjChat(
       session: chat,
       jobs: jobRunner,
       undo: undoStack,
-      emit: render,
+      emit,
       quit: () => quitResolve?.(),
       requestUpdate: (channel) => {
         requestedUpdate = channel;
@@ -1530,18 +1533,18 @@ export async function runAgentjChat(
             if (attachment?.kind === "image") {
               const added = pastedImages.add(attachment.image);
               if ("error" in added) {
-                render({ type: "notice", text: added.error });
+                emit({ type: "notice", text: added.error });
                 return null;
               }
               return ` ${added.marker} `;
             }
-            render({
+            emit({
               type: "notice",
               text: "Ctrl+V attaches files copied in your file manager or a copied screenshot — the clipboard has neither right now. To paste text, use your terminal's paste (⌘V).",
             });
             return null;
           } catch (error) {
-            render({
+            emit({
               type: "notice",
               text:
                 error instanceof ClipboardAttachmentsUnavailableError
@@ -1566,13 +1569,13 @@ export async function runAgentjChat(
     if (checkForUpdate) {
       void notifyAvailableUpdate(checkForUpdate, (event) => emitChatEvent?.(event));
     }
-    for (const notice of skillNotices) render({ type: "notice", text: notice });
+    for (const notice of skillNotices) emit({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
       screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText));
       screen.printAbove(turn.assistant);
     }
     void composition.startMcp().catch((error) => {
-      render({
+      emit({
         type: "notice",
         text: `Unable to load MCP configuration: ${error instanceof Error ? error.message : String(error)}`,
       });
