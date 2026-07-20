@@ -871,13 +871,6 @@ export async function runAgentjChat(
   };
 
   const onToolActivity = (activity: ToolActivity): void => {
-    // run_job returns as soon as detached work starts. Its tool duration is
-    // not the job duration, so the persistent job count and job lifecycle
-    // transcript are the only UI for it.
-    if (activity.tool === "run_job") {
-      updateStatus();
-      return;
-    }
     if (activity.phase === "start") {
       activeTools.set(activity.id, {
         tool: activity.tool,

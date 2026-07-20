@@ -150,6 +150,23 @@ describe("createAgentTools", () => {
     ).not.toHaveProperty("run_job");
   });
 
+  test("run_job reports standard tool activity", async () => {
+    const events: string[] = [];
+    const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), {
+      ...baseOptions,
+      jobs: {
+        start: () => ({ id: "j1" }),
+        inspect: () => undefined,
+        renewSoftTimeout: () => false,
+        abort: () => false,
+      },
+      onToolActivity: (activity) => events.push(`${activity.phase}:${activity.tool}`),
+    });
+
+    await tools.run_job?.execute({ prompt: "watch CI" });
+    expect(events).toEqual(["start:run_job", "end:run_job"]);
+  });
+
   test("permission gating is strictly opt-in: no-gate builder tools behave as before", async () => {
     const config = agentConfigSchema.parse({});
     const plain = await createAgentTools(sandbox, config, baseOptions);
