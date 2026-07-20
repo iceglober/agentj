@@ -39,6 +39,25 @@ describe("createJobRunner", () => {
     expect(notices[0]).toContain("did: refactor");
   });
 
+  test("resolved executor failures are reported as failed", async () => {
+    const notices: string[] = [];
+    const runner = createJobRunner({
+      runJob: async () => ({ text: "child worktree setup failed", status: "failed" }),
+      addTurnNotice: (text) => {
+        notices.push(text);
+      },
+    });
+
+    runner.start("build", "ship the change");
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(runner.list()[0]).toMatchObject({
+      status: "failed",
+      resultText: "child worktree setup failed",
+    });
+    expect(notices[0]).toContain("[j1] failed");
+  });
+
   test("failures and aborts are reported, dispose aborts running jobs", async () => {
     const notices: string[] = [];
     const runner = createJobRunner({

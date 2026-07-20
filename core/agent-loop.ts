@@ -112,6 +112,10 @@ import {
   createUpdateStateStore,
 } from "./lib/update/npm-adapter";
 import {
+  createDelegationChildIdFactory,
+  delegationWorktreeRoot,
+} from "./lib/workspace/delegation-identity";
+import {
   createGitDelegationSnapshot,
   integrateGitDelegation,
 } from "./lib/workspace/git-integration";
@@ -119,13 +123,6 @@ import { createHostExecutionEnvironment } from "./lib/workspace/host-adapter";
 import { resolveProjectSource } from "./lib/workspace/project-source";
 
 const COMMAND_VERSION = packageJson.version;
-
-const safeChildIdSegment = (value: string): string =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "task";
 
 const summarizeStatus = (porcelain: string): string => {
   const count = porcelain.split("\n").filter(Boolean).length;
@@ -230,7 +227,8 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
       const elapsed = formatClock((event.job.endedAt ?? Date.now()) - event.job.startedAt);
       const result = event.job.resultText?.trim();
       const branch = event.job.branch ? `\nwork preserved on ${event.job.branch}` : "";
-      return `✓ [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${result ? `\n${truncateWithNotice(result, 2_000)}` : ""}${branch}`;
+      const marker = event.job.status === "done" ? "✓" : event.job.status === "failed" ? "x" : "!";
+      return `${marker} [${event.job.id}] ${event.job.status} in ${elapsed} — ${event.job.prompt.slice(0, 60)}${result ? `\n${truncateWithNotice(result, 2_000)}` : ""}${branch}`;
     }
     case "notice":
       return event.text;
@@ -323,7 +321,7 @@ interface ChatComposition {
     abortSignal: AbortSignal,
     origin?: string,
     onStep?: (step: RunStep) => void,
-  ): Promise<{ text: string; branch?: string }>;
+  ): Promise<{ text: string; status?: "failed"; branch?: string }>;
   runPlanJob(
     prompt: string,
     abortSignal: AbortSignal,
@@ -428,24 +426,15 @@ async function composeChat(
     ),
   };
 
-  // Child worktrees for build delegation and build jobs live outside the repo.
+  // Child worktrees stay outside the repo, but are scoped to its common Git
+  // directory. Each composition also gets a nonce, so stale worktrees and
+  // branches from a prior process can never collide with a new child.
   const sessionConfig = {
     ...config.session,
     repoDir: root,
-    root: join(tmpdir(), "agentj-worktrees"),
+    root: delegationWorktreeRoot(tmpdir(), commonGitDir),
   };
-  const childIds = new Set<string>();
-  let childCounter = 0;
-  const nextChildId = (taskId: string): string => {
-    while (true) {
-      childCounter += 1;
-      const id = `chat-${childCounter.toString().padStart(4, "0")}-${safeChildIdSegment(taskId)}`;
-      if (!childIds.has(id)) {
-        childIds.add(id);
-        return id;
-      }
-    }
-  };
+  const nextChildId = createDelegationChildIdFactory();
   const delegation = {
     parentRef: "HEAD",
     maxConcurrency: config.agent.tools.subagents.concurrency,
@@ -725,13 +714,22 @@ async function composeChat(
         branch: string | null;
         outcome: string;
       }>;
-      integration?: { outcome: string };
+      integration?: { outcome: string; detail: string | null };
     };
     const result = outcome.results[0];
     const blocked = outcome.integration?.outcome === "blocked";
+    const succeeded = result?.outcome === "changed" || result?.outcome === "clean";
+    const failed = blocked || !succeeded;
+    const integrationDetail = blocked
+      ? `Integration blocked${outcome.integration?.detail ? `: ${outcome.integration.detail}` : "."}`
+      : undefined;
     return {
-      text: result?.text ?? result?.error ?? "no result",
-      ...(blocked && result?.branch ? { branch: result.branch } : {}),
+      text:
+        [result?.error, integrationDetail, result?.text]
+          .filter((detail): detail is string => Boolean(detail))
+          .join("\n") || "no result",
+      ...(failed ? { status: "failed" as const } : {}),
+      ...(failed && result?.branch ? { branch: result.branch } : {}),
     };
   };
 

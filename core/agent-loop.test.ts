@@ -175,6 +175,23 @@ describe("formatChatEvent", () => {
       }),
     ).toBe("✓ [j2] done in 1m14s — monitor the release workflow\nPackage published.");
   });
+
+  test("marks failed jobs as failures", () => {
+    expect(
+      formatChatEvent({
+        type: "job-finished",
+        job: {
+          id: "j2",
+          mode: "build",
+          prompt: "monitor the release workflow",
+          status: "failed",
+          startedAt: 0,
+          endedAt: 1_000,
+          resultText: "Child worktree setup failed.",
+        },
+      }),
+    ).toBe("x [j2] failed in 1s — monitor the release workflow\nChild worktree setup failed.");
+  });
 });
 
 describe("composeProgressLines", () => {
