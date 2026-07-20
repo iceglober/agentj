@@ -20,6 +20,7 @@
     "config-field-layer",
     "cost-optimization",
     "editor-inline-completion",
+    "embedded-browser-skills",
     "fix-background-job-finalization-warnings",
     "fix-delegated-job-failures",
     "float-live-region",
@@ -42,6 +43,7 @@
     "model-background-jobs",
     "model-configuration",
     "multiline-user-transcript",
+    "narrow-tui-status",
     "npm-bin-launcher",
     "onboarding",
     "orwell-writing-style",
@@ -53,6 +55,7 @@
     "plan-handoff",
     "plan-observation-bash",
     "plan-readonly-mcp",
+    "plan-reflections",
     "pleasant-tui",
     "polite-screenshots-see",
     "project-config-layers",
@@ -66,6 +69,7 @@
     "status-cached-session-share",
     "status-cached-tokens",
     "status-section",
+    "structured-user-questions",
     "subagent-permissions",
     "subagent-result-prompt-ui",
     "subagent-tools-activity",
@@ -80,6 +84,7 @@
     "version-flag",
     "version-newline",
     "visible-background-job-tool-activity",
-    "visible-background-jobs"
+    "visible-background-jobs",
+    "web-research-tools"
   ]
 }
