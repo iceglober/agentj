@@ -42,6 +42,7 @@ export interface UpdateResult {
 
 export interface UpdateService {
   check(current: string, channel?: UpdateChannel): Promise<UpdateResult>;
+  checkFresh(current: string, channel?: UpdateChannel): Promise<UpdateResult>;
   update(current: string, channel?: UpdateChannel): Promise<UpdateResult>;
 }
 
@@ -97,12 +98,16 @@ export function createUpdateService(options: {
     return refreshCache(current, channel);
   };
 
+  const checkFresh = (current: string, requested?: UpdateChannel): Promise<UpdateResult> =>
+    check(current, requested, true);
+
   return {
     check,
+    checkFresh,
     async update(current, requested) {
       // An explicit update must check the registry now, rather than reporting
       // a stale cached result as current for up to the normal check interval.
-      const result = await check(current, requested, true);
+      const result = await checkFresh(current, requested);
       if (!result.available) return result;
       if (!options.installer)
         throw new Error("This AgentJ installation cannot be updated automatically.");
