@@ -586,20 +586,24 @@ export async function createAgent(
           new Error(`The selected model (${config.llm.model}) does not support image input.`),
         );
       }
-      return generateWithGroundedCompletion(runtime, {
-        instructions: composed.instructions,
-        prompt,
-        images: generateOpts?.images,
-        messages: generateOpts?.messages,
-        tools,
-        temperature: config.llm.temperature ?? composed.params.temperature,
-        topP: config.llm.topP ?? composed.params.topP,
-        providerOptions: composed.params.providerOptions,
-        stopSteps: opts.stopSteps ?? config.steps,
-        stopContextTokens: opts.stopContextTokens,
-        abortSignal: generateOpts?.abortSignal,
-        onStep: generateOpts?.onStep,
-      });
+      return generateWithGroundedCompletion(
+        runtime,
+        {
+          instructions: composed.instructions,
+          prompt,
+          images: generateOpts?.images,
+          messages: generateOpts?.messages,
+          tools,
+          temperature: config.llm.temperature ?? composed.params.temperature,
+          topP: config.llm.topP ?? composed.params.topP,
+          providerOptions: composed.params.providerOptions,
+          stopSteps: opts.stopSteps ?? config.steps,
+          stopContextTokens: opts.stopContextTokens,
+          abortSignal: generateOpts?.abortSignal,
+          onStep: generateOpts?.onStep,
+        },
+        { todos: opts.todos },
+      );
     },
   };
 }

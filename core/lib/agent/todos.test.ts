@@ -4,6 +4,7 @@ import { createTodoTool } from "./todos";
 test("update_todos replaces the full session list", async () => {
   const updates: unknown[] = [];
   const tool = createTodoTool({
+    list: () => [],
     replace: async (items) => {
       updates.push(items);
     },

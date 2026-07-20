@@ -1,5 +1,6 @@
 import type { GenerateRequest, RunResult, TokenUsage } from "../llm";
 import { parseCompletionReport } from "../report";
+import type { TodoPort } from "./todos";
 
 const ACTIVE_DEFERRED_WORK =
   /\b(?:monitor(?:ing)?|watch(?:ing)?)\b.*\b(?:ci|checks?|release|review|workflow|job|pr)\b|\b(?:waiting|awaiting)\b.*\b(?:ci|checks?|release|review|workflow|job|pr)\b|\b(?:will|once|when)\b.*\b(?:merge|check|validate|monitor)\b/iu;
@@ -9,6 +10,8 @@ const NEGATED_DEFERRED_WORK =
 const BACKGROUND_CORRECTIVE = `Your prior response claimed that background monitoring or future work had started, but no background job was created and that response was not shown to the user. Start the needed background work now. Your first action must be run_job. Use a build job if the work may merge, push, deploy, edit, or otherwise mutate; use a plan job only when all work is read-only. Do not claim that work is monitoring until run_job returns a job ID.`;
 
 const DONE_CORRECTIVE = `Your prior response reported status=done, but this turn called no tools — so nothing was implemented and no validation command was actually run, and that response was not shown to the user. Do the work now with your file and bash tools, run every validation command you intend to claim, and only then report status=done. If the task cannot be completed this turn, report status=blocked or status=failed with the real reason.`;
+
+const TODOS_CORRECTIVE = `The session still has pending or in-progress todos, so your prior response was not shown to the user. Continue the remaining work now. Do not stop merely because there is a next step: use tools, fix failures, or start run_job for genuine external waiting. You may stop only after clearing or completing every todo, or with status=blocked/status=failed for a concrete hard blocker such as unavailable credentials, network, model, required user input, or a runtime error.`;
 
 const blockedReport = (summary: string): string =>
   JSON.stringify({
@@ -88,6 +91,13 @@ export interface CompletionGuard {
   generate(request: GenerateRequest): Promise<RunResult>;
 }
 
+export const hasOpenTodos = (todos: TodoPort | undefined): boolean =>
+  todos?.list().some((todo) => todo.status !== "completed") ?? false;
+
+export interface CompletionState {
+  todos?: TodoPort;
+}
+
 /**
  * A final-response claim that is not backed by this turn's tool trajectory.
  * The two cases share one shape — detect, retry once with a targeted
@@ -110,6 +120,7 @@ interface GroundingViolation {
 const detectViolation = (
   result: RunResult,
   request: GenerateRequest,
+  state: CompletionState,
 ): GroundingViolation | null => {
   const report = parseCompletionReport(result.text);
   if (
@@ -127,6 +138,25 @@ const detectViolation = (
         "No background job was started, so AgentJ is not monitoring this work.",
       ),
       canRetry: Boolean(request.tools.run_job),
+    };
+  }
+
+  if (
+    hasOpenTodos(state.todos) &&
+    !hasStartedBackgroundJob(result) &&
+    report?.status !== "blocked" &&
+    report?.status !== "failed"
+  ) {
+    return {
+      correctivePrompt: TODOS_CORRECTIVE,
+      isResolved: (retry) =>
+        !hasOpenTodos(state.todos) ||
+        hasStartedBackgroundJob(retry) ||
+        ["blocked", "failed"].includes(parseCompletionReport(retry.text)?.status ?? ""),
+      unresolvedFailure: failedReport(
+        "The agent stopped with open session todos and did not continue, start a background job, or report a concrete blocker.",
+      ),
+      canRetry: true,
     };
   }
 
@@ -154,9 +184,10 @@ const detectViolation = (
 export async function generateWithGroundedCompletion(
   runtime: CompletionGuard,
   request: GenerateRequest,
+  state: CompletionState = {},
 ): Promise<RunResult> {
   const first = await runtime.generate(request);
-  const violation = detectViolation(first, request);
+  const violation = detectViolation(first, request, state);
   if (!violation) return first;
 
   if (!violation.canRetry) {

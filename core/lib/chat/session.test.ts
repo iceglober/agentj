@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Agent, GenerateOptions } from "../agent";
 import type { RunResult } from "../llm";
 import { createChatLog, loadChatLog } from "../session/log";
+import type { TodoList } from "../todos";
 import type { ChatEvent } from "./events";
 import { createChatSession } from "./session";
 
@@ -113,6 +114,7 @@ describe("createChatSession", () => {
           }),
         log,
         todos: {
+          list: () => [],
           clear: async () => {
             todosCleared += 1;
           },
@@ -418,6 +420,59 @@ describe("createChatSession", () => {
       expect(prompts).toEqual([text]);
       const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
       expect(loaded?.turns[0]?.user).toBe(text);
+    });
+  });
+
+  test("resumes open work once after a background completion and includes its notice", async () => {
+    await withLog(async (log) => {
+      let todos: TodoList = [{ id: "deploy", text: "Verify deployment", status: "pending" }];
+      const prompts: string[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            todos = [{ ...todos[0]!, status: "completed" }];
+            return result("verified");
+          }),
+        log,
+        todos: {
+          list: () => todos,
+          clear: async () => {
+            todos = [];
+          },
+        },
+      });
+
+      session.addTurnNotice("[j1] done — deployment finished");
+      session.resumePendingWork();
+      session.resumePendingWork();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain("[j1] done — deployment finished");
+      expect(prompts[0]).toContain("Continue the open session todos");
+    });
+  });
+
+  test("does not resume after a job completion when all todos are complete", async () => {
+    await withLog(async (log) => {
+      const prompts: string[] = [];
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async (prompt) => {
+            prompts.push(prompt);
+            return result("unexpected");
+          }),
+        log,
+        todos: {
+          list: () => [{ id: "done", text: "Already done", status: "completed" as const }],
+          clear: async () => {},
+        },
+      });
+
+      session.resumePendingWork();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(prompts).toEqual([]);
     });
   });
 

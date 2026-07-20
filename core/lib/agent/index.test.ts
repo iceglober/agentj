@@ -295,7 +295,7 @@ describe("createAgentTools", () => {
 
   test("injects interactive session tools for primary agents in both modes, never delegates", async () => {
     const primary = agentConfigSchema.parse({});
-    const todos = { replace: async () => {} };
+    const todos = { list: () => [], replace: async () => {} };
     const questions = { ask: async () => [] };
     const plan = await createAgentTools(sandbox, primary, {
       ...baseOptions,

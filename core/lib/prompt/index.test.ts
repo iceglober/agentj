@@ -222,13 +222,13 @@ describe("composePrompt", () => {
     // eval-validated decision, never a refactor side effect. Nano's standalone
     // delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "e0a2f2d29bce", delegate: "e0a2f2d29bce" },
-      "gpt-5.6-terra": { primary: "3079bf87de2b", delegate: "3079bf87de2b" },
+      "gpt-5.6-sol": { primary: "b0953e50240d", delegate: "b0953e50240d" },
+      "gpt-5.6-terra": { primary: "b2412297cc02", delegate: "b2412297cc02" },
       "gpt-5.6-luna": { primary: "e368c4917a7e", delegate: "e368c4917a7e" },
-      "gpt-5.4": { primary: "8d4bdb46026c", delegate: "8d4bdb46026c" },
-      "gpt-5.4-nano": { primary: "018414cc96bd", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "5a9676332544", delegate: "5a9676332544" },
-      "claude-x": { primary: "daa491494c5e", delegate: "daa491494c5e" },
+      "gpt-5.4": { primary: "bbadb2638219", delegate: "bbadb2638219" },
+      "gpt-5.4-nano": { primary: "6460ca395c93", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "e6aa7f677ba4", delegate: "e6aa7f677ba4" },
+      "claude-x": { primary: "00432a934fca", delegate: "00432a934fca" },
     };
     const pinCtx = {
       cwd: "/repo",
