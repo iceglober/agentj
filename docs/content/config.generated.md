@@ -23,5 +23,6 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 - `permissions.bash.allow` (default: `[]`) — Command prefixes (optional trailing `*`) that skip the prompt.
 - `permissions.bash.deny` (default: `[]`) — Command prefixes that are always refused; checked before allow.
 - `permissions.mcp.default` (default: `"ask"`) — Default policy for MCP tool calls, before the allow/deny lists.
+- `permissions.web` (default: `"allow"`) — Policy for outbound web searches and URL fetches: `allow`, `ask`, or `deny`.
 
 :::

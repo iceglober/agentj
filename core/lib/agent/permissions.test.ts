@@ -16,6 +16,11 @@ import {
 
 const bashRequest = (detail: string): PermissionRequest => ({ tool: "bash", kind: "bash", detail });
 const mcpRequest = (tool: string): PermissionRequest => ({ tool, kind: "mcp", detail: tool });
+const webRequest: PermissionRequest = {
+  tool: "web_fetch",
+  kind: "web",
+  detail: "https://example.com",
+};
 
 describe("resolvePermission", () => {
   test("deny beats allow beats default, with prefix wildcards", () => {
@@ -46,6 +51,13 @@ describe("resolvePermission", () => {
     const request: PermissionRequest = { tool: "edit", kind: "edit", detail: "src/a.ts" };
     expect(resolvePermission(allow, request)).toBe("allow");
     expect(resolvePermission(deny, request)).toBe("deny");
+  });
+
+  test("web access defaults to allow and can be denied", () => {
+    expect(resolvePermission(permissionsConfigSchema.parse({}), webRequest)).toBe("allow");
+    expect(resolvePermission(permissionsConfigSchema.parse({ web: "deny" }), webRequest)).toBe(
+      "deny",
+    );
   });
 
   test("MCP defaults to ask and matches canonical names with deny before allow", () => {
@@ -151,6 +163,22 @@ describe("withPermissions", () => {
     const deniedEdit = await tools.edit!.execute({ path: "src/a.ts" });
     expect(String(deniedEdit)).toContain("Denied by user");
     expect(asks).toHaveLength(1);
+  });
+
+  test("web policy gates outbound web tools", async () => {
+    const tools = withPermissions(
+      {
+        web_fetch: {
+          description: "fetch",
+          inputSchema: z.object({ url: z.string() }),
+          execute: async () => "fetched",
+        },
+      },
+      { config: permissionsConfigSchema.parse({ web: "deny" }), gate: async () => "allow" },
+    );
+    await expect(tools.web_fetch!.execute({ url: "https://example.com" })).resolves.toContain(
+      "Denied by user",
+    );
   });
 
   test("gate approval executes the tool", async () => {

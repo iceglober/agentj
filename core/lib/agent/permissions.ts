@@ -6,7 +6,7 @@ import type { ToolSet } from "../llm";
  * system; on the host, mutating tools (bash/edit/writeFile) pass through a
  * policy resolved from config, and "ask" outcomes are settled by an injected
  * gate — a plain function port the composition root wires to the TUI (or to a
- * fixed answer for non-interactive runs). Read/search tools are never gated.
+ * fixed answer for non-interactive runs). Repository reads/searches are never gated; outbound web access has its own policy.
  */
 
 export const permissionDecisionSchema = z.enum(["allow", "ask", "deny"]);
@@ -32,13 +32,15 @@ export const permissionsConfigSchema = z.object({
       deny: z.array(z.string()).default([]),
     })
     .prefault({}),
+  /** Outbound web research and URL fetches. */
+  web: permissionDecisionSchema.default("allow"),
 });
 export type PermissionsConfig = z.infer<typeof permissionsConfigSchema>;
 
 export interface PermissionRequest {
   /** The effective tool target; MCP aliases resolve to their canonical name. */
   tool: string;
-  kind: "bash" | "edit" | "mcp";
+  kind: "bash" | "edit" | "mcp" | "web";
   /** The command line, target path, or effective MCP tool plus its input. */
   detail: string;
   /** Who is asking when not the primary agent — e.g. "subagent t2", "job j1". */
@@ -93,6 +95,7 @@ export function resolvePermission(
   request: PermissionRequest,
 ): PermissionDecision {
   if (request.kind === "edit") return config.edit;
+  if (request.kind === "web") return config.web;
   const policy = request.kind === "mcp" ? config.mcp : config.bash;
   const target = request.kind === "mcp" ? request.tool : request.detail;
   if (policy.deny.some((pattern) => matchesPattern(pattern, target))) return "deny";
@@ -100,11 +103,13 @@ export function resolvePermission(
   return policy.default;
 }
 
-/** Tool name → permission kind; unlisted tools (read/search) are never gated. */
+/** Tool name → permission kind; unlisted repository read/search tools are never gated. */
 const GATED_TOOLS: Record<string, PermissionRequest["kind"]> = {
   bash: "bash",
   edit: "edit",
   writeFile: "edit",
+  web_search: "web",
+  web_fetch: "web",
 };
 
 /** Maps an exposed tool call to its underlying authorization target. */

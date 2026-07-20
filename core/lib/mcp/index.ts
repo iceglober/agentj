@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import z from "zod";
 import type { AgentMode, ExternalAgentTools, ExternalToolPermissionTargetResolver } from "../agent";
 import { defineTool, type ToolDef, type ToolSet } from "../llm";
+import { requestSignal } from "../tools/options";
 import { type SpillWriter, truncateWithSpill } from "../truncation";
 
 const patternSchema = z
@@ -216,12 +217,6 @@ export const canonicalMcpToolName = (server: string, tool: string): string => {
   if (full.length <= 64) return full;
   const suffix = createHash("sha256").update(full).digest("hex").slice(0, 8);
   return `${full.slice(0, 55)}_${suffix}`;
-};
-
-const requestSignal = (options: unknown): AbortSignal | undefined => {
-  if (typeof options !== "object" || options === null) return undefined;
-  const signal = (options as { abortSignal?: unknown }).abortSignal;
-  return signal instanceof AbortSignal ? signal : undefined;
 };
 
 async function allPages<T>(load: (cursor?: string) => Promise<McpPage<T>>): Promise<T[]> {

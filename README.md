@@ -103,6 +103,15 @@ Cmd+Backspace/Delete delete to bound; Home/End, Ctrl+A/E/U/K, and Esc+B/F/D fall
 terminal. Shift+Return and Cmd combinations need a modifier-aware terminal protocol (CSI-u — kitty,
 WezTerm, Ghostty, or mapped keys in iTerm2).
 
+## Web research
+
+`web_search` searches the public web through Exa's anonymous MCP endpoint; no API key or model-provider
+web tool is required. `web_fetch` reads a specific public HTTP(S) URL locally and returns Markdown/text.
+Both tools are available in plan and build modes, including research workers and jobs. Search results and
+page content are labeled untrusted: they are reference material, not instructions. URL fetching blocks
+private, loopback, link-local, and reserved network addresses, follows bounded redirects, and limits time
+and response size.
+
 ## Updates
 
 Installed CLIs check once per day before starting. Prerelease versions follow the `next` tag and
@@ -112,11 +121,12 @@ channel with `agentj config set update.channel next`. Source checkouts are never
 
 ## Permissions
 
-Host-first execution is gated at the tool layer. Read/search tools are never gated; plan mode has
-no mutating tools at all. In build mode:
+Host-first execution is gated at the tool layer. Repository read/search tools are never gated; web
+research has its own policy, and plan mode has no mutating tools. In build mode:
 
 ```sh
 ./bin/agentj config set permissions.edit allow            # allow | ask | deny (default allow)
+./bin/agentj config set permissions.web ask               # outbound web search/fetch (default allow)
 ./bin/agentj config set permissions.bash.default ask      # unlisted commands ask
 ./bin/agentj config add permissions.bash.allow "git *"    # literal prefix, optional trailing *
 ./bin/agentj config add permissions.bash.deny "git push*"
