@@ -1,8 +1,7 @@
-import type { Agent, GenerateOptions } from "../agent";
+import type { Agent } from "../agent";
 import type { ImageAttachment } from "../llm";
 import type { ChatLog, ChatMode } from "../session/log";
 import type { UndoStack } from "../session/undo";
-import { completionVerificationFailure, verifyBuildCompletion } from "./completion-verification";
 import type { ChatEvent } from "./events";
 
 /**
@@ -109,42 +108,17 @@ export function createChatSession(
     try {
       if (mode === "build") await deps.undo?.snapshot("pre-turn");
       const agent = await deps.agentFor(mode);
-      const onStep = (step: Parameters<NonNullable<GenerateOptions["onStep"]>>[0]) => {
-        for (const call of step.toolCalls) emit({ type: "tool-call", call });
-        for (const toolResult of step.toolResults)
-          emit({ type: "tool-result", result: toolResult });
-        if (step.usage) emit({ type: "turn-usage", usage: step.usage });
-      };
-      let result = await agent.generate(content, {
+      const result = await agent.generate(content, {
         abortSignal: turnAbort.signal,
-        onStep,
+        onStep: (step) => {
+          for (const call of step.toolCalls) emit({ type: "tool-call", call });
+          for (const toolResult of step.toolResults)
+            emit({ type: "tool-result", result: toolResult });
+          if (step.usage) emit({ type: "turn-usage", usage: step.usage });
+        },
         messages,
         ...(images && images.length > 0 ? { images } : {}),
       });
-      let verificationFailure = mode === "build" ? verifyBuildCompletion(result) : null;
-      if (verificationFailure) {
-        emit({
-          type: "notice",
-          text: `[verification] Completion report rejected: ${verificationFailure}. Retrying once.`,
-        });
-        const retryMessages = result.messages ?? messages;
-        result = await agent.generate(
-          `The prior completion report was rejected by AgentJ because ${verificationFailure}. Continue the same request now. Use tools, run validation, and return only a completion report whose passed validation commands exactly match successful bash calls. Original request:\n\n${content}`,
-          {
-            abortSignal: turnAbort.signal,
-            onStep,
-            messages: retryMessages,
-          },
-        );
-        verificationFailure = verifyBuildCompletion(result);
-        if (verificationFailure) {
-          result = {
-            ...result,
-            text: completionVerificationFailure(verificationFailure),
-            stepLimitReached: false,
-          };
-        }
-      }
       messages = result.messages ?? messages;
       emit({
         type: "assistant",

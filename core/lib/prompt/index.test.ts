@@ -197,13 +197,13 @@ describe("composePrompt", () => {
     // decision, never a refactor side effect. Standalone delegates do not carry
     // the primary build-mode instruction.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "e17ca8e836c5", delegate: "e17ca8e836c5" },
-      "gpt-5.6-terra": { primary: "6b3ad68ddab9", delegate: "6b3ad68ddab9" },
+      "gpt-5.6-sol": { primary: "e0a350722da0", delegate: "e0a350722da0" },
+      "gpt-5.6-terra": { primary: "f774543920c8", delegate: "f774543920c8" },
       "gpt-5.6-luna": { primary: "68908e3e9ab5", delegate: "68908e3e9ab5" },
-      "gpt-5.4": { primary: "eddc975d076c", delegate: "eddc975d076c" },
-      "gpt-5.4-nano": { primary: "33e8e8918ba9", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "cfcd4591c27f", delegate: "cfcd4591c27f" },
-      "claude-x": { primary: "c4530301a4b3", delegate: "c4530301a4b3" },
+      "gpt-5.4": { primary: "8d594e65141d", delegate: "8d594e65141d" },
+      "gpt-5.4-nano": { primary: "b5d58d2db909", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "b2628c8fc9cc", delegate: "b2628c8fc9cc" },
+      "claude-x": { primary: "d9c5166a1e3c", delegate: "d9c5166a1e3c" },
     };
     const pinCtx = {
       cwd: "/repo",
