@@ -1001,15 +1001,13 @@ export async function runAgentjChat(
 
   const refreshProgress = (): void => {
     screen?.setProgressLines(
-      [
-        ...formatTodoProgressLines(todos?.list() ?? []),
-        ...composeProgressLines({
-          activeTools,
-          dagBlocks: dagBlockLines(),
-          queued: queuedLines(),
-          spinnerFrame,
-        }),
-      ].map(presentActivityLine),
+      composeProgressLines({
+        todos: formatTodoProgressLines(todos?.list() ?? []),
+        activeTools,
+        dagBlocks: dagBlockLines(),
+        queued: queuedLines(),
+        spinnerFrame,
+      }).map(presentActivityLine),
     );
   };
 
