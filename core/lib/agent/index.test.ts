@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 import type { ToolSet } from "../llm";
 import type { Sandbox } from "../sandbox";
+import type { WebFetch, WebSearch } from "../tools/web";
 import {
   agentConfigSchema,
   type CreateAgentOptions,
@@ -37,6 +38,11 @@ const externalTool = (name: string): ToolSet[string] => ({
   inputSchema: z.object({ value: z.string().optional() }),
   execute: async () => name,
 });
+
+const web: { search: WebSearch; fetch: WebFetch } = {
+  search: { search: async () => ({ results: [] }) },
+  fetch: { fetch: async (url) => ({ url, contentType: "text/plain", text: "page" }) },
+};
 
 describe("childAgentConfig", () => {
   test("routes children to the configured subagent model, preserving providers", () => {
@@ -254,6 +260,22 @@ describe("createAgentTools", () => {
     }
     expect(planDelegate).not.toHaveProperty("run_one_subagent");
     expect(planDelegate).not.toHaveProperty("run_subagents");
+  });
+
+  test("injects web research tools in both modes and for delegates", async () => {
+    const primary = agentConfigSchema.parse({});
+    for (const mode of ["plan", "build"] as const) {
+      const primaryTools = await createAgentTools(sandbox, primary, { ...baseOptions, mode, web });
+      const delegateTools = await createAgentTools(sandbox, childAgentConfig(primary, "delegate"), {
+        ...baseOptions,
+        mode,
+        web,
+      });
+      for (const tools of [primaryTools, delegateTools]) {
+        expect(tools).toHaveProperty("web_search");
+        expect(tools).toHaveProperty("web_fetch");
+      }
+    }
   });
 
   test("injects session todos for primary agents in both modes, never delegates", async () => {

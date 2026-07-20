@@ -22,6 +22,7 @@ import { createEditTools, editConfigSchema } from "../tools/edit";
 import { confineSandboxFiles } from "../tools/paths";
 import { createReadTools } from "../tools/read";
 import { createSearchTools } from "../tools/search";
+import { createWebTools, type WebFetch, type WebSearch } from "../tools/web";
 import type { SpillWriter } from "../truncation";
 import {
   type BackgroundJobPort,
@@ -176,6 +177,8 @@ export interface CreateAgentOptions {
   stopContextTokens?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
   mode?: AgentMode;
+  /** Provider-neutral web search and fetch capabilities supplied by composition. */
+  web?: { search: WebSearch; fetch: WebFetch };
   /** Primary-only, mode-specific tools supplied by an external integration. */
   externalTools?: Partial<Record<AgentMode, ExternalAgentTools>>;
   /** Child-specific external tools. The composition root must create these as
@@ -364,6 +367,7 @@ export async function createAgentTools(
                   },
                   metricsSink: opts.metricsSink,
                   spill: opts.spill,
+                  web: opts.web,
                   stopSteps: opts.stopSteps,
                   stopContextTokens: config.context.softLimit,
                   ...(externalLease
@@ -438,6 +442,13 @@ export async function createAgentTools(
       : {};
   const todosTool: ToolSet =
     config.role === "primary" && opts.todos ? { update_todos: createTodoTool(opts.todos) } : {};
+  const webTools: ToolSet = opts.web
+    ? createWebTools({
+        ...opts.web,
+        maxOutputChars: config.tools.maxOutputChars,
+        spill: opts.spill?.write,
+      })
+    : {};
 
   if (mode === "plan") {
     // Plan agents observe but never edit: of the bash-tool trio they get only
@@ -459,6 +470,7 @@ export async function createAgentTools(
         ...(opts.spill ? { extraRoots: [opts.spill.dir] } : {}),
       }),
       ...createSearchTools(sb, { root: opts.root }),
+      ...webTools,
       ...jobsTool,
       ...todosTool,
       ...(opts.research
@@ -485,6 +497,7 @@ export async function createAgentTools(
       spill: opts.spill?.write,
     })),
     ...createSearchTools(sb, { root: opts.root }),
+    ...webTools,
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
     ...jobsTool,
