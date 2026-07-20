@@ -1,5 +1,6 @@
 import z from "zod";
 import type { MetricsSink } from "../metrics";
+import type { SpillWriter } from "../truncation";
 import { createAiSdkRuntime, providerNames } from "./ai-sdk-adapter";
 import { azureModelConfigSchema } from "./azure-adapter";
 
@@ -86,6 +87,10 @@ export interface GenerateRequest {
   temperature?: number;
   topP?: number;
   providerOptions?: Record<string, Record<string, unknown>>;
+  /** Cap all model-bound tool output, including opaque continuation history. */
+  maxOutputChars?: number;
+  /** Persist full output when the model-bound value is capped. */
+  spill?: SpillWriter;
   /** Cap the tool loop at N steps; omitted → the runtime's default. */
   stopSteps?: number;
   /**
