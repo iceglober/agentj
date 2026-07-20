@@ -28,6 +28,7 @@ import {
   createBackgroundJobTool,
   createCheckJobTool,
 } from "./background-jobs";
+import { instructionsConfigSchema, loadInstructionExtensions } from "./instructions";
 import {
   resolveToolTarget,
   type WithPermissionsOptions,
@@ -52,9 +53,9 @@ import {
 export const agentConfigSchema = z.object({
   name: z.string().default("agentj"),
   role: z.enum(["primary", "delegate"]).default("primary"),
-  /** Project rules ({{PROJECT_RULES}}); the composition root may merge in
-   *  AGENTS.md read from the sandbox repo (explicit config wins). */
+  /** Project rules ({{PROJECT_RULES}}), composed with AGENTS.md and scoped extensions. */
   rules: z.string().default(""),
+  instructions: instructionsConfigSchema,
   /**
    * Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a
    * work budget. Without it the AI SDK's implicit 20-step default silently
@@ -487,6 +488,13 @@ export async function createAgentTools(
  * otherwise the profile's advised params (and providerOptions) flow through to
  * every generate() call.
  */
+function composeInstructionRules(base: string, extensions: string): string {
+  return [base, extensions]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export async function createAgent(
   sb: Sandbox,
   config: AgentConfig,
@@ -504,7 +512,13 @@ export async function createAgent(
       model: config.llm.model,
       agentName: config.name,
       role: config.role,
-      rules: config.rules,
+      rules: composeInstructionRules(
+        config.rules,
+        await loadInstructionExtensions(sb, config.instructions.extensions, {
+          mode: opts.mode ?? "build",
+          role: config.role,
+        }),
+      ),
       mode: opts.mode ?? "build",
     },
     opts.ctx,

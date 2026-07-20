@@ -1,0 +1,1 @@
+When planning work, state which existing abstractions you will reuse, which you will extend, and which you will remove or create. Explain how the result leaves the code simpler and name validation and key risks.

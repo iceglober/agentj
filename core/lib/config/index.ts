@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import z from "zod";
 import { agentConfigSchema } from "../agent";
 import { permissionsConfigSchema } from "../agent/permissions";
@@ -37,6 +38,11 @@ export const configSchema = z.object({
 });
 
 export type Config = z.infer<typeof configSchema>;
+export type ConfigInput = z.input<typeof configSchema>;
+/** Marks a trusted TypeScript configuration object for type checking. */
+export function defineConfig<T extends ConfigInput>(config: T): T {
+  return config;
+}
 export type ConfigObject = Record<string, unknown>;
 
 /**
@@ -156,6 +162,25 @@ async function readJsonObject(
   return parsed;
 }
 
+async function readConfigObject(
+  path: string,
+  label: string,
+  fileSystem: ConfigFileSystem,
+): Promise<ConfigObject> {
+  if (extname(path) !== ".ts") return readJsonObject(path, label, fileSystem);
+  try {
+    const loaded = await import(pathToFileURL(path).href);
+    const value = loaded.default;
+    if (!isObject(value)) throw new Error("expected a default-exported config object");
+    return value;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(`Unable to load ${label} TypeScript config at ${path}: ${String(error)}`, {
+      cause: error,
+    });
+  }
+}
+
 /** Read the normal global config. A missing file is equivalent to `{}`. */
 export async function readGlobalConfig(options: GlobalConfigOptions = {}): Promise<ConfigObject> {
   const path = resolveGlobalConfigPath(options);
@@ -268,7 +293,7 @@ export async function loadConfig(path?: string, options: ConfigLoadOptions = {})
   const defaults = configSchema.parse({}) as ConfigObject;
   const global = await readGlobalConfig(options);
   const supplied = path
-    ? await readJsonObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
+    ? await readConfigObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
     : {};
 
   return configSchema.parse(mergeConfig(defaults, global, supplied));
@@ -288,7 +313,7 @@ export async function loadChatConfig(
   const defaults = configSchema.parse({}) as ConfigObject;
   const global = await readGlobalConfig(options);
   const supplied = path
-    ? await readJsonObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
+    ? await readConfigObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
     : {};
   const merged = mergeConfig(defaults, global, supplied);
   const rawMcp = merged.mcp;
