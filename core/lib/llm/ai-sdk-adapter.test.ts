@@ -31,7 +31,7 @@ mock.module("ai", () => ({
   tool: <T>(definition: T) => definition,
 }));
 
-const { createAiSdkRuntime } = await import("./ai-sdk-adapter");
+const { createAiSdkRuntime, LLM_MAX_RETRIES } = await import("./ai-sdk-adapter");
 
 const config = {
   provider: "azure",
@@ -56,6 +56,15 @@ function resetResult(usage: Record<string, unknown>) {
 }
 
 describe("createAiSdkRuntime", () => {
+  test("uses the bounded retry budget for transient model responses", async () => {
+    resetResult({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+
+    await createAiSdkRuntime(config).generate(request());
+
+    expect(constructedAgents[0]?.maxRetries).toBe(LLM_MAX_RETRIES);
+    expect(LLM_MAX_RETRIES).toBe(5);
+  });
+
   test("maps cache input details and preserves zero values", async () => {
     resetResult({
       inputTokens: 30,

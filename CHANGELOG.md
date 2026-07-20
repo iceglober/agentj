@@ -1,5 +1,24 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.47
+
+### Patch Changes
+
+- 588ea2c: Release pull requests now use the repository's trusted release token, so a Changesets version PR can run its checks without waiting for manual workflow approval.
+
+## 0.1.0-next.46
+
+### Minor Changes
+
+- ed342a6: Add a built-in checking-your-work plan review so aj plans now name a bug repro, focused and broad checks, and browser testing when it applies.
+- fe6f6a4: Make interactive question choices easier to scan and let users enter answers that are not listed.
+
+### Patch Changes
+
+- 0145b2d: Keep the persistent Todos panel visually separate from live tool activity, with clear completed, active, and pending markers. For example, several active tasks now each use an arrow and are counted in the panel header instead of blending into a running tool spinner.
+- 05a3c17: Installed interactive sessions now check for updates after the TUI starts and notify instead of auto-installing or restarting. The `update.auto` setting controls the check; `/update` remains explicit.
+- cd7f7f3: Background job completions now follow the foreground output that was already being written to the interactive transcript.
+
 ## 0.1.0-next.45
 
 ### Minor Changes
