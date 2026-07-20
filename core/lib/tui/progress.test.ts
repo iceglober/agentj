@@ -244,19 +244,24 @@ describe("tool activity", () => {
     expect(
       composeProgressLines({
         ...base,
-        todos: ["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect"],
+        todos: ["  ╭─ Todos 0/1 done", "  ╰────────────────────"],
       }),
-    ).toEqual(["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect", "", "  ◐ bash git status --short"]);
+    ).toEqual([
+      "  ◐ bash git status --short",
+      "",
+      "  ╭─ Todos 0/1 done",
+      "  ╰────────────────────",
+    ]);
     expect(composeProgressLines({ ...base, todos: [] })).toEqual(["  ◐ bash git status --short"]);
     expect(
       composeProgressLines({
-        todos: ["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect"],
+        todos: ["  ╭─ Todos 0/1 done", "  ╰────────────────────"],
         activeTools: [],
         dagBlocks: new Map(),
         queued: [],
         spinnerFrame: 0,
       }),
-    ).toEqual(["  ╭─ Todos 0/1 done", "  ╰─ ○ Inspect"]);
+    ).toEqual(["  ╭─ Todos 0/1 done", "  ╰────────────────────"]);
   });
 
   test("formats completed labels as safe one-line previews", () => {

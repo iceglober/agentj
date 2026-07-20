@@ -210,6 +210,6 @@ export const composeProgressLines = (state: {
   const activityRows = [...orphanRows, ...toolRows, ...state.queued];
   const todoRows = state.todos ?? [];
   return todoRows.length > 0 && activityRows.length > 0
-    ? [...todoRows, "", ...activityRows]
-    : [...todoRows, ...activityRows];
+    ? [...activityRows, "", ...todoRows]
+    : [...activityRows, ...todoRows];
 };

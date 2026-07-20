@@ -12,7 +12,8 @@ test("formats a framed progress panel with clear todo markers", () => {
     "  ╭─ Todos 1/3 done · 1 active",
     "  │ ✓ Inspect the design",
     "  │ → Wire the session store",
-    "  ╰─ ○ Validate",
+    "  │ ○ Validate",
+    "  ╰───────────────────────────",
   ]);
 });
 
@@ -29,7 +30,8 @@ test("shows every active todo without treating one as current", () => {
     "  │ ✓ Inspect",
     "  │ → Build",
     "  │ → Test",
-    "  ╰─ ○ Ship",
+    "  │ ○ Ship",
+    "  ╰───────────────────────────",
   ]);
 });
 
@@ -42,7 +44,14 @@ test("collapses fully completed todos and expands when work is added", () => {
   expect(formatTodoProgressLines(completed)).toEqual(["  Todos 3/3 done"]);
   expect(
     formatTodoProgressLines([...completed, { id: "four", text: "Ship", status: "pending" }]),
-  ).toEqual(["  ╭─ Todos 3/4 done", "  │ ✓ Inspect", "  │ ✓ Build", "  │ ✓ Test", "  ╰─ ○ Ship"]);
+  ).toEqual([
+    "  ╭─ Todos 3/4 done",
+    "  │ ✓ Inspect",
+    "  │ ✓ Build",
+    "  │ ✓ Test",
+    "  │ ○ Ship",
+    "  ╰────────────────",
+  ]);
 });
 
 test("preserves todo order and reports hidden active todos", () => {
@@ -56,8 +65,20 @@ test("preserves todo order and reports hidden active todos", () => {
     "  ╭─ Todos 0/4 done · 1 active",
     "  │ ○ Todo 0",
     "  │ ○ Todo 1",
-    "  ╰─ … 2 more · 1 active — /todos to view all",
+    "  ╰──── 2 more todos ...",
   ]);
+});
+
+test("caps the live panel at four todos and shows overflow on the bottom border", () => {
+  const items = Array.from({ length: 6 }, (_, index) => ({
+    id: `todo-${index}`,
+    text: `Todo ${index}`,
+    status: index === 0 ? ("in_progress" as const) : ("pending" as const),
+  }));
+  const lines = formatTodoProgressLines(items);
+  expect(lines).toHaveLength(6);
+  expect(lines.slice(1, 5).every((line) => line.startsWith("  │ "))).toBe(true);
+  expect(lines[5]).toBe("  ╰──── 2 more todos ...");
 });
 
 test("formats every todo for explicit transcript output", () => {

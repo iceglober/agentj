@@ -791,21 +791,21 @@ describe("createChatScreen", () => {
     expect(rendered.slice(latest + 1, idleEditor)).toEqual(["", ""]);
 
     screen.setProgressLines([
-      "  ╭─ Todos 0/1 done · 1 active",
-      "  ╰─ → Inspect configs",
-      "",
       "  ◐ tool running",
+      "",
+      "  ╭─ Todos 0/1 done · 1 active",
+      "  ╰────────────────────────────",
     ]);
     screen.setThinkingLine("◐ thinking 1s (esc)");
     await settle();
     rendered = renderScreen(text());
-    const todo = rendered.findIndex((line) => line.includes("Inspect configs"));
+    const todo = rendered.findIndex((line) => line.includes("Todos 0/1 done"));
     const tool = rendered.findIndex((line) => line.includes("tool running"));
     const thinking = rendered.findIndex((line) => line.includes("thinking 1s"));
     const activeEditor = rendered.findIndex((line) => line.startsWith("> "));
-    expect(todo).toBeLessThan(tool);
-    expect(rendered.slice(todo + 1, tool)).toEqual([""]);
-    expect(tool).toBeLessThan(thinking);
+    expect(tool).toBeLessThan(todo);
+    expect(rendered.slice(tool + 1, todo)).toEqual([""]);
+    expect(todo).toBeLessThan(thinking);
     expect(thinking).toBe(activeEditor - 1);
     screen.stop();
   });
