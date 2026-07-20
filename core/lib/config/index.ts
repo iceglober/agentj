@@ -77,14 +77,21 @@ const nodeFileSystem: ConfigFileSystem = {
 };
 
 export interface GlobalConfigOptions {
-  /** An explicit test or caller override for the normal global config file. */
+  /** An explicit test or caller override for the canonical global config file. */
   globalConfigPath?: string;
+  /** An explicit test or caller override for the legacy global config file. */
+  legacyGlobalConfigPath?: string;
   /** Defaults to process.env.HOME; pass explicitly in tests. */
   home?: string;
   fileSystem?: ConfigFileSystem;
 }
 
-export interface ConfigLoadOptions extends GlobalConfigOptions {}
+export interface ConfigLoadOptions extends GlobalConfigOptions {
+  /** The Git worktree root whose `.aj` JSON layers should be loaded. */
+  projectRoot?: string;
+  /** Trusted bundled TypeScript config, loaded below user-controlled layers. */
+  baseConfigPath?: string;
+}
 
 function isObject(value: unknown): value is ConfigObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -128,19 +135,44 @@ export function resolveGlobalConfigPath(options: GlobalConfigOptions = {}): stri
     );
   }
 
+  return join(home, ".config", "aj", "config.json");
+}
+
+/** Resolve the pre-rename global config path for read-only compatibility. */
+export function resolveLegacyGlobalConfigPath(options: GlobalConfigOptions = {}): string {
+  if (options.legacyGlobalConfigPath) return options.legacyGlobalConfigPath;
+
+  const home = options.home ?? process.env.HOME;
+  if (!home) {
+    throw new Error(
+      "Cannot resolve the legacy AgentJ config path: HOME is unavailable and no legacyGlobalConfigPath override was provided.",
+    );
+  }
+
   return join(home, ".config", "agentj", "config.json");
 }
 
-async function readJsonObject(
+/** Resolve the committed and machine-local config files for one Git worktree. */
+export function resolveProjectConfigPaths(projectRoot: string): {
+  configPath: string;
+  localConfigPath: string;
+} {
+  return {
+    configPath: join(projectRoot, ".aj", "config.json"),
+    localConfigPath: join(projectRoot, ".aj", "config.local.json"),
+  };
+}
+
+async function readOptionalJsonObject(
   path: string,
   label: string,
   fileSystem: ConfigFileSystem,
-): Promise<ConfigObject> {
+): Promise<ConfigObject | undefined> {
   let contents: string;
   try {
     contents = await fileSystem.readFile(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw new Error(`Unable to read ${label} config at ${path}: ${String(error)}`, {
       cause: error,
     });
@@ -162,6 +194,14 @@ async function readJsonObject(
   return parsed;
 }
 
+async function readJsonObject(
+  path: string,
+  label: string,
+  fileSystem: ConfigFileSystem,
+): Promise<ConfigObject> {
+  return (await readOptionalJsonObject(path, label, fileSystem)) ?? {};
+}
+
 async function readConfigObject(
   path: string,
   label: string,
@@ -181,10 +221,26 @@ async function readConfigObject(
   }
 }
 
-/** Read the normal global config. A missing file is equivalent to `{}`. */
+/**
+ * Read canonical global config, falling back to the pre-rename location only
+ * when the canonical file is absent. This avoids stale legacy fields leaking
+ * into a deliberately created canonical config.
+ */
 export async function readGlobalConfig(options: GlobalConfigOptions = {}): Promise<ConfigObject> {
-  const path = resolveGlobalConfigPath(options);
-  return readJsonObject(path, "global", options.fileSystem ?? nodeFileSystem);
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  const global = await readOptionalJsonObject(
+    resolveGlobalConfigPath(options),
+    "global",
+    fileSystem,
+  );
+  if (global) return global;
+  return (
+    (await readOptionalJsonObject(
+      resolveLegacyGlobalConfigPath(options),
+      "legacy global",
+      fileSystem,
+    )) ?? {}
+  );
 }
 
 async function writeGlobalConfig(
@@ -286,17 +342,37 @@ export async function deleteGlobalConfigValue(
 }
 
 /**
- * Load defaults, then normal global config, then the supplied project/bundled
- * config. The supplied path keeps the original API shape and wins on conflict.
+ * Compose configuration layers in precedence order. The explicit `path` keeps
+ * its public API meaning as a caller-supplied final override; chat startup uses
+ * `baseConfigPath` for AgentJ's bundled TypeScript defaults instead.
  */
-export async function loadConfig(path?: string, options: ConfigLoadOptions = {}): Promise<Config> {
+async function readLayeredConfig(
+  path: string | undefined,
+  options: ConfigLoadOptions,
+): Promise<ConfigObject> {
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
   const defaults = configSchema.parse({}) as ConfigObject;
-  const global = await readGlobalConfig(options);
-  const supplied = path
-    ? await readConfigObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
+  const base = options.baseConfigPath
+    ? await readConfigObject(options.baseConfigPath, "bundled", fileSystem)
     : {};
+  const global = await readGlobalConfig(options);
+  const projectPaths = options.projectRoot
+    ? resolveProjectConfigPaths(options.projectRoot)
+    : undefined;
+  const project = projectPaths
+    ? await readJsonObject(projectPaths.configPath, "project", fileSystem)
+    : {};
+  const local = projectPaths
+    ? await readJsonObject(projectPaths.localConfigPath, "local project", fileSystem)
+    : {};
+  const supplied = path ? await readConfigObject(path, "supplied", fileSystem) : {};
 
-  return configSchema.parse(mergeConfig(defaults, global, supplied));
+  return mergeConfig(defaults, base, global, project, local, supplied);
+}
+
+/** Load the effective configuration with defaults validated and filled. */
+export async function loadConfig(path?: string, options: ConfigLoadOptions = {}): Promise<Config> {
+  return configSchema.parse(await readLayeredConfig(path, options));
 }
 
 export interface McpConfigIssue {
@@ -310,12 +386,7 @@ export async function loadChatConfig(
   path?: string,
   options: ConfigLoadOptions = {},
 ): Promise<{ config: Config; mcpIssues: McpConfigIssue[] }> {
-  const defaults = configSchema.parse({}) as ConfigObject;
-  const global = await readGlobalConfig(options);
-  const supplied = path
-    ? await readConfigObject(path, "supplied", options.fileSystem ?? nodeFileSystem)
-    : {};
-  const merged = mergeConfig(defaults, global, supplied);
+  const merged = await readLayeredConfig(path, options);
   const rawMcp = merged.mcp;
   const mcpDefaults = mcpConfigSchema.parse({});
   const issues: McpConfigIssue[] = [];

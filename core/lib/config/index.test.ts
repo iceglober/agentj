@@ -10,6 +10,8 @@ import {
   mutateGlobalConfig,
   readGlobalConfig,
   resolveGlobalConfigPath,
+  resolveLegacyGlobalConfigPath,
+  resolveProjectConfigPaths,
   setGlobalConfigValue,
 } from ".";
 
@@ -63,19 +65,27 @@ function makeFileSystem(files: Record<string, string> = {}) {
 }
 
 const globalPath = "/test/global/config.json";
+const legacyGlobalPath = "/test/legacy/config.json";
 
 function globalOptions(fileSystem: ConfigFileSystem) {
-  return { fileSystem, globalConfigPath: globalPath };
+  return { fileSystem, globalConfigPath: globalPath, legacyGlobalConfigPath: legacyGlobalPath };
 }
 
-describe("global config paths", () => {
-  test("uses an explicit override without HOME and otherwise derives the user config path", () => {
-    expect(resolveGlobalConfigPath({ globalConfigPath: "/tmp/agentj.json", home: undefined })).toBe(
-      "/tmp/agentj.json",
+describe("config paths", () => {
+  test("uses explicit overrides and resolves canonical, legacy, and project locations", () => {
+    expect(resolveGlobalConfigPath({ globalConfigPath: "/tmp/aj.json", home: undefined })).toBe(
+      "/tmp/aj.json",
     );
     expect(resolveGlobalConfigPath({ home: "/users/agent" })).toBe(
+      "/users/agent/.config/aj/config.json",
+    );
+    expect(resolveLegacyGlobalConfigPath({ home: "/users/agent" })).toBe(
       "/users/agent/.config/agentj/config.json",
     );
+    expect(resolveProjectConfigPaths("/project")).toEqual({
+      configPath: "/project/.aj/config.json",
+      localConfigPath: "/project/.aj/config.local.json",
+    });
     expect(() => resolveGlobalConfigPath({ home: "" })).toThrow(/HOME is unavailable/);
   });
 });
@@ -137,6 +147,23 @@ describe("global config reads and merges", () => {
     );
   });
 
+  test("falls back to legacy global config only when canonical config is absent", async () => {
+    const fallback = makeFileSystem({
+      [legacyGlobalPath]: JSON.stringify({ agent: { rules: "legacy" } }),
+    });
+    await expect(readGlobalConfig(globalOptions(fallback.fileSystem))).resolves.toEqual({
+      agent: { rules: "legacy" },
+    });
+
+    const canonical = makeFileSystem({
+      [globalPath]: JSON.stringify({ agent: { rules: "canonical" } }),
+      [legacyGlobalPath]: JSON.stringify({ agent: { rules: "legacy" } }),
+    });
+    await expect(readGlobalConfig(globalOptions(canonical.fileSystem))).resolves.toEqual({
+      agent: { rules: "canonical" },
+    });
+  });
+
   test("deep-merges objects while later arrays and scalars replace earlier values", () => {
     expect(
       mergeConfig(
@@ -148,6 +175,37 @@ describe("global config reads and merges", () => {
       nested: { fromDefault: true, fromGlobal: true, value: "project" },
       list: ["project"],
       scalar: "project",
+    });
+  });
+
+  test("layers bundled, global, project, and local config while keeping explicit input highest", async () => {
+    const root = "/project";
+    const suppliedPath = "/override/config.json";
+    const fixture = makeFileSystem({
+      "/base/config.json": JSON.stringify({ agent: { llm: { model: "base" } } }),
+      [globalPath]: JSON.stringify({ agent: { llm: { model: "global" } } }),
+      "/project/.aj/config.json": JSON.stringify({
+        agent: { llm: { model: "project" } },
+        mcp: { servers: { project: { transport: "stdio", command: "project-server" } } },
+      }),
+      "/project/.aj/config.local.json": JSON.stringify({ agent: { llm: { model: "local" } } }),
+      [suppliedPath]: JSON.stringify({ agent: { llm: { model: "supplied" } } }),
+    });
+    const options = {
+      ...globalOptions(fixture.fileSystem),
+      baseConfigPath: "/base/config.json",
+      projectRoot: root,
+    };
+
+    await expect(loadChatConfig(undefined, options)).resolves.toMatchObject({
+      config: {
+        agent: { llm: { model: "local" } },
+        mcp: { servers: { project: { command: "project-server" } } },
+      },
+      mcpIssues: [],
+    });
+    await expect(loadConfig(suppliedPath, options)).resolves.toMatchObject({
+      agent: { llm: { model: "supplied" } },
     });
   });
 
@@ -207,6 +265,24 @@ describe("global config reads and merges", () => {
 });
 
 describe("global config mutations", () => {
+  test("migrates legacy values to canonical config on the first changed write", async () => {
+    const fixture = makeFileSystem({
+      [legacyGlobalPath]: JSON.stringify({ unknown: { preserved: true } }),
+    });
+
+    await expect(
+      setGlobalConfigValue(["agent", "llm", "model"], "new", globalOptions(fixture.fileSystem)),
+    ).resolves.toBe(true);
+
+    expect(JSON.parse(fixture.stored.get(globalPath)!)).toEqual({
+      unknown: { preserved: true },
+      agent: { llm: { model: "new" } },
+    });
+    expect(fixture.stored.get(legacyGlobalPath)).toBe(
+      JSON.stringify({ unknown: { preserved: true } }),
+    );
+  });
+
   test("sets provider and model in one atomic transaction", async () => {
     const fixture = makeFileSystem({
       [globalPath]: JSON.stringify({ unknown: { preserved: true } }),
