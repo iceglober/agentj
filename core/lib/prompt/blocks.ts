@@ -126,6 +126,8 @@ change end to end.
   delegate Git recovery to the user.
 
 ${COMPLETION_REPORT_INSTRUCTION}
+AgentJ verifies a status=done report against this turn's observed tool calls.
+Every passed validation command must exactly match a successful bash call.
 A failed dependency install, test, typecheck, lint, or build must produce
 status=blocked or status=failed.`;
 
