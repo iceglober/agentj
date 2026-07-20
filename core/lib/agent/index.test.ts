@@ -254,6 +254,21 @@ describe("createAgentTools", () => {
     expect(planDelegate).not.toHaveProperty("run_subagents");
   });
 
+  test("injects session todos for primary agents in both modes, never delegates", async () => {
+    const primary = agentConfigSchema.parse({});
+    const todos = { replace: async () => {} };
+    const plan = await createAgentTools(sandbox, primary, { ...baseOptions, mode: "plan", todos });
+    const build = await createAgentTools(sandbox, primary, { ...baseOptions, todos });
+    const delegate = await createAgentTools(sandbox, childAgentConfig(primary, "delegate"), {
+      ...baseOptions,
+      todos,
+    });
+
+    expect(plan).toHaveProperty("update_todos");
+    expect(build).toHaveProperty("update_todos");
+    expect(delegate).not.toHaveProperty("update_todos");
+  });
+
   test("build mode (the default) retains mutation tools", async () => {
     const tools = await createAgentTools(sandbox, agentConfigSchema.parse({}), baseOptions);
     expect(tools).toHaveProperty("bash");

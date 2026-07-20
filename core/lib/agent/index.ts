@@ -43,6 +43,7 @@ import {
   type SubagentProgressEvent,
   type SubagentRunner,
 } from "./subagents";
+import { createTodoTool, type TodoPort } from "./todos";
 
 /**
  * The agent owns identity/role/rules and composes the three domain modules the
@@ -199,6 +200,8 @@ export interface CreateAgentOptions {
    * Delegates and background children never inherit this.
    */
   jobs?: BackgroundJobPort;
+  /** Primary interactive-session todo capability; never inherited by children. */
+  todos?: TodoPort;
 }
 
 /** Per-turn hooks for a single generate() call. */
@@ -427,6 +430,8 @@ export async function createAgentTools(
           check_job: createCheckJobTool(opts.jobs),
         }
       : {};
+  const todosTool: ToolSet =
+    config.role === "primary" && opts.todos ? { update_todos: createTodoTool(opts.todos) } : {};
 
   if (mode === "plan") {
     // Plan agents observe but never edit: of the bash-tool trio they get only
@@ -449,6 +454,7 @@ export async function createAgentTools(
       }),
       ...createSearchTools(sb, { root: opts.root }),
       ...jobsTool,
+      ...todosTool,
       ...(opts.research
         ? {
             run_subagents: createSubagentsTool({
@@ -472,6 +478,7 @@ export async function createAgentTools(
     ...createEditTools(fileSandbox, config.tools.edit.mode),
     ...delegationTool,
     ...jobsTool,
+    ...todosTool,
   });
 }
 

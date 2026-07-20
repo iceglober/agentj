@@ -2,6 +2,7 @@ import type { PermissionRequest } from "../agent/permissions";
 import type { SubagentProgressEvent } from "../agent/subagents";
 import type { RunStep } from "../llm";
 import type { ChatMode } from "../session/log";
+import type { TodoList } from "../todos";
 
 type ToolCall = RunStep["toolCalls"][number];
 type ToolResult = RunStep["toolResults"][number];
@@ -42,6 +43,7 @@ export type ChatEvent =
   | { type: "turn-finished" }
   /** The session continuation and durable visible history were reset. */
   | { type: "context-cleared" }
+  | { type: "todos-updated"; items: TodoList }
   | { type: "mode-changed"; mode: ChatMode; pending: boolean }
   | { type: "subagent-progress"; progress: SubagentProgressEvent }
   | { type: "permission-ask"; request: PermissionRequest }

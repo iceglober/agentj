@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { TodoList } from "../todos";
 
 /**
  * The single persistence story for chat sessions: one append-only JSONL file
@@ -36,7 +37,8 @@ export type ChatLogRecord =
         longContextRequests: number;
       };
     }
-  | { type: "undo"; ref: string; label: string; ts: string };
+  | { type: "undo"; ref: string; label: string; ts: string }
+  | { type: "todos"; items: TodoList; ts: string };
 
 export interface LoadedChatLog {
   meta: Extract<ChatLogRecord, { type: "meta" }>;
@@ -45,6 +47,8 @@ export interface LoadedChatLog {
   usage: Extract<ChatLogRecord, { type: "usage" }>[];
   /** The resumable continuation — the last `state` record, if any. */
   state: Extract<ChatLogRecord, { type: "state" }> | null;
+  /** The session todo list — the last todo record since the last reset. */
+  todos: TodoList;
 }
 
 export interface ChatLog {
@@ -107,6 +111,7 @@ export async function loadChatLog(options: {
   const turns: LoadedChatLog["turns"] = [];
   const usage: LoadedChatLog["usage"] = [];
   let state: LoadedChatLog["state"] = null;
+  let todos: TodoList = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     let record: ChatLogRecord;
@@ -118,15 +123,17 @@ export async function loadChatLog(options: {
     if (record.type === "meta") meta ??= record;
     else if (record.type === "turn") turns.push(record);
     else if (record.type === "usage") usage.push(record);
+    else if (record.type === "todos") todos = record.items;
     else if (record.type === "state") {
       if (record.reset) {
         turns.length = 0;
         usage.length = 0;
+        todos = [];
       }
       state = record;
     }
   }
-  return meta ? { meta, turns, usage, state } : null;
+  return meta ? { meta, turns, usage, state, todos } : null;
 }
 
 /** Newest session id for a project (by file mtime), or null when none exist. */

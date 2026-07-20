@@ -100,10 +100,11 @@ describe("createChatSession", () => {
     });
   });
 
-  test("clears continuation, notices, and durable history before the next turn", async () => {
+  test("clears continuation, notices, todos, and durable history before the next turn", async () => {
     await withLog(async (log, root) => {
       const prompts: Array<{ prompt: string; messages: unknown[] | undefined }> = [];
       const events: ChatEvent[] = [];
+      let todosCleared = 0;
       const session = createChatSession({
         agentFor: async () =>
           makeAgent(async (prompt, options) => {
@@ -111,6 +112,11 @@ describe("createChatSession", () => {
             return result("done", { messages: [{ prompt }] });
           }),
         log,
+        todos: {
+          clear: async () => {
+            todosCleared += 1;
+          },
+        },
         onEvent: (event) => {
           events.push(event);
         },
@@ -126,6 +132,7 @@ describe("createChatSession", () => {
         { prompt: "fresh request", messages: [] },
       ]);
       expect(events).toContainEqual({ type: "context-cleared" });
+      expect(todosCleared).toBe(1);
       const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
       expect(loaded?.turns.map((turn) => turn.user)).toEqual(["fresh request"]);
       expect(loaded?.state?.messages).toEqual([{ prompt: "fresh request" }]);

@@ -220,8 +220,10 @@ restores primary-model inheritance; the equivalent config paths are
 ## Sessions and persistence
 
 Every session appends to one JSONL log under `$XDG_STATE_HOME/agentj/chats/`. `--continue` /
-`--resume <id>` restore the conversation (including the model's tool-call memory) and replay
-recent turns. Crash-safe by construction: a torn final line is skipped on load.
+`--resume <id>` restore the conversation (including the model's tool-call memory), its todo list,
+and recent turns. For multi-step work, the agent maintains that list with `update_todos`; it stays
+visible in the terminal live region and clears with `/clear`. Crash-safe by construction: a torn
+final line is skipped on load.
 
 ## Evals
 
