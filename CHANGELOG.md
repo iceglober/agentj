@@ -1,5 +1,16 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.39
+
+### Minor Changes
+
+- 3908a3b: Agentj can now maintain a session todo list for multi-step work: for example, it can show a live checklist while it investigates, implements, and tests a feature. The list persists when you resume the chat and `/clear` removes it with the chat context.
+
+### Patch Changes
+
+- 3728352: Recognize Git's canonical worktree paths when finalizing background jobs, preventing clean macOS `/var` worktrees from being preserved as unregistered.
+- 2942eb7: Skills can set top-level `user-invocable: false` in SKILL.md frontmatter to remain available to the model without registering a slash command. The bundled `running-background-work` skill now uses this setting.
+
 ## 0.1.0-next.38
 
 ### Minor Changes
