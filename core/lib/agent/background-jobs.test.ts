@@ -4,7 +4,15 @@ import {
   type BackgroundJobPort,
   createBackgroundJobTool,
   createCheckJobTool,
+  prepareBackgroundJobPrompt,
 } from "./background-jobs";
+
+test("fresh workers must verify repository access before escalating", () => {
+  const prompt = prepareBackgroundJobPrompt("Monitor PR #3263 until its checks pass.");
+  expect(prompt).toContain("same repository and authenticated host environment");
+  expect(prompt).toContain("attempt the relevant command or tool before claiming");
+  expect(prompt).toEndWith("Task:\nMonitor PR #3263 until its checks pass.");
+});
 
 const recordingPort = (
   inspection?: Partial<BackgroundJobInspection>,

@@ -12,6 +12,7 @@ import {
   type ToolActivity,
   withAgentModelSelection,
 } from "./lib/agent";
+import { prepareBackgroundJobPrompt } from "./lib/agent/background-jobs";
 import {
   createSessionPermissionGate,
   type PermissionGate,
@@ -769,7 +770,10 @@ async function composeChat(
     onStep?: (step: RunStep) => void,
   ) => {
     const worker = await createResearchWorker(origin);
-    const result = await worker.generate(prompt, { abortSignal, onStep });
+    const result = await worker.generate(prepareBackgroundJobPrompt(prompt), {
+      abortSignal,
+      onStep,
+    });
     return { text: result.text };
   };
 
@@ -834,7 +838,15 @@ async function composeChat(
         },
         concurrency: 1,
       },
-      { tasks: [{ title: prompt.slice(0, 72), prompt, waitsOn: [] }] },
+      {
+        tasks: [
+          {
+            title: prompt.slice(0, 72),
+            prompt: prepareBackgroundJobPrompt(prompt),
+            waitsOn: [],
+          },
+        ],
+      },
       { abortSignal },
     )) as {
       results: Array<{
