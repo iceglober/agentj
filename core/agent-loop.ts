@@ -18,14 +18,12 @@ import {
   type PermissionGate,
   withRequestOrigin,
 } from "./lib/agent/permissions";
-import type { QuestionPort } from "./lib/agent/questions";
 import { createPlanReflectionFollowUp } from "./lib/agent/reflections";
 import {
   runSubagentTasks,
   type SubagentProgressEvent,
   toGitDelegationResults,
 } from "./lib/agent/subagents";
-import type { TodoPort } from "./lib/agent/todos";
 import { createClackGuidedInput } from "./lib/chat/clack-guided-input-adapter";
 import {
   type ChatCommandContext,
@@ -49,7 +47,11 @@ import {
   formatFileReference,
   formatFileReferences,
 } from "./lib/chat/file-attachments";
-import { createJobRunner, type JobRunner } from "./lib/chat/jobs";
+import {
+  createInteractiveCapabilityBinder,
+  type InteractiveCapabilities,
+} from "./lib/chat/interactive-capabilities";
+import { createJobRunner } from "./lib/chat/jobs";
 import { runOnboarding } from "./lib/chat/onboarding";
 import { createPromptsGuidedInput } from "./lib/chat/prompts-guided-input-adapter";
 import { createQuestionPort } from "./lib/chat/questions";
@@ -313,11 +315,7 @@ interface ChatComposition {
     onStep?: (step: RunStep) => void,
   ): Promise<{ text: string }>;
   /** Late-binds interactive capabilities behind primary-agent tools. */
-  attachInteractiveCapabilities(options: {
-    jobs: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort">;
-    todos: TodoPort;
-    questions: QuestionPort;
-  }): void;
+  attachInteractiveCapabilities(options: InteractiveCapabilities): void;
   environment: Awaited<ReturnType<typeof createHostExecutionEnvironment>>;
   stateRoot: string;
   /** Discovered Agent Skills and the malformed entries worth surfacing. */
@@ -498,36 +496,7 @@ async function composeChat(
   });
 
   let agentMcpVersion = mcp.snapshot().version;
-  let jobsRuntime: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort"> | undefined;
-  let todosRuntime: TodoPort | undefined;
-  let questionsRuntime: QuestionPort | undefined;
-  const jobsPort = {
-    start: (
-      mode: "plan" | "build",
-      prompt: string,
-      options?: { softTimeoutMs?: number },
-    ): { id: string } | { error: string } =>
-      jobsRuntime
-        ? { id: jobsRuntime.start(mode, prompt, options).id }
-        : { error: "Background jobs are unavailable in this session." },
-    inspect: (id: string) => jobsRuntime?.inspect(id),
-    renewSoftTimeout: (id: string, softTimeoutMs: number) =>
-      jobsRuntime?.renewSoftTimeout(id, softTimeoutMs) ?? false,
-    abort: (id: string) => jobsRuntime?.abort(id) ?? false,
-  };
-  const todosPort: TodoPort = {
-    list: () => todosRuntime?.list() ?? [],
-    replace: async (items) => {
-      if (!todosRuntime) throw new Error("Session todos are unavailable in this session.");
-      await todosRuntime.replace(items);
-    },
-  };
-  const questionsPort: QuestionPort = {
-    ask: async (questions) => {
-      if (!questionsRuntime) throw new Error("User questions are unavailable in this session.");
-      return questionsRuntime.ask(questions);
-    },
-  };
+  const interactive = createInteractiveCapabilityBinder();
   const agentFor = async (mode: ChatMode): Promise<Agent> => {
     await mcp.activatePending();
     const mcpSnapshot = mcp.snapshot();
@@ -553,8 +522,10 @@ async function composeChat(
             },
             onToolActivity,
             permissions: { config: config.permissions, gate },
-            jobs: jobsPort,
-            ...(entrypoint === "chat" ? { todos: todosPort, questions: questionsPort } : {}),
+            jobs: interactive.jobs,
+            ...(entrypoint === "chat"
+              ? { todos: interactive.todos, questions: interactive.questions }
+              : {}),
           })
         : createProductionAgent(environment, agentConfigFor("build"), {
             root,
@@ -570,8 +541,10 @@ async function composeChat(
             permissions: { config: config.permissions, gate },
             onSubagentProgress: onDagProgress,
             onToolActivity,
-            jobs: jobsPort,
-            ...(entrypoint === "chat" ? { todos: todosPort, questions: questionsPort } : {}),
+            jobs: interactive.jobs,
+            ...(entrypoint === "chat"
+              ? { todos: interactive.todos, questions: interactive.questions }
+              : {}),
           });
     agents.set(mode, agent);
     return agent;
@@ -777,11 +750,7 @@ async function composeChat(
       }),
     runBuildJob,
     runPlanJob,
-    attachInteractiveCapabilities: ({ jobs, todos, questions }) => {
-      jobsRuntime = jobs;
-      todosRuntime = todos;
-      questionsRuntime = questions;
-    },
+    attachInteractiveCapabilities: interactive.attach,
     environment,
     stateRoot,
     skills: skillsDiscovery.skills,
