@@ -56,6 +56,7 @@ import { runOnboarding } from "./lib/chat/onboarding";
 import { createPromptsGuidedInput } from "./lib/chat/prompts-guided-input-adapter";
 import { createQuestionPort } from "./lib/chat/questions";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
+import { bootstrapInteractiveSession } from "./lib/chat/session-bootstrap";
 import { createSessionTodos } from "./lib/chat/todos";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
@@ -74,6 +75,7 @@ import {
 } from "./lib/mcp/oauth";
 import type { McpRuntimeStatus } from "./lib/mcp/runtime";
 import { createMcpRuntime } from "./lib/mcp/runtime";
+import { createMcpSessionController } from "./lib/mcp/session-controller";
 import type { MetricsSink } from "./lib/metrics";
 import { createOtelMetricsSink } from "./lib/metrics/otel-adapter";
 import { startMetricsProvider } from "./lib/metrics/otel-provider";
@@ -86,8 +88,7 @@ import {
 } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession } from "./lib/session";
-import { type ChatMode, createChatLog, latestChatLogId, loadChatLog } from "./lib/session/log";
-import { createPromptHistory } from "./lib/session/prompt-history";
+import { type ChatMode, createChatLog } from "./lib/session/log";
 import { createUndoStack } from "./lib/session/undo";
 import {
   composeSkillsPromptSection,
@@ -357,7 +358,6 @@ async function composeChat(
   const configLoadOptions = { baseConfigPath: configPath, projectRoot: root };
   const loadedConfig = await loadChatConfig(undefined, configLoadOptions);
   const config = loadedConfig.config;
-  let mcpConfigIssues = loadedConfig.mcpIssues;
   const secretStore = createKeyringSecretStore({});
   const key = await resolveAzureApiKey({ store: secretStore });
   if (key.status !== "resolved") {
@@ -494,6 +494,27 @@ async function composeChat(
     oauth: mcpOAuth,
     spill: spill.write,
   });
+  const loadMcpSessionConfig = async () => {
+    const latest = await loadChatConfig(undefined, configLoadOptions);
+    return { mcp: latest.config.mcp, issues: latest.mcpIssues };
+  };
+  const mcpController = createMcpSessionController({
+    initial: { mcp: config.mcp, issues: loadedConfig.mcpIssues },
+    runtime: mcp,
+    load: loadMcpSessionConfig,
+    onStatus: onMcpStatus,
+    authorizeHttp: async (name, server, hooks) => {
+      try {
+        return await runMcpOAuthFlow(name, server.url, {
+          storage: mcpOAuth,
+          headers: resolveMcpTransportConfig(server).headers ?? {},
+          ...(hooks?.onAuthorizationUrl ? { onAuthorizationUrl: hooks.onAuthorizationUrl } : {}),
+        });
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    },
+  });
 
   let agentMcpVersion = mcp.snapshot().version;
   const interactive = createInteractiveCapabilityBinder();
@@ -548,57 +569,6 @@ async function composeChat(
           });
     agents.set(mode, agent);
     return agent;
-  };
-
-  const invalidServerNames = (): Set<string> =>
-    new Set(mcpConfigIssues.filter(({ name }) => name !== "configuration").map(({ name }) => name));
-  const issueStatuses = (): McpRuntimeStatus[] => {
-    const runtimeStatuses = mcp.statuses();
-    return mcpConfigIssues.map((issue) => ({
-      name: issue.name,
-      transport: "unknown",
-      state: "failed",
-      code: "invalid_config",
-      detail: issue.detail,
-      resolution: issue.resolution,
-      usingPrevious: runtimeStatuses.some(
-        (status) =>
-          status.name === issue.name &&
-          (status.state === "connected" ||
-            status.state === "ready" ||
-            (status.state === "failed" && status.usingPrevious)),
-      ),
-    }));
-  };
-  const publishConfigIssues = (): void => {
-    for (const issue of issueStatuses()) onMcpStatus?.(issue);
-  };
-  const reloadMcp = async (name?: string): Promise<void> => {
-    const latest = await loadChatConfig(undefined, configLoadOptions);
-    mcpConfigIssues = latest.mcpIssues;
-    publishConfigIssues();
-    await mcp.reload(latest.config.mcp, name, { skip: [...invalidServerNames()] });
-  };
-
-  const authorizeMcp = async (
-    name: string,
-    hooks?: { onAuthorizationUrl?(url: string): void },
-  ): Promise<McpOAuthFlowResult> => {
-    const latest = await loadChatConfig(undefined, configLoadOptions);
-    const server = latest.config.mcp.servers[name];
-    if (!server) return { ok: false, reason: `no MCP server named ${name} is configured` };
-    if (server.transport !== "http") {
-      return { ok: false, reason: `${name} uses stdio; OAuth applies to HTTP servers` };
-    }
-    try {
-      return await runMcpOAuthFlow(name, server.url, {
-        storage: mcpOAuth,
-        headers: resolveMcpTransportConfig(server).headers ?? {},
-        ...(hooks?.onAuthorizationUrl ? { onAuthorizationUrl: hooks.onAuthorizationUrl } : {}),
-      });
-    } catch (error) {
-      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-    }
   };
 
   const runPlanJob = async (
@@ -755,18 +725,12 @@ async function composeChat(
     stateRoot,
     skills: skillsDiscovery.skills,
     skillIssues: skillsDiscovery.issues,
-    startMcp: async () => {
-      publishConfigIssues();
-      await mcp.reload(config.mcp, undefined, { skip: [...invalidServerNames()] });
-    },
-    reloadMcp,
-    authorizeMcp,
+    startMcp: mcpController.start,
+    reloadMcp: mcpController.reload,
+    authorizeMcp: mcpController.authorize,
     mcpPrompts: () => mcp.prompts(),
     getMcpPrompt: (server, prompt, args) => mcp.getPrompt(server, prompt, args),
-    mcpStatuses: () => {
-      const invalid = invalidServerNames();
-      return [...mcp.statuses().filter(({ name }) => !invalid.has(name)), ...issueStatuses()];
-    },
+    mcpStatuses: mcpController.statuses,
     close: async () => {
       await mcp.close();
       await metricsProvider?.shutdown();
@@ -933,11 +897,18 @@ export async function runAgentjChat(
   let pendingHistoryWrites = Promise.resolve();
   try {
     const { root, commonGitDir, ctx, agentFor, environment, stateRoot } = composition;
-    const chatsRoot = join(stateRoot, "agentj", "chats");
-    const promptHistory = await createPromptHistory({
-      root: join(stateRoot, "agentj", "prompt-history"),
+    const persistence = await bootstrapInteractiveSession({
+      stateRoot,
+      projectRoot: root,
       projectIdentity: commonGitDir,
+      environment,
+      ...options,
     });
+    if (!persistence.ok) {
+      processStderr.write(`${persistence.error}\n`);
+      return EXIT_FAILURE;
+    }
+    const { promptHistory, resumed, log, undo: undoStack } = persistence;
     const rememberPrompt = (text: string): void => {
       pendingHistoryWrites = pendingHistoryWrites
         .then(() => promptHistory.append(text))
@@ -948,30 +919,7 @@ export async function runAgentjChat(
         });
     };
 
-    // Resume: --continue picks the newest session for this project.
-    let resumeId = options.resume ?? null;
-    if (!resumeId && options.continueLatest) {
-      resumeId = await latestChatLogId({ root: chatsRoot, projectRoot: root });
-      if (!resumeId) {
-        processStderr.write("No previous chat session for this project.\n");
-        return EXIT_FAILURE;
-      }
-    }
-    const resumed = resumeId
-      ? await loadChatLog({ root: chatsRoot, projectRoot: root, id: resumeId })
-      : null;
-    if (resumeId && !resumed) {
-      processStderr.write(`Unknown chat session: ${resumeId}\n`);
-      return EXIT_FAILURE;
-    }
-
-    const log = await createChatLog({
-      root: chatsRoot,
-      projectRoot: root,
-      ...(resumeId ? { id: resumeId } : {}),
-    });
     resumeSessionId = log.id;
-    const undoStack = createUndoStack(environment, root, log.id);
     undo = undoStack;
     // Foreground usage ledger: resumed rows plus one appended record per turn.
     // Only foreground steps land in turn-usage, so /cost prices exactly the
