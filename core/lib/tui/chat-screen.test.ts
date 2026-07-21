@@ -281,6 +281,21 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
+  test("labels the composer mode and gives useful guidance when empty", async () => {
+    const { screen, input, text } = makeScreen();
+    screen.start();
+    screen.setComposer({ label: "plan › ", placeholder: "Ask a question or describe a change" });
+    await settle();
+    expect(renderScreen(text()).join("\n")).toContain("plan › Ask a question or describe a change");
+
+    input.write("inspect the parser");
+    await settle();
+    const rendered = renderScreen(text()).join("\n");
+    expect(rendered).toContain("plan › inspect the parser");
+    expect(rendered).not.toContain("Ask a question or describe a change");
+    screen.stop();
+  });
+
   test("shows and fuzzy-completes slash commands before mode toggling", async () => {
     const { screen, input, calls, text } = makeScreen();
     screen.start();
@@ -307,14 +322,14 @@ describe("createChatScreen", () => {
     input.write("/con\t");
     await settle();
     let shown = renderScreen(text()).join("\n");
-    expect(shown).toContain("> /config ");
+    expect(shown).toContain("› /config ");
     expect(shown).toContain("› get — Read a global configuration value");
     expect(shown).toContain("set — Set a global configuration value");
 
     input.write("s\t");
     await settle();
     shown = renderScreen(text()).join("\n");
-    expect(shown).toContain("> /config set ");
+    expect(shown).toContain("› /config set ");
     expect(shown).toContain("agent.llm.model — Model name");
     expect(calls.tab).toBe(0);
     expect(calls.submit).toEqual([]);
@@ -546,12 +561,12 @@ describe("createChatScreen", () => {
     await settle();
     // The command renders in the modal itself — wrapped, indented — without a
     // duplicate transcript copy for a request this short.
-    expect(text()).toContain("Permission bash\r\n  git push origin");
+    expect(text()).toContain("Approval needed · bash\r\n  git push origin");
     expect(renderScreen(text()).join("\n")).toContain(
       "<Y> allow once · <A> always this session · <N> deny",
     );
     expect(text()).toContain("  echo done");
-    expect(text()).not.toContain("Permission bash:");
+    expect(text()).not.toContain("Approval needed · bash:");
     expect(text()).not.toContain("review request above");
     input.write("y");
     await expect(first).resolves.toBe("allow");
@@ -561,7 +576,7 @@ describe("createChatScreen", () => {
     const longDetail = Array.from({ length: 12 }, (_, i) => `line-${i}`).join("\n");
     const long = screen.askPermission({ tool: "bash", kind: "bash", detail: longDetail });
     await settle();
-    expect(text()).toContain(`Permission bash:\r\n${longDetail.split("\n").join("\r\n")}`);
+    expect(text()).toContain(`Approval needed · bash:\r\n${longDetail.split("\n").join("\r\n")}`);
     expect(text()).toContain("… +6 more lines");
     input.write("n");
     await expect(long).resolves.toBe("deny");
@@ -583,7 +598,7 @@ describe("createChatScreen", () => {
       origin: "subagent t2",
     });
     await settle();
-    expect(text()).toContain("Permission bash — subagent t2");
+    expect(text()).toContain("Approval needed · bash — subagent t2");
     input.write("n");
     await expect(child).resolves.toBe("deny");
     screen.stop();
@@ -763,7 +778,7 @@ describe("createChatScreen", () => {
     expect(joined).toContain("shell-history-2");
     // History stays ABOVE the live region, in order.
     expect(joined.indexOf("shell-history-1")).toBeLessThan(joined.indexOf("shell-history-2"));
-    expect(joined.indexOf("shell-history-2")).toBeLessThan(joined.indexOf("> hello world"));
+    expect(joined.indexOf("shell-history-2")).toBeLessThan(joined.indexOf("› hello world"));
     screen.stop();
   });
 
@@ -777,7 +792,7 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("keeps one blank transcript row and separates todo, activity, and thinking lines", async () => {
+  test("keeps transcript, progress, presence, and composer in a stable hierarchy", async () => {
     const { screen, text } = makeScreen();
     screen.start();
     screen.printAbove("earlier transcript item");
@@ -787,26 +802,26 @@ describe("createChatScreen", () => {
     let rendered = renderScreen(text());
     const earlier = rendered.findIndex((line) => line.includes("earlier transcript item"));
     const latest = rendered.findIndex((line) => line.includes("latest transcript item"));
-    const idleEditor = rendered.findIndex((line) => line.startsWith("> "));
+    const idleEditor = rendered.findIndex((line) => line.startsWith("› "));
     expect(rendered.slice(earlier, latest + 1)).toEqual([
       "earlier transcript item",
       "latest transcript item",
     ]);
-    expect(rendered.slice(latest + 1, idleEditor)).toEqual([""]);
+    expect(rendered.slice(latest + 1, idleEditor)).toEqual(["● Ready"]);
 
     screen.setProgressLines([
       "  ◐ tool running",
       "",
-      "  ╭─ Todos 0/1 done · 1 active",
-      "  ╰────────────────────────────",
+      "  Plan · 0/1 complete",
+      "    → Implement the change",
     ]);
-    screen.setThinkingLine("◐ thinking 1s (esc)");
+    screen.setPresenceLine("◐ Working 1s · Esc interrupt");
     await settle();
     rendered = renderScreen(text());
-    const todo = rendered.findIndex((line) => line.includes("Todos 0/1 done"));
+    const todo = rendered.findIndex((line) => line.includes("Plan · 0/1 complete"));
     const tool = rendered.findIndex((line) => line.includes("tool running"));
-    const thinking = rendered.findIndex((line) => line.includes("thinking 1s"));
-    const activeEditor = rendered.findIndex((line) => line.startsWith("> "));
+    const thinking = rendered.findIndex((line) => line.includes("Working 1s"));
+    const activeEditor = rendered.findIndex((line) => line.startsWith("› "));
     expect(tool).toBeLessThan(todo);
     expect(rendered.slice(tool + 1, todo)).toEqual([""]);
     expect(todo).toBeLessThan(thinking);
@@ -827,7 +842,7 @@ describe("createChatScreen", () => {
     expect(cleared).toContain("\u001b[2J\u001b[H");
     expect(renderScreen(cleared).some((line) => line.includes("old transcript"))).toBe(false);
     expect(renderScreen(cleared).some((line) => line.includes("old status"))).toBe(false);
-    expect(renderScreen(cleared).some((line) => line.startsWith("> "))).toBe(true);
+    expect(renderScreen(cleared).some((line) => line.startsWith("› "))).toBe(true);
     screen.stop();
   });
 

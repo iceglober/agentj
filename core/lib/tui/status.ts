@@ -71,9 +71,6 @@ const middleEllipsis = (text: string, maxWidth: number): string => {
 };
 
 export interface StatusSectionState {
-  sessionId: string;
-  /** Package version shown beside the session root. */
-  version: string;
   /** Display path of the directory the session started in — the root the
    *  session orchestrates from, however many worktrees the work fans into. */
   root: string;
@@ -81,41 +78,47 @@ export interface StatusSectionState {
   model: string;
   mode: ChatMode;
   spinnerFrame: number;
-  /** Cumulative request/response tokens; ctx is the latest request's size and
-   *  cacheRead the session's cumulative provider-cache read tokens. */
-  usage: { in: number; out: number; ctx: number; cacheRead?: number };
+  /** Latest request's context size. */
+  usage: { ctx: number };
   /** When set, ctx displays against this soft limit (for example, 8.7k/8.0k). */
   contextSoftLimit?: number;
-  sessionStartedAt: number;
   /** Running background jobs only — each gets its own row. */
   jobs: ReadonlyArray<{ id: string; mode: ChatMode; prompt: string; startedAt: number }>;
   now?: number;
 }
 
-/**
- * The status section below the editor: identity line, root-path line, then one
- * row per running background job. Foreground activity renders above the editor.
- */
-export const composeThinkingLine = (
+/** The always-visible foreground state immediately above the composer. */
+export const composePresenceLine = (
   state: {
-    thinking: boolean;
+    busy: boolean;
     interruptRequested: boolean;
     spinnerFrame: number;
     turnStartedAt: number | null;
+    activeTools?: number;
+    queued?: number;
     now?: number;
   },
   width: number,
-): string | null => {
-  if (!state.thinking) return null;
+): string => {
   const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
   const elapsed =
     state.turnStartedAt === null
       ? ""
       : ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`;
-  const activity = state.interruptRequested ? "interrupting…" : "thinking";
-  const full = `${frame} ${activity}${elapsed}${state.interruptRequested ? "" : " (esc)"}`;
-  if (displayWidth(full) <= width) return full;
-  return truncateToDisplayWidth(`${frame} ${activity}${elapsed}`, width);
+  const queued = state.queued ? ` · ${state.queued} queued` : "";
+  if (state.interruptRequested)
+    return truncateToDisplayWidth(`${frame} Stopping safely…${queued}`, width);
+  if (state.busy) {
+    const activity = state.activeTools ? "Working" : "Thinking";
+    const full = `${frame} ${activity}${elapsed}${queued} · Esc interrupt`;
+    return displayWidth(full) <= width
+      ? full
+      : truncateToDisplayWidth(`${frame} ${activity}${elapsed}${queued}`, width);
+  }
+  return truncateToDisplayWidth(
+    state.queued ? `● Ready · ${state.queued} queued` : "● Ready",
+    width,
+  );
 };
 
 /** Re-warn after enough growth to be useful without repeating every step. */
@@ -143,50 +146,25 @@ export const composeStatusSection = (
   const width = normalizedWidth(requestedWidth);
   const now = state.now ?? Date.now();
   const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-  const clock = formatClock(now - state.sessionStartedAt);
-  const counters = [
-    formatStatusTokens(state.usage.in),
-    formatStatusTokens(state.usage.out),
+  const context =
     state.contextSoftLimit === undefined
       ? formatStatusTokens(state.usage.ctx)
-      : `${formatStatusTokens(state.usage.ctx)}/${formatStatusTokens(state.contextSoftLimit)}`,
-  ] as const;
-  // Session-cumulative cache reads as a share of cumulative input: how much
-  // of everything sent so far was served from the provider's prefix cache.
-  // Dropped in compact layouts — width wins there.
-  const cacheRead = state.usage.cacheRead;
-  const cached =
-    cacheRead === undefined || state.usage.in <= 0
-      ? ""
-      : ` · cached ${formatStatusTokens(cacheRead)}(${Math.round((cacheRead / state.usage.in) * 100)}%)`;
-  const labeled = `in ${counters[0]}${cached} ▸ out ${counters[1]} · ctx ${counters[2]} · ${clock}`;
-  const compact = `${counters[0]}▸${counters[1]}·${counters[2]}·${clock}`;
-  const essential = `ctx ${counters[2]} · ${clock}`;
-  const identities = [
-    `${state.sessionId} · ${state.model} · ${state.mode} (tab↕)`,
-    `${state.sessionId} · ${state.mode} (tab↕)`,
-    `${state.mode} (tab↕)`,
-  ] as const;
-  const variants = [
-    [identities[0], labeled],
-    [identities[1], labeled],
-    [identities[1], compact],
-    [identities[2], essential],
-  ] as const;
-  const identity = variants.find(([left, right]) => fitsTogether(left, right, width));
-  const identityLine = identity
-    ? splitEnds(identity[0], identity[1], width)
-    : truncateToDisplayWidth(`${identities[2]} · ${essential}`, width);
-
-  const version = `aj ${state.version}`;
-  const versionWidth = displayWidth(version);
-  const rootWidth = width - versionWidth - 2;
-  const location =
-    versionWidth > width
-      ? truncateToDisplayWidth(version, width)
-      : rootWidth < 1
-        ? version
-        : splitEnds(middleEllipsis(state.root, rootWidth), version, width);
+      : `${formatStatusTokens(state.usage.ctx)}/${formatStatusTokens(state.contextSoftLimit)}`;
+  const controls = "Tab mode · / commands";
+  const fullContext = `${state.model} · ctx ${context}`;
+  const compactContext = `ctx ${context}`;
+  const rootBudget = Math.max(0, width - displayWidth(controls) - 2);
+  const rootWidth = rootBudget - displayWidth(fullContext) - 3;
+  const detailedLeft =
+    rootWidth >= 8 ? `${middleEllipsis(state.root, rootWidth)} · ${fullContext}` : "";
+  const footer =
+    detailedLeft && fitsTogether(detailedLeft, controls, width)
+      ? splitEnds(detailedLeft, controls, width)
+      : fitsTogether(fullContext, controls, width)
+        ? splitEnds(fullContext, controls, width)
+        : fitsTogether(compactContext, controls, width)
+          ? splitEnds(compactContext, controls, width)
+          : truncateToDisplayWidth(`${state.mode} · ${compactContext}`, width);
 
   const jobRows = state.jobs.map((job) => {
     const prefix = `  ${frame} [${job.id}] ${job.mode}: `;
@@ -200,5 +178,5 @@ export const composeStatusSection = (
     return `${prefix}${snippet}${suffix}`;
   });
 
-  return [identityLine, location, ...jobRows];
+  return [footer, ...jobRows];
 };

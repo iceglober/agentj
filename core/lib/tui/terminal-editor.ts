@@ -123,9 +123,13 @@ export const wrapToDisplayWidth = (value: string, maxWidth: number): string[] =>
   return rows;
 };
 
-export const renderEditorLayout = (state: EditorState, terminalWidth: number): RenderLayout => {
+export const renderEditorLayout = (
+  state: EditorState,
+  terminalWidth: number,
+  requestedPrefix = "> ",
+): RenderLayout => {
   const width = Math.max(1, Math.floor(terminalWidth));
-  const prefix = width === 1 ? ">" : "> ";
+  const prefix = truncateToDisplayWidth(requestedPrefix, width);
   const rows = [prefix];
   let column = displayWidth(prefix);
   let cursorRow = 0;
