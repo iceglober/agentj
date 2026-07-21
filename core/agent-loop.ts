@@ -7,10 +7,10 @@ import {
   type Agent,
   type AgentConfig,
   childAgentConfig,
+  createAgentModelRouting,
   createAgent as createProductionAgent,
   reflectionAgentConfig,
   type ToolActivity,
-  withAgentModelSelection,
 } from "./lib/agent";
 import { prepareBackgroundJobPrompt } from "./lib/agent/background-jobs";
 import {
@@ -59,7 +59,7 @@ import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cl
 import { loadChatConfig, loadConfig } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { providerNames, type RunStep, resolveTierModel } from "./lib/llm";
+import { providerNames, type RunStep } from "./lib/llm";
 import type { McpPromptCatalogEntry, McpPromptResult } from "./lib/mcp";
 import {
   connectModelContextProtocolServer,
@@ -401,7 +401,7 @@ async function composeChat(
     ],
   });
   const skillsSection = composeSkillsPromptSection(skillsDiscovery.skills);
-  let agentConfig: AgentConfig = {
+  const agentConfig: AgentConfig = {
     ...config.agent,
     rules: [agentsMd, config.agent.rules, skillsSection].filter(Boolean).join("\n\n"),
     llm: {
@@ -453,19 +453,9 @@ async function composeChat(
     },
   };
 
-  // Mode routing: each chat mode rides its configured ladder tier — unless
-  // the user picked a model at runtime (configureModel), which wins outright.
-  let primaryModelOverride = false;
-  const agentConfigFor = (mode: ChatMode): AgentConfig =>
-    primaryModelOverride
-      ? agentConfig
-      : {
-          ...agentConfig,
-          llm: {
-            ...agentConfig.llm,
-            model: resolveTierModel(agentConfig.llm, agentConfig.llm.modes[mode]),
-          },
-        };
+  const agents = new Map<ChatMode, Promise<Agent>>();
+  const modelRouting = createAgentModelRouting(agentConfig, () => agents.clear());
+  const agentConfigFor = modelRouting.configFor;
   // Research workers are plan-mode children. Each run gets a scoped MCP lease
   // so reflection and user-requested research share the same safe inspection tools.
   const createResearchWorker = async (
@@ -507,33 +497,6 @@ async function composeChat(
     spill: spill.write,
   });
 
-  const agents = new Map<ChatMode, Promise<Agent>>();
-  const modelSelections = (): { primary: ModelSelection; subagents: ModelSelection | null } => {
-    const child = childAgentConfig(agentConfig, "delegate");
-    const overridden =
-      agentConfig.tools.subagents.provider !== undefined ||
-      agentConfig.tools.subagents.model !== undefined ||
-      agentConfig.tools.subagents.tier !== undefined;
-    return {
-      primary: { provider: agentConfig.llm.provider, model: agentConfig.llm.model },
-      subagents: overridden ? { provider: child.llm.provider, model: child.llm.model } : null,
-    };
-  };
-  const configureModel = (target: ModelTarget, selection: ModelSelection | null): void => {
-    agentConfig = withAgentModelSelection(
-      agentConfig,
-      target,
-      selection
-        ? {
-            provider: selection.provider as AgentConfig["llm"]["provider"],
-            model: selection.model,
-          }
-        : null,
-    );
-    // An explicit primary selection suspends ladder mode-routing until reset.
-    if (target === "primary") primaryModelOverride = selection !== null;
-    agents.clear();
-  };
   let agentMcpVersion = mcp.snapshot().version;
   let jobsRuntime: Pick<JobRunner, "start" | "inspect" | "renewSoftTimeout" | "abort"> | undefined;
   let todosRuntime: TodoPort | undefined;
@@ -785,10 +748,10 @@ async function composeChat(
     commonGitDir,
     ctx,
     get llm() {
-      return modelSelections().primary;
+      return modelRouting.selections().primary;
     },
-    modelSelections,
-    configureModel,
+    modelSelections: modelRouting.selections,
+    configureModel: modelRouting.configure,
     modelFor: (mode: ChatMode) => {
       const active = agentConfigFor(mode).llm;
       return { provider: active.provider, model: active.model };
@@ -796,7 +759,7 @@ async function composeChat(
     contextSoftLimit: config.agent.context.softLimit,
     evalPrices: config.eval.prices,
     agentFor,
-    reflectionEvents: agentConfig.reflections.events,
+    reflectionEvents: modelRouting.config().reflections.events,
     reflectPlan: ({ request, draft, phase, abortSignal }) =>
       createPlanReflectionFollowUp({
         config: reflectionAgentConfig(agentConfigFor("plan")),

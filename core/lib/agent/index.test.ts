@@ -7,6 +7,7 @@ import {
   agentConfigSchema,
   type CreateAgentOptions,
   childAgentConfig,
+  createAgentModelRouting,
   createAgentTools,
   reflectionAgentConfig,
   withAgentModelSelection,
@@ -144,6 +145,43 @@ describe("childAgentConfig", () => {
     expect(config.steps).toBe(100);
     expect(childAgentConfig(config, "delegate").steps).toBe(100);
     expect(agentConfigSchema.parse({ steps: 250 }).steps).toBe(250);
+  });
+});
+
+describe("createAgentModelRouting", () => {
+  test("routes modes through tiers until a live primary selection takes precedence", () => {
+    let changes = 0;
+    const routing = createAgentModelRouting(
+      agentConfigSchema.parse({
+        llm: {
+          model: "base",
+          tiers: ["frontier", "economy"],
+          modes: { plan: 0, build: 1 },
+        },
+      }),
+      () => changes++,
+    );
+
+    expect(routing.configFor("plan").llm.model).toBe("frontier");
+    expect(routing.configFor("build").llm.model).toBe("economy");
+
+    routing.configure("primary", { provider: "azure", model: "live" });
+    expect(routing.configFor("plan").llm.model).toBe("live");
+    expect(routing.configFor("build").llm.model).toBe("live");
+    expect(routing.selections().primary).toEqual({ provider: "azure", model: "live" });
+    expect(changes).toBe(1);
+  });
+
+  test("reports explicit child routing and clears it back to inheritance", () => {
+    const routing = createAgentModelRouting(agentConfigSchema.parse({ llm: { model: "primary" } }));
+    expect(routing.selections().subagents).toBeNull();
+
+    routing.configure("subagents", { provider: "azure", model: "child" });
+    expect(routing.selections().subagents).toEqual({ provider: "azure", model: "child" });
+
+    routing.configure("subagents", null);
+    expect(routing.selections().subagents).toBeNull();
+    expect(routing.config().tools.subagents.model).toBeUndefined();
   });
 });
 

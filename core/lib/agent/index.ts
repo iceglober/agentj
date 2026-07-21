@@ -309,6 +309,64 @@ export function withAgentModelSelection(
   };
 }
 
+export interface AgentModelSelection {
+  provider: string;
+  model: string;
+}
+
+/** Owns live model overrides and mode-tier routing for one chat composition. */
+export function createAgentModelRouting(
+  initialConfig: AgentConfig,
+  onChange: () => void = () => {},
+): {
+  config(): AgentConfig;
+  configFor(mode: AgentMode): AgentConfig;
+  selections(): { primary: AgentModelSelection; subagents: AgentModelSelection | null };
+  configure(target: "primary" | "subagents", selection: AgentModelSelection | null): void;
+} {
+  let config = initialConfig;
+  let primaryOverride = false;
+
+  return {
+    config: () => config,
+    configFor: (mode) =>
+      primaryOverride
+        ? config
+        : {
+            ...config,
+            llm: {
+              ...config.llm,
+              model: resolveTierModel(config.llm, config.llm.modes[mode]),
+            },
+          },
+    selections: () => {
+      const child = childAgentConfig(config, "delegate");
+      const overridden =
+        config.tools.subagents.provider !== undefined ||
+        config.tools.subagents.model !== undefined ||
+        config.tools.subagents.tier !== undefined;
+      return {
+        primary: { provider: config.llm.provider, model: config.llm.model },
+        subagents: overridden ? { provider: child.llm.provider, model: child.llm.model } : null,
+      };
+    },
+    configure: (target, selection) => {
+      config = withAgentModelSelection(
+        config,
+        target,
+        selection
+          ? {
+              provider: selection.provider as AgentConfig["llm"]["provider"],
+              model: selection.model,
+            }
+          : null,
+      );
+      if (target === "primary") primaryOverride = selection !== null;
+      onChange();
+    },
+  };
+}
+
 export interface ToolActivity {
   /** Pairs a start with its end (parallel calls to the same tool differ). */
   id: number;
