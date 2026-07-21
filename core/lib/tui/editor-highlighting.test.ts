@@ -10,7 +10,7 @@ describe("highlightEditorLine", () => {
         matchesSlashCommand: (query) => query === "build",
       }),
     ).toEqual([
-      { text: "> " },
+      { text: "> ", tone: "accent", bold: true },
       { text: "inspect " },
       { text: "/build", tone: "accent" },
       { text: " and " },
@@ -25,7 +25,12 @@ describe("highlightEditorLine", () => {
         firstRow: true,
         matchesSlashCommand: (query) => query === "b",
       }),
-    ).toEqual([{ text: "> " }, { text: "/b", tone: "accent" }, { text: " " }, { text: "/bz" }]);
+    ).toEqual([
+      { text: "> ", tone: "accent", bold: true },
+      { text: "/b", tone: "accent" },
+      { text: " " },
+      { text: "/bz" },
+    ]);
   });
 
   test("marks a leading background job without treating embedded & specially", () => {

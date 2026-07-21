@@ -28,7 +28,7 @@ import {
 
 /**
  * The persistent chat surface: raw mode for the whole session, one live
- * region at the bottom (optional progress block → editor rows → status line)
+ * region at the bottom (optional progress → presence → composer → calm footer)
  * repainted in place, and an append-only transcript printed above it — the
  * same cursor-up/clear/repaint trick the DAG painter proved, generalized.
  * The screen renders and routes keys; it decides nothing (ChatSession does).
@@ -80,8 +80,10 @@ export interface ChatScreen extends GuidedInputPort {
   restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: UiTextLine[]): void;
-  /** Ephemeral model-generation indicator, immediately above the editor. */
-  setThinkingLine(line: UiTextLine | null): void;
+  /** Current session state, immediately above the editor. */
+  setPresenceLine(line: UiTextLine): void;
+  /** Set the visible composer identity and empty-state guidance. */
+  setComposer(options: { label: string; placeholder: string }): void;
   /** Replace the status section below the editor (idle repaints are skipped). */
   setStatusLines(lines: UiTextLine[]): void;
   /** Usable line width (columns minus the repaint-safety margin) for
@@ -105,7 +107,8 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: UiTextLine[] = [];
-  let thinkingLine: UiTextLine | null = null;
+  let presenceLine: UiTextLine = "● Ready";
+  let composer = { label: "› ", placeholder: "Ask AgentJ anything" };
   let statusLines: UiTextLine[] = [];
   let hasTranscript = false;
   let started = false;
@@ -195,7 +198,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
             ];
       const askLines = [
         ...wrapToDisplayWidth(
-          `Permission ${escapeTerminalText(pendingModal.request.tool)}${origin}`,
+          `Approval needed · ${escapeTerminalText(pendingModal.request.tool)}${origin}`,
           contentWidth(),
         ),
         ...detail.lines,
@@ -211,10 +214,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         cursorColumn: displayWidth(askLines.at(-1) ?? ""),
       };
     }
-    const editorActivity = [...progress, ...(thinkingLine ? [safeLine(thinkingLine)] : [])];
-    // The transcript owns one blank separator. The live region owns the
-    // second row above an idle editor, which active work replaces.
-    const editorLead = editorActivity.length > 0 ? editorActivity : [""];
+    const editorLead = [...progress, safeLine(presenceLine)];
     if (pendingModal?.kind === "input") {
       const prompt = pendingModal;
       const labelLines = wrapToDisplayWidth(
@@ -269,17 +269,27 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         cursorColumn: layout.cursorColumn,
       };
     }
-    const layout = windowEditorLayout(renderEditorLayout(editor, contentWidth()), 10);
+    const layout = windowEditorLayout(
+      renderEditorLayout(editor, contentWidth(), composer.label),
+      10,
+    );
     const background = editor.text.startsWith("&");
     const editorRows = layout.rows.map((row, index) =>
       safeLine(
         highlightEditorLine(row, {
           background,
           firstRow: index === 0,
+          prefix: composer.label,
           matchesSlashCommand: options.matchesSlashCommand,
         }),
       ),
     );
+    if (editor.text.length === 0 && editorRows[0]) {
+      editorRows[0] = safeLine([
+        { text: composer.label, tone: "accent", bold: true },
+        { text: composer.placeholder, tone: "muted" },
+      ]);
+    }
     const backgroundLines = background
       ? [safeLine([{ text: "BACKGROUND JOB", tone: "warning", bold: true }])]
       : [];
@@ -334,7 +344,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
   const printPermissionRequest = (request: PermissionRequest): void => {
     const origin = request.origin ? ` (${request.origin})` : "";
-    printTranscript(`Permission ${request.tool}${origin}:\n${request.detail}`);
+    printTranscript(`Approval needed · ${request.tool}${origin}:\n${request.detail}`);
   };
 
   /** The request rendered inside the modal: indented, wrapped, clamped. The
@@ -701,7 +711,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     clearTranscript() {
       progressLines = [];
-      thinkingLine = null;
+      presenceLine = "● Ready";
       statusLines = [];
       liveRegion.clearScreen();
       hasTranscript = false;
@@ -723,9 +733,15 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       paint();
     },
 
-    setThinkingLine(line) {
-      if (thinkingLine === line) return;
-      thinkingLine = line;
+    setPresenceLine(line) {
+      if (safeLine(presenceLine) === safeLine(line)) return;
+      presenceLine = line;
+      paint();
+    },
+
+    setComposer(next) {
+      if (composer.label === next.label && composer.placeholder === next.placeholder) return;
+      composer = next;
       paint();
     },
 
@@ -734,7 +750,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     setStatusLines(lines) {
       if (
         lines.length === statusLines.length &&
-        lines.every((line, index) => line === statusLines[index])
+        lines.every((line, index) => safeLine(line) === safeLine(statusLines[index] ?? ""))
       ) {
         return;
       }

@@ -8,16 +8,22 @@ export const highlightEditorLine = (
   options: {
     background: boolean;
     firstRow: boolean;
+    prefix?: string;
     /** Uses the command catalog owned by the composition root. */
     matchesSlashCommand(query: string): boolean;
   },
 ): UiLine => {
-  const prefix = options.firstRow && row.startsWith("> ") ? "> " : "";
+  const requestedPrefix = options.prefix ?? "> ";
+  const prefix = options.firstRow && row.startsWith(requestedPrefix) ? requestedPrefix : "";
   const content = prefix ? row.slice(prefix.length) : row;
   const graphemes = splitGraphemes(content);
   const spans: UiLine[number][] = [];
   if (prefix)
-    spans.push({ text: prefix, ...(options.background ? { tone: "warning", bold: true } : {}) });
+    spans.push({
+      text: prefix,
+      tone: options.background ? "warning" : "accent",
+      bold: true,
+    });
 
   let offset = 0;
   for (const token of findEditorTokens(content)) {

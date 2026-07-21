@@ -1,20 +1,14 @@
 import { expect, test } from "bun:test";
 import { formatTodoDetails, formatTodoProgressLines } from "./todos";
 
-test("formats a framed progress panel with clear todo markers", () => {
+test("keeps the live plan compact and focused on remaining work", () => {
   expect(
     formatTodoProgressLines([
       { id: "one", text: "Inspect the design", status: "completed" },
       { id: "two", text: "Wire the session store", status: "in_progress" },
       { id: "three", text: "Validate", status: "pending" },
     ]),
-  ).toEqual([
-    "  ╭─ Todos 1/3 done · 1 active",
-    "  │ ✓ Inspect the design",
-    "  │ → Wire the session store",
-    "  │ ○ Validate",
-    "  ╰───────────────────────────",
-  ]);
+  ).toEqual(["  Plan · 1/3 complete", "    → Wire the session store", "    ○ Validate"]);
 });
 
 test("shows every active todo without treating one as current", () => {
@@ -25,14 +19,7 @@ test("shows every active todo without treating one as current", () => {
       { id: "three", text: "Test", status: "in_progress" },
       { id: "four", text: "Ship", status: "pending" },
     ]),
-  ).toEqual([
-    "  ╭─ Todos 1/4 done · 2 active",
-    "  │ ✓ Inspect",
-    "  │ → Build",
-    "  │ → Test",
-    "  │ ○ Ship",
-    "  ╰───────────────────────────",
-  ]);
+  ).toEqual(["  Plan · 1/4 complete", "    → Build", "    → Test", "    ○ Ship"]);
 });
 
 test("collapses fully completed todos and expands when work is added", () => {
@@ -41,20 +28,13 @@ test("collapses fully completed todos and expands when work is added", () => {
     { id: "two", text: "Build", status: "completed" as const },
     { id: "three", text: "Test", status: "completed" as const },
   ];
-  expect(formatTodoProgressLines(completed)).toEqual(["  Todos 3/3 done"]);
+  expect(formatTodoProgressLines(completed)).toEqual(["  ✓ Plan complete · 3/3"]);
   expect(
     formatTodoProgressLines([...completed, { id: "four", text: "Ship", status: "pending" }]),
-  ).toEqual([
-    "  ╭─ Todos 3/4 done",
-    "  │ ✓ Inspect",
-    "  │ ✓ Build",
-    "  │ ✓ Test",
-    "  │ ○ Ship",
-    "  ╰────────────────",
-  ]);
+  ).toEqual(["  Plan · 3/4 complete", "    ○ Ship"]);
 });
 
-test("preserves todo order and reports hidden active todos", () => {
+test("prioritizes active work before pending work and reports overflow", () => {
   const items = [
     { id: "one", text: "Todo 0", status: "pending" as const },
     { id: "two", text: "Todo 1", status: "pending" as const },
@@ -62,14 +42,14 @@ test("preserves todo order and reports hidden active todos", () => {
     { id: "four", text: "Todo 3", status: "pending" as const },
   ];
   expect(formatTodoProgressLines(items, 2)).toEqual([
-    "  ╭─ Todos 0/4 done · 1 active",
-    "  │ ○ Todo 0",
-    "  │ ○ Todo 1",
-    "  ╰──── 2 more todos ...",
+    "  Plan · 0/4 complete",
+    "    → Todo 2",
+    "    ○ Todo 0",
+    "    +2 more",
   ]);
 });
 
-test("caps the live panel at four todos and shows overflow on the bottom border", () => {
+test("caps the live plan at four items and shows compact overflow", () => {
   const items = Array.from({ length: 6 }, (_, index) => ({
     id: `todo-${index}`,
     text: `Todo ${index}`,
@@ -77,8 +57,8 @@ test("caps the live panel at four todos and shows overflow on the bottom border"
   }));
   const lines = formatTodoProgressLines(items);
   expect(lines).toHaveLength(6);
-  expect(lines.slice(1, 5).every((line) => line.startsWith("  │ "))).toBe(true);
-  expect(lines[5]).toBe("  ╰──── 2 more todos ...");
+  expect(lines.slice(1, 5).every((line) => line.startsWith("    "))).toBe(true);
+  expect(lines[5]).toBe("    +2 more");
 });
 
 test("formats every todo for explicit transcript output", () => {

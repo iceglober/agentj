@@ -120,7 +120,7 @@ import {
   createProgressTracker,
   type ProgressTracker,
 } from "./lib/tui/progress";
-import { composeStatusSection, composeThinkingLine, shouldWarnContext } from "./lib/tui/status";
+import { composePresenceLine, composeStatusSection, shouldWarnContext } from "./lib/tui/status";
 import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
@@ -259,8 +259,8 @@ export {
 } from "./lib/tui/chat-event-format";
 export { composeProgressLines } from "./lib/tui/progress";
 export {
+  composePresenceLine,
   composeStatusSection,
-  composeThinkingLine,
   formatClock,
   type StatusSectionState,
   shouldWarnContext,
@@ -784,12 +784,7 @@ export async function runAgentjChat(
   // nothing, which looks identical to a freeze.
   let turnProducedOutput = false;
   let spinnerFrame = 0;
-  let sessionStartedAt = Date.now();
-  const turnTokens: { in: number; out: number; ctx: number; cacheRead?: number } = {
-    in: 0,
-    out: 0,
-    ctx: 0,
-  };
+  const turnTokens = { ctx: 0 };
   let lastContextWarning: number | undefined;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
   let todos: ReturnType<typeof createSessionTodos> | undefined;
@@ -941,29 +936,20 @@ export async function runAgentjChat(
       if (event.type === "context-cleared") {
         usageRows.length = 0;
         turnUsage = null;
-        turnTokens.in = 0;
-        turnTokens.out = 0;
         turnTokens.ctx = 0;
-        delete turnTokens.cacheRead;
         lastContextWarning = undefined;
         turnStartedAt = null;
         interruptRequested = false;
         turnProducedOutput = false;
         turnActivityCount = 0;
         completedActivities.length = 0;
-        sessionStartedAt = Date.now();
         screen?.clearTranscript();
         refreshProgress();
         updateStatus();
         return;
       }
       if (event.type === "turn-usage") {
-        turnTokens.in += event.usage.inputTokens;
-        turnTokens.out += event.usage.outputTokens;
         turnTokens.ctx = event.usage.inputTokens;
-        if (event.usage.cacheReadInputTokens !== undefined) {
-          turnTokens.cacheRead = (turnTokens.cacheRead ?? 0) + event.usage.cacheReadInputTokens;
-        }
         if (turnUsage) {
           turnUsage.inputTokens += event.usage.inputTokens;
           turnUsage.outputTokens += event.usage.outputTokens;
@@ -1165,22 +1151,32 @@ export async function runAgentjChat(
     const rootDisplay = root.startsWith(home) ? `~${root.slice(home.length)}` : root;
     updateStatus = (): void => {
       if (!screen) return;
-      screen.setThinkingLine(
-        composeThinkingLine(
-          {
-            thinking: chat.busy && activeTools.size === 0 && !permissionPending,
-            interruptRequested,
-            spinnerFrame,
-            turnStartedAt,
-          },
-          screen.width(),
-        ),
-      );
+      const busy = chat.busy && !permissionPending;
+      screen.setPresenceLine([
+        {
+          text: composePresenceLine(
+            {
+              busy,
+              interruptRequested,
+              spinnerFrame,
+              turnStartedAt,
+              activeTools: activeTools.size,
+              queued: queuedMessages.length,
+            },
+            screen.width(),
+          ),
+          tone: interruptRequested ? "warning" : busy ? "accent" : "success",
+        },
+      ]);
+      const mode = chat.pendingMode;
+      screen.setComposer({
+        label: `${mode} › `,
+        placeholder:
+          mode === "plan" ? "Ask a question or describe a change" : "Describe what to build",
+      });
       screen.setStatusLines(
         composeStatusSection(
           {
-            sessionId: log.id,
-            version: COMMAND_VERSION,
             root: rootDisplay,
             model: (({ provider, model }) => `${provider}/${model}`)(
               composition.modelFor(chat.pendingMode),
@@ -1189,7 +1185,6 @@ export async function runAgentjChat(
             spinnerFrame,
             usage: turnTokens,
             contextSoftLimit: composition.contextSoftLimit,
-            sessionStartedAt,
             jobs: jobRunner
               .list()
               .filter((job) => job.status === "running")

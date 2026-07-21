@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composeStatusSection, composeThinkingLine, formatClock } from "./status";
+import { composePresenceLine, composeStatusSection, formatClock } from "./status";
 import { displayWidth } from "./terminal-editor";
 
 const base = {
@@ -15,102 +15,80 @@ const base = {
   now: 74_000,
 };
 
-describe("composeThinkingLine", () => {
+describe("composePresenceLine", () => {
   const state = {
-    thinking: true,
+    busy: true,
     interruptRequested: false,
     spinnerFrame: 0,
     turnStartedAt: 62_000,
     now: 74_000,
   };
 
-  test("preserves the standard-width line and shortens cleanly when needed", () => {
-    expect(composeThinkingLine(state, 80)).toBe("◐ thinking 12s (esc)");
-    expect(composeThinkingLine(state, 12)).toBe("◐ thinking …");
+  test("makes active work and its interrupt control explicit", () => {
+    expect(composePresenceLine(state, 80)).toBe("◐ Thinking 12s · Esc interrupt");
+    expect(composePresenceLine({ ...state, activeTools: 2, queued: 1 }, 80)).toBe(
+      "◐ Working 12s · 1 queued · Esc interrupt",
+    );
+    expect(composePresenceLine(state, 12)).toBe("◐ Thinking …");
   });
 
-  test("omits inactive thinking", () => {
+  test("shows ready and stopping as first-class states", () => {
     expect(
-      composeThinkingLine(
-        { thinking: false, interruptRequested: false, spinnerFrame: 0, turnStartedAt: null },
+      composePresenceLine(
+        { busy: false, interruptRequested: false, spinnerFrame: 0, turnStartedAt: null },
         80,
       ),
-    ).toBeNull();
+    ).toBe("● Ready");
+    expect(composePresenceLine({ ...state, interruptRequested: true }, 80)).toBe(
+      "◐ Stopping safely…",
+    );
   });
 });
 
 describe("composeStatusSection", () => {
-  test("keeps the full standard-width identity and metrics layout", () => {
+  test("keeps one calm footer with context and contextual controls", () => {
     expect(composeStatusSection(base, 120)).toEqual([
-      "204ed50c · azure/gpt-5.6-sol · plan (tab↕)                                        in 12.4k ▸ out 3.1k · ctx 8.7k · 1m14s",
-      "~/repos/agentj                                                                                          aj 0.1.0-next.32",
-    ]);
-    expect(composeStatusSection(base, 140)).toEqual([
-      "204ed50c · azure/gpt-5.6-sol · plan (tab↕)                                                            in 12.4k ▸ out 3.1k · ctx 8.7k · 1m14s",
-      "~/repos/agentj                                                                                                              aj 0.1.0-next.32",
+      "~/repos/agentj · azure/gpt-5.6-sol · ctx 8.7k                                                      Tab mode · / commands",
     ]);
   });
 
-  test("pins the aj version to the right and shortens the root first", () => {
-    const lines = composeStatusSection({ ...base, root: "~/repos/very/deep/project/root" }, 35);
-    expect(lines[1]).toBe("~/repo…oject/root  aj 0.1.0-next.32");
-  });
-
-  test("keeps session, labeled metrics, and million-scale tokens at 79 columns", () => {
+  test("shortens location before dropping it", () => {
     const lines = composeStatusSection(
       {
         ...base,
-        sessionId: "4316bd7c",
-        version: "0.1.0-next.39",
         root: "~/.glrs/worktrees/agentj/wt-260718-231658-7yr",
-        usage: { in: 1_952_300, out: 24_600, ctx: 60_000 },
-        now: 1_382_000,
       },
       79,
     );
-
-    expect(lines[0]).toContain("4316bd7c · plan (tab↕)");
-    expect(lines[0]).toContain("in 2.0m ▸ out 24.6k · ctx 60.0k · 23m2s");
-    expect(lines[0]).not.toContain("azure/gpt-5.6-sol");
+    expect(lines[0]).toContain("~/.glrs/w…0718-231658-7yr");
+    expect(lines[0]).toContain("azure/gpt-5.6-sol · ctx 8.7k");
     expect(lines.every((line) => displayWidth(line) <= 79)).toBe(true);
   });
 
-  test("degrades from labels to compact metrics before the essential fallback", () => {
+  test("degrades to model, then context, then the essential mode and context", () => {
     const compact = composeStatusSection(base, 55)[0] ?? "";
     const essential = composeStatusSection(base, 30)[0] ?? "";
 
-    expect(compact).toContain("204ed50c · plan (tab↕)");
-    expect(compact).toContain("12.4k▸3.1k·8.7k·1m14s");
-    expect(essential).toContain("plan (tab↕)");
-    expect(essential).toContain("ctx 8.7k · 1m14s");
-  });
-
-  test("shows cache reads in the full form and drops them in compact form", () => {
-    const wide =
-      composeStatusSection({ ...base, usage: { ...base.usage, cacheRead: 8_030 } }, 120)[0] ?? "";
-    const narrow =
-      composeStatusSection({ ...base, usage: { ...base.usage, cacheRead: 8_030 } }, 66)[0] ?? "";
-
-    expect(wide).toContain("in 12.4k · cached 8.0k(65%) ▸ out 3.1k");
-    expect(narrow).not.toContain("cached");
+    expect(compact).toContain("azure/gpt-5.6-sol · ctx 8.7k");
+    expect(compact).toContain("Tab mode · / commands");
+    expect(essential).toBe("plan · ctx 8.7k");
   });
 
   test("shows context against the configured soft limit without a warning glyph", () => {
     expect(composeStatusSection({ ...base, contextSoftLimit: 10_000 }, 120)[0]).toContain(
-      "ctx 8.7k/10.0k ·",
+      "ctx 8.7k/10.0k",
     );
     expect(composeStatusSection({ ...base, contextSoftLimit: 8_000 }, 120)[0]).toContain(
       "ctx 8.7k/8.0k",
     );
   });
 
-  test("fits Unicode roots, versions, and job prompts without screen clipping", () => {
+  test("fits Unicode roots and job prompts without screen clipping", () => {
     const width = 35;
     const lines = composeStatusSection(
       {
         ...base,
         root: "~/界/very/deep/project/🙂",
-        version: "0.1.0-next.32🙂",
         jobs: [
           {
             id: "job-with-a-long-id",
@@ -124,7 +102,7 @@ describe("composeStatusSection", () => {
     );
 
     expect(lines.every((line) => displayWidth(line) <= width)).toBe(true);
-    expect(lines[2]).toContain("job-with");
+    expect(lines[1]).toContain("job-with");
   });
 
   test("preserves standard-width job rows", () => {
@@ -139,7 +117,7 @@ describe("composeStatusSection", () => {
       90,
     );
 
-    expect(lines.slice(2)).toEqual([
+    expect(lines.slice(1)).toEqual([
       "  ◐ [j1] build: Run the test suite  24s",
       "  ◐ [j2] plan: Investigate the failure  14s",
     ]);
