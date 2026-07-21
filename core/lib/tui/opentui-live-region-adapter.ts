@@ -2,7 +2,7 @@ import type { Writable } from "node:stream";
 import type { StyledText, TextChunk } from "@opentui/core";
 import type { LiveLayout, LiveRegionPort } from "./live-region";
 import type { UiBlock, UiSpan, UiTextLine } from "./styles";
-import { escapeTerminalText } from "./terminal-editor";
+import { displayWidth, escapeTerminalText } from "./terminal-editor";
 
 interface TerminalOutput extends Writable {
   columns?: number;
@@ -95,6 +95,23 @@ export async function createOpenTuiLiveRegionAdapter(
     ];
   };
 
+  /** Escaped display width of a single semantic line, matching the chunk text. */
+  const lineWidth = (line: UiTextLine): number => {
+    const spans: UiBlock[number] = typeof line === "string" ? [{ text: line }] : line;
+    return spans.reduce(
+      (total, span) => total + displayWidth(escapeTerminalText(span.text).replace(/\n+/gu, " ")),
+      0,
+    );
+  };
+
+  /** Rows a wrapped block occupies at a given width, so scrollback commits reserve
+   *  enough height for word-wrapped lines instead of clipping to one row each. */
+  const wrappedRows = (lines: readonly UiTextLine[], columns: number): number =>
+    lines.reduce(
+      (total, line) => total + Math.max(1, Math.ceil(lineWidth(line) / Math.max(1, columns))),
+      0,
+    );
+
   const toStyledText = (lines: readonly UiTextLine[]): StyledText => {
     const chunks: TextChunk[] = [];
     lines.forEach((line, index) => {
@@ -145,17 +162,23 @@ export async function createOpenTuiLiveRegionAdapter(
       const block: UiBlock =
         typeof text === "string" ? text.split("\n").map((line) => [{ text: line }]) : text;
       const renderedBlock: UiBlock = spacing === "turn" ? [[], ...block] : block;
-      renderer.writeToScrollback((context) => ({
-        root: new opentui.TextRenderable(context.renderContext, {
-          content: toStyledText(renderedBlock),
+      renderer.writeToScrollback((context) => {
+        // Reserve enough rows for word-wrapped lines; a fixed one-row-per-line
+        // height would clip a long paragraph to its first visual row.
+        const height = Math.max(1, wrappedRows(renderedBlock, context.width));
+        return {
+          root: new opentui.TextRenderable(context.renderContext, {
+            content: toStyledText(renderedBlock),
+            width: context.width,
+            height,
+            wrapMode: "word",
+          }),
           width: context.width,
-          height: Math.max(1, renderedBlock.length),
-        }),
-        width: context.width,
-        height: Math.max(1, renderedBlock.length),
-        startOnNewLine: spacing === "turn",
-        trailingNewline: true,
-      }));
+          height,
+          startOnNewLine: spacing === "turn",
+          trailingNewline: true,
+        };
+      });
     },
     clear() {
       if (disposed) return;
