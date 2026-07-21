@@ -52,7 +52,11 @@ export async function createOpenTuiLiveRegionAdapter(
     clearOnShutdown: false,
     useMouse: false,
     autoFocus: false,
-    useKittyKeyboard: null,
+    // ChatScreen owns input and decodes raw stdin bytes. OpenTUI enables the
+    // kitty keyboard protocol by default (null resolves to flags 5), which
+    // re-encodes Ctrl+C as a CSI-u event the decoder doesn't recognize. Zeroing
+    // the flags keeps the terminal in legacy mode so Ctrl+C stays "\x03".
+    useKittyKeyboard: { disambiguate: false, alternateKeys: false },
     consoleMode: "disabled",
   });
   const footer = new opentui.TextRenderable(renderer, {
@@ -62,6 +66,18 @@ export async function createOpenTuiLiveRegionAdapter(
   });
   renderer.root.add(footer);
   renderer.start();
+
+  // The split footer floats inline at the real cursor row (`renderOffset`), not
+  // pinned to the terminal bottom, so the editor cursor must be measured from
+  // there — `terminalHeight - footerHeight` lands it ~a screenful too low.
+  // renderOffset is private; fall back to the pinned bottom offset if a future
+  // OpenTUI release drops it.
+  const footerTopRow = (): number => {
+    const offset = (renderer as unknown as { renderOffset?: number }).renderOffset;
+    return typeof offset === "number" && Number.isFinite(offset)
+      ? Math.max(0, offset)
+      : Math.max(0, renderer.terminalHeight - renderer.footerHeight);
+  };
 
   const width = (): number =>
     Math.max(1, Math.floor(options.terminalWidth ?? renderer.terminalWidth) - 1);
@@ -152,7 +168,7 @@ export async function createOpenTuiLiveRegionAdapter(
       semanticFooter(layout.lines);
       renderer.setCursorPosition(
         Math.max(0, layout.cursorColumn),
-        Math.max(0, renderer.terminalHeight - renderer.footerHeight + layout.cursorRow),
+        footerTopRow() + Math.max(0, layout.cursorRow),
         true,
       );
       renderer.requestRender();
