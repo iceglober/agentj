@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
@@ -103,6 +104,48 @@ await server.connect(new StdioServerTransport());
     });
     await client.close();
     await client.close();
+  });
+
+  test("isolates noisy stdio startup errors from the parent terminal", async () => {
+    const serverFixture = join(process.cwd(), `.agentj-mcp-noisy-server-${crypto.randomUUID()}.ts`);
+    const clientFixture = join(process.cwd(), `.agentj-mcp-noisy-client-${crypto.randomUUID()}.ts`);
+    fixtures.push(serverFixture, clientFixture);
+    await writeFile(
+      serverFixture,
+      `process.stderr.write("RPA_FILES_S3_BUCKET not configured.\\n");
+process.exit(1);
+`,
+    );
+    await writeFile(
+      clientFixture,
+      `import { mcpServerConfigSchema } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "core/lib/mcp/index.ts")).href)};
+import { connectModelContextProtocolServer } from ${JSON.stringify(pathToFileURL(join(process.cwd(), "core/lib/mcp/model-context-protocol-adapter.ts")).href)};
+try {
+  await connectModelContextProtocolServer("noisy", mcpServerConfigSchema.parse({
+    transport: "stdio",
+    command: process.execPath,
+    args: [${JSON.stringify(serverFixture)}],
+  }), { root: process.cwd() });
+  process.stdout.write(JSON.stringify({ state: "connected" }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({ state: "failed", message: String(error) }));
+}
+`,
+    );
+
+    const child = Bun.spawn([process.execPath, clientFixture], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({ state: "failed" });
+    expect(stderr).toBe("");
   });
 
   test("connects over Streamable HTTP and sends configured headers", async () => {
