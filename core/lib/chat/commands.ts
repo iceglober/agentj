@@ -1,26 +1,24 @@
-import { type ConfigField, configField } from "../config/fields";
 import { type ConfigCliHandlers, type ConfigCliResult, listConfigPaths } from "../config-cli";
 import { fuzzyFilter } from "../fuzzy";
 import { providerNames } from "../llm";
-import {
-  type McpPromptCatalogEntry,
-  type McpPromptResult,
-  mcpServerConfigSchema,
-  renderMcpPrompt,
-} from "../mcp";
+import { mcpServerConfigSchema, renderMcpPrompt } from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
-import type { UndoStack } from "../session/undo";
-import type { TodoList } from "../todos";
-import { type ListEditorAction, type ListEditorState, reduceListEditor } from "../tui/list-editor";
-import { listOverflowFooter, windowList } from "../tui/list-window";
 import { formatDuration, formatToolActivityLabel } from "../tui/progress";
 import { formatTodoDetails } from "../tui/todos";
 import type { UpdateChannel } from "../update";
-import { type CostPrice, formatCostReport, type UsageRecord } from "./cost";
-import type { ChatEvent } from "./events";
+import type { ChatCommandContext, ModelTarget, SkillCommand } from "./command-context";
+import { configActions, isSensitiveConfigPath, runConfigCommand } from "./config-command";
+import { formatCostReport } from "./cost";
 import type { GuidedInputPort } from "./guided-input";
-import type { JobRunner } from "./jobs";
-import type { ChatSession } from "./session";
+import { modelTargets, runModelCommand } from "./model-command";
+
+export type {
+  ChatCommandContext,
+  ModelController,
+  ModelSelection,
+  ModelTarget,
+  SkillCommand,
+} from "./command-context";
 
 /**
  * Input routing for the chat screen: slash commands (handled locally, never
@@ -48,74 +46,6 @@ export function parseInput(raw: string): ParsedInput {
   return { kind: "message", text };
 }
 
-/**
- * A discovered Agent Skill surfaced as a slash command (the composition root
- * adapts core/lib/skills discoveries into these). Built-in commands win name
- * collisions everywhere skills appear.
- */
-export interface SkillCommand {
-  name: string;
-  summary: string;
-  /** Mode to switch to before the skill turn starts (metadata agentj-mode). */
-  mode?: "plan" | "build";
-  /** The full turn prompt for an explicit invocation with these arguments. */
-  prompt(args: string): string;
-}
-
-export type ModelTarget = "primary" | "subagents";
-
-export interface ModelSelection {
-  provider: string;
-  model: string;
-}
-
-export interface ModelController {
-  current(): { primary: ModelSelection; subagents: ModelSelection | null };
-  providers(): readonly string[];
-  modelSuggestions(provider: string): readonly string[];
-  configure(target: ModelTarget, selection: ModelSelection | null): Promise<boolean>;
-}
-
-export interface ChatCommandContext {
-  session: ChatSession;
-  jobs: JobRunner;
-  undo?: UndoStack;
-  emit(event: ChatEvent): void;
-  /** Ends the interactive session. */
-  quit(): void;
-  /** Requests a self-update and then allows the caller to exit cleanly. */
-  requestUpdate?(channel: UpdateChannel): Promise<void> | void;
-  config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
-  models?: ModelController;
-  cost?: {
-    rows(): readonly UsageRecord[];
-    prices: Readonly<Record<string, CostPrice>>;
-  };
-  activity?: {
-    list(): readonly { tool: string; detail: string; elapsedMs: number }[];
-  };
-  todos?: {
-    list(): TodoList;
-  };
-  mcp?: {
-    statuses(): readonly McpRuntimeStatus[];
-    prompts?(): readonly McpPromptCatalogEntry[];
-    getPrompt?(
-      server: string,
-      prompt: string,
-      args: Record<string, string>,
-    ): Promise<McpPromptResult>;
-    reload(name?: string): Promise<void>;
-    /** Interactive OAuth flow for an HTTP server (browser round-trip). */
-    authorize?(
-      name: string,
-      hooks?: { onAuthorizationUrl?(url: string): void },
-    ): Promise<{ ok: true } | { ok: false; reason: string }>;
-  };
-  guided?: GuidedInputPort;
-  skills?: readonly SkillCommand[];
-}
-
 type ChatCommand = {
   summary: string;
   /** The command starts a turn whose transcript label announces the command. */
@@ -136,94 +66,15 @@ const mcpActions = {
   set: "Set an advanced server JSON definition",
 } as const;
 
-const modelTargets = {
-  primary: "Primary agent",
-  subagents: "Subagents and background jobs",
-} as const;
-
-const configActions = {
-  get: "Read a global configuration value",
-  set: "Set a global configuration value",
-  delete: "Delete a global configuration value",
-} as const;
-
 const splitHead = (value: string): [string, string] => {
   const match = value.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/u);
   return [match?.[1] ?? "", match?.[2] ?? ""];
 };
 
-const isSensitiveConfigPath = (key: string): boolean =>
-  /(?:^|\.)(?:headers|env)(?:\.|$)/u.test(key) ||
-  /(?:api[_-]?key|token|secret|password)/iu.test(key);
-
 const serverNameError = (name: string): string | null =>
   /^[A-Za-z0-9_-]+$/u.test(name) ? null : "Use letters, numbers, underscores, or hyphens.";
 
 const successful = (result: ConfigCliResult): boolean => result.ok;
-
-const reloadConfigPath = async (context: ChatCommandContext, key: string): Promise<void> => {
-  if (!key.startsWith("mcp.")) return;
-  const match = key.match(/^mcp\.servers\.([A-Za-z0-9_-]+)/u);
-  await context.mcp?.reload(match?.[1]);
-};
-
-const listEditorLabel = (key: string, state: ListEditorState): string => {
-  const window = windowList(state.items, state.cursor);
-  const items = window.items.map((item, index) => {
-    const selected = window.start + index === state.cursor ? ">" : " ";
-    return `${selected} ${item}`;
-  });
-  const overflow = listOverflowFooter(window);
-  return [
-    `Edit ${key}`,
-    ...(items.length > 0 ? items : ["(no items)"]),
-    ...(overflow ? [overflow] : []),
-  ].join("\n");
-};
-
-const editStringArray = async (
-  context: ChatCommandContext,
-  key: string,
-  initial: readonly string[],
-): Promise<string[] | null> => {
-  const guided = requireGuidedInput(context);
-  if (!guided) return null;
-  let state: ListEditorState = { items: [...initial], cursor: 0 };
-  while (true) {
-    const multi = state.items.length > 1;
-    const actions = [
-      "add",
-      ...(state.items.length > 0 ? ["edit", "delete", "select up", "select down"] : []),
-      ...(multi ? ["move item up", "move item down"] : []),
-      "save",
-    ];
-    const action = await guided.askInput({
-      label: listEditorLabel(key, state),
-      choices: actions,
-      validate: (value) => (actions.includes(value) ? null : "Choose a list action."),
-    });
-    if (action === null) return null;
-    if (action === "save") return state.items;
-    const commands: Record<string, Exclude<ListEditorAction, { item: string }>["type"]> = {
-      "select up": "move-up",
-      "select down": "move-down",
-      "move item up": "reorder-up",
-      "move item down": "reorder-down",
-      delete: "delete",
-    };
-    const kind = commands[action];
-    if (kind) {
-      state = reduceListEditor(state, { type: kind });
-      continue;
-    }
-    const item = await guided.askInput({
-      label: action === "add" ? `Add item to ${key}` : `Edit item in ${key}`,
-      validate: (value) => (value.trim() ? null : "An item is required."),
-    });
-    if (item === null) return null;
-    state = reduceListEditor(state, { type: action === "add" ? "add" : "edit", item: item.trim() });
-  }
-};
 
 const formatMcpStatus = (status: McpRuntimeStatus): string => {
   const label = `${status.name} [${status.transport}]`;
@@ -247,83 +98,6 @@ const requireConfig = (context: ChatCommandContext): ConfigCliHandlers | null =>
     return null;
   }
   return context.config as ConfigCliHandlers;
-};
-
-const runConfigCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
-  const [action, remainder] = splitHead(args);
-  if (!(action in configActions)) {
-    context.emit({ type: "notice", text: "Usage: /config get|set|delete <path> [JSON value]" });
-    return;
-  }
-  const handlers = requireConfig(context);
-  if (!handlers) return;
-  const [key, suppliedValue] = splitHead(remainder);
-  if (!key) {
-    context.emit({
-      type: "notice",
-      text: `Usage: /config ${action} <path>${action === "set" ? " [JSON value]" : ""}`,
-    });
-    return;
-  }
-  if (action === "get") {
-    if (isSensitiveConfigPath(key) || key === "mcp" || key.startsWith("mcp.servers")) {
-      context.emit({ type: "notice", text: `${key} is sensitive and cannot be displayed.` });
-      return;
-    }
-    await handlers.get({ key });
-    return;
-  }
-  if (action === "delete") {
-    const result = await handlers.delete({ key });
-    if (successful(result)) await reloadConfigPath(context, key);
-    return;
-  }
-
-  if (key === "providers.azure.api_key" || key === "agent.llm.providers.azure.apiKey") {
-    const result = await handlers.set({ key, secret: true });
-    if (successful(result)) await reloadConfigPath(context, key);
-    return;
-  }
-  let field: ConfigField | undefined;
-  try {
-    field = configField(key);
-  } catch {
-    field = undefined;
-  }
-  if (field?.kind === "string-array") {
-    const current = await handlers.get({ key });
-    if (
-      !current.ok ||
-      !Array.isArray(current.value) ||
-      !current.value.every((item) => typeof item === "string")
-    ) {
-      return;
-    }
-    const items = await editStringArray(context, key, current.value);
-    if (items === null) {
-      context.emit({ type: "notice", text: "Configuration update cancelled." });
-      return;
-    }
-    const result = await handlers.set({ key, value: JSON.stringify(items) });
-    if (successful(result)) await reloadConfigPath(context, key);
-    return;
-  }
-  let value = suppliedValue;
-  if (!value) {
-    const guided = requireGuidedInput(context);
-    if (!guided) return;
-    const entered = await guided.askInput({
-      label: `Value for ${key}`,
-      masked: isSensitiveConfigPath(key),
-    });
-    if (entered === null) {
-      context.emit({ type: "notice", text: "Configuration update cancelled." });
-      return;
-    }
-    value = isSensitiveConfigPath(key) ? JSON.stringify(entered) : entered;
-  }
-  const result = await handlers.set({ key, value });
-  if (successful(result)) await reloadConfigPath(context, key);
 };
 
 const setMcpServer = async (
@@ -557,72 +331,6 @@ const runUpdateCommand = async (context: ChatCommandContext, args: string): Prom
   }
   await context.requestUpdate(channel as UpdateChannel);
   context.quit();
-};
-
-const runModelCommand = async (context: ChatCommandContext, args: string): Promise<void> => {
-  if (!context.models) {
-    context.emit({ type: "notice", text: "Model selection is unavailable in this session." });
-    return;
-  }
-  const guided = requireGuidedInput(context);
-  if (!guided) return;
-
-  let target = args.trim();
-  if (!target) {
-    const selected = await guided.askInput({
-      label: "Configure which agents?",
-      choices: Object.keys(modelTargets),
-      validate: (value) => (value in modelTargets ? null : "Choose primary or subagents."),
-    });
-    if (selected === null) return;
-    target = selected;
-  }
-  if (!(target in modelTargets)) {
-    context.emit({ type: "notice", text: "Usage: /model [primary|subagents]" });
-    return;
-  }
-  const modelTarget = target as ModelTarget;
-  const current = context.models.current();
-  const selected = modelTarget === "primary" ? current.primary : current.subagents;
-  const providerChoices = [
-    ...(selected ? [selected.provider] : []),
-    ...(modelTarget === "subagents" ? ["inherit"] : []),
-    ...context.models.providers(),
-  ].filter((value, index, values) => values.indexOf(value) === index);
-  const provider = await guided.askInput({
-    label: `${modelTargets[modelTarget]} provider`,
-    choices: providerChoices,
-    validate: (value) =>
-      providerChoices.includes(value) ? null : `Choose ${providerChoices.join(" or ")}.`,
-  });
-  if (provider === null) return;
-  if (provider === "inherit") {
-    if (await context.models.configure("subagents", null)) {
-      context.emit({
-        type: "notice",
-        text: "Subagents now inherit the primary provider and model on new work.",
-      });
-    }
-    return;
-  }
-
-  const modelChoices = [
-    ...(selected?.provider === provider ? [selected.model] : []),
-    ...context.models.modelSuggestions(provider),
-  ].filter((value, index, values) => value.length > 0 && values.indexOf(value) === index);
-  const model = await guided.askInput({
-    label: `${modelTargets[modelTarget]} model ID`,
-    choices: modelChoices,
-    validate: (value) => (value.trim().length > 0 ? null : "Model ID is required."),
-  });
-  if (model === null) return;
-  const selection = { provider, model: model.trim() };
-  if (await context.models.configure(modelTarget, selection)) {
-    context.emit({
-      type: "notice",
-      text: `${modelTargets[modelTarget]} will use ${selection.provider}/${selection.model} on new work.`,
-    });
-  }
 };
 
 /** Registry keyed by command name — same idiom as checkGraders/editModes. */
