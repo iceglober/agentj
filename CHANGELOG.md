@@ -1,5 +1,15 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.52
+
+### Minor Changes
+
+- 72345e7: Make `gpt-5.6-luna` the cost-efficient default model, ground claimed validation in successful command evidence, compact long-running chat context automatically or with `/compact`, and add a frozen multi-seed reliability evaluation baseline with richer cost and latency reporting.
+
+### Patch Changes
+
+- 7c527da: Require background workers to verify repository access before reporting a missing-authentication blocker.
+
 ## 0.1.0-next.51
 
 ### Patch Changes
