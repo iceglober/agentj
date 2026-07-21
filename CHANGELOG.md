@@ -1,5 +1,12 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.50
+
+### Patch Changes
+
+- 5c76c02: Keep transcript events in emission order and use semantic spacing so background completions appear where they occurred without adding extra blank rows between related events.
+- 1b1500e: Prevent MCP stdio startup diagnostics from being written directly to the terminal, keeping the TUI intact while preserving the normal MCP failure and reload guidance.
+
 ## 0.1.0-next.49
 
 ### Patch Changes
