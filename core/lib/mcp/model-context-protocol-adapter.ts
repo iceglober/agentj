@@ -92,6 +92,7 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
           args: config.args,
           ...(config.cwd ? { cwd: resolve(options.root, config.cwd) } : { cwd: options.root }),
           env: resolved.env,
+          stderr: "ignore",
         })
       : new StreamableHTTPClientTransport(new URL(config.url), {
           requestInit: { headers: resolved.headers },
