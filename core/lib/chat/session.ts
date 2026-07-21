@@ -29,6 +29,8 @@ export interface ChatSessionDependencies {
   undo?: UndoStack;
   /** Optional session-owned state cleared with model context and history. */
   todos?: SessionTodoLifecycle;
+  /** Request-context ceiling; old turns compact automatically at 75%. */
+  contextSoftLimit?: number;
   onEvent?(event: ChatEvent): void | Promise<void>;
   /**
    * Optional composition-root continuation transform run after a successful
@@ -93,6 +95,8 @@ export interface ChatSession {
   resumePendingWork(): void;
   /** Start a fresh model context and durable visible history. Returns false while busy. */
   clearContext(): Promise<boolean>;
+  /** Compact old tool-heavy turns while preserving recent conversation. */
+  compactContext(): Promise<boolean>;
   /** The resumable continuation for the session log. */
   snapshot(): { messages: unknown[]; mode: ChatMode };
 }
@@ -171,6 +175,15 @@ export function createChatSession(
         ...(transcriptText ? { transcriptText } : {}),
       });
       if (deps.transformContinuation) messages = await deps.transformContinuation(messages, mode);
+      const latestContext = result.steps.at(-1)?.usage?.inputTokens;
+      const softLimit = deps.contextSoftLimit;
+      if (softLimit && latestContext && latestContext >= softLimit * 0.75) {
+        const compacted = agent.compactContinuation?.(messages) ?? messages;
+        if (compacted !== messages) {
+          messages = compacted;
+          emit({ type: "notice", text: "Context compacted after reaching 75% of its soft limit." });
+        }
+      }
       await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
       return { succeeded: true, mode, text: result.text };
     } catch (error) {
@@ -402,6 +415,20 @@ export function createChatSession(
         reset: true,
       });
       emit({ type: "context-cleared" });
+      return true;
+    },
+
+    async compactContext() {
+      if (busy) return false;
+      const agent = await deps.agentFor(mode);
+      const compacted = agent.compactContinuation?.(messages) ?? messages;
+      const changed = compacted !== messages;
+      messages = compacted;
+      await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
+      emit({
+        type: "notice",
+        text: changed ? "Context compacted." : "Context is already compact.",
+      });
       return true;
     },
 

@@ -27,8 +27,8 @@ bun run agentj -- --resume <id>        # reopen a specific session
 bun run agentj -- run "add a --json flag"              # non-interactive one-shot (build)
 bun run agentj -- run --plan "how does auth work?"     # non-interactive, read-only
 bun run agentj -- run --allow-all "fix the tests"      # asks auto-resolve to allow
-./bin/agentj config set agent.llm.model gpt-5.6-sol
-./bin/agentj config set agent.tools.subagents.model gpt-5.6-luna  # tier-route fan-out work
+./bin/agentj config set agent.llm.model gpt-5.6-luna  # default; cost-efficient primary
+./bin/agentj config set agent.tools.subagents.model gpt-5.6-luna  # explicit fan-out override
 ./bin/agentj config set --secret providers.azure.api_key
 agentj update --channel next             # update an installed CLI now
 ./bin/agentj eval | eval report | eval selfcheck

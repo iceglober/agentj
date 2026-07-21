@@ -806,6 +806,14 @@ export const chatCommands: Record<string, ChatCommand> = {
       }
     },
   },
+  compact: {
+    summary: "Compact old conversation and tool history",
+    async run(context) {
+      if (!(await context.session.compactContext())) {
+        context.emit({ type: "notice", text: "Cannot compact context while a turn is running." });
+      }
+    },
+  },
   quit: {
     summary: "End the session",
     run(context) {

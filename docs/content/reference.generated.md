@@ -19,6 +19,7 @@ In-session slash commands and key bindings — the same list `/help` prints, gen
 - `/undo` — Revert the agent's last file changes
 - `/redo` — Re-apply reverted changes
 - `/clear` — Start a fresh conversation context
+- `/compact` — Compact old conversation and tool history
 - `/quit` — End the session
 
 ### Input & keys

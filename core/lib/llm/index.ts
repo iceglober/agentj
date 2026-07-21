@@ -133,7 +133,7 @@ export const llmConfigSchema = z.object({
   /** Which generation runtime to drive the model + tool loop with. */
   runtime: z.enum(runtimeNames).default("ai-sdk"),
   provider: z.enum(providerNames).default("azure"),
-  model: z.string().default("gpt-5.6-sol"),
+  model: z.string().default("gpt-5.6-luna"),
   /**
    * Ordered, provider-agnostic model ladder: index 0 is the frontier tier
    * (most capable, most expensive), each later entry a cheaper rung. Routing

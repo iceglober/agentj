@@ -53,6 +53,7 @@ async function loadTasks(tasksDir: string, split: string, only?: string[]): Prom
   const dir = join(tasksDir, split);
   const tasks: Task[] = [];
   for await (const file of new Bun.Glob("*.ts").scan({ cwd: dir, absolute: true })) {
+    if (file.endsWith(".test.ts")) continue;
     const mod = (await import(file)) as { default: Task | Task[] };
     const exported = Array.isArray(mod.default) ? mod.default : [mod.default];
     tasks.push(...exported);

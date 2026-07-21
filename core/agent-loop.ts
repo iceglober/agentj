@@ -1343,6 +1343,7 @@ export async function runAgentjChat(
         log,
         undo: undoStack,
         todos: sessionTodos,
+        contextSoftLimit: composition.contextSoftLimit,
         reflectionEvents: composition.reflectionEvents,
         reflectPlan: composition.reflectPlan,
         onEvent: emit,

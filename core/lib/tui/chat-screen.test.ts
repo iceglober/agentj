@@ -44,7 +44,12 @@ function makeScreen(
   output.isTTY = color ?? true;
   const screen = createChatScreen({
     stdin: input,
-    liveRegion: createAnsiLiveRegionAdapter({ stdout: output, terminalHeight, terminalWidth }),
+    liveRegion: createAnsiLiveRegionAdapter({
+      stdout: output,
+      terminalHeight,
+      terminalWidth,
+      color: color ?? true,
+    }),
     escapeFlushMs: 5,
     quitWindowMs: 100,
     initialHistory,
@@ -284,7 +289,7 @@ describe("createChatScreen", () => {
     const shown = renderScreen(text()).join("\n");
     expect(shown).toContain("› /help — List commands and keys");
     expect(shown).toContain("/activity — Show completed tool activity for this session");
-    expect(shown).toContain("… ↓ 7 more");
+    expect(shown).toContain("… ↓ 8 more");
 
     input.write("bld\t\r");
     await settle();

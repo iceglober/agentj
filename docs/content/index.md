@@ -37,8 +37,8 @@ agentj run --allow-all "fix the tests"      # one task; permission asks auto-res
 Settings layer from `~/.config/aj/config.json`, then `.aj/config.json`, then `.aj/config.local.json` in the current Git worktree. The legacy `~/.config/agentj/config.json` is read only when the canonical global file is absent. Use the `config` subcommand to edit canonical global settings:
 
 ```
-agentj config set agent.llm.model gpt-5.6-sol
-agentj config set agent.tools.subagents.model gpt-5.6-luna   # route fan-out to a cheaper tier
+agentj config set agent.llm.model gpt-5.6-luna               # default; cost-efficient primary
+agentj config set agent.tools.subagents.model gpt-5.6-luna   # explicit fan-out override
 agentj config get agent.llm.model
 ```
 

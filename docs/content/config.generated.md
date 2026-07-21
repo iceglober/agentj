@@ -4,7 +4,7 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 
 :::details Show all configuration keys
 
-- `agent.llm.model` (default: `"gpt-5.6-sol"`) — The primary model id the agent runs on.
+- `agent.llm.model` (default: `"gpt-5.6-luna"`) — The primary model id the agent runs on.
 - `agent.llm.provider` (default: `"azure"`) — Model provider. Azure AI Foundry is wired in.
 - `agent.llm.providers.azure.apiKey` (default: unset) — Azure AI Foundry API key, stored only in your OS keychain.
 - `agent.llm.tiers` (default: `[]`) — Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.
@@ -20,7 +20,7 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 - `agent.tools.subagents.concurrency` (default: `2`) — Maximum subagents run at once within a single fan-out.
 - `agent.tools.edit.mode` (default: `"batch"`) — Edit-tool strategy: `exact`, `batch`, or `hash`.
 - `agent.tools.maxOutputChars` (default: `30000`) — Character cap on tool output returned to the model. Over-cap output spills to a session file so nothing is lost.
-- `agent.context.softLimit` (default: unset) — Request input-token threshold that triggers `onLimit`. Unset means no ceiling.
+- `agent.context.softLimit` (default: unset) — Request input-token threshold: interactive history compacts at 75%, then `onLimit` applies at the threshold. Unset means no ceiling.
 - `agent.context.onLimit` (default: `"warn"`) — Behavior when a request crosses the soft limit: `warn` posts a notice to wrap up or delegate.
 - `agent.steps` (default: `100`) — Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.
 - `permissions.edit` (default: `"allow"`) — Policy for file edits in build mode: `allow`, `ask`, or `deny`.
