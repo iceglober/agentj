@@ -1,5 +1,11 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.51
+
+### Patch Changes
+
+- 24f43bc: Make MCP tool and resource discovery resilient to natural-language queries by ignoring punctuation, ranking partial matches, and showing a server catalog when a scoped search has no exact matches.
+
 ## 0.1.0-next.50
 
 ### Patch Changes

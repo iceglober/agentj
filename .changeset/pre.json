@@ -33,6 +33,7 @@
     "fix-background-job-finalization-warnings",
     "fix-delegated-job-failures",
     "float-live-region",
+    "fuzzy-mcp-search",
     "grounded-completions",
     "initial-v0.1",
     "interactive-update-notice",
