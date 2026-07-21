@@ -17,8 +17,10 @@ import { createRuntime, type LlmConfig } from "../lib/llm";
 import { getSandbox } from "../lib/sandbox";
 import { createSandboxProviderLocal } from "../lib/sandbox/local-adapter";
 import { createSandboxProviderMicrosandbox } from "../lib/sandbox/microsandbox-adapter";
+import { createKeyringSecretStore } from "../lib/secrets/keyring-adapter";
 import { createInProcessAdapter } from "./adapters/in-process";
 import { createSandboxFixtureFactory } from "./adapters/sandbox-env";
+import { resolveEvalAuth } from "./auth";
 
 // Resolve paths against the repo root (two levels up from core/eval/run.ts) so
 // the harness works regardless of the cwd it is invoked from.
@@ -109,7 +111,7 @@ async function main() {
   const concurrency = Number(flag("concurrency") ?? evalCfg.concurrency);
   const runId = flag("run-id") ?? new Date().toISOString().replace(/[:.]/g, "-");
 
-  const configs = await loadRunConfigs(resolve(evalCfg.configsDir), csv("config"));
+  let configs = await loadRunConfigs(resolve(evalCfg.configsDir), csv("config"));
   const tasks = await loadTasks(resolve(evalCfg.tasksDir), split, csv("task"));
 
   if (configs.length === 0) throw new Error("no run configs matched");
@@ -208,6 +210,11 @@ async function main() {
     process.exit(violations === 0 ? 0 : 1);
   }
 
+  const auth = await resolveEvalAuth(configs, cfg.agent.llm, {
+    store: createKeyringSecretStore({}),
+  });
+  configs = auth.configs;
+
   // --- real runs ----------------------------------------------------------
   const resultsDir = resolve(evalCfg.resultsDir);
   const trajDir = join(resolve(evalCfg.trajDir), runId);
@@ -220,7 +227,7 @@ async function main() {
   );
   const factory = createSandboxFixtureFactory(sandbox, { root: "/workspace/eval" });
   const adapter = createInProcessAdapter(sandbox);
-  const judgeCtx = buildJudge(evalCfg, cfg.agent.llm);
+  const judgeCtx = buildJudge(evalCfg, auth.baseLlm);
 
   // Serialize appends so concurrent trials never interleave a JSONL line.
   let writeChain: Promise<void> = Promise.resolve();

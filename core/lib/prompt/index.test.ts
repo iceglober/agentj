@@ -212,24 +212,34 @@ describe("composePrompt", () => {
     }
   });
 
+  test("completion reports preserve answers embedded in mixed implementation requests", () => {
+    const composed = composePrompt(AUTO, inputs({ model: "gpt-5.6-luna", mode: "build" }), CTX);
+    expect(composed.instructions).toContain(
+      "Put answers to informational\nor no-code questions in summary",
+    );
+    expect(composed.instructions).toContain(
+      "openQuestions is only for unresolved questions the user still needs to answer",
+    );
+  });
+
   test("12c. non-5.6 profiles keep hallucinationGuard off by default", () => {
     const build = composePrompt(AUTO, inputs({ model: "gpt-5.4", mode: "build" }), CTX);
     expect(build.instructions).not.toContain("# Evidence rule");
   });
 
   test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
-    // Versions captured 2026-07-20 after clarifying foreground delegation
-    // versus detached background jobs. A failure here means prompt CONTENT
+    // Versions captured 2026-07-20 after preserving informational answers in
+    // mixed implementation requests. A failure here means prompt CONTENT
     // changed — a separate, eval-validated decision, never a refactor side
     // effect. Nano's standalone delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "46cc4803bbbc", delegate: "46cc4803bbbc" },
-      "gpt-5.6-terra": { primary: "00d0e8e9fedf", delegate: "00d0e8e9fedf" },
-      "gpt-5.6-luna": { primary: "5f56e8b4a36f", delegate: "5f56e8b4a36f" },
-      "gpt-5.4": { primary: "4aee67ba2975", delegate: "4aee67ba2975" },
-      "gpt-5.4-nano": { primary: "988884fa561d", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "dd92cfcbe4e8", delegate: "dd92cfcbe4e8" },
-      "claude-x": { primary: "cc4fee863014", delegate: "cc4fee863014" },
+      "gpt-5.6-sol": { primary: "e4baf021b573", delegate: "e4baf021b573" },
+      "gpt-5.6-terra": { primary: "f3ba218684a6", delegate: "f3ba218684a6" },
+      "gpt-5.6-luna": { primary: "4ddc109847ad", delegate: "4ddc109847ad" },
+      "gpt-5.4": { primary: "230a76bdfaad", delegate: "230a76bdfaad" },
+      "gpt-5.4-nano": { primary: "e34394d49d93", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "dc05e7dcffa8", delegate: "dc05e7dcffa8" },
+      "claude-x": { primary: "814ef31ccd1c", delegate: "814ef31ccd1c" },
     };
     const pinCtx = {
       cwd: "/repo",
