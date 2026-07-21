@@ -239,23 +239,38 @@ const comparableText = (...values: Array<string | undefined>): string =>
     .join(" ")
     .toLowerCase();
 
+/** Search words are punctuation-insensitive so natural requests such as
+ * "issue/project lookup" match names like "list_issues". */
+const searchTerms = (value: string): string[] => value.toLowerCase().match(/[a-z0-9]+/gu) ?? [];
+
 const searchScore = (query: string, name: string, text: string): number => {
-  const terms = query.toLowerCase().trim().split(/\s+/u).filter(Boolean);
+  const terms = searchTerms(query);
   if (terms.length === 0) return 1;
-  const lowerName = name.toLowerCase();
+  const nameTerms = searchTerms(name);
+  const textTerms = new Set(searchTerms(text));
+  let matched = 0;
   let score = 0;
   for (const term of terms) {
-    if (!text.includes(term)) return -1;
-    score +=
-      lowerName === term
-        ? 100
-        : lowerName.startsWith(term)
-          ? 20
-          : lowerName.includes(term)
-            ? 10
-            : 1;
+    if (nameTerms.includes(term)) {
+      matched += 1;
+      score += 100;
+    } else if (textTerms.has(term)) {
+      matched += 1;
+      score += 1;
+    }
   }
-  return score;
+  // Keep unrelated global searches empty, while server-scoped callers can use
+  // the catalog fallback below to recover from an overly specific request.
+  return matched === 0 ? -1 : score + matched / terms.length;
+};
+
+const catalogSearch = <T extends { score: number }>(
+  entries: T[],
+  server: string | undefined,
+): T[] => {
+  const matches = entries.filter((entry) => entry.score >= 0);
+  if (matches.length > 0 || !server) return matches;
+  return entries.map((entry) => ({ ...entry, score: 0 }));
 };
 
 const boundedJson = (value: unknown, maxChars: number, spill?: SpillWriter): string =>
@@ -550,27 +565,29 @@ export function createMcpExternalTools(
       if (states.some((state) => state.config.tools[mode].length > 0)) {
         tools.find_mcp_tools = defineTool({
           description:
-            "Search configured MCP tools. Returns canonical tool names and JSON input schemas for call_mcp_tool.",
+            "Search configured MCP tools by natural-language keywords. Punctuation is ignored; when server is specified, a no-match query returns that server's catalog. Returns canonical tool names and JSON input schemas for call_mcp_tool.",
           inputSchema: findToolsInput,
           execute: async ({ query, server, limit }) => {
             await Promise.all(states.map(refreshTools));
             return boundedJson(
-              eligibleTools()
-                .filter((entry) => !server || entry.state.name === server)
-                .map((entry) => ({
-                  ...entry,
-                  score: searchScore(
-                    query,
-                    entry.remote.name,
-                    comparableText(
-                      entry.state.name,
+              catalogSearch(
+                eligibleTools()
+                  .filter((entry) => !server || entry.state.name === server)
+                  .map((entry) => ({
+                    ...entry,
+                    score: searchScore(
+                      query,
                       entry.remote.name,
-                      entry.remote.title,
-                      entry.remote.description,
+                      comparableText(
+                        entry.state.name,
+                        entry.remote.name,
+                        entry.remote.title,
+                        entry.remote.description,
+                      ),
                     ),
-                  ),
-                }))
-                .filter((entry) => entry.score >= 0)
+                  })),
+                server,
+              )
                 .sort((a, b) => b.score - a.score || a.canonical.localeCompare(b.canonical))
                 .slice(0, limit)
                 .map(({ state, remote, canonical }) => ({
@@ -624,33 +641,36 @@ export function createMcpExternalTools(
 
       if (states.some((state) => state.config.resources[mode].length > 0)) {
         tools.find_mcp_resources = defineTool({
-          description: "Search configured MCP resources and URI templates available in this mode.",
+          description:
+            "Search configured MCP resources and URI templates by natural-language keywords. Punctuation is ignored; when server is specified, a no-match query returns that server's catalog.",
           inputSchema: findResourcesInput,
           execute: async ({ query, server, limit }) => {
             await Promise.all(states.map(refreshResources));
             return boundedJson(
-              eligibleResources()
-                .filter((entry) => !server || entry.state.name === server)
-                .map((entry) => {
-                  const uri =
-                    entry.kind === "resource" ? entry.resource.uri : entry.resource.uriTemplate;
-                  return {
-                    entry,
-                    uri,
-                    score: searchScore(
-                      query,
-                      entry.resource.name,
-                      comparableText(
-                        entry.state.name,
+              catalogSearch(
+                eligibleResources()
+                  .filter((entry) => !server || entry.state.name === server)
+                  .map((entry) => {
+                    const uri =
+                      entry.kind === "resource" ? entry.resource.uri : entry.resource.uriTemplate;
+                    return {
+                      entry,
+                      uri,
+                      score: searchScore(
+                        query,
                         entry.resource.name,
-                        entry.resource.title,
-                        entry.resource.description,
-                        uri,
+                        comparableText(
+                          entry.state.name,
+                          entry.resource.name,
+                          entry.resource.title,
+                          entry.resource.description,
+                          uri,
+                        ),
                       ),
-                    ),
-                  };
-                })
-                .filter(({ score }) => score >= 0)
+                    };
+                  }),
+                server,
+              )
                 .sort((a, b) => b.score - a.score || a.uri.localeCompare(b.uri))
                 .slice(0, limit)
                 .map(({ entry, uri }) => ({

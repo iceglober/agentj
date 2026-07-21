@@ -163,6 +163,24 @@ describe("connectMcp", () => {
     expect(found).toContain("mcp_github_delete_issue");
     expect(found).toContain('"inputSchema"');
 
+    const naturalLanguage = String(
+      await execute(connection.externalTools.build.tools.find_mcp_tools, {
+        query: "Linear issue/project milestone lookup",
+        server: "github",
+        limit: 8,
+      }),
+    );
+    expect(naturalLanguage).toContain("mcp_github_delete_issue");
+
+    const catalogFallback = String(
+      await execute(connection.externalTools.build.tools.find_mcp_tools, {
+        query: "completely unrelated request",
+        server: "github",
+        limit: 8,
+      }),
+    );
+    expect(catalogFallback).toContain("mcp_github_delete_issue");
+
     const controller = new AbortController();
     const output = await execute(
       connection.externalTools.build.tools.call_mcp_tool,
@@ -227,11 +245,20 @@ describe("connectMcp", () => {
 
     const found = String(
       await execute(connection.externalTools.plan.tools.find_mcp_resources, {
-        query: "issue",
+        query: "issue/project",
         limit: 5,
       }),
     );
     expect(found).toContain("github://issues/{number}");
+
+    const catalogFallback = String(
+      await execute(connection.externalTools.plan.tools.find_mcp_resources, {
+        query: "unrelated",
+        server: "docs",
+        limit: 5,
+      }),
+    );
+    expect(catalogFallback).toContain("docs://guide");
     const read = await execute(
       connection.externalTools.plan.tools.read_mcp_resource,
       { server: "docs", uri: "github://issues/42" },
