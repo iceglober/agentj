@@ -1476,6 +1476,11 @@ export async function runAgentjOnce(
 
     let outcome: "done" | "aborted" | "error" = "done";
     let resultText = "";
+    const turnUsage: UsageRecord["usage"] = {
+      inputTokens: 0,
+      outputTokens: 0,
+      longContextRequests: 0,
+    };
     const chat = createChatSession(
       {
         agentFor: composition.agentFor,
@@ -1490,6 +1495,21 @@ export async function runAgentjOnce(
           }
           if (event.type === "turn-aborted") outcome = "aborted";
           if (event.type === "turn-error") outcome = "error";
+          if (event.type === "turn-usage") {
+            turnUsage.inputTokens += event.usage.inputTokens;
+            turnUsage.outputTokens += event.usage.outputTokens;
+            if (event.usage.cacheReadInputTokens !== undefined) {
+              turnUsage.cacheReadInputTokens =
+                (turnUsage.cacheReadInputTokens ?? 0) + event.usage.cacheReadInputTokens;
+            }
+            if (event.usage.cacheWriteInputTokens !== undefined) {
+              turnUsage.cacheWriteInputTokens =
+                (turnUsage.cacheWriteInputTokens ?? 0) + event.usage.cacheWriteInputTokens;
+            }
+            if (event.usage.inputTokens > LONG_CONTEXT_INPUT_TOKENS) {
+              turnUsage.longContextRequests += 1;
+            }
+          }
           const text = formatChatEvent(event);
           if (text) processStderr.write(`${text}\n`);
         },
@@ -1506,6 +1526,17 @@ export async function runAgentjOnce(
     } finally {
       options.signal.removeEventListener("abort", onAbort);
       await undo.dispose().catch(() => {});
+    }
+
+    if (turnUsage.inputTokens + turnUsage.outputTokens > 0) {
+      const model = composition.modelFor(options.plan ? "plan" : "build");
+      await log.append({
+        type: "usage",
+        provider: model.provider,
+        model: model.model,
+        ts: new Date().toISOString(),
+        usage: turnUsage,
+      });
     }
 
     if (outcome === "done") {
