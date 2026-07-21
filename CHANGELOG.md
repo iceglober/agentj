@@ -1,5 +1,16 @@
 # @glrs-dev/aj
 
+## 0.1.0-next.53
+
+### Minor Changes
+
+- 5185d4d: Raise the default GPT-5.6 Luna reasoning effort to the externally validated medium setting, persist token usage for `agentj run`, and add a reproducible cross-agent SWE-bench benchmark with models.dev cost estimates.
+- e3f94e4: Redesign the interactive terminal surface around explicit ready, thinking, working, queued, stopping, and approval states; label the composer by mode with contextual guidance; simplify persistent telemetry; and keep live plans focused on active and upcoming work.
+
+### Patch Changes
+
+- e28f5ff: Preserve answers to informational questions in completion reports for mixed implementation requests, and let real eval runs securely reuse the same keychain-backed Azure credential as interactive AgentJ.
+
 ## 0.1.0-next.52
 
 ### Minor Changes
