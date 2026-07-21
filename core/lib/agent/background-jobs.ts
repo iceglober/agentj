@@ -57,6 +57,12 @@ export const checkJobInputSchema = z.object({
   abort: z.boolean().optional(),
 });
 
+const BACKGROUND_WORKER_CONTEXT = `You are a fresh-context background worker continuing work in the same repository and authenticated host environment as the foreground agent.
+Inspect the workspace and attempt the relevant command or tool before claiming that repository context, credentials, or access are unavailable. Quote the exact failure if an attempt fails. Do not ask for information that the task, git metadata, or available tools can supply.`;
+
+export const prepareBackgroundJobPrompt = (prompt: string): string =>
+  `${BACKGROUND_WORKER_CONTEXT}\n\nTask:\n${prompt}`;
+
 const formatSpan = (ms: number): string => {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1_000);
