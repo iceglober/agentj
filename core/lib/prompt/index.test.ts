@@ -137,6 +137,9 @@ describe("composePrompt", () => {
 
     const sol = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol" }), CTX);
     expect(sol.params.providerOptions?.openai?.reasoningEffort).toBe("high");
+
+    const luna = composePrompt(AUTO, inputs({ model: "gpt-5.6-luna" }), CTX);
+    expect(luna.params.providerOptions?.openai?.reasoningEffort).toBe("medium");
   });
 
   test("9. marks known non-vision profiles", () => {
@@ -228,14 +231,14 @@ describe("composePrompt", () => {
   });
 
   test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
-    // Versions captured 2026-07-20 after preserving informational answers in
-    // mixed implementation requests. A failure here means prompt CONTENT
+    // Versions captured 2026-07-21 after moving Luna to the externally
+    // benchmarked medium-effort default. A failure here means prompt CONTENT
     // changed — a separate, eval-validated decision, never a refactor side
     // effect. Nano's standalone delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
       "gpt-5.6-sol": { primary: "e4baf021b573", delegate: "e4baf021b573" },
       "gpt-5.6-terra": { primary: "f3ba218684a6", delegate: "f3ba218684a6" },
-      "gpt-5.6-luna": { primary: "4ddc109847ad", delegate: "4ddc109847ad" },
+      "gpt-5.6-luna": { primary: "0d196868fd30", delegate: "0d196868fd30" },
       "gpt-5.4": { primary: "230a76bdfaad", delegate: "230a76bdfaad" },
       "gpt-5.4-nano": { primary: "e34394d49d93", delegate: "096ae64c4caf" },
       "deepseek-v4-pro": { primary: "dc05e7dcffa8", delegate: "dc05e7dcffa8" },
