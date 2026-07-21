@@ -11,6 +11,10 @@ describe("createTerminalStyler", () => {
     expect(color.renderLine([{ text: "\u001b[2J" }])).toBe("\\x1b[2J");
     const plain = createTerminalStyler({ color: false });
     expect(plain.renderLine([{ text: "<Y>", tone: "accent", bold: true }])).toBe("<Y>");
+    expect(color.renderLine([{ text: " user ", background: "muted", bold: true }])).toBe(
+      "\u001b[1m\u001b[100m user \u001b[0m",
+    );
+    expect(plain.renderLine([{ text: " user ", background: "muted", bold: true }])).toBe(" user ");
   });
 
   test("truncates semantic spans by display width before styling", () => {

@@ -1,5 +1,6 @@
 import type { Writable } from "node:stream";
 import type { LiveLayout, LiveRegionPort } from "./live-region";
+import { createTerminalStyler } from "./styles";
 import { displayWidth } from "./terminal-editor";
 
 interface TerminalOutput extends Writable {
@@ -33,6 +34,10 @@ export function createAnsiLiveRegionAdapter(
   options: CreateAnsiLiveRegionAdapterOptions = {},
 ): LiveRegionPort {
   const stdout = (options.stdout ?? process.stdout) as TerminalOutput;
+  const colorEnabled =
+    options.color ??
+    (stdout.isTTY !== false && process.env.NO_COLOR === undefined && process.env.TERM !== "dumb");
+  const styler = createTerminalStyler({ color: colorEnabled });
   const csi = (sequence: string): string => `[${sequence}`;
   const write = (text: string): void => {
     stdout.write(text);
@@ -66,7 +71,12 @@ export function createAnsiLiveRegionAdapter(
     const rowsBefore = layout.lines
       .slice(0, layout.cursorRow)
       .reduce(
-        (total, line) => total + Math.max(1, Math.ceil(displayWidth(line) / terminalWidth)),
+        (total, line) =>
+          total +
+          Math.max(
+            1,
+            Math.ceil(displayWidth(styler.renderLine(line, terminalWidth)) / terminalWidth),
+          ),
         0,
       );
     const cursorWrap =
@@ -98,9 +108,7 @@ export function createAnsiLiveRegionAdapter(
   };
 
   return {
-    color: () =>
-      options.color ??
-      (stdout.isTTY !== false && process.env.NO_COLOR === undefined && process.env.TERM !== "dumb"),
+    color: () => colorEnabled,
     width: contentWidth,
     height,
     onResize(listener) {
@@ -113,7 +121,7 @@ export function createAnsiLiveRegionAdapter(
     paint(layout) {
       eraseRegion();
       const fitted = clamp(layout);
-      write(fitted.lines.join("\r\n"));
+      write(fitted.lines.map((line) => styler.renderLine(line, contentWidth())).join("\r\n"));
       const up = fitted.lines.length - 1 - fitted.cursorRow;
       write(
         `\r${up > 0 ? csi(`${up}A`) : ""}${fitted.cursorColumn > 0 ? csi(`${fitted.cursorColumn}C`) : ""}`,
@@ -126,7 +134,8 @@ export function createAnsiLiveRegionAdapter(
       // below the transcript when it is painted.
       eraseRegion();
       lastLayout = null;
-      write(`${spacing === "turn" ? "\r\n" : ""}${text}\r\n`);
+      const rendered = styler.renderBlock(text).join("\r\n");
+      write(`${spacing === "turn" ? "\r\n" : ""}${rendered}\r\n`);
     },
     clear() {
       eraseRegion();

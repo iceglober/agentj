@@ -114,6 +114,7 @@ import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { renderMarkdownLite } from "./lib/tui/markdown";
+import { createOpenTuiLiveRegionAdapter } from "./lib/tui/opentui-live-region-adapter";
 import {
   applyProgressEvent,
   composeProgressLines,
@@ -1278,7 +1279,10 @@ export async function runAgentjChat(
         .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
     ];
 
-    const liveRegion = createAnsiLiveRegionAdapter({ stdout: processStdout });
+    const liveRegion =
+      process.env.AGENTJ_TUI === "opentui"
+        ? await createOpenTuiLiveRegionAdapter({ stdout: processStdout })
+        : createAnsiLiveRegionAdapter({ stdout: processStdout });
     const clipboardAttachments = createCrosscopyClipboardAttachments();
     const pastedImages = createPastedImageRegistry();
     const projectFiles = createProjectFileCatalog(createGitProjectFileSource(environment, root));

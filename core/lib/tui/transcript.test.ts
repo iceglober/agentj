@@ -5,10 +5,16 @@ import { formatUserTurnBlock } from "./transcript";
 describe("formatUserTurnBlock", () => {
   test("preserves every prompt line, including consecutive blank lines", () => {
     expect(formatUserTurnBlock("first\n\n\nsecond")).toEqual([
-      [{ text: "❯", tone: "accent", bold: true }, { text: " " }, { text: "first", bold: true }],
-      [{ text: "", bold: true }],
-      [{ text: "", bold: true }],
-      [{ text: "second", bold: true }],
+      [
+        { text: " ", background: "muted" },
+        { text: "❯", tone: "accent", bold: true, background: "muted" },
+        { text: " ", background: "muted" },
+        { text: "first", bold: true, background: "muted" },
+        { text: " ", background: "muted" },
+      ],
+      [{ text: "  ", bold: true, background: "muted" }],
+      [{ text: "  ", bold: true, background: "muted" }],
+      [{ text: " second ", bold: true, background: "muted" }],
     ]);
   });
 
@@ -22,8 +28,8 @@ describe("formatUserTurnBlock", () => {
   test("leaves terminal escaping to the shared screen renderer", () => {
     const block = formatUserTurnBlock("unsafe \u001b[2J\nnext");
     expect(createTerminalStyler({ color: false }).renderBlock(block)).toEqual([
-      "❯ unsafe \\x1b[2J",
-      "next",
+      " ❯ unsafe \\x1b[2J ",
+      " next ",
     ]);
   });
 });

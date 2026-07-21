@@ -3,10 +3,12 @@ import { displayWidth, escapeTerminalText, graphemeWidth } from "./terminal-edit
 
 /** Semantic terminal styling. Text is always escaped before ANSI is emitted. */
 export type UiTone = "accent" | "muted" | "success" | "warning" | "danger";
+export type UiBackground = "muted";
 
 export interface UiSpan {
   text: string;
   tone?: UiTone;
+  background?: UiBackground;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
@@ -24,6 +26,9 @@ const toneCodes: Record<UiTone, string> = {
   warning: "\u001b[33m",
   danger: "\u001b[31m",
 };
+const backgroundCodes: Record<UiBackground, string> = {
+  muted: "\u001b[100m",
+};
 
 const normalize = (line: UiTextLine): UiLine =>
   typeof line === "string" ? [{ text: line }] : line;
@@ -35,6 +40,7 @@ const styled = (span: UiSpan, text: string, color: boolean): string => {
     span.italic ? "\u001b[3m" : "",
     span.underline ? "\u001b[4m" : "",
     span.tone ? toneCodes[span.tone] : "",
+    span.background ? backgroundCodes[span.background] : "",
   ].join("");
   return codes.length > 0 ? `${codes}${text}${RESET}` : text;
 };
