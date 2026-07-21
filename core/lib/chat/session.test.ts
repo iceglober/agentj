@@ -184,6 +184,73 @@ describe("createChatSession", () => {
     });
   });
 
+  test("automatically compacts at 75% of the configured context limit", async () => {
+    await withLog(async (log, root) => {
+      const full = [
+        { role: "user", content: "old" },
+        { role: "assistant", content: "large" },
+      ];
+      const compacted = [{ role: "user", content: "summary" }];
+      const events: ChatEvent[] = [];
+      const agent: Agent = {
+        composed: {} as Agent["composed"],
+        generate: async () =>
+          result("done", {
+            messages: full,
+            steps: [
+              {
+                toolCalls: [],
+                toolResults: [],
+                usage: { inputTokens: 75, outputTokens: 1, totalTokens: 76 },
+              },
+            ],
+          }),
+        compactContinuation: (messages) => {
+          expect(messages).toBe(full);
+          return compacted;
+        },
+      };
+      const session = createChatSession({
+        agentFor: async () => agent,
+        log,
+        contextSoftLimit: 100,
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      await session.send("go");
+
+      expect(session.snapshot().messages).toBe(compacted);
+      expect(events).toContainEqual({
+        type: "notice",
+        text: "Context compacted after reaching 75% of its soft limit.",
+      });
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.state?.messages).toEqual(compacted);
+    });
+  });
+
+  test("manually compacts an idle context and persists it", async () => {
+    await withLog(async (log, root) => {
+      const compacted = [{ role: "user", content: "summary" }];
+      const agent: Agent = {
+        composed: {} as Agent["composed"],
+        generate: async () => result("unused"),
+        compactContinuation: () => compacted,
+      };
+      const session = createChatSession(
+        { agentFor: async () => agent, log },
+        { messages: [{ role: "user", content: "old" }] },
+      );
+
+      expect(await session.compactContext()).toBe(true);
+      expect(session.snapshot().messages).toBe(compacted);
+      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
+      expect(loaded?.state?.messages).toEqual(compacted);
+    });
+  });
+
   test("turn-usage reflects only the foreground agent's own steps — subagent usage stays out", async () => {
     await withLog(async (log) => {
       const events: ChatEvent[] = [];

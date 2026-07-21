@@ -67,6 +67,7 @@ describe("suggestChatCommands", () => {
       "undo",
       "redo",
       "clear",
+      "compact",
       "quit",
     ]);
     expect(suggestChatCommands("BU")[0]?.name).toBe("build");
@@ -251,6 +252,7 @@ describe("runChatCommand", () => {
       "/undo",
       "/redo",
       "/clear",
+      "/compact",
       "/quit",
     ]) {
       expect(text).toContain(name);
@@ -306,6 +308,26 @@ describe("runChatCommand", () => {
     expect(events.at(-1)).toEqual({
       type: "notice",
       text: "Cannot clear context while a turn is running.",
+    });
+  });
+
+  test("compact compacts the session context and reports when a turn is active", async () => {
+    const { context, events } = makeContext();
+    let calls = 0;
+    context.session = {
+      compactContext: async () => {
+        calls += 1;
+        return calls === 1;
+      },
+    } as ChatCommandContext["session"];
+
+    await runChatCommand(context, "compact", "");
+    expect(calls).toBe(1);
+    expect(events).toEqual([{ type: "command", name: "compact" }]);
+    await runChatCommand(context, "compact", "");
+    expect(events.at(-1)).toEqual({
+      type: "notice",
+      text: "Cannot compact context while a turn is running.",
     });
   });
 

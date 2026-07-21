@@ -4,6 +4,7 @@ import { llmConfigSchema, resolveTierModel } from ".";
 describe("llm tier ladder", () => {
   test("defaults: empty ladder, plan on frontier, build one rung down", () => {
     const llm = llmConfigSchema.parse({});
+    expect(llm.model).toBe("gpt-5.6-luna");
     expect(llm.tiers).toEqual([]);
     expect(llm.modes.plan).toBe(0);
     expect(llm.modes.build).toBe(1);

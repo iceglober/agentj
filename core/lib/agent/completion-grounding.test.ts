@@ -6,6 +6,7 @@ import {
   claimsActiveDeferredWork,
   generateWithGroundedCompletion,
   hasAnyToolCall,
+  hasGroundedPassedValidation,
   hasStartedBackgroundJob,
 } from "./completion-grounding";
 
@@ -43,6 +44,13 @@ const runJobStep = () => ({
 const editStep = () => ({
   toolCalls: [{ name: "edit", input: {} }],
   toolResults: [{ name: "edit", output: "applied" }],
+});
+
+const validationStep = (exitCode = 0) => ({
+  toolCalls: [{ name: "bash", input: { command: "bun test" } }],
+  toolResults: [
+    { name: "bash", output: { stdout: "ok", stderr: "", exitCode }, isError: exitCode !== 0 },
+  ],
 });
 
 const result = (text: string, overrides: Partial<RunResult> = {}): RunResult => ({
@@ -89,6 +97,20 @@ describe("hasAnyToolCall", () => {
   test("is false for a zero-tool turn and true once any tool is called", () => {
     expect(hasAnyToolCall(result(doneReport("done")))).toBe(false);
     expect(hasAnyToolCall(result(doneReport("done"), { steps: [editStep()] }))).toBe(true);
+  });
+});
+
+describe("hasGroundedPassedValidation", () => {
+  test("matches passed validation to an exact successful bash command", () => {
+    expect(
+      hasGroundedPassedValidation(result(doneReport("done"), { steps: [validationStep()] })),
+    ).toBe(true);
+    expect(
+      hasGroundedPassedValidation(result(doneReport("done"), { steps: [validationStep(1)] })),
+    ).toBe(false);
+    expect(hasGroundedPassedValidation(result(doneReport("done"), { steps: [editStep()] }))).toBe(
+      false,
+    );
   });
 });
 
@@ -193,7 +215,7 @@ describe("generateWithGroundedCompletion — open todos", () => {
           return result("I am done.", { messages: [{ role: "assistant" }] });
         items = [{ ...items[0]!, status: "completed" }];
         return result(doneReport("Finished and validated."), {
-          steps: [editStep()],
+          steps: [editStep(), validationStep()],
           messages: [{ role: "assistant" }, { role: "tool" }],
         });
       },
@@ -281,7 +303,7 @@ describe("generateWithGroundedCompletion — fabricated done reports", () => {
         return requests.length === 1
           ? result(doneReport("2745 tests passed."), { messages: [{ role: "assistant" }] })
           : result(doneReport("Implemented and validated."), {
-              steps: [editStep()],
+              steps: [editStep(), validationStep()],
               messages: [{ role: "assistant" }, { role: "tool" }],
             });
       },
@@ -291,7 +313,7 @@ describe("generateWithGroundedCompletion — fabricated done reports", () => {
 
     expect(requests).toHaveLength(2);
     expect(requests[1]?.requiredFirstTool).toBeUndefined();
-    expect(output.steps).toHaveLength(1);
+    expect(output.steps).toHaveLength(2);
     expect(output.text).toContain("Implemented and validated.");
   });
 
@@ -300,7 +322,7 @@ describe("generateWithGroundedCompletion — fabricated done reports", () => {
     const runtime = {
       async generate() {
         calls += 1;
-        return result(doneReport("Done for real."), { steps: [editStep()] });
+        return result(doneReport("Done for real."), { steps: [editStep(), validationStep()] });
       },
     };
 
@@ -324,6 +346,24 @@ describe("generateWithGroundedCompletion — fabricated done reports", () => {
     expect(calls).toBe(2);
     expect(output.text).toContain('"status":"failed"');
     expect(output.text).toContain("without running any tool");
+  });
+
+  test("retries a passing validation claim that only edited files", async () => {
+    let calls = 0;
+    const output = await generateWithGroundedCompletion(
+      {
+        async generate() {
+          calls += 1;
+          return calls === 1
+            ? result(doneReport("Done."), { steps: [editStep()] })
+            : result(doneReport("Done and tested."), { steps: [validationStep()] });
+        },
+      },
+      request,
+    );
+
+    expect(calls).toBe(2);
+    expect(output.text).toContain("Done and tested");
   });
 
   test("leaves blocked and failed reports untouched", async () => {

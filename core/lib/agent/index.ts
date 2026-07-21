@@ -9,6 +9,7 @@ import {
   resolveTierModel,
   type ToolSet,
 } from "../llm";
+import { compactModelMessages } from "../llm/continuation";
 import type { MetricsSink } from "../metrics";
 import {
   type ComposedPrompt,
@@ -230,6 +231,8 @@ export interface Agent {
   composed: ComposedPrompt;
   /** Run one turn: prompt in, final text + trajectory + usage out. */
   generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
+  /** Drop old tool payloads while retaining a bounded textual history and recent turns. */
+  compactContinuation?(messages: unknown[]): unknown[];
 }
 
 /**
@@ -581,6 +584,7 @@ export async function createAgent(
 
   return {
     composed,
+    compactContinuation: compactModelMessages,
     generate: (prompt, generateOpts) => {
       if (generateOpts?.images && generateOpts.images.length > 0 && !composed.supportsImages) {
         return Promise.reject(

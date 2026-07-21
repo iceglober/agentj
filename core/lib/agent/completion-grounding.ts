@@ -11,6 +11,8 @@ const BACKGROUND_CORRECTIVE = `Your prior response claimed that background monit
 
 const DONE_CORRECTIVE = `Your prior response reported status=done, but this turn called no tools — so nothing was implemented and no validation command was actually run, and that response was not shown to the user. Do the work now with your file and bash tools, run every validation command you intend to claim, and only then report status=done. If the task cannot be completed this turn, report status=blocked or status=failed with the real reason.`;
 
+const VALIDATION_CORRECTIVE = `Your prior response claimed passing validation that is not backed by a successful matching bash command in this turn, so it was not shown to the user. Run each validation command you intend to claim, report its exact command, and use status=done only when those commands succeed. Otherwise report the real failed or not-run outcome.`;
+
 const TODOS_CORRECTIVE = `The session still has pending or in-progress todos, so your prior response was not shown to the user. Continue the remaining work now. Do not stop merely because there is a next step: use tools, fix failures, or start run_background_job for genuine external waiting. You may stop only after clearing or completing every todo, or with status=blocked/status=failed for a concrete hard blocker such as unavailable credentials, network, model, required user input, or a runtime error.`;
 
 const blockedReport = (summary: string): string =>
@@ -59,6 +61,39 @@ export const hasStartedBackgroundJob = (result: RunResult): boolean =>
 /** Whether the turn called any tool at all — a done report needs at least one. */
 export const hasAnyToolCall = (result: RunResult): boolean =>
   result.steps.some((step) => step.toolCalls.length > 0);
+
+const normalizedCommand = (value: unknown): string | null => {
+  if (typeof value !== "object" || value === null) return null;
+  const command = (value as Record<string, unknown>).command;
+  return typeof command === "string" ? command.trim().replace(/\s+/gu, " ") : null;
+};
+
+/** Commands a completion report calls passed must exist as successful bash results. */
+export const hasGroundedPassedValidation = (result: RunResult): boolean => {
+  const report = parseCompletionReport(result.text);
+  if (!report) return true;
+  const passed = report.validation.filter((item) => item.outcome === "passed");
+  if (passed.length === 0) return true;
+
+  const successful = new Set<string>();
+  for (const step of result.steps) {
+    for (let index = 0; index < step.toolCalls.length; index += 1) {
+      const call = step.toolCalls[index];
+      const toolResult = step.toolResults[index];
+      if (call?.name !== "bash" || toolResult?.name !== "bash" || toolResult.isError) continue;
+      const output = toolResult.output;
+      if (
+        typeof output === "object" &&
+        output !== null &&
+        (output as Record<string, unknown>).exitCode === 0
+      ) {
+        const command = normalizedCommand(call.input);
+        if (command) successful.add(command);
+      }
+    }
+  }
+  return passed.every((item) => successful.has(item.command.trim().replace(/\s+/gu, " ")));
+};
 
 const addUsage = (first: TokenUsage, second: TokenUsage): TokenUsage => {
   const optional = (key: keyof TokenUsage): number | undefined => {
@@ -166,6 +201,17 @@ const detectViolation = (
       isResolved: hasAnyToolCall,
       unresolvedFailure: failedReport(
         "The previous response reported done without running any tool, so no work was performed or validated.",
+      ),
+      canRetry: true,
+    };
+  }
+
+  if (report?.status === "done" && !hasGroundedPassedValidation(result)) {
+    return {
+      correctivePrompt: VALIDATION_CORRECTIVE,
+      isResolved: hasGroundedPassedValidation,
+      unresolvedFailure: failedReport(
+        "The completion report claimed passing validation without a matching successful bash command.",
       ),
       canRetry: true,
     };

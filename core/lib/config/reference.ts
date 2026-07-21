@@ -76,7 +76,8 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   },
   {
     path: "agent.context.softLimit",
-    description: "Request input-token threshold that triggers `onLimit`. Unset means no ceiling.",
+    description:
+      "Request input-token threshold: interactive history compacts at 75%, then `onLimit` applies at the threshold. Unset means no ceiling.",
   },
   {
     path: "agent.context.onLimit",

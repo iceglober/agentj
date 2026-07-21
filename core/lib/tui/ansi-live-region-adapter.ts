@@ -12,6 +12,8 @@ export interface CreateAnsiLiveRegionAdapterOptions {
   stdout?: Writable;
   terminalWidth?: number | (() => number);
   terminalHeight?: number | (() => number);
+  /** Explicit capability override for embedders and deterministic tests. */
+  color?: boolean;
 }
 
 /**
@@ -97,7 +99,8 @@ export function createAnsiLiveRegionAdapter(
 
   return {
     color: () =>
-      stdout.isTTY !== false && process.env.NO_COLOR === undefined && process.env.TERM !== "dumb",
+      options.color ??
+      (stdout.isTTY !== false && process.env.NO_COLOR === undefined && process.env.TERM !== "dumb"),
     width: contentWidth,
     height,
     onResize(listener) {

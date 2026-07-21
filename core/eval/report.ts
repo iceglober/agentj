@@ -45,7 +45,8 @@ function perConfigTable(rows: ResultRow[]) {
   const configs = [...new Set(rows.map((r) => r.configId))].sort();
   console.log(
     `${"config".padEnd(12)} ${"tasks".padStart(5)} ${"passRate".padStart(9)} ` +
-      `${"min".padStart(5)} ${"max".padStart(5)} ${"medSecs".padStart(8)} ${"meanTokIn".padStart(10)}`,
+      `${"min".padStart(5)} ${"max".padStart(5)} ${"medSecs".padStart(8)} ` +
+      `${"meanIn".padStart(9)} ${"meanOut".padStart(9)} ${"meanUSD".padStart(9)} ${"medFiles".padStart(8)}`,
   );
   for (const cid of configs) {
     const cr = rows.filter((r) => r.configId === cid);
@@ -65,7 +66,17 @@ function perConfigTable(rows: ResultRow[]) {
           .padStart(8)} ` +
         `${Math.round(mean(cr.map((r) => r.tokensIn)))
           .toString()
-          .padStart(10)}`,
+          .padStart(9)} ` +
+        `${Math.round(mean(cr.map((r) => r.tokensOut)))
+          .toString()
+          .padStart(9)} ` +
+        `${(() => {
+          const priced = cr.flatMap((r) => (r.usd === null ? [] : [r.usd]));
+          return priced.length ? `$${mean(priced).toFixed(3)}` : "n/a";
+        })().padStart(9)} ` +
+        `${median(cr.map((r) => r.filesTouched))
+          .toFixed(1)
+          .padStart(8)}`,
     );
   }
 }
