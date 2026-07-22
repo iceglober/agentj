@@ -126,4 +126,24 @@ describe("createOpenTuiChatScreen", () => {
     screen.stop();
     renderer.destroy();
   });
+
+  test("copies a highlighted selection to the system clipboard", async () => {
+    const { renderer, screen } = await setup();
+    const copied: string[] = [];
+    const spy = renderer as unknown as {
+      copyToClipboardOSC52: (t: string) => boolean;
+      emit: (event: string, ...args: unknown[]) => void;
+    };
+    spy.copyToClipboardOSC52 = (t) => {
+      copied.push(t);
+      return true;
+    };
+    screen.start();
+    // OpenTUI draws the highlight and emits "selection"; the adapter copies it.
+    spy.emit("selection", { getSelectedText: () => "grab me" });
+    spy.emit("selection", { getSelectedText: () => "" }); // empty selection is ignored
+    expect(copied).toEqual(["grab me"]);
+    screen.stop();
+    renderer.destroy();
+  });
 });
