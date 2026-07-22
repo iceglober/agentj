@@ -25,17 +25,6 @@ const formatStatusTokens = (count: number): string => {
 
 const normalizedWidth = (width: number): number => Math.max(0, Math.floor(width));
 
-const fitsTogether = (left: string, right: string, width: number): boolean =>
-  displayWidth(left) + displayWidth(right) + 2 <= width;
-
-/** Left and right hug opposite edges once both fit with a readable gap. */
-const splitEnds = (left: string, right: string, width: number): string => {
-  if (right.length === 0) return truncateToDisplayWidth(left, width);
-  const gap = width - displayWidth(left) - displayWidth(right);
-  if (gap >= 2) return `${left}${" ".repeat(gap)}${right}`;
-  return truncateToDisplayWidth(`${left} ${right}`, width);
-};
-
 /** Long paths keep their head and leaf: ~/repos/…/nested/repo. */
 const middleEllipsis = (text: string, maxWidth: number): string => {
   const width = normalizedWidth(maxWidth);
@@ -153,18 +142,19 @@ export const composeStatusSection = (
   const controls = "Tab mode · / commands";
   const fullContext = `${state.model} · ctx ${context}`;
   const compactContext = `ctx ${context}`;
-  const rootBudget = Math.max(0, width - displayWidth(controls) - 2);
-  const rootWidth = rootBudget - displayWidth(fullContext) - 3;
-  const detailedLeft =
-    rootWidth >= 8 ? `${middleEllipsis(state.root, rootWidth)} · ${fullContext}` : "";
-  const footer =
-    detailedLeft && fitsTogether(detailedLeft, controls, width)
-      ? splitEnds(detailedLeft, controls, width)
-      : fitsTogether(fullContext, controls, width)
-        ? splitEnds(fullContext, controls, width)
-        : fitsTogether(compactContext, controls, width)
-          ? splitEnds(compactContext, controls, width)
-          : truncateToDisplayWidth(`${state.mode} · ${compactContext}`, width);
+  // The controls live on their own line now, so the info line gets the full
+  // width. It degrades location → model → context → the essential mode.
+  const rootWidth = width - displayWidth(fullContext) - 3;
+  const info =
+    rootWidth >= 8
+      ? `${middleEllipsis(state.root, rootWidth)} · ${fullContext}`
+      : displayWidth(fullContext) <= width
+        ? fullContext
+        : displayWidth(compactContext) <= width
+          ? compactContext
+          : `${state.mode} · ${compactContext}`;
+  const infoLine = truncateToDisplayWidth(info, width);
+  const controlsLine = truncateToDisplayWidth(controls, width);
 
   const jobRows = state.jobs.map((job) => {
     const prefix = `  ${frame} [${job.id}] ${job.mode}: `;
@@ -178,5 +168,5 @@ export const composeStatusSection = (
     return `${prefix}${snippet}${suffix}`;
   });
 
-  return [footer, ...jobRows];
+  return [infoLine, controlsLine, ...jobRows];
 };

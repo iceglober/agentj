@@ -46,9 +46,10 @@ describe("composePresenceLine", () => {
 });
 
 describe("composeStatusSection", () => {
-  test("keeps one calm footer with context and contextual controls", () => {
+  test("splits the footer into an info line and a controls line", () => {
     expect(composeStatusSection(base, 120)).toEqual([
-      "~/repos/agentj · azure/gpt-5.6-sol · ctx 8.7k                                                      Tab mode · / commands",
+      "~/repos/agentj · azure/gpt-5.6-sol · ctx 8.7k",
+      "Tab mode · / commands",
     ]);
   });
 
@@ -58,20 +59,20 @@ describe("composeStatusSection", () => {
         ...base,
         root: "~/.glrs/worktrees/agentj/wt-260718-231658-7yr",
       },
-      79,
+      60,
     );
-    expect(lines[0]).toContain("~/.glrs/w…0718-231658-7yr");
+    expect(lines[0]).toContain("~/.glrs/w");
+    expect(lines[0]).toContain("…");
     expect(lines[0]).toContain("azure/gpt-5.6-sol · ctx 8.7k");
-    expect(lines.every((line) => displayWidth(line) <= 79)).toBe(true);
+    expect(lines[1]).toBe("Tab mode · / commands");
+    expect(lines.every((line) => displayWidth(line) <= 60)).toBe(true);
   });
 
-  test("degrades to model, then context, then the essential mode and context", () => {
-    const compact = composeStatusSection(base, 55)[0] ?? "";
-    const essential = composeStatusSection(base, 30)[0] ?? "";
-
-    expect(compact).toContain("azure/gpt-5.6-sol · ctx 8.7k");
-    expect(compact).toContain("Tab mode · / commands");
-    expect(essential).toBe("plan · ctx 8.7k");
+  test("degrades the info line to model, then bare context", () => {
+    // Full width no longer needs to reserve room for the controls line.
+    expect(composeStatusSection(base, 38)[0]).toBe("azure/gpt-5.6-sol · ctx 8.7k");
+    expect(composeStatusSection(base, 38)[1]).toBe("Tab mode · / commands");
+    expect(composeStatusSection(base, 20)[0]).toBe("ctx 8.7k");
   });
 
   test("shows context against the configured soft limit without a warning glyph", () => {
@@ -102,10 +103,10 @@ describe("composeStatusSection", () => {
     );
 
     expect(lines.every((line) => displayWidth(line) <= width)).toBe(true);
-    expect(lines[1]).toContain("job-with");
+    expect(lines.at(-1)).toContain("job-with");
   });
 
-  test("preserves standard-width job rows", () => {
+  test("preserves standard-width job rows after the info and controls lines", () => {
     const lines = composeStatusSection(
       {
         ...base,
@@ -117,7 +118,7 @@ describe("composeStatusSection", () => {
       90,
     );
 
-    expect(lines.slice(1)).toEqual([
+    expect(lines.slice(2)).toEqual([
       "  ◐ [j1] build: Run the test suite  24s",
       "  ◐ [j2] plan: Investigate the failure  14s",
     ]);
