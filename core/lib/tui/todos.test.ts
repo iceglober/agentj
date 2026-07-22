@@ -8,7 +8,7 @@ test("keeps the live plan compact and focused on remaining work", () => {
       { id: "two", text: "Wire the session store", status: "in_progress" },
       { id: "three", text: "Validate", status: "pending" },
     ]),
-  ).toEqual(["  Plan · 1/3 complete", "    → Wire the session store", "    ○ Validate"]);
+  ).toEqual(["  Todos · 1/3 complete", "    → Wire the session store", "    ○ Validate"]);
 });
 
 test("shows every active todo without treating one as current", () => {
@@ -19,7 +19,7 @@ test("shows every active todo without treating one as current", () => {
       { id: "three", text: "Test", status: "in_progress" },
       { id: "four", text: "Ship", status: "pending" },
     ]),
-  ).toEqual(["  Plan · 1/4 complete", "    → Build", "    → Test", "    ○ Ship"]);
+  ).toEqual(["  Todos · 1/4 complete", "    → Build", "    → Test", "    ○ Ship"]);
 });
 
 test("collapses fully completed todos and expands when work is added", () => {
@@ -28,10 +28,10 @@ test("collapses fully completed todos and expands when work is added", () => {
     { id: "two", text: "Build", status: "completed" as const },
     { id: "three", text: "Test", status: "completed" as const },
   ];
-  expect(formatTodoProgressLines(completed)).toEqual(["  ✓ Plan complete · 3/3"]);
+  expect(formatTodoProgressLines(completed)).toEqual(["  ✓ Todos complete · 3/3"]);
   expect(
     formatTodoProgressLines([...completed, { id: "four", text: "Ship", status: "pending" }]),
-  ).toEqual(["  Plan · 3/4 complete", "    ○ Ship"]);
+  ).toEqual(["  Todos · 3/4 complete", "    ○ Ship"]);
 });
 
 test("prioritizes active work before pending work and reports overflow", () => {
@@ -42,7 +42,7 @@ test("prioritizes active work before pending work and reports overflow", () => {
     { id: "four", text: "Todo 3", status: "pending" as const },
   ];
   expect(formatTodoProgressLines(items, 2)).toEqual([
-    "  Plan · 0/4 complete",
+    "  Todos · 0/4 complete",
     "    → Todo 2",
     "    ○ Todo 0",
     "    +2 more",

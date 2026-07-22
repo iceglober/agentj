@@ -80,8 +80,6 @@ export interface ChatScreen extends GuidedInputPort {
   restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: UiTextLine[]): void;
-  /** Current session state, immediately above the editor. */
-  setPresenceLine(line: UiTextLine): void;
   /** Set the visible composer identity and empty-state guidance. */
   setComposer(options: { label: string; placeholder: string }): void;
   /** Replace the status section below the editor (idle repaints are skipped). */
@@ -107,7 +105,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: UiTextLine[] = [];
-  let presenceLine: UiTextLine = "● Ready";
   let composer = { label: "› ", placeholder: "Ask AgentJ anything" };
   let statusLines: UiTextLine[] = [];
   let hasTranscript = false;
@@ -217,7 +214,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
         cursorColumn: displayWidth(styler.renderLine(askLines.at(-1) ?? "")),
       };
     }
-    const editorLead = [...progress, safeLine(presenceLine)];
+    const editorLead = [...progress];
     if (pendingModal?.kind === "input") {
       const prompt = pendingModal;
       const labelLines = wrapToDisplayWidth(
@@ -712,7 +709,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     clearTranscript() {
       progressLines = [];
-      presenceLine = "● Ready";
       statusLines = [];
       liveRegion.clearScreen();
       hasTranscript = false;
@@ -731,12 +727,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     setProgressLines(lines) {
       progressLines = lines;
-      paint();
-    },
-
-    setPresenceLine(line) {
-      if (comparableLine(presenceLine) === comparableLine(line)) return;
-      presenceLine = line;
       paint();
     },
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composePresenceLine, composeStatusSection, formatClock } from "./status";
+import { composeStatusSection, formatClock } from "./status";
 import { displayWidth } from "./terminal-editor";
 
 const base = {
@@ -14,36 +14,6 @@ const base = {
   jobs: [],
   now: 74_000,
 };
-
-describe("composePresenceLine", () => {
-  const state = {
-    busy: true,
-    interruptRequested: false,
-    spinnerFrame: 0,
-    turnStartedAt: 62_000,
-    now: 74_000,
-  };
-
-  test("makes active work and its interrupt control explicit", () => {
-    expect(composePresenceLine(state, 80)).toBe("◐ Thinking 12s · Esc interrupt");
-    expect(composePresenceLine({ ...state, activeTools: 2, queued: 1 }, 80)).toBe(
-      "◐ Working 12s · 1 queued · Esc interrupt",
-    );
-    expect(composePresenceLine(state, 12)).toBe("◐ Thinking …");
-  });
-
-  test("shows ready and stopping as first-class states", () => {
-    expect(
-      composePresenceLine(
-        { busy: false, interruptRequested: false, spinnerFrame: 0, turnStartedAt: null },
-        80,
-      ),
-    ).toBe("● Ready");
-    expect(composePresenceLine({ ...state, interruptRequested: true }, 80)).toBe(
-      "◐ Stopping safely…",
-    );
-  });
-});
 
 describe("composeStatusSection", () => {
   test("splits the footer into an info line and a controls line", () => {

@@ -76,40 +76,6 @@ export interface StatusSectionState {
   now?: number;
 }
 
-/** The always-visible foreground state immediately above the composer. */
-export const composePresenceLine = (
-  state: {
-    busy: boolean;
-    interruptRequested: boolean;
-    spinnerFrame: number;
-    turnStartedAt: number | null;
-    activeTools?: number;
-    queued?: number;
-    now?: number;
-  },
-  width: number,
-): string => {
-  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-  const elapsed =
-    state.turnStartedAt === null
-      ? ""
-      : ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`;
-  const queued = state.queued ? ` · ${state.queued} queued` : "";
-  if (state.interruptRequested)
-    return truncateToDisplayWidth(`${frame} Stopping safely…${queued}`, width);
-  if (state.busy) {
-    const activity = state.activeTools ? "Working" : "Thinking";
-    const full = `${frame} ${activity}${elapsed}${queued} · Esc interrupt`;
-    return displayWidth(full) <= width
-      ? full
-      : truncateToDisplayWidth(`${frame} ${activity}${elapsed}${queued}`, width);
-  }
-  return truncateToDisplayWidth(
-    state.queued ? `● Ready · ${state.queued} queued` : "● Ready",
-    width,
-  );
-};
-
 /** Re-warn after enough growth to be useful without repeating every step. */
 export const contextWarningRearmThreshold = (softLimit: number): number =>
   Math.max(1, Math.ceil(softLimit * 0.1));
