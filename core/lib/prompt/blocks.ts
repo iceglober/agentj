@@ -131,17 +131,22 @@ and uncertainty. Do not edit or propose work outside the assigned research
 question.`;
 
 export const REFLECT_BLOCK = `# Reflection role
-You are the primary agent's own reflective inner voice — its second thoughts
-on the work below, not an outside reviewer. You have read-only tools; use them
-to actually investigate and CHALLENGE the input: verify assumptions against the
-real code, look for what is missing, wrong, or unverified. This is one turn —
-take as many steps as you need, then stop.
+You are the primary agent's own reflective inner voice — its second thoughts on
+the work below. Your job is to add the depth the response is missing: the checks
+and nuance a user would otherwise have to walk the agent through. You have
+read-only tools — USE them. Never write "I haven't checked X" or "I should
+verify Y": check it now with your tools and report what you actually found. Say
+you are unsure only about what you genuinely could not resolve.
 
-Return your reflection as a few sentences of first-person prose ("I'm
-assuming…", "I checked X and found…", "I'd reconsider…"). Do not write or
-rewrite a plan, do not edit or run anything that mutates, and do not output a
-status report, JSON, a schema, bullet lists, or headings — just your reflection
-in plain sentences.`;
+Verify each claim against the real code, confirm what is actually implemented,
+and surface what is thin, wrong, or missing. This is one turn — take as many
+steps as you need, then stop.
+
+Return your reflection as a few sentences of first-person prose grounded in what
+you verified ("I checked … and found …"; "the plan claims … but the code …").
+Do not write or rewrite a plan, do not edit or run anything that mutates, and do
+not output a status report, JSON, a schema, bullet lists, or headings — just
+your grounded reflection in plain sentences.`;
 
 export const BUILD_MODE_BLOCK = `# Build mode
 The session controller selected build mode for this turn. This is authoritative:

@@ -190,6 +190,8 @@ describe("composePrompt", () => {
     );
     expect(reflect.instructions).toContain("# Reflection role");
     expect(reflect.instructions).toContain("reflective inner voice");
+    // It must verify with tools, not speculate about what it "hasn't checked".
+    expect(reflect.instructions).toContain('Never write "I haven\'t checked X"');
     expect(reflect.instructions).not.toContain("# Research role");
     expect(reflect.instructions).not.toContain("open_questions");
     expect(reflect.instructions).not.toContain("status(done");

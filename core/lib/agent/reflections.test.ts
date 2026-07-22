@@ -69,6 +69,8 @@ describe("plan reflections", () => {
     expect(text).toContain("I am assuming architecture");
     // It revises from the reflection's findings without a second investigation.
     expect(text).toContain("do not re-open files or re-run searches");
+    // It must not retract a true claim on a reflection's mere uncertainty.
+    expect(text).toContain("only change what a reflection actually verified as wrong");
     // Not a re-plan: no revised-plan heading and no "rewrite the plan" instruction.
     expect(text).not.toContain("# Revised");
     expect(text).not.toContain("Original user request");

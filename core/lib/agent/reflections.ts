@@ -140,8 +140,8 @@ export async function createPlanReflectionFollowUp(
         prompt: [
           prompt,
           options.phase === "pre_turn"
-            ? `You are the primary agent's own reflective voice — its first-person second thoughts before it plans. Reflect on the task below: what it is really asking, what you are assuming, what is risky or unclear, and what you would want to check first. Write as "I", in a few concrete sentences. Do not write a plan and do not write code.`
-            : `You are the primary agent's own reflective voice — its first-person second thoughts on the plan it just drafted. Reflect on the plan below: what you are assuming, what is thin, risky, or unverified, and what you would double-check before acting. Write as "I", in a few concrete sentences. Do not rewrite the plan and do not write code.`,
+            ? `You are the primary agent's own reflective voice — its first-person second thoughts before it plans. Investigate the task against the real code with your tools: what it truly involves, what already exists, and what is risky or unclear. Report what you found, not what you would check. Write as "I", in a few concrete sentences. Do not write a plan and do not write code.`
+            : `You are the primary agent's own reflective voice — its first-person second thoughts on the plan it just drafted. Verify the plan against the real code with your tools: confirm that what each claim depends on actually exists and works, and surface what is thin, wrong, or missing. Do not speculate — check what you can and report what you found; say you are unsure only about what you truly could not resolve. Write as "I", in a few concrete sentences. Do not rewrite the plan and do not write code.`,
           `Task:\n${options.request}`,
           ...(options.phase === "pre_turn" ? [] : [`Plan I drafted:\n${options.draft}`]),
         ].join("\n\n"),
@@ -183,7 +183,7 @@ export async function createPlanReflectionFollowUp(
   return {
     transcriptText,
     text: [
-      "Below are your own reflections on the plan you just wrote — your second thoughts, in your own voice. They already inspected the code, so revise directly from their findings: do not re-open files or re-run searches. Respond in the first person — tighten specific steps where a reflection warrants it and say what still stands. Do not restate the whole plan and do not write code.",
+      "Below are your own reflections on the plan you just wrote — your second thoughts, in your own voice. They inspected the code, so revise directly from what they verified: do not re-open files or re-run searches. Fold in the depth and corrections they add. But do not weaken or drop a claim just because a reflection was unsure or said it had not checked — only change what a reflection actually verified as wrong. Respond in the first person — tighten specific steps and say what still stands. Do not restate the whole plan and do not write code.",
       `Reflections:\n${findings}`,
     ].join("\n\n"),
   };
