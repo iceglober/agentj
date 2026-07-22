@@ -39,7 +39,6 @@ import {
   withRequestOrigin,
 } from "./permissions";
 import { createQuestionTool, type QuestionPort } from "./questions";
-import { createReflectionSelectionTool, reflectionsConfigSchema } from "./reflections";
 import {
   type CreateSubagentsToolOptions,
   createRunOneSubagentTool,
@@ -84,7 +83,6 @@ export const agentConfigSchema = z.object({
     .prefault({}),
   llm: llmConfigSchema.prefault({}),
   prompt: promptConfigSchema.prefault({}),
-  reflections: reflectionsConfigSchema,
   tools: z
     .object({
       /**
@@ -182,9 +180,6 @@ export interface CreateAgentOptions {
   stopContextTokens?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
   mode?: AgentMode;
-  /** Compose the reflection prompt variant: first-person prose, read-only, no
-   * report schema. */
-  reflect?: boolean;
   /** Provider-neutral web search and fetch capabilities supplied by composition. */
   web?: { search: WebSearch; fetch: WebFetch };
   /** Primary-only, mode-specific tools supplied by an external integration. */
@@ -227,8 +222,6 @@ export interface GenerateOptions {
   images?: readonly ImageAttachment[];
   /** Prior turns (RunResult.messages) — the chat loop's opaque continuation. */
   messages?: unknown[];
-  /** Add the plan-only reflection chooser for this draft exchange. */
-  selectReflections?: boolean;
 }
 
 export interface Agent {
@@ -238,8 +231,6 @@ export interface Agent {
   generate(prompt: string, opts?: GenerateOptions): Promise<RunResult>;
   /** Drop old tool payloads while retaining a bounded textual history and recent turns. */
   compactContinuation?(messages: unknown[]): unknown[];
-  /** Reflection IDs available to this primary plan agent. */
-  reflectionIds?: readonly string[];
 }
 
 /**
@@ -281,18 +272,6 @@ export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"])
     provider: config.tools.subagents.provider,
     model: subagentModel(config),
   });
-}
-
-/** Reflection routing wins over subagent routing, then inherits the plan model. */
-export function reflectionAgentConfig(config: AgentConfig): AgentConfig {
-  const { provider, model, tier, temperature } = config.reflections;
-  const routed = routedChildAgentConfig(config, "delegate", {
-    provider: provider ?? config.tools.subagents.provider,
-    model:
-      model ?? (tier === undefined ? subagentModel(config) : resolveTierModel(config.llm, tier)),
-  });
-  if (temperature === undefined) return routed;
-  return { ...routed, llm: { ...routed.llm, temperature } };
 }
 
 export function withAgentModelSelection(
@@ -643,42 +622,27 @@ export async function createAgent(
         }),
       ),
       mode: opts.mode ?? "build",
-      reflect: opts.reflect,
     },
     opts.ctx,
   );
 
   const tools = await createAgentTools(sb, config, opts);
-  const reflectionIds = Object.keys(config.reflections.prompts);
-  const reflectionSelectionTool =
-    config.role === "primary" && opts.mode === "plan" && reflectionIds.length > 0
-      ? createReflectionSelectionTool(config.reflections.prompts)
-      : null;
 
   return {
     composed,
     compactContinuation: compactModelMessages,
-    reflectionIds,
     generate: (prompt, generateOpts) => {
       if (generateOpts?.images && generateOpts.images.length > 0 && !composed.supportsImages) {
         return Promise.reject(
           new Error(`The selected model (${config.llm.model}) does not support image input.`),
         );
       }
-      const requestTools =
-        generateOpts?.selectReflections && reflectionSelectionTool
-          ? (() => {
-              if (Object.hasOwn(tools, "select_reflections"))
-                throw new Error("Reflection selection tool name collides with an existing tool.");
-              return { ...tools, select_reflections: reflectionSelectionTool };
-            })()
-          : tools;
       const request = {
         instructions: composed.instructions,
         prompt,
         images: generateOpts?.images,
         messages: generateOpts?.messages,
-        tools: requestTools,
+        tools,
         maxOutputChars: config.tools.maxOutputChars,
         spill: opts.spill?.write,
         temperature: config.llm.temperature ?? composed.params.temperature,
@@ -689,13 +653,7 @@ export async function createAgent(
         abortSignal: generateOpts?.abortSignal,
         onStep: generateOpts?.onStep,
       };
-      // Reflection workers produce first-person prose, never a completion report
-      // or a background job — the grounding gate's done/deferred-work correctives
-      // don't apply and would otherwise overwrite a reflection with a blocked
-      // report. Go straight to the runtime for them.
-      return opts.reflect
-        ? runtime.generate(request)
-        : generateWithGroundedCompletion(runtime, request, { todos: opts.todos });
+      return generateWithGroundedCompletion(runtime, request, { todos: opts.todos });
     },
   };
 }

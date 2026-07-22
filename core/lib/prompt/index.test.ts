@@ -181,36 +181,7 @@ describe("composePrompt", () => {
     expect(research.instructions).toContain("# Research role");
     expect(research.instructions.startsWith("You are a coding executor")).toBe(false);
 
-    // claude-x has no profile → all additive flags off, isolating the
-    // RESEARCH-vs-REFLECT swap from the subagent-contract schema block.
-    const reflect = composePrompt(
-      AUTO,
-      inputs({ model: "claude-x", role: "delegate", mode: "plan", reflect: true }),
-      CTX,
-    );
-    expect(reflect.instructions).toContain("# Reflection role");
-    expect(reflect.instructions).toContain("reflective inner voice");
-    // It must verify with tools, not speculate about what it "hasn't checked".
-    expect(reflect.instructions).toContain('Never write "I haven\'t checked X"');
-    expect(reflect.instructions).not.toContain("# Research role");
-    expect(reflect.instructions).not.toContain("open_questions");
-    expect(reflect.instructions).not.toContain("status(done");
-
-    // On nano the subagent contract is profile-on, and it carries the SAME
-    // report schema independently of RESEARCH; reflect must suppress it (and
-    // its status=done comms fallback) too, or the worker still emits JSON.
-    const reflectNano = composePrompt(
-      AUTO,
-      inputs({ model: "gpt-5.4-nano", role: "delegate", mode: "plan", reflect: true }),
-      CTX,
-    );
-    expect(reflectNano.instructions).toContain("# Reflection role");
-    expect(reflectNano.instructions).not.toContain("# Research role");
-    expect(reflectNano.instructions).not.toContain("# Subagent contract");
-    expect(reflectNano.instructions).not.toContain("open_questions");
-    expect(reflectNano.instructions).not.toContain("status(done");
-    expect(reflectNano.instructions).not.toContain("status=done");
-    // The nano RESEARCH worker still keeps the contract + schema.
+    // The nano RESEARCH worker keeps the subagent contract + report schema.
     const researchNano = composePrompt(
       AUTO,
       inputs({ model: "gpt-5.4-nano", role: "delegate", mode: "plan" }),
@@ -218,22 +189,6 @@ describe("composePrompt", () => {
     );
     expect(researchNano.instructions).toContain("# Subagent contract");
     expect(researchNano.instructions).toContain("open_questions");
-    // reflect omitted keeps the RESEARCH contract, no reflection block.
-    const researchDefault = composePrompt(
-      AUTO,
-      inputs({ model: "claude-x", role: "delegate", mode: "plan" }),
-      CTX,
-    );
-    expect(researchDefault.instructions).toContain("# Research role");
-    expect(researchDefault.instructions).not.toContain("# Reflection role");
-    // reflect:false is equivalent to omitted.
-    const reflectOff = composePrompt(
-      AUTO,
-      inputs({ model: "claude-x", role: "delegate", mode: "plan", reflect: false }),
-      CTX,
-    );
-    expect(reflectOff.instructions).toContain("# Research role");
-    expect(reflectOff.instructions).not.toContain("# Reflection role");
 
     const build = composePrompt(AUTO, inputs({ model: "gpt-5.6-sol", mode: "build" }), CTX);
     expect(build.instructions).toContain("# Build mode");

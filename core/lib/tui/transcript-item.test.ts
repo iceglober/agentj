@@ -6,7 +6,6 @@ import {
   renderDagLine,
   renderToolRow,
   renderTranscriptItem,
-  toTranscriptItem,
   type ToolOutcome,
   type TranscriptItem,
 } from "./transcript-item";
@@ -26,7 +25,6 @@ describe("renderTranscriptItem spacing + block per kind", () => {
     { item: { kind: "notice", text: "hello" }, spacing: "none" },
     { item: { kind: "command", text: "Command: help" }, spacing: "none" },
     { item: { kind: "job", text: "[j1] started", status: "started" }, spacing: "none" },
-    { item: { kind: "reflection", text: "second thoughts" }, spacing: "turn" },
   ];
 
   for (const { item, spacing } of cases) {
@@ -65,23 +63,6 @@ describe("renderTranscriptItem spacing + block per kind", () => {
     expect(renderTranscriptItem({ kind: "notice", text: "a" }, WIDTH).block).toEqual([
       [{ text: "a" }],
     ]);
-  });
-
-  test("a reflection event maps to a reflection item and renders muted wrapped lines", () => {
-    expect(toTranscriptItem({ type: "reflection", text: "my second thoughts" })).toEqual({
-      kind: "reflection",
-      text: "my second thoughts",
-    });
-    const { block, spacing } = renderTranscriptItem(
-      { kind: "reflection", text: "  a fairly long reflection line that has to wrap somewhere" },
-      24,
-    );
-    expect(spacing).toBe("turn");
-    expect(block.length).toBeGreaterThan(1);
-    for (const line of block) {
-      expect(line[0]?.tone).toBe("muted");
-      expect(line[0]?.text.startsWith("  ")).toBe(true);
-    }
   });
 
   test("a failed job tones its head line danger, leaving the body plain", () => {

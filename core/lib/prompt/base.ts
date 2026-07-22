@@ -6,7 +6,6 @@ import {
   COMMS_STOP_BLOCK,
   HALLUCINATION_GUARD,
   PLAN_BLOCK,
-  REFLECT_BLOCK,
   RESEARCH_BLOCK,
   SMALL_MODEL_BLOCK,
   SOL_OUTCOME_BLOCK,
@@ -46,7 +45,6 @@ structure, use your tools to read and verify — do NOT guess or invent.
 
 {{#if PLAN}}${PLAN_BLOCK}
 {{/if}}{{#if RESEARCH}}${RESEARCH_BLOCK}
-{{/if}}{{#if REFLECT}}${REFLECT_BLOCK}
 {{/if}}{{#if BUILDER}}${BUILDER_BLOCK}
 {{/if}}
 
@@ -71,9 +69,9 @@ ${WORKFLOW_STEPS_BLOCK}{{/if}}{{#if WORKFLOW_OUTCOME}}${SOL_OUTCOME_BLOCK}{{/if}
 
 {{#if SMALL_MODEL}}${SMALL_MODEL_BLOCK}
 {{/if}}{{#if HALLUCINATION_GUARD}}${HALLUCINATION_GUARD}
-{{/if}}{{#if SUBAGENT_CONTRACT}}${SUBAGENT_CONTRACT_BLOCK}{{/if}}{{#if COMMS_STOP}}${COMMS_STOP_BLOCK}
+{{/if}}{{#if SUBAGENT_CONTRACT}}${SUBAGENT_CONTRACT_BLOCK}{{/if}}{{#unless SUBAGENT_CONTRACT}}${COMMS_STOP_BLOCK}
 
-{{/if}}{{#unless SUBAGENT_CONTRACT}}${WRITING_STYLE_BLOCK}{{/unless}}
+${WRITING_STYLE_BLOCK}{{/unless}}
 {{PROFILE_DELTA}}
 
 # Project rules

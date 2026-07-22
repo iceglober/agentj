@@ -61,29 +61,4 @@ describe("createChatEventOrderer", () => {
       events.map((event) => (event.type === "job-finished" ? event.job.id : event.type)),
     ).toEqual(["turn-started", "j1", "j2", "submission-finished", "turn-started"]);
   });
-
-  test("preserves completion order through a plan reflection exchange", () => {
-    const events: ChatEvent[] = [];
-    const orderer = createChatEventOrderer((event) => events.push(event));
-
-    orderer.emit({ type: "turn-started", mode: "plan", text: "draft" });
-    orderer.emit({ type: "turn-finished" });
-    orderer.emit({ type: "job-finished", job: job("j1") });
-    orderer.emit({ type: "notice", text: "Reflections: architecture" });
-    orderer.emit({ type: "turn-started", mode: "plan", text: "revised" });
-    orderer.emit({ type: "assistant", mode: "plan", text: "revised plan" });
-    orderer.emit({ type: "submission-finished" });
-
-    expect(
-      events.map((event) => (event.type === "job-finished" ? event.job.id : event.type)),
-    ).toEqual([
-      "turn-started",
-      "turn-finished",
-      "j1",
-      "notice",
-      "turn-started",
-      "assistant",
-      "submission-finished",
-    ]);
-  });
 });

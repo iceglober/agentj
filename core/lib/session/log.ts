@@ -29,7 +29,6 @@ export type ChatLogRecord =
       mode: ChatMode;
       ts: string;
       reset?: true;
-      reflectionOnce?: Partial<Record<"pre_turn" | "post_turn", boolean>>;
     }
   | {
       type: "usage";

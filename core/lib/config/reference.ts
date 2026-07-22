@@ -29,34 +29,6 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   },
   { path: "agent.llm.modes.build", description: "Ladder tier build mode runs on." },
   {
-    path: "agent.reflections.events",
-    description:
-      "Reflection hooks: plan.once or plan.each, before or after a plan turn. Defaults to one post-turn review; an empty array disables scheduling.",
-  },
-  {
-    path: "agent.reflections.prompts",
-    description:
-      "Named parallel review instructions. Empty by default; add prompts to enable reflections. After a plan draft, the model chooses which named reviews run; the choice and each review's bounded findings are shown before revision.",
-  },
-  {
-    path: "agent.reflections.tier",
-    description:
-      "Ladder tier reflection workers run on. Reflection model and provider overrides win; otherwise subagent routing applies.",
-  },
-  {
-    path: "agent.reflections.model",
-    description: "Explicit model for reflection workers; wins over reflections.tier.",
-  },
-  {
-    path: "agent.reflections.provider",
-    description: "Provider override for reflection workers; otherwise subagent routing applies.",
-  },
-  {
-    path: "agent.reflections.temperature",
-    description:
-      "Sampling temperature for reflection workers; higher yields more divergent challenging. Omitted uses the model default.",
-  },
-  {
     path: "agent.tools.subagents.tier",
     description:
       "Ladder tier subagents and planning workers run on — route fan-out to a cheaper rung.",

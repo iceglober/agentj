@@ -9,7 +9,6 @@ import {
   childAgentConfig,
   createAgentModelRouting,
   createAgentTools,
-  reflectionAgentConfig,
   withAgentModelSelection,
 } from ".";
 import { permissionsConfigSchema } from "./permissions";
@@ -112,20 +111,6 @@ describe("childAgentConfig", () => {
       tools: { subagents: { model: "deepseek-v4-pro", tier: 1 } },
     });
     expect(childAgentConfig(config, "delegate").llm.model).toBe("deepseek-v4-pro");
-  });
-
-  test("reflection routing wins over subagent routing and falls back to it", () => {
-    const config = agentConfigSchema.parse({
-      llm: { tiers: ["frontier", "cheap"] },
-      tools: { subagents: { model: "subagent" } },
-      reflections: { tier: 1 },
-    });
-    expect(reflectionAgentConfig(config).llm.model).toBe("cheap");
-    expect(
-      reflectionAgentConfig(
-        agentConfigSchema.parse({ tools: { subagents: { model: "subagent" } } }),
-      ).llm.model,
-    ).toBe("subagent");
   });
 
   test("context ceiling: off by default, warns, and children inherit it", () => {

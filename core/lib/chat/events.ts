@@ -45,7 +45,7 @@ export type ChatEvent =
   | { type: "turn-aborted" }
   | { type: "turn-error"; error: string }
   | { type: "turn-finished" }
-  /** A submitted foreground turn, including plan reflection, has settled. */
+  /** A submitted foreground turn has settled. */
   | { type: "submission-finished" }
   /** The session continuation and durable visible history were reset. */
   | { type: "context-cleared" }
@@ -56,5 +56,4 @@ export type ChatEvent =
   | { type: "permission-ask"; request: PermissionRequest }
   | { type: "job-started"; job: JobView }
   | { type: "job-finished"; job: JobView }
-  | { type: "reflection"; text: string }
   | { type: "notice"; text: string };

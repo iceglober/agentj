@@ -1,9 +1,4 @@
 import type { Agent } from "../agent";
-import {
-  extractReflectionSelection,
-  type ReflectionEvent,
-  type ReflectionPreparation,
-} from "../agent/reflections";
 import type { ImageAttachment } from "../llm";
 import type { ChatLog, ChatMode } from "../session/log";
 import type { UndoStack } from "../session/undo";
@@ -42,22 +37,12 @@ export interface ChatSessionDependencies {
    * returns opaque messages; session logic never interprets either shape.
    */
   transformContinuation?(messages: unknown[], mode: ChatMode): Promise<unknown[]> | unknown[];
-  /** Reflection runner; scheduling is controlled by reflectionEvents. */
-  reflectPlan?(input: {
-    request: string;
-    draft: string;
-    phase: "pre_turn" | "post_turn";
-    abortSignal: AbortSignal;
-    selectedIds?: readonly string[];
-  }): Promise<ReflectionPreparation | null>;
-  reflectionEvents?: readonly ReflectionEvent[];
   now?: () => string;
 }
 
 export interface ChatSessionInitialState {
   messages?: unknown[];
   mode?: ChatMode;
-  reflectionOnce?: Partial<Record<"pre_turn" | "post_turn", boolean>>;
 }
 
 export interface ChatSession {
@@ -108,7 +93,6 @@ export function createChatSession(
   let mode: ChatMode = initial.mode ?? "plan";
   let pendingMode: ChatMode = mode;
   let messages: unknown[] = initial.messages ?? [];
-  let reflectionOnce = { pre_turn: false, post_turn: false, ...initial.reflectionOnce };
   let busy = false;
   let turnAbort: AbortController | null = null;
   const notices: string[] = [];
@@ -130,26 +114,19 @@ export function createChatSession(
     text: string,
     transcriptText?: string,
     images?: readonly ImageAttachment[],
-    fixedMode?: ChatMode,
-    extraContext?: string,
-    selectReflections = false,
-    preReflection?: string,
   ): Promise<{
     succeeded: boolean;
     mode: ChatMode;
     text?: string;
-    selectedIds?: string[];
     stepLimitReached?: boolean;
   }> => {
-    mode = fixedMode ?? pendingMode;
+    mode = pendingMode;
     turnAbort = new AbortController();
     const abort = turnAbort;
     emit({ type: "turn-started", mode, text, ...(transcriptText ? { transcriptText } : {}) });
-    if (preReflection) emit({ type: "reflection", text: preReflection });
 
     const drained = notices.splice(0);
-    const baseContent = drained.length > 0 ? `${drained.join("\n")}\n\n${text}` : text;
-    const content = extraContext ? `${baseContent}\n\n${extraContext}` : baseContent;
+    const content = drained.length > 0 ? `${drained.join("\n")}\n\n${text}` : text;
 
     try {
       if (mode === "build") await deps.undo?.snapshot("pre-turn");
@@ -164,11 +141,7 @@ export function createChatSession(
         },
         messages,
         ...(images && images.length > 0 ? { images } : {}),
-        ...(selectReflections ? { selectReflections: true } : {}),
       });
-      const selectedIds = selectReflections
-        ? extractReflectionSelection(result, agent.reflectionIds ?? [])
-        : null;
       messages = result.messages ?? messages;
       emit({
         type: "assistant",
@@ -196,12 +169,11 @@ export function createChatSession(
           emit({ type: "notice", text: "Context compacted after reaching 75% of its soft limit." });
         }
       }
-      await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
+      await deps.log.append({ type: "state", messages, mode, ts: now() });
       return {
         succeeded: true,
         mode,
         text: result.text,
-        ...(selectedIds !== null ? { selectedIds } : {}),
         ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
       };
     } catch (error) {
@@ -229,86 +201,7 @@ export function createChatSession(
   ): Promise<void> => {
     busy = true;
     try {
-      if (pendingMode === "plan" && mode === "build")
-        reflectionOnce = { pre_turn: false, post_turn: false };
-      const reflectPlan = deps.reflectPlan;
-      const events = new Set(deps.reflectionEvents ?? []);
-      const hook = (phase: "pre_turn" | "post_turn") => {
-        const each = events.has(`plan.each.${phase}` as ReflectionEvent);
-        const once = events.has(`plan.once.${phase}` as ReflectionEvent) && !reflectionOnce[phase];
-        return each || once ? { once } : null;
-      };
-      let context: string | undefined;
-      let preReflection: string | undefined;
-      const pre = pendingMode === "plan" && reflectPlan ? hook("pre_turn") : null;
-      if (pre) {
-        if (pre.once) {
-          reflectionOnce.pre_turn = true;
-          await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
-        }
-        const controller = new AbortController();
-        turnAbort = controller;
-        try {
-          const preparation = await reflectPlan!({
-            request: text,
-            draft: "",
-            phase: "pre_turn",
-            abortSignal: controller.signal,
-          });
-          if (preparation && "notice" in preparation)
-            emit({ type: "notice", text: preparation.notice });
-          else if (preparation && "context" in preparation) {
-            context = preparation.context;
-            preReflection = preparation.transcriptText;
-          }
-        } finally {
-          if (turnAbort === controller) turnAbort = null;
-        }
-      }
-      const postDue = pendingMode === "plan" && reflectPlan ? hook("post_turn") : null;
-      const draft = await runExchange(
-        text,
-        transcriptText,
-        images,
-        undefined,
-        context,
-        postDue !== null,
-        preReflection,
-      );
-      if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) return;
-      if (!postDue) return;
-      const controller = new AbortController();
-      turnAbort = controller;
-      try {
-        if (postDue.once) {
-          reflectionOnce.post_turn = true;
-          await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
-        }
-        const followUp = await reflectPlan({
-          request: text,
-          draft: draft.text ?? "",
-          phase: "post_turn",
-          abortSignal: controller.signal,
-          ...(draft.selectedIds ? { selectedIds: draft.selectedIds } : {}),
-        });
-        if (followUp && "text" in followUp) {
-          // Show the reflection as its own dim block, then run the revision as a
-          // labeled continuation so the two phases don't blur together.
-          emit({ type: "reflection", text: followUp.transcriptText });
-          await runExchange(followUp.text, "Revised · after reflection", undefined, "plan");
-        } else if (followUp && "notice" in followUp) {
-          emit({ type: "notice", text: followUp.notice });
-        }
-      } catch (error) {
-        if (controller.signal.aborted) emit({ type: "turn-aborted" });
-        else
-          emit({
-            type: "notice",
-            text: `Reflections failed; keeping draft. (${error instanceof Error ? error.message : String(error)})`,
-          });
-      } finally {
-        if (turnAbort === controller) turnAbort = null;
-      }
+      await runExchange(text, transcriptText, images);
     } finally {
       busy = false;
       if (pendingMode !== mode) emit({ type: "mode-changed", mode: pendingMode, pending: false });
@@ -423,12 +316,10 @@ export function createChatSession(
       messages = [];
       notices.length = 0;
       await deps.todos?.clear();
-      reflectionOnce = { pre_turn: false, post_turn: false };
       await deps.log.append({
         type: "state",
         messages,
         mode,
-        reflectionOnce,
         ts: now(),
         reset: true,
       });
@@ -442,7 +333,7 @@ export function createChatSession(
       const compacted = agent.compactContinuation?.(messages) ?? messages;
       const changed = compacted !== messages;
       messages = compacted;
-      await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
+      await deps.log.append({ type: "state", messages, mode, ts: now() });
       emit({
         type: "notice",
         text: changed ? "Context compacted." : "Context is already compact.",

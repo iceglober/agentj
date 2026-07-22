@@ -67,8 +67,6 @@ export const formatChatEvent = (event: ChatEvent): string | null => {
     }
     case "notice":
       return event.text;
-    case "reflection":
-      return event.text;
     default:
       return null;
   }

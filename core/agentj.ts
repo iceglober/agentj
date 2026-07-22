@@ -27,14 +27,6 @@ export default defineConfig({
         },
       },
     },
-    reflections: {
-      prompts: {
-        architecture:
-          "Ensure you outline how we will leave the code better than we found it. Which existing abstractions will we use? Which will we extend? Which will we remove or create? Leave the code simpler, cleaner, and with a more sound architecture.",
-        "checking-your-work":
-          "Ensure you outline how we will prove the work is correct. Reproduce the root cause for bugs, name focused and broad checks, inspect the final result, and include browser testing when relevant. State what each check proves and call out any check that cannot run.",
-      },
-    },
     tools: {
       edit: {
         mode: "batch",

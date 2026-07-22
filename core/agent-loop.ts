@@ -9,7 +9,6 @@ import {
   childAgentConfig,
   createAgentModelRouting,
   createAgent as createProductionAgent,
-  reflectionAgentConfig,
   type ToolActivity,
 } from "./lib/agent";
 import { prepareBackgroundJobPrompt } from "./lib/agent/background-jobs";
@@ -18,7 +17,6 @@ import {
   type PermissionGate,
   withRequestOrigin,
 } from "./lib/agent/permissions";
-import { createPlanReflectionFollowUp } from "./lib/agent/reflections";
 import {
   runSubagentTasks,
   type SubagentProgressEvent,
@@ -297,14 +295,6 @@ interface ChatComposition {
   /** The eval $/Mtok map, reused by /cost for terminal pricing. */
   evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
-  reflectionEvents: AgentConfig["reflections"]["events"];
-  reflectPlan(input: {
-    request: string;
-    draft: string;
-    phase: "pre_turn" | "post_turn";
-    abortSignal: AbortSignal;
-    selectedIds?: readonly string[];
-  }): ReturnType<typeof createPlanReflectionFollowUp>;
   runBuildJob(
     prompt: string,
     abortSignal: AbortSignal,
@@ -457,11 +447,10 @@ async function composeChat(
   const modelRouting = createAgentModelRouting(agentConfig, () => agents.clear());
   const agentConfigFor = modelRouting.configFor;
   // Research workers are plan-mode children. Each run gets a scoped MCP lease
-  // so reflection and user-requested research share the same safe inspection tools.
+  // so user-requested research uses the same safe inspection tools.
   const createResearchWorker = async (
     origin?: string,
     workerConfig = childAgentConfig(agentConfigFor("plan"), "delegate"),
-    opts?: { reflect?: boolean },
   ) => ({
     generate: async (
       prompt: string,
@@ -476,7 +465,6 @@ async function composeChat(
           spill,
           web,
           mode: "plan",
-          ...(opts?.reflect ? { reflect: true } : {}),
           stopContextTokens: config.agent.context.softLimit,
           childExternalTools: externalLease.externalTools,
           permissions: {
@@ -706,23 +694,6 @@ async function composeChat(
     contextSoftLimit: config.agent.context.softLimit,
     evalPrices: config.eval.prices,
     agentFor,
-    reflectionEvents: modelRouting.config().reflections.events,
-    reflectPlan: ({ request, draft, phase, abortSignal, selectedIds }) =>
-      createPlanReflectionFollowUp({
-        config: reflectionAgentConfig(agentConfigFor("plan")),
-        parentModel: agentConfigFor("plan").llm,
-        request,
-        draft,
-        phase,
-        abortSignal,
-        ...(selectedIds !== undefined ? { selectedIds } : {}),
-        reflectionModel: `${reflectionAgentConfig(agentConfigFor("plan")).llm.provider}/${reflectionAgentConfig(agentConfigFor("plan")).llm.model}`,
-        createWorker: (task) =>
-          createResearchWorker(`reflection ${task.id}`, reflectionAgentConfig(agentConfigFor("plan")), {
-            reflect: true,
-          }),
-        onProgress: onDagProgress,
-      }),
     runBuildJob,
     runPlanJob,
     attachInteractiveCapabilities: interactive.attach,
@@ -1084,15 +1055,12 @@ export async function runAgentjChat(
         undo: undoStack,
         todos: sessionTodos,
         contextSoftLimit: composition.contextSoftLimit,
-        reflectionEvents: composition.reflectionEvents,
-        reflectPlan: composition.reflectPlan,
         onEvent: emit,
       },
       resumed?.state
         ? {
             messages: resumed.state.messages,
             mode: resumed.state.mode,
-            reflectionOnce: resumed.state.reflectionOnce,
           }
         : {},
     );
@@ -1465,8 +1433,6 @@ export async function runAgentjOnce(
         agentFor: composition.agentFor,
         log,
         undo,
-        reflectionEvents: composition.reflectionEvents,
-        reflectPlan: composition.reflectPlan,
         onEvent: (event) => {
           if (event.type === "assistant") {
             resultText = event.text;
