@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { composeStatusSection, formatClock } from "./status";
+import { composeStatusSection, formatClock, formatVuMeter } from "./status";
 import { displayWidth } from "./terminal-editor";
 
 const base = {
@@ -92,6 +92,22 @@ describe("composeStatusSection", () => {
       "  ◐ [j1] build: Run the test suite  24s",
       "  ◐ [j2] plan: Investigate the failure  14s",
     ]);
+  });
+});
+
+describe("formatVuMeter", () => {
+  const BLOCKS = new Set([..."▁▂▃▄▅▆▇█"]);
+
+  test("renders one bobbing block per bar, deterministic in the frame", () => {
+    expect([...formatVuMeter(0)]).toHaveLength(5);
+    expect([...formatVuMeter(0, 3)]).toHaveLength(3);
+    expect([...formatVuMeter(7)].every((glyph) => BLOCKS.has(glyph))).toBe(true);
+    expect(formatVuMeter(4)).toBe(formatVuMeter(4)); // same frame → same bars
+  });
+
+  test("animates: the bars change as the frame advances", () => {
+    const frames = new Set([0, 1, 2, 3, 4, 5].map((frame) => formatVuMeter(frame)));
+    expect(frames.size).toBeGreaterThan(1);
   });
 });
 

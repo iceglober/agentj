@@ -4,6 +4,21 @@ import { displayWidth, graphemeWidth, truncateToDisplayWidth } from "./terminal-
 
 const SPINNER = ["◐", "◓", "◑", "◒"];
 
+const VU_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/** An ambient "working" meter: a bank of block bars that bob like an audio VU
+ *  meter. Deterministic in `frame` so the 250ms status ticker animates it, and
+ *  so it stays testable. Each bar rides a sine wave offset from its neighbours,
+ *  giving a continuous hum rather than a rotating spinner. */
+export const formatVuMeter = (frame: number, bars = 5): string => {
+  let out = "";
+  for (let index = 0; index < bars; index += 1) {
+    const level = Math.sin(frame * 0.55 + index * 1.1) * 0.5 + 0.5;
+    out += VU_BLOCKS[Math.min(VU_BLOCKS.length - 1, Math.floor(level * VU_BLOCKS.length))];
+  }
+  return out;
+};
+
 export const formatClock = (ms: number): string => {
   const total = Math.max(0, Math.floor(ms / 1000));
   const days = Math.floor(total / 86_400);

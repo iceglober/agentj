@@ -122,7 +122,7 @@ import {
   formatToolActivityLabel,
   type ProgressTracker,
 } from "./lib/tui/progress";
-import { composeStatusSection, shouldWarnContext } from "./lib/tui/status";
+import { composeStatusSection, formatVuMeter, shouldWarnContext } from "./lib/tui/status";
 import type { UiSpan, UiTextLine } from "./lib/tui/styles";
 import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
@@ -1162,7 +1162,8 @@ export async function runAgentjChat(
             text: `   Stopping safely…${queued ? ` · ${queued} queued` : ""}`,
             tone: "warning",
           });
-        else if (busy) segs.push({ text: "   Esc interrupt", tone: "accent" });
+        else if (busy)
+          segs.push({ text: `   ${formatVuMeter(spinnerFrame)}  Esc interrupt`, tone: "accent" });
         return segs;
       };
       const mode = chat.pendingMode;
