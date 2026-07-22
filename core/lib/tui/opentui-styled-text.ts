@@ -16,7 +16,7 @@ export const toneColors: Record<NonNullable<UiSpan["tone"]>, string> = {
   danger: "#f08080",
 };
 export const backgroundColors: Record<NonNullable<UiSpan["background"]>, string> = {
-  muted: "#30363d",
+  muted: "#383f47",
 };
 
 export interface OpenTuiStyledText {
