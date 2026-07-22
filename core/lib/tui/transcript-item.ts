@@ -88,7 +88,7 @@ export type TranscriptItem =
 export type RenderedItem = { block: UiBlock; spacing: "none" | "turn" };
 
 const OUTCOME: Record<ToolOutcome, { glyph: string; tone: UiTone }> = {
-  running: { glyph: "◐", tone: "accent" },
+  running: { glyph: "▌", tone: "accent" },
   ok: { glyph: "✓", tone: "success" },
   fail: { glyph: "✗", tone: "danger" },
   blocked: { glyph: "⊘", tone: "warning" },

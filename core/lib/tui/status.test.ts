@@ -89,8 +89,8 @@ describe("composeStatusSection", () => {
     );
 
     expect(lines.slice(2)).toEqual([
-      "  ◐ [j1] build: Run the test suite  24s",
-      "  ◐ [j2] plan: Investigate the failure  14s",
+      "  ▏ [j1] build: Run the test suite  24s",
+      "  ▏ [j2] plan: Investigate the failure  14s",
     ]);
   });
 });

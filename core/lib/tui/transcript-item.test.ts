@@ -112,7 +112,7 @@ describe("renderToolRow — only the glyph carries tone", () => {
       { live: true },
       WIDTH,
     );
-    expect(spans(line).find((span) => span.text === "◐")?.tone).toBe("accent");
+    expect(spans(line).find((span) => span.text === "▌")?.tone).toBe("accent");
   });
 
   test("owned DAG rows freeze below the tool line, toned by glyph", () => {

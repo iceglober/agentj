@@ -7,7 +7,7 @@ import { truncateWithNotice } from "../truncation";
  * Pure state — the chat screen owns painting and the spinner cadence.
  */
 
-const SPINNER = ["◐", "◓", "◑", "◒"];
+const SPINNER = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "▊", "▋", "▌", "▍", "▎"];
 
 const truncateLine = (value: string, maxLength: number): string =>
   truncateWithNotice(value.replace(/\r\n?|\n/gu, " "), maxLength);

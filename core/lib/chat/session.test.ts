@@ -763,7 +763,9 @@ describe("plan reflections", () => {
         log,
         reflectionEvents: ["plan.each.post_turn"],
         reflectPlan: async () => ({ text: "revise", transcriptText: "Reflections" }),
-        onEvent: (event) => events.push(event),
+        onEvent: (event) => {
+          events.push(event);
+        },
       });
 
       await session.send("plan");
@@ -783,7 +785,9 @@ describe("plan reflections", () => {
         log,
         reflectionEvents: ["plan.each.post_turn"],
         reflectPlan: async () => ({ notice: "Reflections skipped by plan selection." }),
-        onEvent: (event) => events.push(event),
+        onEvent: (event) => {
+          events.push(event);
+        },
       });
 
       await session.send("plan");

@@ -810,7 +810,7 @@ describe("createChatScreen", () => {
     expect(rendered.slice(latest + 1, idleEditor)).toEqual([]);
 
     screen.setProgressLines([
-      "  ◐ tool running",
+      "  ▏ tool running",
       "",
       "  Todos · 0/1 complete",
       "    → Implement the change",
@@ -847,11 +847,11 @@ describe("createChatScreen", () => {
     const { screen, text } = makeScreen();
     screen.start();
     screen.setStatusLines(["204ed50c · build", "~/repos/demo"]);
-    screen.setProgressLines(["t1 ◐ mapping modules"]);
+    screen.setProgressLines(["t1 ▏ mapping modules"]);
     await settle();
     expect(text()).toContain("204ed50c · build");
     expect(text()).toContain("~/repos/demo");
-    expect(text()).toContain("t1 ◐ mapping modules");
+    expect(text()).toContain("t1 ▏ mapping modules");
     screen.stop();
   });
 
@@ -859,7 +859,7 @@ describe("createChatScreen", () => {
     const { screen, output, text } = makeScreen();
     screen.start();
     screen.setStatusLines(["⏵ build · a deliberately long status"]);
-    screen.setProgressLines(["t1 ◐ a deliberately long progress description"]);
+    screen.setProgressLines(["t1 ▏ a deliberately long progress description"]);
     const beforeResize = text().length;
 
     output.columns = 14;

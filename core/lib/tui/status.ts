@@ -2,7 +2,7 @@ import type { ChatMode } from "../session/log";
 import { splitGraphemes } from "./editor";
 import { displayWidth, graphemeWidth, truncateToDisplayWidth } from "./terminal-editor";
 
-const SPINNER = ["◐", "◓", "◑", "◒"];
+const SPINNER = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "▊", "▋", "▌", "▍", "▎"];
 
 const VU_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
