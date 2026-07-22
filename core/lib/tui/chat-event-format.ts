@@ -5,16 +5,12 @@ import {
   formatCompletionReportText,
   formatExecutorResultText,
 } from "./completion-report";
-import { formatDuration } from "./progress";
 import { formatClock } from "./status";
 import type { UiTextLine } from "./styles";
 
 /** Keep a bounded single-line preview while making the omitted character count explicit. */
 export const truncateLineWithNotice = (value: string, maxLength: number): string =>
   truncateWithNotice(value.replace(/\r\n?|\n/gu, " "), maxLength);
-
-export const formatActivityReceipt = (count: number, elapsedMs: number): string =>
-  `✓ ${count} ${count === 1 ? "tool" : "tools"} · ${formatDuration(elapsedMs)} · /activity for details`;
 
 /** Render a ChatEvent as transcript text. */
 export const formatChatEvent = (event: ChatEvent): string | null => {
