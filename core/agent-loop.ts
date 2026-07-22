@@ -104,7 +104,6 @@ import { createExaWebSearch } from "./lib/tools/web/exa-adapter";
 import { createHttpWebFetch } from "./lib/tools/web/http-adapter";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import {
-  formatActivityReceipt,
   formatChatEvent,
   presentActivityLine,
   truncateLineWithNotice,
@@ -120,6 +119,8 @@ import {
   composeProgressLines,
   countVisibleToolActivities,
   createProgressTracker,
+  formatDuration,
+  formatToolActivityLabel,
   type ProgressTracker,
 } from "./lib/tui/progress";
 import { composePresenceLine, composeStatusSection, shouldWarnContext } from "./lib/tui/status";
@@ -254,11 +255,7 @@ export async function finalizeInteractiveChat(options: {
   }
 }
 
-export {
-  formatActivityReceipt,
-  formatChatEvent,
-  truncateLineWithNotice,
-} from "./lib/tui/chat-event-format";
+export { formatChatEvent, truncateLineWithNotice } from "./lib/tui/chat-event-format";
 export { composeProgressLines } from "./lib/tui/progress";
 export {
   composePresenceLine,
@@ -791,7 +788,6 @@ export async function runAgentjChat(
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
   let todos: ReturnType<typeof createSessionTodos> | undefined;
   const completedActivities: Array<{ tool: string; detail: string; elapsedMs: number }> = [];
-  let turnActivityCount = 0;
 
   // DAG progress nests under the tool activity that owns it, one tracker per
   // owner so concurrent run_subagents calls stay apart. NO_ACTIVITY collects
@@ -840,15 +836,25 @@ export async function runAgentjChat(
       const started = activeTools.get(activity.id);
       activeTools.delete(activity.id);
       const elapsedMs = started ? Date.now() - started.startedAt : 0;
+      const detail = started?.detail ?? activity.detail;
+      // A tool that owned a subagent DAG freezes its rows beneath the tool line,
+      // so the transcript reads parent-then-children.
+      const dagBlock = dagTrackers.get(activity.id)?.lines(spinnerFrame, dagIndent(activity.id)) ?? [];
       dagTrackers.delete(activity.id);
-      completedActivities.push({
-        tool: activity.tool,
-        detail: started?.detail ?? activity.detail,
-        elapsedMs,
-      });
+      completedActivities.push({ tool: activity.tool, detail, elapsedMs });
       if (completedActivities.length > 100) completedActivities.shift();
-      turnActivityCount += 1;
       turnProducedOutput = true;
+      // Stream each finished tool into the transcript so the turn shows what it
+      // actually did, rather than collapsing to a single count.
+      screen?.printAbove([
+        [
+          {
+            text: `  ✓ ${formatToolActivityLabel(activity.tool, detail)} ${formatDuration(elapsedMs)}`,
+            tone: "success",
+          },
+        ],
+        ...dagBlock.map((text) => [{ text }]),
+      ]);
     }
     refreshProgress();
     updateStatus();
@@ -943,7 +949,6 @@ export async function runAgentjChat(
         turnStartedAt = null;
         interruptRequested = false;
         turnProducedOutput = false;
-        turnActivityCount = 0;
         completedActivities.length = 0;
         screen?.clearTranscript();
         refreshProgress();
@@ -995,7 +1000,6 @@ export async function runAgentjChat(
         turnStartedAt = Date.now();
         interruptRequested = false;
         turnProducedOutput = false;
-        turnActivityCount = 0;
         turnModel = composition.modelFor(event.mode);
         turnUsage = { inputTokens: 0, outputTokens: 0, longContextRequests: 0 };
       }
@@ -1007,17 +1011,6 @@ export async function runAgentjChat(
         screen?.restoreInput(event.restoreText ?? event.text);
       }
       if (event.type === "turn-finished") {
-        const elapsedMs = turnStartedAt === null ? 0 : Date.now() - turnStartedAt;
-        if (turnActivityCount > 0) {
-          screen?.printAbove([
-            [
-              {
-                text: formatActivityReceipt(turnActivityCount, elapsedMs),
-                tone: "success",
-              },
-            ],
-          ]);
-        }
         turnStartedAt = null;
         interruptRequested = false;
         if (turnUsage && turnUsage.inputTokens + turnUsage.outputTokens > 0) {

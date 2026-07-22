@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   finalizeInteractiveChat,
-  formatActivityReceipt,
   formatChatEvent,
   formatResumeCommand,
   notifyAvailableUpdate,
@@ -154,13 +153,6 @@ describe("truncateLineWithNotice", () => {
 
   test("turns multiline previews into one line without marking untruncated text", () => {
     expect(truncateLineWithNotice("alpha\nbeta", 20)).toBe("alpha beta");
-  });
-});
-
-describe("formatActivityReceipt", () => {
-  test("summarizes completed tools and points to activity details", () => {
-    expect(formatActivityReceipt(1, 1_200)).toBe("✓ 1 tool · 1.2s · /activity for details");
-    expect(formatActivityReceipt(3, 74_000)).toBe("✓ 3 tools · 74.0s · /activity for details");
   });
 });
 
