@@ -118,6 +118,7 @@ import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
 import {
   applyProgressEvent,
   composeProgressLines,
+  countVisibleToolActivities,
   createProgressTracker,
   type ProgressTracker,
 } from "./lib/tui/progress";
@@ -1161,7 +1162,7 @@ export async function runAgentjChat(
               interruptRequested,
               spinnerFrame,
               turnStartedAt,
-              activeTools: activeTools.size,
+              activeTools: countVisibleToolActivities(activeTools),
               queued: queuedMessages.length,
             },
             screen.width(),

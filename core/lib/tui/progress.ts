@@ -186,17 +186,44 @@ export function createProgressTracker(): ProgressTracker {
     },
   };
 }
+export const TOOL_ACTIVITY_VISIBILITY_DELAY_MS = 250;
+
+export interface ActiveToolActivity {
+  tool: string;
+  detail: string;
+  /** Optional for callers that do not need delayed live visibility. */
+  startedAt?: number;
+}
+
+export const isToolActivityVisible = (activity: ActiveToolActivity, now = Date.now()): boolean =>
+  activity.startedAt === undefined || now - activity.startedAt >= TOOL_ACTIVITY_VISIBILITY_DELAY_MS;
+
+export const countVisibleToolActivities = (
+  activeTools: Iterable<ActiveToolActivity | readonly [number, ActiveToolActivity]>,
+  now = Date.now(),
+): number =>
+  [...activeTools].filter((entry) => {
+    const activity = Array.isArray(entry) ? entry[1] : entry;
+    return isToolActivityVisible(activity, now);
+  }).length;
+
 export const composeProgressLines = (state: {
   todos?: string[];
-  activeTools: Iterable<[number, { tool: string; detail: string }]>;
+  activeTools: Iterable<[number, ActiveToolActivity]>;
   dagBlocks: ReadonlyMap<number, string[]>;
   queued: string[];
   spinnerFrame: number;
+  now?: number;
 }): string[] => {
   const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
+  const now = state.now ?? Date.now();
+  const activeEntries = [...state.activeTools];
+  const activeIds = new Set(activeEntries.map(([id]) => id));
   const owned = new Set<number>();
   const toolRows: string[] = [];
-  for (const [id, { tool, detail }] of state.activeTools) {
+  for (const [id, activity] of activeEntries) {
+    if (!isToolActivityVisible(activity, now)) continue;
+    const { tool, detail } = activity;
     toolRows.push(`  ${frame} ${formatToolActivityLabel(tool, detail, 80)}`);
     const block = state.dagBlocks.get(id);
     if (block) {
@@ -205,7 +232,7 @@ export const composeProgressLines = (state: {
     }
   }
   const orphanRows = [...state.dagBlocks]
-    .filter(([id]) => !owned.has(id))
+    .filter(([id]) => !activeIds.has(id) && !owned.has(id))
     .flatMap(([, block]) => block);
   const activityRows = [...orphanRows, ...toolRows, ...state.queued];
   const todoRows = state.todos ?? [];

@@ -3,6 +3,7 @@ import type { SubagentProgressEvent } from "../agent/subagents";
 import {
   applyProgressEvent,
   composeProgressLines,
+  countVisibleToolActivities,
   createProgressTracker,
   formatDuration,
   formatToolActivityLabel,
@@ -182,6 +183,27 @@ describe("tool activity", () => {
     entries: Array<[number, string, string?]>,
   ): Array<[number, { tool: string; detail: string }]> =>
     entries.map(([id, tool, detail]) => [id, { tool, detail: detail ?? "" }]);
+
+  test("keeps rapid tools out of the live region until they have lasted 250ms", () => {
+    const now = 1_000;
+    const activeTools: Array<[number, { tool: string; detail: string; startedAt: number }]> = [
+      [1, { tool: "bash", detail: "quick", startedAt: now - 249 }],
+      [2, { tool: "readFile", detail: "slow", startedAt: now - 250 }],
+    ];
+    expect(
+      composeProgressLines({
+        activeTools,
+        dagBlocks: new Map([
+          [1, ["    ◐ quick child"]],
+          [2, ["    ◐ slow child"]],
+        ]),
+        queued: [],
+        spinnerFrame: 0,
+        now,
+      }),
+    ).toEqual(["  ◐ readFile slow", "    ◐ slow child"]);
+    expect(countVisibleToolActivities(activeTools, now)).toBe(1);
+  });
 
   test("keeps each tool's basic arguments on live rows", () => {
     const lines = composeProgressLines({
