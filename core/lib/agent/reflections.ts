@@ -183,7 +183,7 @@ export async function createPlanReflectionFollowUp(
   return {
     transcriptText,
     text: [
-      "Below is your own reflection on the plan you just wrote — your second thoughts, in your own voice. Continue in the first person: tighten specific steps where the reflection warrants it and say what still stands. Do not restate the whole plan and do not write code.",
+      "Below are your own reflections on the plan you just wrote — your second thoughts, in your own voice. They already inspected the code, so revise directly from their findings: do not re-open files or re-run searches. Respond in the first person — tighten specific steps where a reflection warrants it and say what still stands. Do not restate the whole plan and do not write code.",
       `Reflections:\n${findings}`,
     ].join("\n\n"),
   };

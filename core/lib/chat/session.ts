@@ -292,8 +292,10 @@ export function createChatSession(
           ...(draft.selectedIds ? { selectedIds: draft.selectedIds } : {}),
         });
         if (followUp && "text" in followUp) {
-          // The draft is already shown; the agent continues in the first person.
-          await runExchange(followUp.text, followUp.transcriptText, undefined, "plan");
+          // Show the reflection as its own dim block, then run the revision as a
+          // labeled continuation so the two phases don't blur together.
+          emit({ type: "reflection", text: followUp.transcriptText });
+          await runExchange(followUp.text, "Revised · after reflection", undefined, "plan");
         } else if (followUp && "notice" in followUp) {
           emit({ type: "notice", text: followUp.notice });
         }

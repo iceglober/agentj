@@ -697,17 +697,23 @@ describe("plan reflections", () => {
       expect(
         events.filter((event) => event.type === "assistant").map((event) => event.text),
       ).toEqual(["draft plan", "on reflection, step 4 stands"]);
+      // The reflection is its own dim block; the continuation carries the label.
+      expect(events).toContainEqual({ type: "reflection", text: "Reflection · nano" });
       expect(events.filter((event) => event.type === "turn-started")).toContainEqual({
         type: "turn-started",
         mode: "plan",
         text: "continue in the first person",
-        transcriptText: "Reflection · nano",
+        transcriptText: "Revised · after reflection",
       });
       const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
       expect(loaded?.turns.map((turn) => [turn.user, turn.transcriptText, turn.assistant])).toEqual(
         [
           ["plan this", undefined, "draft plan"],
-          ["continue in the first person", "Reflection · nano", "on reflection, step 4 stands"],
+          [
+            "continue in the first person",
+            "Revised · after reflection",
+            "on reflection, step 4 stands",
+          ],
         ],
       );
     });

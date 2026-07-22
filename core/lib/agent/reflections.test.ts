@@ -65,8 +65,10 @@ describe("plan reflections", () => {
       "Reflection\n  I am assuming architecture holds\n\n  I am assuming testing holds",
     );
     // The follow-up is a first-person continuation, not a re-plan.
-    expect(text).toContain("your own reflection on the plan you just wrote");
+    expect(text).toContain("your own reflections on the plan you just wrote");
     expect(text).toContain("I am assuming architecture");
+    // It revises from the reflection's findings without a second investigation.
+    expect(text).toContain("do not re-open files or re-run searches");
     // Not a re-plan: no revised-plan heading and no "rewrite the plan" instruction.
     expect(text).not.toContain("# Revised");
     expect(text).not.toContain("Original user request");
