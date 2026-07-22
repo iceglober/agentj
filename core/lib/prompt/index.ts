@@ -68,6 +68,9 @@ export interface PromptInputs {
   rules: string;
   /** Fills SUBAGENT_CONTRACT's {{OUTPUT_SCHEMA}}; used by a future orchestrator. */
   outputSchema?: string;
+  /** Compose the reflection variant (first-person prose) instead of RESEARCH
+   *  for read-only delegate/plan workers. */
+  reflect?: boolean;
 }
 
 export interface ComposedPrompt {
@@ -144,9 +147,11 @@ export function composePrompt(
     PLANNING: flags.planning,
     SMALL_MODEL: flags.smallModel,
     HALLUCINATION_GUARD: flags.hallucinationGuard,
-    SUBAGENT_CONTRACT: flags.subagentContract,
+    SUBAGENT_CONTRACT: flags.subagentContract && !inputs.reflect,
+    COMMS_STOP: !flags.subagentContract && !inputs.reflect,
     PLAN: !isBuild && inputs.role === "primary",
-    RESEARCH: !isBuild && inputs.role === "delegate",
+    RESEARCH: !isBuild && inputs.role === "delegate" && !inputs.reflect,
+    REFLECT: !isBuild && (inputs.reflect ?? false),
     BUILDER: isBuild,
   };
 

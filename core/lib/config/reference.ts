@@ -52,6 +52,11 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
     description: "Provider override for reflection workers; otherwise subagent routing applies.",
   },
   {
+    path: "agent.reflections.temperature",
+    description:
+      "Sampling temperature for reflection workers; higher yields more divergent challenging. Omitted uses the model default.",
+  },
+  {
     path: "agent.tools.subagents.tier",
     description:
       "Ladder tier subagents and planning workers run on — route fan-out to a cheaper rung.",

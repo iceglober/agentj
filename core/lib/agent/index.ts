@@ -182,6 +182,9 @@ export interface CreateAgentOptions {
   stopContextTokens?: number;
   /** Capability mode: plan (read-only tools) or build (full). Default build. */
   mode?: AgentMode;
+  /** Compose the reflection prompt variant: first-person prose, read-only, no
+   * report schema. */
+  reflect?: boolean;
   /** Provider-neutral web search and fetch capabilities supplied by composition. */
   web?: { search: WebSearch; fetch: WebFetch };
   /** Primary-only, mode-specific tools supplied by an external integration. */
@@ -282,12 +285,14 @@ export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"])
 
 /** Reflection routing wins over subagent routing, then inherits the plan model. */
 export function reflectionAgentConfig(config: AgentConfig): AgentConfig {
-  const { provider, model, tier } = config.reflections;
-  return routedChildAgentConfig(config, "delegate", {
+  const { provider, model, tier, temperature } = config.reflections;
+  const routed = routedChildAgentConfig(config, "delegate", {
     provider: provider ?? config.tools.subagents.provider,
     model:
       model ?? (tier === undefined ? subagentModel(config) : resolveTierModel(config.llm, tier)),
   });
+  if (temperature === undefined) return routed;
+  return { ...routed, llm: { ...routed.llm, temperature } };
 }
 
 export function withAgentModelSelection(
@@ -638,6 +643,7 @@ export async function createAgent(
         }),
       ),
       mode: opts.mode ?? "build",
+      reflect: opts.reflect,
     },
     opts.ctx,
   );
@@ -667,26 +673,29 @@ export async function createAgent(
               return { ...tools, select_reflections: reflectionSelectionTool };
             })()
           : tools;
-      return generateWithGroundedCompletion(
-        runtime,
-        {
-          instructions: composed.instructions,
-          prompt,
-          images: generateOpts?.images,
-          messages: generateOpts?.messages,
-          tools: requestTools,
-          maxOutputChars: config.tools.maxOutputChars,
-          spill: opts.spill?.write,
-          temperature: config.llm.temperature ?? composed.params.temperature,
-          topP: config.llm.topP ?? composed.params.topP,
-          providerOptions: composed.params.providerOptions,
-          stopSteps: opts.stopSteps ?? config.steps,
-          stopContextTokens: opts.stopContextTokens,
-          abortSignal: generateOpts?.abortSignal,
-          onStep: generateOpts?.onStep,
-        },
-        { todos: opts.todos },
-      );
+      const request = {
+        instructions: composed.instructions,
+        prompt,
+        images: generateOpts?.images,
+        messages: generateOpts?.messages,
+        tools: requestTools,
+        maxOutputChars: config.tools.maxOutputChars,
+        spill: opts.spill?.write,
+        temperature: config.llm.temperature ?? composed.params.temperature,
+        topP: config.llm.topP ?? composed.params.topP,
+        providerOptions: composed.params.providerOptions,
+        stopSteps: opts.stopSteps ?? config.steps,
+        stopContextTokens: opts.stopContextTokens,
+        abortSignal: generateOpts?.abortSignal,
+        onStep: generateOpts?.onStep,
+      };
+      // Reflection workers produce first-person prose, never a completion report
+      // or a background job — the grounding gate's done/deferred-work correctives
+      // don't apply and would otherwise overwrite a reflection with a blocked
+      // report. Go straight to the runtime for them.
+      return opts.reflect
+        ? runtime.generate(request)
+        : generateWithGroundedCompletion(runtime, request, { todos: opts.todos });
     },
   };
 }

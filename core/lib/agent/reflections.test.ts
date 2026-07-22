@@ -1,8 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { agentConfigSchema } from ".";
-import { createPlanReflectionFollowUp, extractReflectionSelection } from "./reflections";
+import {
+  createPlanReflectionFollowUp,
+  extractReflectionSelection,
+  reflectionsConfigSchema,
+} from "./reflections";
 
 describe("plan reflections", () => {
+  test("temperature defaults to undefined and accepts an override in range", () => {
+    expect(reflectionsConfigSchema.parse({}).temperature).toBeUndefined();
+    expect(reflectionsConfigSchema.parse({ temperature: 1.2 }).temperature).toBe(1.2);
+    expect(() => reflectionsConfigSchema.parse({ temperature: 2.5 })).toThrow();
+  });
+
   test("is disabled by an empty prompt map", async () => {
     const config = agentConfigSchema.parse({});
     expect(
@@ -87,9 +97,11 @@ describe("plan reflections", () => {
     // Collapsed to a single indented line, newlines gone.
     expect(line.startsWith("  I am worried about the plan because ")).toBe(true);
     expect(line).not.toContain("\n");
-    // Hard-capped at the ~240-char display budget (indent + trunc notice).
-    expect(line.length).toBeLessThanOrEqual(240 + 2);
-    expect(line).toContain("[trunc");
+    // Hard-capped at the 400-char display budget with a clean ellipsis, not the
+    // ugly mid-sentence `[trunc N chars]` notice.
+    expect(line.length).toBeLessThanOrEqual(400 + 3);
+    expect(line.endsWith("…")).toBe(true);
+    expect(line).not.toContain("[trunc");
     // The model still receives the full prose through the findings text.
     expect((followUp as { text: string }).text).toContain("end");
   });

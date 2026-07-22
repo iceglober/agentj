@@ -73,6 +73,9 @@ export const reflectionsConfigSchema = z
     model: z.string().trim().min(1).optional(),
     /** Ladder tier for reflection workers. */
     tier: z.number().int().min(0).optional(),
+    /** Sampling temperature for reflection workers; higher = more divergent
+     *  challenging. Omitted → the model default. */
+    temperature: z.number().min(0).max(2).optional(),
   })
   .prefault({});
 
@@ -160,11 +163,13 @@ export async function createPlanReflectionFollowUp(
     .map(({ id, text }) => `${id}:\n${truncateWithNotice(text, cap)}`)
     .join("\n\n");
   const model = options.reflectionModel ? ` · ${options.reflectionModel.split("/").pop()}` : "";
-  const reflections = result.results.map((entry) =>
-    entry.outcome === "completed" && entry.text !== null
-      ? `  ${truncateWithNotice(entry.text.replace(/\s+/gu, " ").trim(), 240)}`
-      : `  ✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`,
-  );
+  const reflections = result.results.map((entry) => {
+    if (entry.outcome === "completed" && entry.text !== null) {
+      const line = entry.text.replace(/\s+/gu, " ").trim();
+      return `  ${line.length > 400 ? `${line.slice(0, 399).trimEnd()}…` : line}`;
+    }
+    return `  ✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`;
+  });
   const transcriptText = [`Reflection${model}`, reflections.join("\n\n")].join("\n");
   if (options.phase === "pre_turn") {
     return {

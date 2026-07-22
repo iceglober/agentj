@@ -461,6 +461,7 @@ async function composeChat(
   const createResearchWorker = async (
     origin?: string,
     workerConfig = childAgentConfig(agentConfigFor("plan"), "delegate"),
+    opts?: { reflect?: boolean },
   ) => ({
     generate: async (
       prompt: string,
@@ -475,6 +476,7 @@ async function composeChat(
           spill,
           web,
           mode: "plan",
+          ...(opts?.reflect ? { reflect: true } : {}),
           stopContextTokens: config.agent.context.softLimit,
           childExternalTools: externalLease.externalTools,
           permissions: {
@@ -716,10 +718,9 @@ async function composeChat(
         ...(selectedIds !== undefined ? { selectedIds } : {}),
         reflectionModel: `${reflectionAgentConfig(agentConfigFor("plan")).llm.provider}/${reflectionAgentConfig(agentConfigFor("plan")).llm.model}`,
         createWorker: (task) =>
-          createResearchWorker(
-            `reflection ${task.id}`,
-            reflectionAgentConfig(agentConfigFor("plan")),
-          ),
+          createResearchWorker(`reflection ${task.id}`, reflectionAgentConfig(agentConfigFor("plan")), {
+            reflect: true,
+          }),
         onProgress: onDagProgress,
       }),
     runBuildJob,
