@@ -1,4 +1,3 @@
-import type { Readable } from "node:stream";
 import type { UiBlock, UiTextLine } from "./styles";
 
 /** A terminal output boundary for the persistent live region. */
@@ -9,11 +8,6 @@ export interface LiveLayout {
 }
 
 export interface LiveRegionPort {
-  /** Key input the screen should read instead of the process stdin, when the
-   *  adapter owns the terminal. The adapter parses stdin (absorbing terminal
-   *  query responses) and forwards raw keystrokes here. Undefined means the
-   *  screen reads the process stdin directly. */
-  input?: Readable;
   /** Whether semantic UI spans should render SGR styling. */
   color(): boolean;
   /** Usable line width, excluding the repaint safety margin. */

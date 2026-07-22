@@ -114,7 +114,7 @@ import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { renderMarkdownLite } from "./lib/tui/markdown";
-import { createOpenTuiLiveRegionAdapter } from "./lib/tui/opentui-live-region-adapter";
+import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
 import {
   applyProgressEvent,
   composeProgressLines,
@@ -1279,21 +1279,14 @@ export async function runAgentjChat(
         .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
     ];
 
-    const liveRegion =
-      process.env.AGENTJ_TUI === "opentui"
-        ? await createOpenTuiLiveRegionAdapter({ stdout: processStdout })
-        : createAnsiLiveRegionAdapter({ stdout: processStdout });
     const clipboardAttachments = createCrosscopyClipboardAttachments();
     const pastedImages = createPastedImageRegistry();
     const projectFiles = createProjectFileCatalog(createGitProjectFileSource(environment, root));
     await projectFiles.refresh();
-    screen = createChatScreen({
-      liveRegion,
-      // When the adapter owns the terminal (OpenTUI), read forwarded keystrokes
-      // from it; otherwise the screen falls back to the process stdin.
-      stdin: liveRegion.input,
+    const sharedScreenOptions = {
       initialHistory: promptHistory.entries,
-      matchesSlashCommand: (query) => suggestChatInputRoots(query, commandContext).length > 0,
+      matchesSlashCommand: (query: string) =>
+        suggestChatInputRoots(query, commandContext).length > 0,
       editorCompletionOptions: createEditorCompletionProvider({
         completeInitialSlash: (state) =>
           completeChatInput(state.text, state.cursor, commandContext),
@@ -1305,10 +1298,10 @@ export async function runAgentjChat(
             summary: "Project file",
           })),
       }),
-      shouldRememberInput: (text) =>
+      shouldRememberInput: (text: string) =>
         shouldRememberChatInput(text) && !pastedImages.hasReference(text),
       callbacks: {
-        onSubmit: (text) => {
+        onSubmit: (text: string) => {
           if (shouldRememberChatInput(text) && !pastedImages.hasReference(text))
             rememberPrompt(text);
           const parsed = parseInput(text);
@@ -1374,7 +1367,14 @@ export async function runAgentjChat(
         },
         onQuit: () => quitResolve?.(),
       },
-    });
+    };
+    screen =
+      process.env.AGENTJ_TUI === "opentui"
+        ? await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions })
+        : createChatScreen({
+            liveRegion: createAnsiLiveRegionAdapter({ stdout: processStdout }),
+            ...sharedScreenOptions,
+          });
 
     screen.start();
     refreshProgress();
