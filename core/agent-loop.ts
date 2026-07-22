@@ -1289,6 +1289,9 @@ export async function runAgentjChat(
     await projectFiles.refresh();
     screen = createChatScreen({
       liveRegion,
+      // When the adapter owns the terminal (OpenTUI), read forwarded keystrokes
+      // from it; otherwise the screen falls back to the process stdin.
+      stdin: liveRegion.input,
       initialHistory: promptHistory.entries,
       matchesSlashCommand: (query) => suggestChatInputRoots(query, commandContext).length > 0,
       editorCompletionOptions: createEditorCompletionProvider({

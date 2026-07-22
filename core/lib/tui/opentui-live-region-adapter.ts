@@ -1,4 +1,4 @@
-import type { Writable } from "node:stream";
+import { PassThrough, type Writable } from "node:stream";
 import type { StyledText, TextChunk } from "@opentui/core";
 import type { LiveLayout, LiveRegionPort } from "./live-region";
 import type { UiBlock, UiSpan, UiTextLine } from "./styles";
@@ -90,6 +90,26 @@ export async function createOpenTuiLiveRegionAdapter(
   renderer.on("resize", onRendererResize);
   let disposed = false;
 
+  // OpenTUI owns the raw stdin and parses it, absorbing terminal query
+  // responses (cursor reports, capability probes) that would otherwise corrupt
+  // the screen's key decoder. Real keystrokes are re-emitted as raw bytes on
+  // this stream, which the screen reads in place of the process stdin.
+  const input = new PassThrough();
+  const onKeypress = (event: { raw?: string; sequence?: string }): void => {
+    if (disposed) return;
+    const bytes = event.raw ?? event.sequence ?? "";
+    if (bytes.length > 0) input.write(Buffer.from(bytes, "utf8"));
+  };
+  const onPaste = (event: { bytes: Uint8Array }): void => {
+    if (disposed) return;
+    // Rewrap in bracketed-paste markers so the screen's decoder treats the
+    // payload as one paste, matching what it reads straight from a terminal.
+    const text = Buffer.from(event.bytes).toString("utf8");
+    input.write(Buffer.from(`[200~${text}[201~`, "utf8"));
+  };
+  renderer.keyInput.on("keypress", onKeypress);
+  renderer.keyInput.on("paste", onPaste);
+
   const attributes = (span: UiSpan): number =>
     (span.bold ? opentui.TextAttributes.BOLD : 0) |
     (span.italic ? opentui.TextAttributes.ITALIC : 0) |
@@ -147,11 +167,15 @@ export async function createOpenTuiLiveRegionAdapter(
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
+    renderer.keyInput.removeListener("keypress", onKeypress);
+    renderer.keyInput.removeListener("paste", onPaste);
+    input.end();
     renderer.removeListener("resize", onRendererResize);
     renderer.destroy();
   };
 
   return {
+    input,
     color: () => colorEnabled,
     width,
     height,
