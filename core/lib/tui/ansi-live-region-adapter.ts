@@ -86,12 +86,21 @@ export function createAnsiLiveRegionAdapter(
     return rowsBefore + cursorWrap;
   };
 
-  /** Move the cursor to the top-left of the drawn region and clear to the end
-   *  of the screen, leaving the cursor where the next line should begin. */
-  const eraseRegion = (): void => {
+  // Wrap a repaint in a synchronized update so the terminal applies the whole
+  // erase-redraw-reposition atomically: no tearing, and the cursor never
+  // visibly jumps mid-frame (the flicker). Terminals without the feature ignore
+  // these private-mode sequences, so there is no regression.
+  const SYNC_BEGIN = csi("?2026h");
+  const SYNC_END = csi("?2026l");
+
+  /** The sequence that moves to the top-left of the drawn region and clears to
+   *  the end of the screen, leaving the cursor where the next line begins. */
+  const eraseSequence = (): string => {
     const cursorRow = lastLayout ? physicalCursorRow(lastLayout) : 0;
-    if (cursorRow > 0) write(csi(`${cursorRow}A`));
-    write(`\r${csi("J")}`);
+    return `${cursorRow > 0 ? csi(`${cursorRow}A`) : ""}\r${csi("J")}`;
+  };
+  const eraseRegion = (): void => {
+    write(eraseSequence());
   };
 
   /** Keep the region no taller than the screen so redrawing it can never scroll
@@ -119,23 +128,22 @@ export function createAnsiLiveRegionAdapter(
       write(csi(`?2004${enabled ? "h" : "l"}`));
     },
     paint(layout) {
-      eraseRegion();
+      const erase = eraseSequence();
       const fitted = clamp(layout);
-      write(fitted.lines.map((line) => styler.renderLine(line, contentWidth())).join("\r\n"));
+      const body = fitted.lines.map((line) => styler.renderLine(line, contentWidth())).join("\r\n");
       const up = fitted.lines.length - 1 - fitted.cursorRow;
-      write(
-        `\r${up > 0 ? csi(`${up}A`) : ""}${fitted.cursorColumn > 0 ? csi(`${fitted.cursorColumn}C`) : ""}`,
-      );
+      const reposition = `\r${up > 0 ? csi(`${up}A`) : ""}${fitted.cursorColumn > 0 ? csi(`${fitted.cursorColumn}C`) : ""}`;
+      write(`${SYNC_BEGIN}${erase}${body}${reposition}${SYNC_END}`);
       lastLayout = fitted;
     },
     printAbove(text, spacing = "none") {
       // Spacing is semantic: related events are adjacent, while a new user turn
       // gets one leading blank. The live layout supplies the single separator
       // below the transcript when it is painted.
-      eraseRegion();
+      const erase = eraseSequence();
       lastLayout = null;
       const rendered = styler.renderBlock(text).join("\r\n");
-      write(`${spacing === "turn" ? "\r\n" : ""}${rendered}\r\n`);
+      write(`${SYNC_BEGIN}${erase}${spacing === "turn" ? "\r\n" : ""}${rendered}\r\n${SYNC_END}`);
     },
     clear() {
       eraseRegion();

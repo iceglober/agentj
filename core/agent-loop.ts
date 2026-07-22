@@ -788,6 +788,9 @@ export async function runAgentjChat(
   // nothing, which looks identical to a freeze.
   let turnProducedOutput = false;
   let spinnerFrame = 0;
+  // The VU busy meter animates on its own fast frame so the hum is fluid; the
+  // progress spinner and clocks stay on the calmer spinnerFrame.
+  let vuFrame = 0;
   const turnTokens = { ctx: 0 };
   let lastContextWarning: number | undefined;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
@@ -1130,7 +1133,7 @@ export async function runAgentjChat(
             tone: "warning",
           });
         else if (busy)
-          segs.push({ text: `   ${formatVuMeter(spinnerFrame)}  Esc interrupt`, tone: "accent" });
+          segs.push({ text: `   ${formatVuMeter(vuFrame)}  Esc interrupt`, tone: "accent" });
         return segs;
       };
       const mode = chat.pendingMode;
@@ -1165,13 +1168,19 @@ export async function runAgentjChat(
       );
     };
 
-    // Animate spinners and clocks. The screen skips repaints when the status
-    // section is unchanged, so idle ticks cost one comparison.
+    // Animate the busy meter on a fast frame for a fluid hum; advance the
+    // calmer spinner/clock frame every third tick. The screen skips repaints
+    // when a section is unchanged, so idle ticks cost one comparison.
+    let animationTick = 0;
     ticker = setInterval(() => {
-      spinnerFrame += 1;
-      if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
+      animationTick += 1;
+      vuFrame += 1;
+      if (animationTick % 3 === 0) {
+        spinnerFrame += 1;
+        if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
+      }
       updateStatus();
-    }, 250);
+    }, 90);
 
     const configOutput = (message: string): void => {
       const text = message.trim();
