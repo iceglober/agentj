@@ -750,6 +750,52 @@ describe("plan reflections", () => {
     });
   });
 
+  test("holds the draft plan back and shows only the revised plan", async () => {
+    await withLog(async (log) => {
+      const events: ChatEvent[] = [];
+      let calls = 0;
+      const session = createChatSession({
+        agentFor: async () =>
+          makeAgent(async () => {
+            calls += 1;
+            return result(calls === 1 ? "draft plan" : "revised plan");
+          }),
+        log,
+        reflectionEvents: ["plan.each.post_turn"],
+        reflectPlan: async () => ({ text: "revise", transcriptText: "Reflections" }),
+        onEvent: (event) => events.push(event),
+      });
+
+      await session.send("plan");
+
+      // The draft never reaches the transcript — only the revised plan does.
+      expect(
+        events.filter((event) => event.type === "assistant").map((event) => event.text),
+      ).toEqual(["revised plan"]);
+    });
+  });
+
+  test("replays the held draft plan when reflections do not revise it", async () => {
+    await withLog(async (log) => {
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () => makeAgent(async () => result("draft plan")),
+        log,
+        reflectionEvents: ["plan.each.post_turn"],
+        reflectPlan: async () => ({ notice: "Reflections skipped by plan selection." }),
+        onEvent: (event) => events.push(event),
+      });
+
+      await session.send("plan");
+
+      // No revision landed, so the held-back draft is restored, with the note.
+      expect(
+        events.filter((event) => event.type === "assistant").map((event) => event.text),
+      ).toEqual(["draft plan"]);
+      expect(events.some((event) => event.type === "notice")).toBe(true);
+    });
+  });
+
   test("keeps the draft when reflections return a notice and never refines build turns", async () => {
     await withLog(async (log, root) => {
       let refinements = 0;

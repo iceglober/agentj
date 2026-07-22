@@ -139,7 +139,14 @@ export function createChatSession(
     fixedMode?: ChatMode,
     extraContext?: string,
     selectReflections = false,
-  ): Promise<{ succeeded: boolean; mode: ChatMode; text?: string; selectedIds?: string[] }> => {
+    emitAssistant = true,
+  ): Promise<{
+    succeeded: boolean;
+    mode: ChatMode;
+    text?: string;
+    selectedIds?: string[];
+    stepLimitReached?: boolean;
+  }> => {
     mode = fixedMode ?? pendingMode;
     turnAbort = new AbortController();
     const abort = turnAbort;
@@ -168,12 +175,16 @@ export function createChatSession(
         ? extractReflectionSelection(result, agent.reflectionIds ?? [])
         : null;
       messages = result.messages ?? messages;
-      emit({
-        type: "assistant",
-        mode,
-        text: result.text,
-        ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
-      });
+      // A draft plan that reflections will revise is deferred: showing it and
+      // then a second, revised plan is confusing. The caller replays it only if
+      // reflections fail to produce a revision.
+      if (emitAssistant)
+        emit({
+          type: "assistant",
+          mode,
+          text: result.text,
+          ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
+        });
       if (result.stepLimitReached)
         notices.push("[note] The previous turn stopped at the step limit before finishing.");
       await deps.log.append({
@@ -200,6 +211,7 @@ export function createChatSession(
         mode,
         text: result.text,
         ...(selectedIds !== null ? { selectedIds } : {}),
+        ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
       };
     } catch (error) {
       if (abort.signal.aborted) {
@@ -277,17 +289,38 @@ export function createChatSession(
         }
       }
       const postDue = pendingMode === "plan" && reflectPlan ? hook("post_turn") : null;
+      // When a post-turn reflection will revise the plan, hold the draft back so
+      // the user sees only the revised plan; replay it if reflections don't land.
+      const willRevise = postDue !== null && deps.reflectPlan !== undefined;
       const draft = await runExchange(
         text,
         transcriptText,
         images,
         undefined,
         context,
-        postDue !== null && deps.reflectPlan !== undefined,
+        willRevise,
+        !willRevise,
       );
-      if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) return;
+      let draftShown = false;
+      const showDraft = (): void => {
+        if (draftShown || !willRevise || !draft.succeeded || draft.text === undefined) return;
+        draftShown = true;
+        emit({
+          type: "assistant",
+          mode: draft.mode,
+          text: draft.text,
+          ...(draft.stepLimitReached ? { stepLimitReached: true } : {}),
+        });
+      };
+      if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) {
+        showDraft();
+        return;
+      }
       const post = postDue;
-      if (!post) return;
+      if (!post) {
+        showDraft();
+        return;
+      }
       const controller = new AbortController();
       turnAbort = controller;
       try {
@@ -302,10 +335,16 @@ export function createChatSession(
           abortSignal: controller.signal,
           ...(draft.selectedIds ? { selectedIds: draft.selectedIds } : {}),
         });
-        if (followUp && "notice" in followUp) emit({ type: "notice", text: followUp.notice });
-        else if (followUp && "text" in followUp)
+        if (followUp && "text" in followUp) {
+          // The revised plan replaces the held-back draft.
           await runExchange(followUp.text, followUp.transcriptText, undefined, "plan");
+        } else {
+          // No revision landed: restore the draft, then note why if there was one.
+          showDraft();
+          if (followUp && "notice" in followUp) emit({ type: "notice", text: followUp.notice });
+        }
       } catch (error) {
+        showDraft();
         if (controller.signal.aborted) emit({ type: "turn-aborted" });
         else
           emit({

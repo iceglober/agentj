@@ -78,12 +78,37 @@ describe("plan reflections", () => {
       }),
     });
     expect(followUp).toMatchObject({
-      transcriptText: "Reflections\n\n✗ architecture — Blocked: Boundary is unclear.",
+      transcriptText: "Reflections\n\n✗ architecture — Boundary is unclear.",
     });
     // The raw arrays never reach the human-facing transcript.
     expect(followUp).not.toMatchObject({
       transcriptText: expect.stringContaining("three"),
     });
+  });
+
+  test("shows only the review name when the review returns unparseable JSON", async () => {
+    const config = agentConfigSchema.parse({
+      reflections: { prompts: { architecture: "Review it." } },
+      tools: { maxOutputChars: 2_000 },
+    });
+    // Unquoted keys / an off-schema status: not a valid completion report.
+    const jsonish = '{status:"needs_escalation",changes:[],evidence:["README.md describes agentj"]}';
+    const followUp = await createPlanReflectionFollowUp({
+      config,
+      request: "request",
+      draft: "draft",
+      abortSignal: new AbortController().signal,
+      createWorker: async () => ({
+        generate: async () => ({
+          text: jsonish,
+          steps: [],
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        }),
+      }),
+    });
+    // Name only — no brace, no JSON, ever reaches the transcript.
+    expect(followUp).toMatchObject({ transcriptText: "Reflections\n\n✓ architecture" });
+    expect(followUp).not.toMatchObject({ transcriptText: expect.stringContaining("{") });
   });
 
   test("runs only the selected reflections and preserves configured order", async () => {

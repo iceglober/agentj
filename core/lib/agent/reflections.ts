@@ -1,7 +1,7 @@
 import z from "zod";
 import type { RunResult } from "../llm";
 import { defineTool } from "../llm";
-import { type CompletionReport, parseCompletionReport } from "../report";
+import { parseCompletionReport } from "../report";
 import { truncateWithNotice } from "../truncation";
 import type { AgentConfig } from ".";
 import type { SubagentProgressEvent, SubagentRunner } from "./subagents";
@@ -77,31 +77,35 @@ export const reflectionsConfigSchema = z
   })
   .prefault({});
 
-const REVIEW_STATUS_LABEL: Record<CompletionReport["status"], string> = {
-  done: "Done",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  failed: "Failed",
+const SUMMARY_CAP = 64;
+const shorten = (value: string): string => {
+  const line = value.replace(/\s+/gu, " ").trim();
+  return line.length > SUMMARY_CAP ? `${line.slice(0, SUMMARY_CAP - 1)}…` : line;
+};
+
+/** A clean one-line summary for a review, or null when there is nothing
+ *  readable to show (e.g. the review returned raw JSON). */
+const reviewSummary = (text: string): string | null => {
+  const report = parseCompletionReport(text);
+  if (report?.summary) return report.summary;
+  const field = text.match(/"summary"\s*:\s*"([^"]{1,240})"/u);
+  if (field?.[1]) return field[1];
+  const line = text.replace(/\s+/gu, " ").trim();
+  // Anything still shaped like JSON has no readable summary to surface.
+  return line.length === 0 || line.startsWith("{") || line.startsWith("[") ? null : line;
 };
 
 /**
- * Terse, human-facing rendering of one completed review for the transcript.
- * When the review returned a completion report, show its status + summary (and
- * open questions for non-failing reviews) rather than the raw JSON. Research
- * reviews return free-form findings; those collapse to one bounded line so a
- * verbose or JSON-shaped review never becomes a wall of noise. The full text
- * still reaches the primary model through `findings`; only display changes.
+ * One short, human-facing line per completed review — never a JSON blob or a
+ * long body. Show a clean summary when there is one and cap it hard; otherwise
+ * just the review name. The full review text still reaches the primary model
+ * through `findings`; only the transcript display is trimmed.
  */
-const formatReviewFinding = (id: string, text: string, cap: number): string => {
+const formatReviewFinding = (id: string, text: string): string => {
   const report = parseCompletionReport(text);
-  if (!report) {
-    const preview = truncateWithNotice(text.replace(/\r\n?|\n/gu, " ").trim(), Math.min(cap, 200));
-    return `✓ ${id} — ${preview}`;
-  }
-  const failing = report.status === "failed" || report.status === "blocked";
-  const head = `${failing ? "✗" : "✓"} ${id} — ${REVIEW_STATUS_LABEL[report.status]}: ${report.summary}`;
-  if (failing || report.openQuestions.length === 0) return head;
-  return `${head}\n${report.openQuestions.map((question) => `  · ${question}`).join("\n")}`;
+  const marker = report?.status === "failed" || report?.status === "blocked" ? "✗" : "✓";
+  const summary = reviewSummary(text);
+  return summary ? `${marker} ${id} — ${shorten(summary)}` : `${marker} ${id}`;
 };
 
 export type ReflectionFollowUp = { text: string; transcriptText: string };
@@ -184,8 +188,8 @@ export async function createPlanReflectionFollowUp(
     `Reflections${model}`,
     ...result.results.map((entry) =>
       entry.outcome === "completed" && entry.text !== null
-        ? formatReviewFinding(entry.id, entry.text, cap)
-        : `✗ ${entry.id} — ${entry.error ?? entry.outcome} (not sent to the primary model)`,
+        ? formatReviewFinding(entry.id, entry.text)
+        : `✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`,
     ),
   ].join("\n\n");
   if (options.phase === "pre_turn") {
