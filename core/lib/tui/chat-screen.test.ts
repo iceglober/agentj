@@ -792,7 +792,7 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("keeps transcript, progress, presence, and composer in a stable hierarchy", async () => {
+  test("keeps transcript, progress, and composer in a stable hierarchy", async () => {
     const { screen, text } = makeScreen();
     screen.start();
     screen.printAbove("earlier transcript item");
@@ -807,25 +807,22 @@ describe("createChatScreen", () => {
       "earlier transcript item",
       "latest transcript item",
     ]);
-    expect(rendered.slice(latest + 1, idleEditor)).toEqual(["● Ready"]);
+    expect(rendered.slice(latest + 1, idleEditor)).toEqual([]);
 
     screen.setProgressLines([
       "  ◐ tool running",
       "",
-      "  Plan · 0/1 complete",
+      "  Todos · 0/1 complete",
       "    → Implement the change",
     ]);
-    screen.setPresenceLine("◐ Working 1s · Esc interrupt");
     await settle();
     rendered = renderScreen(text());
-    const todo = rendered.findIndex((line) => line.includes("Plan · 0/1 complete"));
+    const todo = rendered.findIndex((line) => line.includes("Todos · 0/1 complete"));
     const tool = rendered.findIndex((line) => line.includes("tool running"));
-    const thinking = rendered.findIndex((line) => line.includes("Working 1s"));
     const activeEditor = rendered.findIndex((line) => line.startsWith("› "));
     expect(tool).toBeLessThan(todo);
     expect(rendered.slice(tool + 1, todo)).toEqual([""]);
-    expect(todo).toBeLessThan(thinking);
-    expect(thinking).toBe(activeEditor - 1);
+    expect(todo).toBeLessThan(activeEditor);
     screen.stop();
   });
 

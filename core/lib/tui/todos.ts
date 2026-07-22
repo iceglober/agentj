@@ -29,7 +29,7 @@ const formatTodoItem = (item: TodoItem): string =>
 export const formatTodoProgressLines = (items: TodoList, maxRows = TODO_LIVE_ROWS): string[] => {
   if (items.length === 0) return [];
   const completed = completedCount(items);
-  if (completed === items.length) return [`  ✓ Plan complete · ${completed}/${items.length}`];
+  if (completed === items.length) return [`  ✓ Todos complete · ${completed}/${items.length}`];
 
   // The live view answers "what is happening next?": active work comes first,
   // then pending work. Completed items remain represented by the header and
@@ -42,7 +42,7 @@ export const formatTodoProgressLines = (items: TodoList, maxRows = TODO_LIVE_ROW
   const hiddenCount = remaining.length - visible.length;
 
   return [
-    `  Plan · ${completed}/${items.length} complete`,
+    `  Todos · ${completed}/${items.length} complete`,
     ...visible.map((row) => `    ${row}`),
     ...(hiddenCount > 0 ? [`    +${hiddenCount} more`] : []),
   ];

@@ -117,13 +117,13 @@ import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
 import {
   applyProgressEvent,
   composeProgressLines,
-  countVisibleToolActivities,
   createProgressTracker,
   formatDuration,
   formatToolActivityLabel,
   type ProgressTracker,
 } from "./lib/tui/progress";
-import { composePresenceLine, composeStatusSection, shouldWarnContext } from "./lib/tui/status";
+import { composeStatusSection, shouldWarnContext } from "./lib/tui/status";
+import type { UiSpan, UiTextLine } from "./lib/tui/styles";
 import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
@@ -258,7 +258,6 @@ export async function finalizeInteractiveChat(options: {
 export { formatChatEvent, truncateLineWithNotice } from "./lib/tui/chat-event-format";
 export { composeProgressLines } from "./lib/tui/progress";
 export {
-  composePresenceLine,
   composeStatusSection,
   formatClock,
   type StatusSectionState,
@@ -1150,22 +1149,18 @@ export async function runAgentjChat(
     updateStatus = (): void => {
       if (!screen) return;
       const busy = chat.busy && !permissionPending;
-      screen.setPresenceLine([
-        {
-          text: composePresenceLine(
-            {
-              busy,
-              interruptRequested,
-              spinnerFrame,
-              turnStartedAt,
-              activeTools: countVisibleToolActivities(activeTools),
-              queued: queuedMessages.length,
-            },
-            screen.width(),
-          ),
-          tone: interruptRequested ? "warning" : busy ? "accent" : "success",
-        },
-      ]);
+      const queued = queuedMessages.length;
+      const toneControlsLine = (text: string, index: number): UiTextLine => {
+        if (index !== 1) return [{ text, tone: "muted" }];
+        const segs: UiSpan[] = [{ text, tone: "muted" }];
+        if (interruptRequested)
+          segs.push({
+            text: `   Stopping safely…${queued ? ` · ${queued} queued` : ""}`,
+            tone: "warning",
+          });
+        else if (busy) segs.push({ text: "   Esc interrupt", tone: "accent" });
+        return segs;
+      };
       const mode = chat.pendingMode;
       screen.setComposer({
         label: `${mode} › `,
@@ -1194,7 +1189,7 @@ export async function runAgentjChat(
               })),
           },
           screen.width(),
-        ).map((text) => [{ text, tone: "muted" }]),
+        ).map(toneControlsLine),
       );
     };
 

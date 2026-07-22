@@ -59,14 +59,12 @@ describe("createOpenTuiChatScreen", () => {
     renderer.destroy();
   });
 
-  test("setStatusLines and setPresenceLine update the surface", async () => {
+  test("setStatusLines updates the surface", async () => {
     const { renderer, screen, renderOnce, captureCharFrame } = await setup();
     screen.start();
-    screen.setPresenceLine("● Thinking");
     screen.setStatusLines([[{ text: "status footer" }]]);
     await renderOnce();
     const frame = captureCharFrame();
-    expect(frame).toContain("Thinking");
     expect(frame).toContain("status footer");
     screen.stop();
     renderer.destroy();
