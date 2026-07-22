@@ -5,11 +5,12 @@ import {
   parseExecutorResult,
 } from "../report";
 
-const statusLabel = (status: CompletionReport["status"]): string =>
+export const statusLabel = (status: CompletionReport["status"]): string =>
   ({ done: "Done", in_progress: "In progress", blocked: "Blocked", failed: "Failed" })[status];
 
-const validationLabel = (outcome: CompletionReport["validation"][number]["outcome"]): string =>
-  ({ passed: "Passed", failed: "Failed", not_run: "Not run" })[outcome];
+export const validationLabel = (
+  outcome: CompletionReport["validation"][number]["outcome"],
+): string => ({ passed: "Passed", failed: "Failed", not_run: "Not run" })[outcome];
 
 /** Present the complete structured result in the transcript rather than dropping
  * evidence and next steps behind a one-line summary. */

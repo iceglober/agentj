@@ -112,20 +112,23 @@ import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
-import { renderMarkdownLite } from "./lib/tui/markdown";
 import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
 import {
   applyProgressEvent,
   composeProgressLines,
   createProgressTracker,
-  formatDuration,
-  formatToolActivityLabel,
   type ProgressTracker,
 } from "./lib/tui/progress";
 import { composeStatusSection, formatVuMeter, shouldWarnContext } from "./lib/tui/status";
 import type { UiSpan, UiTextLine } from "./lib/tui/styles";
 import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
+import {
+  renderTranscriptItem,
+  renderToolRow,
+  type ToolRow,
+  toTranscriptItem,
+} from "./lib/tui/transcript-item";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
   createNpmInstaller,
@@ -848,16 +851,18 @@ export async function runAgentjChat(
       if (completedActivities.length > 100) completedActivities.shift();
       turnProducedOutput = true;
       // Stream each finished tool into the transcript so the turn shows what it
-      // actually did, rather than collapsing to a single count.
-      screen?.printAbove([
-        [
-          {
-            text: `  ✓ ${formatToolActivityLabel(activity.tool, detail)} ${formatDuration(elapsedMs)}`,
-            tone: "success",
-          },
-        ],
-        ...dagBlock.map((text) => [{ text }]),
-      ]);
+      // actually did, rather than collapsing to a single count. Only the ✓ is
+      // toned — the row itself stays calm — and any owned DAG rows freeze below.
+      if (screen) {
+        const row: ToolRow = {
+          tool: activity.tool,
+          detail,
+          elapsedMs,
+          outcome: "ok",
+          ...(dagBlock.length > 0 ? { dag: dagBlock } : {}),
+        };
+        screen.printAbove(renderToolRow(row, { live: false }, screen.width()), "none");
+      }
     }
     refreshProgress();
     updateStatus();
@@ -1040,54 +1045,16 @@ export async function runAgentjChat(
         if (!dagTracker.live) dagTrackers.delete(owner);
         refreshProgress();
       }
-      // Chat styling (interactive only): a blank line + colored prefix separates
-      // turns; assistant markdown renders lightly.
-      if (event.type === "turn-started") {
-        screen?.printAbove(
-          formatUserTurnBlock(event.text, event.transcriptText, screen.width()),
-          "turn",
-        );
-        updateStatus();
-        return;
-      }
-      if (event.type === "assistant") {
-        const body = formatChatEvent(event);
-        if (body !== null) {
-          turnProducedOutput = true;
-          screen?.printAbove(renderMarkdownLite(body));
-        } else if (!turnProducedOutput) {
-          // The turn ran, showed no tool work, and the model returned no text —
-          // say so, or the turn is indistinguishable from a hang.
-          screen?.printAbove([
-            [{ text: "(no response — the model returned nothing; try again)", tone: "muted" }],
-          ]);
-        }
-        updateStatus();
-        return;
-      }
-      if (event.type === "turn-error") {
-        turnProducedOutput = true;
-        const filtered = /content management policy|content filter|was filtered/i.test(event.error);
-        screen?.printAbove([
-          [{ text: `error: ${event.error}`, tone: "danger" }],
-          ...(filtered
-            ? [
-                [
-                  {
-                    text: "The provider's content filter rejected this request. It often fires intermittently — retry once; if it keeps happening, start a new session (aj) instead of resuming this one.",
-                    tone: "muted" as const,
-                  },
-                ],
-              ]
-            : []),
-        ]);
-        updateStatus();
-        return;
-      }
-      const text = formatChatEvent(event);
-      if (text) {
-        turnProducedOutput = true;
-        screen?.printAbove(text);
+      // Chat styling (interactive only): one seam lowers every transcript event
+      // to a semantic block + spacing. User and assistant blocks separate with a
+      // blank line ("turn"); tool and system lines pack tight ("none"). The
+      // empty-response notice fires only when the turn showed nothing at all —
+      // otherwise the turn is indistinguishable from a hang.
+      const item = toTranscriptItem(event);
+      if (item && screen && (item.kind !== "empty" || !turnProducedOutput)) {
+        if (item.kind !== "user") turnProducedOutput = true;
+        const { block, spacing } = renderTranscriptItem(item, screen.width());
+        screen.printAbove(block, spacing);
       }
       updateStatus();
     };

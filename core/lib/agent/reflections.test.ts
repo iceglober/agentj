@@ -47,9 +47,43 @@ describe("plan reflections", () => {
     expect(prompts.testing).toContain("Add reflections");
     expect(followUp).toMatchObject({
       transcriptText:
-        "Reflections\n\n✓ architecture\narchitecture finding\n\n✓ testing\ntesting finding",
+        "Reflections\n\n✓ architecture — architecture finding\n\n✓ testing — testing finding",
     });
     expect(followUp).toMatchObject({ text: expect.stringContaining("architecture finding") });
+  });
+
+  test("renders a completion-report review as a terse status line, not raw JSON", async () => {
+    const config = agentConfigSchema.parse({
+      reflections: { prompts: { architecture: "Review it." } },
+      tools: { maxOutputChars: 1_000 },
+    });
+    const followUp = await createPlanReflectionFollowUp({
+      config,
+      request: "request",
+      draft: "draft",
+      abortSignal: new AbortController().signal,
+      createWorker: async () => ({
+        generate: async () => ({
+          text: JSON.stringify({
+            status: "blocked",
+            summary: "Boundary is unclear.",
+            changes: ["one", "two", "three"],
+            validation: [],
+            nextSteps: [],
+            openQuestions: ["Which module owns it?"],
+          }),
+          steps: [],
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        }),
+      }),
+    });
+    expect(followUp).toMatchObject({
+      transcriptText: "Reflections\n\n✗ architecture — Blocked: Boundary is unclear.",
+    });
+    // The raw arrays never reach the human-facing transcript.
+    expect(followUp).not.toMatchObject({
+      transcriptText: expect.stringContaining("three"),
+    });
   });
 
   test("runs only the selected reflections and preserves configured order", async () => {
