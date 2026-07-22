@@ -183,15 +183,15 @@ export async function createPlanReflectionFollowUp(
   const findings = successful
     .map(({ id, text }) => `${id}:\n${truncateWithNotice(text, cap)}`)
     .join("\n\n");
-  const model = options.reflectionModel ? ` · ${options.reflectionModel}` : "";
+  const model = options.reflectionModel ? ` · ${options.reflectionModel.split("/").pop()}` : "";
   const transcriptText = [
     `Reflections${model}`,
     ...result.results.map((entry) =>
       entry.outcome === "completed" && entry.text !== null
-        ? formatReviewFinding(entry.id, entry.text)
-        : `✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`,
+        ? `  ${formatReviewFinding(entry.id, entry.text)}`
+        : `  ✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`,
     ),
-  ].join("\n\n");
+  ].join("\n");
   if (options.phase === "pre_turn") {
     return {
       transcriptText,
@@ -204,7 +204,7 @@ export async function createPlanReflectionFollowUp(
   return {
     transcriptText,
     text: [
-      "Revise your preceding plan using the independent reflections below. Return a complete revised plan, not a diff. Keep valid parts, correct weak parts, and do not claim work is implemented.",
+      'Revise your preceding plan using the independent reflections below. Return a complete revised plan, not a diff. Keep valid parts, correct weak parts, and do not claim work is implemented. Begin your response with a top-level "# Revised plan" markdown heading.',
       `Original user request:\n${options.request}`,
       `Draft plan:\n${options.draft}`,
       `Reflections:\n${findings}`,

@@ -678,7 +678,9 @@ describe("plan reflections", () => {
             });
           }),
         log,
-        refinePlan: async ({ request, draft }) => {
+        reflectionEvents: ["plan.once.post_turn"],
+        reflectPlan: async ({ request, draft, phase }) => {
+          expect(phase).toBe("post_turn");
           expect(request).toBe("plan this");
           expect(draft).toBe("draft plan");
           return { text: "apply reflections", transcriptText: "Reflections: architecture ✓" };
@@ -691,9 +693,11 @@ describe("plan reflections", () => {
       await session.send("plan this");
 
       expect(prompts).toEqual(["plan this", "apply reflections"]);
+      // The draft is held back — only the revised plan reaches the transcript —
+      // but the draft is still persisted to the log (asserted below).
       expect(
         events.filter((event) => event.type === "assistant").map((event) => event.text),
-      ).toEqual(["draft plan", "revised plan"]);
+      ).toEqual(["revised plan"]);
       expect(events.filter((event) => event.type === "turn-started")).toContainEqual({
         type: "turn-started",
         mode: "plan",
@@ -807,7 +811,8 @@ describe("plan reflections", () => {
       const session = createChatSession({
         agentFor: async () => makeAgent(async () => result("draft")),
         log,
-        refinePlan: async () => {
+        reflectionEvents: ["plan.once.post_turn"],
+        reflectPlan: async () => {
           refinements += 1;
           return { notice: "Reflections failed; keeping draft." };
         },

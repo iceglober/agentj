@@ -35,8 +35,8 @@ describe("formatUserTurnBlock", () => {
 
   test("uses transcript overrides without a user-turn prefix", () => {
     expect(formatUserTurnBlock("internal prompt", "Command: build\nworking")).toEqual([
-      [{ text: "Command: build" }],
-      [{ text: "working" }],
+      [{ text: "Command: build", tone: "muted" }],
+      [{ text: "working", tone: "muted" }],
     ]);
   });
 

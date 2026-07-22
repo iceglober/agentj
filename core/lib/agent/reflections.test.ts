@@ -47,7 +47,7 @@ describe("plan reflections", () => {
     expect(prompts.testing).toContain("Add reflections");
     expect(followUp).toMatchObject({
       transcriptText:
-        "Reflections\n\n✓ architecture — architecture finding\n\n✓ testing — testing finding",
+        "Reflections\n  ✓ architecture — architecture finding\n  ✓ testing — testing finding",
     });
     expect(followUp).toMatchObject({ text: expect.stringContaining("architecture finding") });
   });
@@ -78,7 +78,7 @@ describe("plan reflections", () => {
       }),
     });
     expect(followUp).toMatchObject({
-      transcriptText: "Reflections\n\n✗ architecture — Boundary is unclear.",
+      transcriptText: "Reflections\n  ✗ architecture — Boundary is unclear.",
     });
     // The raw arrays never reach the human-facing transcript.
     expect(followUp).not.toMatchObject({
@@ -107,7 +107,7 @@ describe("plan reflections", () => {
       }),
     });
     // Name only — no brace, no JSON, ever reaches the transcript.
-    expect(followUp).toMatchObject({ transcriptText: "Reflections\n\n✓ architecture" });
+    expect(followUp).toMatchObject({ transcriptText: "Reflections\n  ✓ architecture" });
     expect(followUp).not.toMatchObject({ transcriptText: expect.stringContaining("{") });
   });
 

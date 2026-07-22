@@ -51,12 +51,6 @@ export interface ChatSessionDependencies {
     selectedIds?: readonly string[];
   }): Promise<ReflectionPreparation | null>;
   reflectionEvents?: readonly ReflectionEvent[];
-  /** Backward-compatible post-turn hook for embedders. */
-  refinePlan?(input: {
-    request: string;
-    draft: string;
-    abortSignal: AbortSignal;
-  }): Promise<ReflectionPreparation | null>;
   now?: () => string;
 }
 
@@ -240,26 +234,8 @@ export function createChatSession(
     try {
       if (pendingMode === "plan" && mode === "build")
         reflectionOnce = { pre_turn: false, post_turn: false };
-      const reflectPlan =
-        deps.reflectPlan ??
-        (deps.refinePlan
-          ? (input: {
-              request: string;
-              draft: string;
-              phase: "pre_turn" | "post_turn";
-              abortSignal: AbortSignal;
-            }) =>
-              input.phase === "post_turn"
-                ? deps.refinePlan!({
-                    request: input.request,
-                    draft: input.draft,
-                    abortSignal: input.abortSignal,
-                  })
-                : Promise.resolve(null)
-          : undefined);
-      const events = new Set(
-        deps.reflectionEvents ?? (deps.refinePlan ? ["plan.once.post_turn" as const] : []),
-      );
+      const reflectPlan = deps.reflectPlan;
+      const events = new Set(deps.reflectionEvents ?? []);
       const hook = (phase: "pre_turn" | "post_turn") => {
         const each = events.has(`plan.each.${phase}` as ReflectionEvent);
         const once = events.has(`plan.once.${phase}` as ReflectionEvent) && !reflectionOnce[phase];
