@@ -7,7 +7,7 @@ import { statusLabel, validationLabel } from "./completion-report";
 import { renderMarkdownLite } from "./markdown";
 import { formatDuration } from "./progress";
 import type { UiBlock, UiLine, UiSpan, UiTone } from "./styles";
-import { formatUserTurnBlock } from "./transcript";
+import { formatUserTurnBlock, wrapMutedBlock } from "./transcript";
 
 /**
  * One rendering seam for the chat transcript. A `ChatEvent` becomes a typed
@@ -76,6 +76,12 @@ export interface EmptyResponseItem {
   kind: "empty";
 }
 
+/** The agent's first-person self-reflection, shown as a dim wrapped block. */
+export interface ReflectionItem {
+  kind: "reflection";
+  text: string;
+}
+
 export type TranscriptItem =
   | UserTurnItem
   | AssistantItem
@@ -83,7 +89,8 @@ export type TranscriptItem =
   | NoticeItem
   | JobItem
   | ErrorItem
-  | EmptyResponseItem;
+  | EmptyResponseItem
+  | ReflectionItem;
 
 export type RenderedItem = { block: UiBlock; spacing: "none" | "turn" };
 
@@ -241,6 +248,8 @@ export const toTranscriptItem = (event: ChatEvent): TranscriptItem | null => {
           )
           .join("\n"),
       };
+    case "reflection":
+      return { kind: "reflection", text: event.text };
     case "notice":
       return { kind: "notice", text: event.text };
     case "job-started":
@@ -273,6 +282,8 @@ export const renderTranscriptItem = (item: TranscriptItem, width: number): Rende
     }
     case "empty":
       return { block: [[{ text: EMPTY_RESPONSE_NOTICE, tone: "muted" }]], spacing: "turn" };
+    case "reflection":
+      return { block: wrapMutedBlock(item.text, width), spacing: "turn" };
     case "tool":
       return { block: renderToolRow(item.row, { live: false }, width), spacing: "none" };
     case "error": {

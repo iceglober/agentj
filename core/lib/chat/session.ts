@@ -133,6 +133,7 @@ export function createChatSession(
     fixedMode?: ChatMode,
     extraContext?: string,
     selectReflections = false,
+    preReflection?: string,
   ): Promise<{
     succeeded: boolean;
     mode: ChatMode;
@@ -144,6 +145,7 @@ export function createChatSession(
     turnAbort = new AbortController();
     const abort = turnAbort;
     emit({ type: "turn-started", mode, text, ...(transcriptText ? { transcriptText } : {}) });
+    if (preReflection) emit({ type: "reflection", text: preReflection });
 
     const drained = notices.splice(0);
     const baseContent = drained.length > 0 ? `${drained.join("\n")}\n\n${text}` : text;
@@ -237,6 +239,7 @@ export function createChatSession(
         return each || once ? { once } : null;
       };
       let context: string | undefined;
+      let preReflection: string | undefined;
       const pre = pendingMode === "plan" && reflectPlan ? hook("pre_turn") : null;
       if (pre) {
         if (pre.once) {
@@ -254,7 +257,10 @@ export function createChatSession(
           });
           if (preparation && "notice" in preparation)
             emit({ type: "notice", text: preparation.notice });
-          else if (preparation && "context" in preparation) context = preparation.context;
+          else if (preparation && "context" in preparation) {
+            context = preparation.context;
+            preReflection = preparation.transcriptText;
+          }
         } finally {
           if (turnAbort === controller) turnAbort = null;
         }
@@ -267,6 +273,7 @@ export function createChatSession(
         undefined,
         context,
         postDue !== null,
+        preReflection,
       );
       if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) return;
       if (!postDue) return;

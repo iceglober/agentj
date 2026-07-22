@@ -713,6 +713,42 @@ describe("plan reflections", () => {
     });
   });
 
+  test("pre_turn emits the reflection between the user turn and the plan", async () => {
+    await withLog(async (log) => {
+      const events: ChatEvent[] = [];
+      const session = createChatSession({
+        agentFor: async () => makeAgent(async () => result("the plan")),
+        log,
+        reflectionEvents: ["plan.once.pre_turn"],
+        reflectPlan: async ({ phase }) => {
+          expect(phase).toBe("pre_turn");
+          return {
+            context: "Before planning, here are your own reflections.",
+            transcriptText: "Reflection · nano\n  worth verifying the feature list",
+          };
+        },
+        onEvent: (event) => {
+          events.push(event);
+        },
+      });
+
+      await session.send("plan this");
+
+      // Order for the turn: turn-started → reflection (the transcriptText) → assistant (the plan).
+      const relevant = events.filter(
+        (event) =>
+          event.type === "turn-started" ||
+          event.type === "reflection" ||
+          event.type === "assistant",
+      );
+      expect(relevant).toEqual([
+        { type: "turn-started", mode: "plan", text: "plan this" },
+        { type: "reflection", text: "Reflection · nano\n  worth verifying the feature list" },
+        { type: "assistant", mode: "plan", text: "the plan" },
+      ]);
+    });
+  });
+
   test("passes the plan's selected reflections to the worker and does not select on revision", async () => {
     await withLog(async (log) => {
       const selected: Array<readonly string[] | undefined> = [];

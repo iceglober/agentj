@@ -56,4 +56,5 @@ export type ChatEvent =
   | { type: "permission-ask"; request: PermissionRequest }
   | { type: "job-started"; job: JobView }
   | { type: "job-finished"; job: JobView }
+  | { type: "reflection"; text: string }
   | { type: "notice"; text: string };
