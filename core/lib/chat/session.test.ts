@@ -665,7 +665,7 @@ test("a failed turn's request survives into the next turn's notice", async () =>
 });
 
 describe("plan reflections", () => {
-  test("persists a draft, shows a labeled synthetic turn, then revises it once", async () => {
+  test("shows the draft, then a first-person continuation after the reflection", async () => {
     await withLog(async (log, root) => {
       const prompts: string[] = [];
       const events: ChatEvent[] = [];
@@ -673,7 +673,7 @@ describe("plan reflections", () => {
         agentFor: async () =>
           makeAgent(async (prompt, options) => {
             prompts.push(prompt);
-            return result(prompts.length === 1 ? "draft plan" : "revised plan", {
+            return result(prompts.length === 1 ? "draft plan" : "on reflection, step 4 stands", {
               messages: [{ turn: prompts.length, prior: options?.messages }],
             });
           }),
@@ -683,7 +683,7 @@ describe("plan reflections", () => {
           expect(phase).toBe("post_turn");
           expect(request).toBe("plan this");
           expect(draft).toBe("draft plan");
-          return { text: "apply reflections", transcriptText: "Reflections: architecture ✓" };
+          return { text: "continue in the first person", transcriptText: "Reflection · nano" };
         },
         onEvent: (event) => {
           events.push(event);
@@ -692,23 +692,22 @@ describe("plan reflections", () => {
 
       await session.send("plan this");
 
-      expect(prompts).toEqual(["plan this", "apply reflections"]);
-      // The draft is held back — only the revised plan reaches the transcript —
-      // but the draft is still persisted to the log (asserted below).
+      expect(prompts).toEqual(["plan this", "continue in the first person"]);
+      // The draft is shown immediately, then the continuation follows it.
       expect(
         events.filter((event) => event.type === "assistant").map((event) => event.text),
-      ).toEqual(["revised plan"]);
+      ).toEqual(["draft plan", "on reflection, step 4 stands"]);
       expect(events.filter((event) => event.type === "turn-started")).toContainEqual({
         type: "turn-started",
         mode: "plan",
-        text: "apply reflections",
-        transcriptText: "Reflections: architecture ✓",
+        text: "continue in the first person",
+        transcriptText: "Reflection · nano",
       });
       const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
       expect(loaded?.turns.map((turn) => [turn.user, turn.transcriptText, turn.assistant])).toEqual(
         [
           ["plan this", undefined, "draft plan"],
-          ["apply reflections", "Reflections: architecture ✓", "revised plan"],
+          ["continue in the first person", "Reflection · nano", "on reflection, step 4 stands"],
         ],
       );
     });
@@ -754,7 +753,7 @@ describe("plan reflections", () => {
     });
   });
 
-  test("holds the draft plan back and shows only the revised plan", async () => {
+  test("shows the draft plan, then the first-person continuation", async () => {
     await withLog(async (log) => {
       const events: ChatEvent[] = [];
       let calls = 0;
@@ -762,11 +761,11 @@ describe("plan reflections", () => {
         agentFor: async () =>
           makeAgent(async () => {
             calls += 1;
-            return result(calls === 1 ? "draft plan" : "revised plan");
+            return result(calls === 1 ? "draft plan" : "continuation");
           }),
         log,
         reflectionEvents: ["plan.each.post_turn"],
-        reflectPlan: async () => ({ text: "revise", transcriptText: "Reflections" }),
+        reflectPlan: async () => ({ text: "continue", transcriptText: "Reflection" }),
         onEvent: (event) => {
           events.push(event);
         },
@@ -774,14 +773,14 @@ describe("plan reflections", () => {
 
       await session.send("plan");
 
-      // The draft never reaches the transcript — only the revised plan does.
+      // The draft shows first, then the continuation — the draft is never held back.
       expect(
         events.filter((event) => event.type === "assistant").map((event) => event.text),
-      ).toEqual(["revised plan"]);
+      ).toEqual(["draft plan", "continuation"]);
     });
   });
 
-  test("replays the held draft plan when reflections do not revise it", async () => {
+  test("keeps the shown draft and warns when reflections return a notice", async () => {
     await withLog(async (log) => {
       const events: ChatEvent[] = [];
       const session = createChatSession({
@@ -796,7 +795,7 @@ describe("plan reflections", () => {
 
       await session.send("plan");
 
-      // No revision landed, so the held-back draft is restored, with the note.
+      // The draft is already shown; no continuation runs, and the notice surfaces.
       expect(
         events.filter((event) => event.type === "assistant").map((event) => event.text),
       ).toEqual(["draft plan"]);

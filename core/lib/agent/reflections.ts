@@ -1,7 +1,6 @@
 import z from "zod";
 import type { RunResult } from "../llm";
 import { defineTool } from "../llm";
-import { parseCompletionReport } from "../report";
 import { truncateWithNotice } from "../truncation";
 import type { AgentConfig } from ".";
 import type { SubagentProgressEvent, SubagentRunner } from "./subagents";
@@ -83,31 +82,6 @@ const shorten = (value: string): string => {
   return line.length > SUMMARY_CAP ? `${line.slice(0, SUMMARY_CAP - 1)}…` : line;
 };
 
-/** A clean one-line summary for a review, or null when there is nothing
- *  readable to show (e.g. the review returned raw JSON). */
-const reviewSummary = (text: string): string | null => {
-  const report = parseCompletionReport(text);
-  if (report?.summary) return report.summary;
-  const field = text.match(/"summary"\s*:\s*"([^"]{1,240})"/u);
-  if (field?.[1]) return field[1];
-  const line = text.replace(/\s+/gu, " ").trim();
-  // Anything still shaped like JSON has no readable summary to surface.
-  return line.length === 0 || line.startsWith("{") || line.startsWith("[") ? null : line;
-};
-
-/**
- * One short, human-facing line per completed review — never a JSON blob or a
- * long body. Show a clean summary when there is one and cap it hard; otherwise
- * just the review name. The full review text still reaches the primary model
- * through `findings`; only the transcript display is trimmed.
- */
-const formatReviewFinding = (id: string, text: string): string => {
-  const report = parseCompletionReport(text);
-  const marker = report?.status === "failed" || report?.status === "blocked" ? "✗" : "✓";
-  const summary = reviewSummary(text);
-  return summary ? `${marker} ${id} — ${shorten(summary)}` : `${marker} ${id}`;
-};
-
 export type ReflectionFollowUp = { text: string; transcriptText: string };
 export type ReflectionPreparation =
   | ReflectionFollowUp
@@ -159,12 +133,14 @@ export async function createPlanReflectionFollowUp(
     {
       tasks: entries.map(([id, prompt]) => ({
         id,
-        title: `Review ${id}`,
+        title: `Reflect ${id}`,
         prompt: [
           prompt,
-          `Review the following user request and ${options.phase === "pre_turn" ? "repo context" : "draft plan"}. Return concise, concrete findings for the primary agent; do not write code.`,
-          `User request:\n${options.request}`,
-          ...(options.phase === "pre_turn" ? [] : [`Draft plan:\n${options.draft}`]),
+          options.phase === "pre_turn"
+            ? `You are the primary agent's own reflective voice — its first-person second thoughts before it plans. Reflect on the task below: what it is really asking, what you are assuming, what is risky or unclear, and what you would want to check first. Write as "I", in a few concrete sentences. Do not write a plan and do not write code.`
+            : `You are the primary agent's own reflective voice — its first-person second thoughts on the plan it just drafted. Reflect on the plan below: what you are assuming, what is thin, risky, or unverified, and what you would double-check before acting. Write as "I", in a few concrete sentences. Do not rewrite the plan and do not write code.`,
+          `Task:\n${options.request}`,
+          ...(options.phase === "pre_turn" ? [] : [`Plan I drafted:\n${options.draft}`]),
         ].join("\n\n"),
         waitsOn: [],
       })),
@@ -184,19 +160,17 @@ export async function createPlanReflectionFollowUp(
     .map(({ id, text }) => `${id}:\n${truncateWithNotice(text, cap)}`)
     .join("\n\n");
   const model = options.reflectionModel ? ` · ${options.reflectionModel.split("/").pop()}` : "";
-  const transcriptText = [
-    `Reflections${model}`,
-    ...result.results.map((entry) =>
-      entry.outcome === "completed" && entry.text !== null
-        ? `  ${formatReviewFinding(entry.id, entry.text)}`
-        : `  ✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`,
-    ),
-  ].join("\n");
+  const reflections = result.results.map((entry) =>
+    entry.outcome === "completed" && entry.text !== null
+      ? `  ${truncateWithNotice(entry.text.replace(/\s+/gu, " ").trim(), 240)}`
+      : `  ✗ ${entry.id} — ${shorten(entry.error ?? entry.outcome)}`,
+  );
+  const transcriptText = [`Reflection${model}`, reflections.join("\n\n")].join("\n");
   if (options.phase === "pre_turn") {
     return {
       transcriptText,
       context: [
-        "Use these independent reflections while preparing the plan. Do not mention the reflection process unless useful.",
+        "Before planning, here are your own first-person reflections on the task. Treat them as your own second thoughts and let them shape the plan. Do not mention the reflection process.",
         `Reflections:\n${findings}`,
       ].join("\n\n"),
     };
@@ -204,9 +178,7 @@ export async function createPlanReflectionFollowUp(
   return {
     transcriptText,
     text: [
-      'Revise your preceding plan using the independent reflections below. Return a complete revised plan, not a diff. Keep valid parts, correct weak parts, and do not claim work is implemented. Begin your response with a top-level "# Revised plan" markdown heading.',
-      `Original user request:\n${options.request}`,
-      `Draft plan:\n${options.draft}`,
+      "Below is your own reflection on the plan you just wrote — your second thoughts, in your own voice. Continue in the first person: tighten specific steps where the reflection warrants it and say what still stands. Do not restate the whole plan and do not write code.",
       `Reflections:\n${findings}`,
     ].join("\n\n"),
   };

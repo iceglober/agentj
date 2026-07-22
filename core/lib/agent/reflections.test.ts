@@ -18,7 +18,7 @@ describe("plan reflections", () => {
     ).toBeNull();
   });
 
-  test("runs named reviews in parallel and builds a labeled revision follow-up", async () => {
+  test("runs first-person reflections in parallel and builds a continuation follow-up", async () => {
     const config = agentConfigSchema.parse({
       reflections: {
         prompts: { architecture: "Find simpler boundaries.", testing: "Find test gaps." },
@@ -30,12 +30,13 @@ describe("plan reflections", () => {
       config,
       request: "Add reflections",
       draft: "Draft plan",
+      phase: "post_turn",
       abortSignal: new AbortController().signal,
       createWorker: async (task) => ({
         generate: async (prompt) => {
           prompts[task.id] = prompt;
           return {
-            text: `${task.id} finding`,
+            text: `I am assuming ${task.id} holds`,
             steps: [],
             usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
           };
@@ -43,72 +44,54 @@ describe("plan reflections", () => {
       }),
     });
 
-    expect(prompts.architecture).toContain("Draft plan");
-    expect(prompts.testing).toContain("Add reflections");
-    expect(followUp).toMatchObject({
-      transcriptText:
-        "Reflections\n  ✓ architecture — architecture finding\n  ✓ testing — testing finding",
-    });
-    expect(followUp).toMatchObject({ text: expect.stringContaining("architecture finding") });
+    // First-person, plan-labeled worker prompt.
+    expect(prompts.architecture).toContain('Write as "I"');
+    expect(prompts.architecture).toContain("Plan I drafted:\nDraft plan");
+    expect(prompts.architecture).toContain("rewrite the plan"); // post_turn wording
+    expect(prompts.testing).toContain("Task:\nAdd reflections");
+    // Reflection prose is shown dim, one indented paragraph per worker.
+    const { transcriptText, text } = followUp as { transcriptText: string; text: string };
+    expect(transcriptText).toBe(
+      "Reflection\n  I am assuming architecture holds\n\n  I am assuming testing holds",
+    );
+    // The follow-up is a first-person continuation, not a re-plan.
+    expect(text).toContain("your own reflection on the plan you just wrote");
+    expect(text).toContain("I am assuming architecture");
+    // Not a re-plan: no revised-plan heading and no "rewrite the plan" instruction.
+    expect(text).not.toContain("# Revised");
+    expect(text).not.toContain("Original user request");
   });
 
-  test("renders a completion-report review as a terse status line, not raw JSON", async () => {
+  test("collapses reflection whitespace and hard-caps the displayed prose", async () => {
     const config = agentConfigSchema.parse({
-      reflections: { prompts: { architecture: "Review it." } },
-      tools: { maxOutputChars: 1_000 },
+      reflections: { prompts: { architecture: "Reflect on it." } },
+      tools: { maxOutputChars: 4_000 },
     });
+    const prose = `I am worried about\n\n  the plan   because ${"detail ".repeat(60)}end`;
     const followUp = await createPlanReflectionFollowUp({
       config,
       request: "request",
       draft: "draft",
+      phase: "post_turn",
       abortSignal: new AbortController().signal,
       createWorker: async () => ({
         generate: async () => ({
-          text: JSON.stringify({
-            status: "blocked",
-            summary: "Boundary is unclear.",
-            changes: ["one", "two", "three"],
-            validation: [],
-            nextSteps: [],
-            openQuestions: ["Which module owns it?"],
-          }),
+          text: prose,
           steps: [],
           usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         }),
       }),
     });
-    expect(followUp).toMatchObject({
-      transcriptText: "Reflections\n  ✗ architecture — Boundary is unclear.",
-    });
-    // The raw arrays never reach the human-facing transcript.
-    expect(followUp).not.toMatchObject({
-      transcriptText: expect.stringContaining("three"),
-    });
-  });
-
-  test("shows only the review name when the review returns unparseable JSON", async () => {
-    const config = agentConfigSchema.parse({
-      reflections: { prompts: { architecture: "Review it." } },
-      tools: { maxOutputChars: 2_000 },
-    });
-    // Unquoted keys / an off-schema status: not a valid completion report.
-    const jsonish = '{status:"needs_escalation",changes:[],evidence:["README.md describes agentj"]}';
-    const followUp = await createPlanReflectionFollowUp({
-      config,
-      request: "request",
-      draft: "draft",
-      abortSignal: new AbortController().signal,
-      createWorker: async () => ({
-        generate: async () => ({
-          text: jsonish,
-          steps: [],
-          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-        }),
-      }),
-    });
-    // Name only — no brace, no JSON, ever reaches the transcript.
-    expect(followUp).toMatchObject({ transcriptText: "Reflections\n  ✓ architecture" });
-    expect(followUp).not.toMatchObject({ transcriptText: expect.stringContaining("{") });
+    const transcriptText = (followUp as { transcriptText: string }).transcriptText;
+    const line = transcriptText.split("\n").at(-1) ?? "";
+    // Collapsed to a single indented line, newlines gone.
+    expect(line.startsWith("  I am worried about the plan because ")).toBe(true);
+    expect(line).not.toContain("\n");
+    // Hard-capped at the ~240-char display budget (indent + trunc notice).
+    expect(line.length).toBeLessThanOrEqual(240 + 2);
+    expect(line).toContain("[trunc");
+    // The model still receives the full prose through the findings text.
+    expect((followUp as { text: string }).text).toContain("end");
   });
 
   test("runs only the selected reflections and preserves configured order", async () => {

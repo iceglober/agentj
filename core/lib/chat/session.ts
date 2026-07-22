@@ -133,7 +133,6 @@ export function createChatSession(
     fixedMode?: ChatMode,
     extraContext?: string,
     selectReflections = false,
-    emitAssistant = true,
   ): Promise<{
     succeeded: boolean;
     mode: ChatMode;
@@ -169,16 +168,12 @@ export function createChatSession(
         ? extractReflectionSelection(result, agent.reflectionIds ?? [])
         : null;
       messages = result.messages ?? messages;
-      // A draft plan that reflections will revise is deferred: showing it and
-      // then a second, revised plan is confusing. The caller replays it only if
-      // reflections fail to produce a revision.
-      if (emitAssistant)
-        emit({
-          type: "assistant",
-          mode,
-          text: result.text,
-          ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
-        });
+      emit({
+        type: "assistant",
+        mode,
+        text: result.text,
+        ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
+      });
       if (result.stepLimitReached)
         notices.push("[note] The previous turn stopped at the step limit before finishing.");
       await deps.log.append({
@@ -265,42 +260,20 @@ export function createChatSession(
         }
       }
       const postDue = pendingMode === "plan" && reflectPlan ? hook("post_turn") : null;
-      // When a post-turn reflection will revise the plan, hold the draft back so
-      // the user sees only the revised plan; replay it if reflections don't land.
-      const willRevise = postDue !== null && deps.reflectPlan !== undefined;
       const draft = await runExchange(
         text,
         transcriptText,
         images,
         undefined,
         context,
-        willRevise,
-        !willRevise,
+        postDue !== null,
       );
-      let draftShown = false;
-      const showDraft = (): void => {
-        if (draftShown || !willRevise || !draft.succeeded || draft.text === undefined) return;
-        draftShown = true;
-        emit({
-          type: "assistant",
-          mode: draft.mode,
-          text: draft.text,
-          ...(draft.stepLimitReached ? { stepLimitReached: true } : {}),
-        });
-      };
-      if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) {
-        showDraft();
-        return;
-      }
-      const post = postDue;
-      if (!post) {
-        showDraft();
-        return;
-      }
+      if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) return;
+      if (!postDue) return;
       const controller = new AbortController();
       turnAbort = controller;
       try {
-        if (post.once) {
+        if (postDue.once) {
           reflectionOnce.post_turn = true;
           await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
         }
@@ -312,15 +285,12 @@ export function createChatSession(
           ...(draft.selectedIds ? { selectedIds: draft.selectedIds } : {}),
         });
         if (followUp && "text" in followUp) {
-          // The revised plan replaces the held-back draft.
+          // The draft is already shown; the agent continues in the first person.
           await runExchange(followUp.text, followUp.transcriptText, undefined, "plan");
-        } else {
-          // No revision landed: restore the draft, then note why if there was one.
-          showDraft();
-          if (followUp && "notice" in followUp) emit({ type: "notice", text: followUp.notice });
+        } else if (followUp && "notice" in followUp) {
+          emit({ type: "notice", text: followUp.notice });
         }
       } catch (error) {
-        showDraft();
         if (controller.signal.aborted) emit({ type: "turn-aborted" });
         else
           emit({
