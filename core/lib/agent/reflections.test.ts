@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { agentConfigSchema } from ".";
-import { createPlanReflectionFollowUp } from "./reflections";
+import { createPlanReflectionFollowUp, extractReflectionSelection } from "./reflections";
 
 describe("plan reflections", () => {
   test("is disabled by an empty prompt map", async () => {
@@ -45,8 +45,80 @@ describe("plan reflections", () => {
 
     expect(prompts.architecture).toContain("Draft plan");
     expect(prompts.testing).toContain("Add reflections");
-    expect(followUp).toMatchObject({ transcriptText: "Reflections: architecture ✓ · testing ✓" });
-    expect("text" in (followUp ?? {})).toBe(true);
+    expect(followUp).toMatchObject({
+      transcriptText:
+        "Reflections\n\n✓ architecture\narchitecture finding\n\n✓ testing\ntesting finding",
+    });
+    expect(followUp).toMatchObject({ text: expect.stringContaining("architecture finding") });
+  });
+
+  test("runs only the selected reflections and preserves configured order", async () => {
+    const config = agentConfigSchema.parse({
+      reflections: { prompts: { architecture: "A", testing: "T", security: "S" } },
+    });
+    const ran: string[] = [];
+    const followUp = await createPlanReflectionFollowUp({
+      config,
+      selectedIds: ["security", "security"],
+      request: "request",
+      draft: "draft",
+      phase: "post_turn",
+      abortSignal: new AbortController().signal,
+      createWorker: async (task) => ({
+        generate: async () => {
+          ran.push(task.id);
+          return {
+            text: `${task.id} finding`,
+            steps: [],
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+          };
+        },
+      }),
+    });
+    expect(ran).toEqual(["security"]);
+    expect(followUp).toMatchObject({ transcriptText: expect.stringContaining("security finding") });
+    expect(followUp).not.toMatchObject({ transcriptText: expect.stringContaining("architecture") });
+  });
+
+  test("extracts the last valid reflection selection and distinguishes omission", () => {
+    expect(extractReflectionSelection({ steps: [] }, ["a", "b"])).toBeNull();
+    expect(
+      extractReflectionSelection(
+        {
+          steps: [
+            { toolCalls: [{ name: "select_reflections", input: { ids: ["a"] } }], toolResults: [] },
+            {
+              toolCalls: [{ name: "select_reflections", input: { ids: ["b", "b"] } }],
+              toolResults: [],
+            },
+          ],
+        },
+        ["a", "b"],
+      ),
+    ).toEqual(["b"]);
+    expect(
+      extractReflectionSelection(
+        {
+          steps: [
+            {
+              toolCalls: [{ name: "select_reflections", input: { ids: ["unknown"] } }],
+              toolResults: [],
+            },
+          ],
+        },
+        ["a"],
+      ),
+    ).toBeNull();
+    expect(
+      extractReflectionSelection(
+        {
+          steps: [
+            { toolCalls: [{ name: "select_reflections", input: { ids: [] } }], toolResults: [] },
+          ],
+        },
+        ["a"],
+      ),
+    ).toEqual([]);
   });
 
   test("keeps the draft when every worker fails", async () => {

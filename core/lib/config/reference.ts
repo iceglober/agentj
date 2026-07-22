@@ -36,7 +36,7 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
   {
     path: "agent.reflections.prompts",
     description:
-      "Named parallel review instructions. Empty by default; add prompts to enable reflections.",
+      "Named parallel review instructions. Empty by default; add prompts to enable reflections. After a plan draft, the model chooses which named reviews run; the choice and each review's bounded findings are shown before revision.",
   },
   {
     path: "agent.reflections.tier",

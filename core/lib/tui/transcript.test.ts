@@ -16,7 +16,6 @@ describe("formatUserTurnBlock", () => {
     }
   });
 
-
   test("preserves every prompt line, including consecutive blank lines", () => {
     expect(formatUserTurnBlock("first\n\n\nsecond")).toEqual([
       [{ text: " ", background: "muted" }],

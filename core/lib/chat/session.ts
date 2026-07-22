@@ -1,5 +1,9 @@
 import type { Agent } from "../agent";
-import type { ReflectionEvent, ReflectionPreparation } from "../agent/reflections";
+import {
+  extractReflectionSelection,
+  type ReflectionEvent,
+  type ReflectionPreparation,
+} from "../agent/reflections";
 import type { ImageAttachment } from "../llm";
 import type { ChatLog, ChatMode } from "../session/log";
 import type { UndoStack } from "../session/undo";
@@ -44,6 +48,7 @@ export interface ChatSessionDependencies {
     draft: string;
     phase: "pre_turn" | "post_turn";
     abortSignal: AbortSignal;
+    selectedIds?: readonly string[];
   }): Promise<ReflectionPreparation | null>;
   reflectionEvents?: readonly ReflectionEvent[];
   /** Backward-compatible post-turn hook for embedders. */
@@ -133,7 +138,8 @@ export function createChatSession(
     images?: readonly ImageAttachment[],
     fixedMode?: ChatMode,
     extraContext?: string,
-  ): Promise<{ succeeded: boolean; mode: ChatMode; text?: string }> => {
+    selectReflections = false,
+  ): Promise<{ succeeded: boolean; mode: ChatMode; text?: string; selectedIds?: string[] }> => {
     mode = fixedMode ?? pendingMode;
     turnAbort = new AbortController();
     const abort = turnAbort;
@@ -156,7 +162,11 @@ export function createChatSession(
         },
         messages,
         ...(images && images.length > 0 ? { images } : {}),
+        ...(selectReflections ? { selectReflections: true } : {}),
       });
+      const selectedIds = selectReflections
+        ? extractReflectionSelection(result, agent.reflectionIds ?? [])
+        : null;
       messages = result.messages ?? messages;
       emit({
         type: "assistant",
@@ -185,7 +195,12 @@ export function createChatSession(
         }
       }
       await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
-      return { succeeded: true, mode, text: result.text };
+      return {
+        succeeded: true,
+        mode,
+        text: result.text,
+        ...(selectedIds !== null ? { selectedIds } : {}),
+      };
     } catch (error) {
       if (abort.signal.aborted) {
         emit({ type: "turn-aborted" });
@@ -261,9 +276,17 @@ export function createChatSession(
           if (turnAbort === controller) turnAbort = null;
         }
       }
-      const draft = await runExchange(text, transcriptText, images, undefined, context);
+      const postDue = pendingMode === "plan" && reflectPlan ? hook("post_turn") : null;
+      const draft = await runExchange(
+        text,
+        transcriptText,
+        images,
+        undefined,
+        context,
+        postDue !== null && deps.reflectPlan !== undefined,
+      );
       if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) return;
-      const post = hook("post_turn");
+      const post = postDue;
       if (!post) return;
       const controller = new AbortController();
       turnAbort = controller;
@@ -277,6 +300,7 @@ export function createChatSession(
           draft: draft.text ?? "",
           phase: "post_turn",
           abortSignal: controller.signal,
+          ...(draft.selectedIds ? { selectedIds: draft.selectedIds } : {}),
         });
         if (followUp && "notice" in followUp) emit({ type: "notice", text: followUp.notice });
         else if (followUp && "text" in followUp)

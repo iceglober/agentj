@@ -11,7 +11,7 @@ Set with `agentj config set <key> <value>`; read with `agentj config get <key>`.
 - `agent.llm.modes.plan` (default: `0`) — Ladder tier plan mode runs on. Defaults to the frontier tier (0).
 - `agent.llm.modes.build` (default: `1`) — Ladder tier build mode runs on.
 - `agent.reflections.events` (default: `["plan.once.post_turn"]`) — Reflection hooks: plan.once or plan.each, before or after a plan turn. Defaults to one post-turn review; an empty array disables scheduling.
-- `agent.reflections.prompts` (default: `{}`) — Named parallel review instructions. Empty by default; add prompts to enable reflections.
+- `agent.reflections.prompts` (default: `{}`) — Named parallel review instructions. Empty by default; add prompts to enable reflections. After a plan draft, the model chooses which named reviews run; the choice and each review's bounded findings are shown before revision.
 - `agent.reflections.tier` (default: unset) — Ladder tier reflection workers run on. Reflection model and provider overrides win; otherwise subagent routing applies.
 - `agent.reflections.model` (default: unset) — Explicit model for reflection workers; wins over reflections.tier.
 - `agent.reflections.provider` (default: unset) — Provider override for reflection workers; otherwise subagent routing applies.

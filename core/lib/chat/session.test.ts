@@ -710,6 +710,46 @@ describe("plan reflections", () => {
     });
   });
 
+  test("passes the plan's selected reflections to the worker and does not select on revision", async () => {
+    await withLog(async (log) => {
+      const selected: Array<readonly string[] | undefined> = [];
+      const options: boolean[] = [];
+      let calls = 0;
+      const agent = makeAgent(async (_prompt, generateOptions) => {
+        calls += 1;
+        options.push(generateOptions?.selectReflections ?? false);
+        return result(
+          calls === 1 ? "draft" : "revised",
+          calls === 1
+            ? {
+                steps: [
+                  {
+                    toolCalls: [{ name: "select_reflections", input: { ids: ["security"] } }],
+                    toolResults: [],
+                  },
+                ],
+              }
+            : {},
+        );
+      });
+      agent.reflectionIds = ["architecture", "security"];
+      const session = createChatSession({
+        agentFor: async () => agent,
+        log,
+        reflectionEvents: ["plan.each.post_turn"],
+        reflectPlan: async (input) => {
+          selected.push(input.selectedIds);
+          return { text: "revise", transcriptText: "Reflections" };
+        },
+      });
+
+      await session.send("plan");
+
+      expect(options).toEqual([true, false]);
+      expect(selected).toEqual([["security"]]);
+    });
+  });
+
   test("keeps the draft when reflections return a notice and never refines build turns", async () => {
     await withLog(async (log, root) => {
       let refinements = 0;

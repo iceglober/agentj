@@ -301,6 +301,7 @@ interface ChatComposition {
     draft: string;
     phase: "pre_turn" | "post_turn";
     abortSignal: AbortSignal;
+    selectedIds?: readonly string[];
   }): ReturnType<typeof createPlanReflectionFollowUp>;
   runBuildJob(
     prompt: string,
@@ -702,7 +703,7 @@ async function composeChat(
     evalPrices: config.eval.prices,
     agentFor,
     reflectionEvents: modelRouting.config().reflections.events,
-    reflectPlan: ({ request, draft, phase, abortSignal }) =>
+    reflectPlan: ({ request, draft, phase, abortSignal, selectedIds }) =>
       createPlanReflectionFollowUp({
         config: reflectionAgentConfig(agentConfigFor("plan")),
         parentModel: agentConfigFor("plan").llm,
@@ -710,6 +711,8 @@ async function composeChat(
         draft,
         phase,
         abortSignal,
+        ...(selectedIds !== undefined ? { selectedIds } : {}),
+        reflectionModel: `${reflectionAgentConfig(agentConfigFor("plan")).llm.provider}/${reflectionAgentConfig(agentConfigFor("plan")).llm.model}`,
         createWorker: (task) =>
           createResearchWorker(
             `reflection ${task.id}`,
@@ -839,7 +842,8 @@ export async function runAgentjChat(
       const detail = started?.detail ?? activity.detail;
       // A tool that owned a subagent DAG freezes its rows beneath the tool line,
       // so the transcript reads parent-then-children.
-      const dagBlock = dagTrackers.get(activity.id)?.lines(spinnerFrame, dagIndent(activity.id)) ?? [];
+      const dagBlock =
+        dagTrackers.get(activity.id)?.lines(spinnerFrame, dagIndent(activity.id)) ?? [];
       dagTrackers.delete(activity.id);
       completedActivities.push({ tool: activity.tool, detail, elapsedMs });
       if (completedActivities.length > 100) completedActivities.shift();
@@ -1381,7 +1385,10 @@ export async function runAgentjChat(
     }
     for (const notice of skillNotices) emit({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
-      screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText, screen.width()), "turn");
+      screen.printAbove(
+        formatUserTurnBlock(turn.user, turn.transcriptText, screen.width()),
+        "turn",
+      );
       screen.printAbove(turn.assistant);
     }
     void composition.startMcp().catch((error) => {

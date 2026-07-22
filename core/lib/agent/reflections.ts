@@ -1,7 +1,9 @@
 import z from "zod";
+import type { RunResult } from "../llm";
+import { defineTool } from "../llm";
 import { truncateWithNotice } from "../truncation";
 import type { AgentConfig } from ".";
-import type { SubagentProgressEvent, SubagentRunner, SubagentsResult } from "./subagents";
+import type { SubagentProgressEvent, SubagentRunner } from "./subagents";
 import { runSubagentTasks } from "./subagents";
 
 export const reflectionEvents = [
@@ -13,6 +15,41 @@ export const reflectionEvents = [
 
 export type ReflectionEvent = (typeof reflectionEvents)[number];
 export const reflectionEventSchema = z.enum(reflectionEvents);
+
+export const reflectionSelectionInputSchema = z.object({
+  ids: z.array(z.string().min(1).max(32)).max(32),
+});
+export type ReflectionSelection = string[] | null;
+
+export const createReflectionSelectionTool = (prompts: Readonly<Record<string, string>>) =>
+  defineTool({
+    description: [
+      "When your plan draft is complete, choose which independent reflections should review it.",
+      "Call exactly once. Select zero or more IDs; an empty list skips reflections.",
+      `Available reflections: ${Object.entries(prompts)
+        .map(([id, prompt]) => `${id}: ${prompt}`)
+        .join("; ")}`,
+    ].join(" "),
+    inputSchema: reflectionSelectionInputSchema,
+    execute: () => "Reflection selection recorded.",
+  });
+
+export const extractReflectionSelection = (
+  result: Pick<RunResult, "steps">,
+  availableIds: readonly string[],
+): ReflectionSelection => {
+  const available = new Set(availableIds);
+  let selection: ReflectionSelection = null;
+  for (const step of result.steps) {
+    for (const call of step.toolCalls) {
+      if (call.name !== "select_reflections") continue;
+      const parsed = reflectionSelectionInputSchema.safeParse(call.input);
+      if (!parsed.success || parsed.data.ids.some((id) => !available.has(id))) continue;
+      selection = [...new Set(parsed.data.ids)];
+    }
+  }
+  return selection;
+};
 
 /** Optional parallel reviews scheduled around plan turns. */
 export const reflectionsConfigSchema = z
@@ -55,12 +92,11 @@ export interface CreatePlanReflectionsOptions {
   abortSignal: AbortSignal;
   createWorker(task: { id: string }): Promise<SubagentRunner>;
   onProgress?(event: SubagentProgressEvent): void | Promise<void>;
+  /** Reflection worker model shown in the completed reflection transcript. */
+  reflectionModel?: string;
+  /** IDs selected by the completed plan draft; undefined means all. */
+  selectedIds?: readonly string[];
 }
-
-const summary = (results: SubagentsResult["results"]): string =>
-  `Reflections: ${results
-    .map((result) => `${result.id} ${result.outcome === "completed" ? "✓" : result.outcome}`)
-    .join(" · ")}`;
 
 /**
  * Run independent read-only reviews and turn successful findings into either
@@ -70,8 +106,13 @@ const summary = (results: SubagentsResult["results"]): string =>
 export async function createPlanReflectionFollowUp(
   options: CreatePlanReflectionsOptions,
 ): Promise<ReflectionPreparation | null> {
-  const entries = Object.entries(options.config.reflections.prompts);
-  if (entries.length === 0) return null;
+  const allEntries = Object.entries(options.config.reflections.prompts);
+  if (allEntries.length === 0) return null;
+  const selected = options.selectedIds === undefined ? null : new Set(options.selectedIds);
+  const entries = selected === null ? allEntries : allEntries.filter(([id]) => selected.has(id));
+  if (entries.length === 0) {
+    return { notice: "Reflections skipped by plan selection." };
+  }
 
   const result = await runSubagentTasks(
     {
@@ -80,11 +121,7 @@ export async function createPlanReflectionFollowUp(
         createWorker: async (task) => options.createWorker({ id: task.id }),
       },
       concurrency: options.config.tools.subagents.concurrency,
-      ...(options.parentModel &&
-      (options.parentModel.provider !== options.config.llm.provider ||
-        options.parentModel.model !== options.config.llm.model)
-        ? { model: `${options.config.llm.provider}/${options.config.llm.model}` }
-        : {}),
+      model: `${options.config.llm.provider}/${options.config.llm.model}`,
       onProgress: options.onProgress,
     },
     {
@@ -114,7 +151,18 @@ export async function createPlanReflectionFollowUp(
   const findings = successful
     .map(({ id, text }) => `${id}:\n${truncateWithNotice(text, cap)}`)
     .join("\n\n");
-  const transcriptText = summary(result.results);
+  const model = options.reflectionModel ? ` · ${options.reflectionModel}` : "";
+  const transcriptText = [
+    `Reflections${model}`,
+    ...result.results.map((entry) => {
+      const marker = entry.outcome === "completed" && entry.text !== null ? "✓" : "x";
+      const detail =
+        entry.outcome === "completed" && entry.text !== null
+          ? truncateWithNotice(entry.text, cap)
+          : `${entry.error ?? entry.outcome} (not sent to the primary model)`;
+      return `${marker} ${entry.id}\n${detail}`;
+    }),
+  ].join("\n\n");
   if (options.phase === "pre_turn") {
     return {
       transcriptText,
