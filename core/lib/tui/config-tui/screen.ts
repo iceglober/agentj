@@ -122,6 +122,11 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     return [...left, { text: " ".repeat(gap) }, ...right];
   };
 
+  // Keep the meaningful tail (filename, parent dirs) and drop the head with a
+  // leading ellipsis, so a deep path never wraps the header.
+  const truncateStart = (s: string, max: number): string =>
+    s.length <= max ? s : `…${s.slice(s.length - max + 1)}`;
+
   const pad = (col: number, at: number): string => " ".repeat(Math.max(1, at - col));
 
   const rowLine = (r: ConfigViewRow): UiLine => {
@@ -218,8 +223,12 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
         ],
       ),
     ]);
+    const pathRoom = Math.max(12, contentWidth() - section.length - 3);
     sectionText.content = styled.toStyledText([
-      headerLine([{ text: ` ${section}`, bold: true }], [{ text: v.scopePath, tone: "muted" }]),
+      headerLine(
+        [{ text: ` ${section}`, bold: true }],
+        [{ text: truncateStart(v.scopePath, pathRoom), tone: "muted" }],
+      ),
     ]);
     ruleText.content = styled.toStyledText([hr()]);
     bodyText.content = styled.toStyledText(bodyLines(v));
