@@ -145,15 +145,15 @@ describe("config TUI model", () => {
   test("s cycles the write scope global→project→local→global, path follows", () => {
     const m = fresh();
     expect(m.view()).toMatchObject({
-      scopeLabel: "you",
+      scopeLabel: "Global",
       scopePath: "~/.config/glorious/config.json",
     });
     m.handleKey(k("s"));
     expect(m.scope()).toBe("project");
     expect(m.view()).toMatchObject({
-      scopeLabel: "this project",
+      scopeLabel: "Project",
       scopePath: ".glorious/config.json",
-      toast: "writing to this project",
+      toast: "scope: Project",
     });
     m.handleKey(k("s"));
     expect(m.view()).toMatchObject({ scope: "local", scopePath: ".glorious/config.local.json" });

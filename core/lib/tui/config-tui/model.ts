@@ -28,9 +28,9 @@ export interface ConfigTuiData {
 /** Writable layers the editor can target, in cycle order, with short labels. */
 export const SCOPES: readonly WritableConfigLayer[] = ["global", "project", "local"] as const;
 export const SCOPE_LABELS: Record<WritableConfigLayer, string> = {
-  global: "you",
-  project: "this project",
-  local: "this machine",
+  global: "Global",
+  project: "Project",
+  local: "ProjectLocal",
 };
 /** Short provenance tag shown against a value, e.g. "· project". */
 const layerNote = (layer: ConfigLayer | undefined): string | undefined =>
@@ -431,7 +431,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     if (key.name === "r" && SECTIONS[section] === "mcp") return [{ kind: "reloadMcp" }];
     if (key.name === "s") {
       scope = SCOPES[(SCOPES.indexOf(scope) + 1) % SCOPES.length];
-      toastText = `writing to ${SCOPE_LABELS[scope]}`;
+      toastText = `scope: ${SCOPE_LABELS[scope]}`;
       return [];
     }
 

@@ -65,8 +65,8 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     paddingRight: 1,
   });
   const titleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  const sectionText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const ruleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
-  const tabsText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const gapText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const bodyText = new opentui.TextRenderable(renderer, {
     content: "",
@@ -98,8 +98,8 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   overlayBox.visible = false;
 
   root.add(titleText);
+  root.add(sectionText);
   root.add(ruleText);
-  root.add(tabsText);
   root.add(gapText);
   root.add(bodyText);
   root.add(hintText);
@@ -115,17 +115,11 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   const hr = (): UiLine => [{ text: "─".repeat(contentWidth()), tone: "muted" }];
 
   // ---- view → styled lines ----
-  const tabStrip = (v: ConfigView): UiLine => {
-    const spans: UiSpan[] = [{ text: " " }];
-    v.sections.forEach((s, i) => {
-      if (i > 0) spans.push({ text: "   " });
-      spans.push(
-        s.active
-          ? { text: ` ${s.label} `, background: "muted", bold: true }
-          : { text: ` ${s.label} `, tone: "muted" },
-      );
-    });
-    return spans;
+  // A header row: a bold left label and a right-aligned detail, filling width.
+  const headerLine = (left: UiSpan[], right: UiSpan[]): UiLine => {
+    const width = (spans: UiSpan[]): number => spans.reduce((n, s) => n + s.text.length, 0);
+    const gap = Math.max(2, contentWidth() - width(left) - width(right));
+    return [...left, { text: " ".repeat(gap) }, ...right];
   };
 
   const pad = (col: number, at: number): string => " ".repeat(Math.max(1, at - col));
@@ -212,20 +206,22 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
 
   const render = (): void => {
     const v = model.view();
-    const title = ` ${v.title}`;
-    const scope = `writing to · ${v.scopeLabel}`;
-    const path = `  ${v.scopePath}`;
-    const titlePad = Math.max(2, contentWidth() - title.length - scope.length - path.length);
+    const app = v.title.split(" · ")[0] ?? "glorious config";
+    const section = v.sections.find((s) => s.active)?.label ?? "";
+    // Line 1: app name · scope.  Line 2: current section · target file.
     titleText.content = styled.toStyledText([
-      [
-        { text: title, bold: true },
-        { text: " ".repeat(titlePad) },
-        { text: scope, tone: "accent" },
-        { text: path, tone: "muted" },
-      ],
+      headerLine(
+        [{ text: ` ${app}`, bold: true }],
+        [
+          { text: "scope: ", tone: "muted" },
+          { text: v.scopeLabel, tone: "accent", bold: true },
+        ],
+      ),
+    ]);
+    sectionText.content = styled.toStyledText([
+      headerLine([{ text: ` ${section}`, bold: true }], [{ text: v.scopePath, tone: "muted" }]),
     ]);
     ruleText.content = styled.toStyledText([hr()]);
-    tabsText.content = styled.toStyledText([tabStrip(v)]);
     bodyText.content = styled.toStyledText(bodyLines(v));
     hintText.content = styled.toStyledText([
       v.toast
