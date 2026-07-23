@@ -1,9 +1,9 @@
 ---
 name: verify
-description: Drive the agentj TUI end-to-end and capture what it paints — build/launch/drive recipe for verifying chat and progress-rendering changes at the real terminal surface.
+description: Drive the glorious TUI end-to-end and capture what it paints — build/launch/drive recipe for verifying chat and progress-rendering changes at the real terminal surface.
 ---
 
-# Verifying agentj at the TUI surface
+# Verifying glorious at the TUI surface
 
 ## Launch
 

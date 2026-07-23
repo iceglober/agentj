@@ -99,7 +99,7 @@ const classifyFailure = (name: string, error: unknown, timedOut: boolean) => {
     return {
       code: "invalid_config" as const,
       detail: `missing environment variable ${missingVariable}`,
-      resolution: `Set ${missingVariable} in AgentJ's environment, then restart this session.`,
+      resolution: `Set ${missingVariable} in Glorious's environment, then restart this session.`,
     };
   }
   if (

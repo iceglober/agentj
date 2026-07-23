@@ -1,7 +1,14 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.3/schema.json",
   "files": {
-    "includes": ["**", "!core/eval/results", "!core/eval/traj", "!.changeset"]
+    "includes": [
+      "**",
+      "!core/eval/results",
+      "!core/eval/traj",
+      "!.changeset",
+      "!docs-site",
+      "!infra"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -25,7 +25,7 @@ import { resolveEvalAuth } from "./auth";
 // Resolve paths against the repo root (two levels up from core/eval/run.ts) so
 // the harness works regardless of the cwd it is invoked from.
 const REPO_ROOT = new URL("../../", import.meta.url).pathname;
-const CONFIG_PATH = new URL("../agentj.ts", import.meta.url).pathname;
+const CONFIG_PATH = new URL("../glorious.ts", import.meta.url).pathname;
 
 // --- argv (house style: no CLI dep) --------------------------------------
 const argv = process.argv.slice(2);

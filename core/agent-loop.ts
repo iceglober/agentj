@@ -9,7 +9,6 @@ import {
   childAgentConfig,
   createAgentModelRouting,
   createAgent as createProductionAgent,
-  reflectionAgentConfig,
   type ToolActivity,
 } from "./lib/agent";
 import { prepareBackgroundJobPrompt } from "./lib/agent/background-jobs";
@@ -18,7 +17,6 @@ import {
   type PermissionGate,
   withRequestOrigin,
 } from "./lib/agent/permissions";
-import { createPlanReflectionFollowUp } from "./lib/agent/reflections";
 import {
   runSubagentTasks,
   type SubagentProgressEvent,
@@ -58,7 +56,7 @@ import { createQuestionPort } from "./lib/chat/questions";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { bootstrapInteractiveSession } from "./lib/chat/session-bootstrap";
 import { createSessionTodos } from "./lib/chat/todos";
-import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
+import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runGloriousCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
@@ -104,7 +102,6 @@ import { createExaWebSearch } from "./lib/tools/web/exa-adapter";
 import { createHttpWebFetch } from "./lib/tools/web/http-adapter";
 import { createAnsiLiveRegionAdapter } from "./lib/tui/ansi-live-region-adapter";
 import {
-  formatActivityReceipt,
   formatChatEvent,
   presentActivityLine,
   truncateLineWithNotice,
@@ -113,16 +110,23 @@ import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
-import { renderMarkdownLite } from "./lib/tui/markdown";
+import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
 import {
   applyProgressEvent,
   composeProgressLines,
   createProgressTracker,
   type ProgressTracker,
 } from "./lib/tui/progress";
-import { composePresenceLine, composeStatusSection, shouldWarnContext } from "./lib/tui/status";
+import { composeStatusSection, formatVuMeter, shouldWarnContext } from "./lib/tui/status";
+import type { UiSpan, UiTextLine } from "./lib/tui/styles";
 import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
+import {
+  renderToolRow,
+  renderTranscriptItem,
+  type ToolRow,
+  toTranscriptItem,
+} from "./lib/tui/transcript-item";
 import { createUpdateService, type UpdateChannel, type UpdateService } from "./lib/update";
 import {
   createNpmInstaller,
@@ -165,12 +169,14 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
   });
 }
 
-/** `agentj config` with no subcommand: a prompts-driven editor over the config
+/** `glorious config` with no subcommand: a prompts-driven editor over the config
  *  keys, persisting through the same handlers as `config set`. */
 function createProductionConfigUi(): () => Promise<number> {
   return async () => {
     if (!processStdout.isTTY) {
-      processStderr.write("Run `agentj config` in a terminal, or use `agentj config set <key>`.\n");
+      processStderr.write(
+        "Run `glorious config` in a terminal, or use `glorious config set <key>`.\n",
+      );
       return EXIT_FAILURE;
     }
     const guided = createClackGuidedInput();
@@ -207,7 +213,7 @@ function createProductionConfigUi(): () => Promise<number> {
 
 /** Command shown after an interactive session has restored the terminal. */
 export const formatResumeCommand = (sessionId: string): string =>
-  `Resume with: agentj --resume ${sessionId}\n`;
+  `Resume with: glorious --resume ${sessionId}\n`;
 
 export const notifyAvailableUpdate = async (
   check: () => Promise<{ available?: string } | undefined>,
@@ -218,7 +224,7 @@ export const notifyAvailableUpdate = async (
     if (result?.available)
       emit({
         type: "notice",
-        text: `agentj ${result.available} is available. Run /update to install it.`,
+        text: `glorious ${result.available} is available. Run /update to install it.`,
       });
   } catch {}
 };
@@ -252,14 +258,9 @@ export async function finalizeInteractiveChat(options: {
   }
 }
 
-export {
-  formatActivityReceipt,
-  formatChatEvent,
-  truncateLineWithNotice,
-} from "./lib/tui/chat-event-format";
+export { formatChatEvent, truncateLineWithNotice } from "./lib/tui/chat-event-format";
 export { composeProgressLines } from "./lib/tui/progress";
 export {
-  composePresenceLine,
   composeStatusSection,
   formatClock,
   type StatusSectionState,
@@ -296,13 +297,6 @@ interface ChatComposition {
   /** The eval $/Mtok map, reused by /cost for terminal pricing. */
   evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
-  reflectionEvents: AgentConfig["reflections"]["events"];
-  reflectPlan(input: {
-    request: string;
-    draft: string;
-    phase: "pre_turn" | "post_turn";
-    abortSignal: AbortSignal;
-  }): ReturnType<typeof createPlanReflectionFollowUp>;
   runBuildJob(
     prompt: string,
     abortSignal: AbortSignal,
@@ -362,20 +356,20 @@ async function composeChat(
   const key = await resolveAzureApiKey({ store: secretStore });
   if (key.status !== "resolved") {
     throw new Error(
-      "Azure API key missing; run: agentj config set --secret providers.azure.api_key",
+      "Azure API key missing; run: glorious config set --secret providers.azure.api_key",
     );
   }
   const mcpOAuth = createKeyringMcpOAuthStorage(secretStore);
   // Config-first with the historical env var kept as a fallback enable. The
   // provider is only stood up when an OTLP endpoint is configured; otherwise
   // the sink reads the global meter (an external bootstrap's, or a no-op).
-  const metricsEnabled = config.metrics.enabled || process.env.AGENTJ_OTEL_METRICS === "1";
+  const metricsEnabled = config.metrics.enabled || process.env.GLORIOUS_OTEL_METRICS === "1";
   const metricsProvider = metricsEnabled ? startMetricsProvider(config.metrics) : undefined;
   const metricsSink: MetricsSink = createOtelMetricsSink({ enabled: metricsEnabled });
   const environment = await createHostExecutionEnvironment(root);
   // Over-cap tool output spills here in full; tools reference the file in
   // their truncation notices so the model can slice it back in.
-  const spillSink = createSpillSink(join(tmpdir(), "agentj-spill", entrypoint));
+  const spillSink = createSpillSink(join(tmpdir(), "glorious-spill", entrypoint));
   const spill = { dir: spillSink.dir, write: spillSink.write };
   // Web capabilities are client-side and model-provider independent. Exa only
   // backs the search port; direct URL fetching never flows through an LLM API.
@@ -393,8 +387,8 @@ async function composeChat(
   // activate a skill by reading its SKILL.md (progressive disclosure).
   const skillsDiscovery = await discoverSkills({
     roots: [
-      join(root, ".aj", "skills"),
-      join(homedir(), ".config", "agentj", "skills"),
+      join(root, ".glorious", "skills"),
+      join(homedir(), ".config", "glorious", "skills"),
       embeddedSkillsRoot,
     ],
   });
@@ -455,7 +449,7 @@ async function composeChat(
   const modelRouting = createAgentModelRouting(agentConfig, () => agents.clear());
   const agentConfigFor = modelRouting.configFor;
   // Research workers are plan-mode children. Each run gets a scoped MCP lease
-  // so reflection and user-requested research share the same safe inspection tools.
+  // so user-requested research uses the same safe inspection tools.
   const createResearchWorker = async (
     origin?: string,
     workerConfig = childAgentConfig(agentConfigFor("plan"), "delegate"),
@@ -702,22 +696,6 @@ async function composeChat(
     contextSoftLimit: config.agent.context.softLimit,
     evalPrices: config.eval.prices,
     agentFor,
-    reflectionEvents: modelRouting.config().reflections.events,
-    reflectPlan: ({ request, draft, phase, abortSignal }) =>
-      createPlanReflectionFollowUp({
-        config: reflectionAgentConfig(agentConfigFor("plan")),
-        parentModel: agentConfigFor("plan").llm,
-        request,
-        draft,
-        phase,
-        abortSignal,
-        createWorker: (task) =>
-          createResearchWorker(
-            `reflection ${task.id}`,
-            reflectionAgentConfig(agentConfigFor("plan")),
-          ),
-        onProgress: onDagProgress,
-      }),
     runBuildJob,
     runPlanJob,
     attachInteractiveCapabilities: interactive.attach,
@@ -740,9 +718,9 @@ async function composeChat(
 }
 
 /** The interactive chat session (the default command). */
-export async function runAgentjChat(
+export async function runGloriousChat(
   options: { resume?: string; continueLatest?: boolean } = {},
-  configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
+  configPath: string = new URL("./glorious.ts", import.meta.url).pathname,
   update?: (channel: UpdateChannel) => Promise<void>,
   checkForUpdate?: () => Promise<{ available?: string } | undefined>,
 ): Promise<number> {
@@ -784,12 +762,14 @@ export async function runAgentjChat(
   // nothing, which looks identical to a freeze.
   let turnProducedOutput = false;
   let spinnerFrame = 0;
+  // The VU busy meter animates on its own fast frame so the hum is fluid; the
+  // progress spinner and clocks stay on the calmer spinnerFrame.
+  let vuFrame = 0;
   const turnTokens = { ctx: 0 };
   let lastContextWarning: number | undefined;
   const activeTools = new Map<number, { tool: string; detail: string; startedAt: number }>();
   let todos: ReturnType<typeof createSessionTodos> | undefined;
   const completedActivities: Array<{ tool: string; detail: string; elapsedMs: number }> = [];
-  let turnActivityCount = 0;
 
   // DAG progress nests under the tool activity that owns it, one tracker per
   // owner so concurrent run_subagents calls stay apart. NO_ACTIVITY collects
@@ -838,15 +818,28 @@ export async function runAgentjChat(
       const started = activeTools.get(activity.id);
       activeTools.delete(activity.id);
       const elapsedMs = started ? Date.now() - started.startedAt : 0;
+      const detail = started?.detail ?? activity.detail;
+      // A tool that owned a subagent DAG freezes its rows beneath the tool line,
+      // so the transcript reads parent-then-children.
+      const dagBlock =
+        dagTrackers.get(activity.id)?.lines(spinnerFrame, dagIndent(activity.id)) ?? [];
       dagTrackers.delete(activity.id);
-      completedActivities.push({
-        tool: activity.tool,
-        detail: started?.detail ?? activity.detail,
-        elapsedMs,
-      });
+      completedActivities.push({ tool: activity.tool, detail, elapsedMs });
       if (completedActivities.length > 100) completedActivities.shift();
-      turnActivityCount += 1;
       turnProducedOutput = true;
+      // Stream each finished tool into the transcript so the turn shows what it
+      // actually did, rather than collapsing to a single count. Only the ✓ is
+      // toned — the row itself stays calm — and any owned DAG rows freeze below.
+      if (screen) {
+        const row: ToolRow = {
+          tool: activity.tool,
+          detail,
+          elapsedMs,
+          outcome: "ok",
+          ...(dagBlock.length > 0 ? { dag: dagBlock } : {}),
+        };
+        screen.printAbove(renderToolRow(row, { live: false }, screen.width()), "none");
+      }
     }
     refreshProgress();
     updateStatus();
@@ -854,7 +847,7 @@ export async function runAgentjChat(
 
   // First-run gate: walk the user through setting a provider key before
   // standing up the session, which otherwise hard-errors on a missing key.
-  // Interactive TTY only — `agentj run` and pipes keep the clean error.
+  // Interactive TTY only — `glorious run` and pipes keep the clean error.
   if (processStdout.isTTY) {
     const onboardingStore = createKeyringSecretStore({});
     const guided = createPromptsGuidedInput();
@@ -941,7 +934,6 @@ export async function runAgentjChat(
         turnStartedAt = null;
         interruptRequested = false;
         turnProducedOutput = false;
-        turnActivityCount = 0;
         completedActivities.length = 0;
         screen?.clearTranscript();
         refreshProgress();
@@ -993,7 +985,6 @@ export async function runAgentjChat(
         turnStartedAt = Date.now();
         interruptRequested = false;
         turnProducedOutput = false;
-        turnActivityCount = 0;
         turnModel = composition.modelFor(event.mode);
         turnUsage = { inputTokens: 0, outputTokens: 0, longContextRequests: 0 };
       }
@@ -1005,17 +996,6 @@ export async function runAgentjChat(
         screen?.restoreInput(event.restoreText ?? event.text);
       }
       if (event.type === "turn-finished") {
-        const elapsedMs = turnStartedAt === null ? 0 : Date.now() - turnStartedAt;
-        if (turnActivityCount > 0) {
-          screen?.printAbove([
-            [
-              {
-                text: formatActivityReceipt(turnActivityCount, elapsedMs),
-                tone: "success",
-              },
-            ],
-          ]);
-        }
         turnStartedAt = null;
         interruptRequested = false;
         if (turnUsage && turnUsage.inputTokens + turnUsage.outputTokens > 0) {
@@ -1042,51 +1022,16 @@ export async function runAgentjChat(
         if (!dagTracker.live) dagTrackers.delete(owner);
         refreshProgress();
       }
-      // Chat styling (interactive only): a blank line + colored prefix separates
-      // turns; assistant markdown renders lightly.
-      if (event.type === "turn-started") {
-        screen?.printAbove(formatUserTurnBlock(event.text, event.transcriptText), "turn");
-        updateStatus();
-        return;
-      }
-      if (event.type === "assistant") {
-        const body = formatChatEvent(event);
-        if (body !== null) {
-          turnProducedOutput = true;
-          screen?.printAbove(renderMarkdownLite(body));
-        } else if (!turnProducedOutput) {
-          // The turn ran, showed no tool work, and the model returned no text —
-          // say so, or the turn is indistinguishable from a hang.
-          screen?.printAbove([
-            [{ text: "(no response — the model returned nothing; try again)", tone: "muted" }],
-          ]);
-        }
-        updateStatus();
-        return;
-      }
-      if (event.type === "turn-error") {
-        turnProducedOutput = true;
-        const filtered = /content management policy|content filter|was filtered/i.test(event.error);
-        screen?.printAbove([
-          [{ text: `error: ${event.error}`, tone: "danger" }],
-          ...(filtered
-            ? [
-                [
-                  {
-                    text: "The provider's content filter rejected this request. It often fires intermittently — retry once; if it keeps happening, start a new session (aj) instead of resuming this one.",
-                    tone: "muted" as const,
-                  },
-                ],
-              ]
-            : []),
-        ]);
-        updateStatus();
-        return;
-      }
-      const text = formatChatEvent(event);
-      if (text) {
-        turnProducedOutput = true;
-        screen?.printAbove(text);
+      // Chat styling (interactive only): one seam lowers every transcript event
+      // to a semantic block + spacing. User and assistant blocks separate with a
+      // blank line ("turn"); tool and system lines pack tight ("none"). The
+      // empty-response notice fires only when the turn showed nothing at all —
+      // otherwise the turn is indistinguishable from a hang.
+      const item = toTranscriptItem(event);
+      if (item && screen && (item.kind !== "empty" || !turnProducedOutput)) {
+        if (item.kind !== "user") turnProducedOutput = true;
+        const { block, spacing } = renderTranscriptItem(item, screen.width());
+        screen.printAbove(block, spacing);
       }
       updateStatus();
     };
@@ -1112,15 +1057,12 @@ export async function runAgentjChat(
         undo: undoStack,
         todos: sessionTodos,
         contextSoftLimit: composition.contextSoftLimit,
-        reflectionEvents: composition.reflectionEvents,
-        reflectPlan: composition.reflectPlan,
         onEvent: emit,
       },
       resumed?.state
         ? {
             messages: resumed.state.messages,
             mode: resumed.state.mode,
-            reflectionOnce: resumed.state.reflectionOnce,
           }
         : {},
     );
@@ -1152,22 +1094,19 @@ export async function runAgentjChat(
     updateStatus = (): void => {
       if (!screen) return;
       const busy = chat.busy && !permissionPending;
-      screen.setPresenceLine([
-        {
-          text: composePresenceLine(
-            {
-              busy,
-              interruptRequested,
-              spinnerFrame,
-              turnStartedAt,
-              activeTools: activeTools.size,
-              queued: queuedMessages.length,
-            },
-            screen.width(),
-          ),
-          tone: interruptRequested ? "warning" : busy ? "accent" : "success",
-        },
-      ]);
+      const queued = queuedMessages.length;
+      const toneControlsLine = (text: string, index: number): UiTextLine => {
+        if (index !== 1) return [{ text, tone: "muted" }];
+        const segs: UiSpan[] = [{ text, tone: "muted" }];
+        if (interruptRequested)
+          segs.push({
+            text: `   Stopping safely…${queued ? ` · ${queued} queued` : ""}`,
+            tone: "warning",
+          });
+        else if (busy)
+          segs.push({ text: `   ${formatVuMeter(vuFrame)}  Esc interrupt`, tone: "accent" });
+        return segs;
+      };
       const mode = chat.pendingMode;
       screen.setComposer({
         label: `${mode} › `,
@@ -1196,17 +1135,23 @@ export async function runAgentjChat(
               })),
           },
           screen.width(),
-        ).map((text) => [{ text, tone: "muted" }]),
+        ).map(toneControlsLine),
       );
     };
 
-    // Animate spinners and clocks. The screen skips repaints when the status
-    // section is unchanged, so idle ticks cost one comparison.
+    // Animate the busy meter on a fast frame for a fluid hum; advance the
+    // calmer spinner/clock frame every third tick. The screen skips repaints
+    // when a section is unchanged, so idle ticks cost one comparison.
+    let animationTick = 0;
     ticker = setInterval(() => {
-      spinnerFrame += 1;
-      if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
+      animationTick += 1;
+      vuFrame += 1;
+      if (animationTick % 3 === 0) {
+        spinnerFrame += 1;
+        if (dagTrackers.size > 0 || activeTools.size > 0) refreshProgress();
+      }
       updateStatus();
-    }, 250);
+    }, 90);
 
     const configOutput = (message: string): void => {
       const text = message.trim();
@@ -1278,15 +1223,14 @@ export async function runAgentjChat(
         .map(({ name }) => `skill ${name} is shadowed by the built-in /${name} command.`),
     ];
 
-    const liveRegion = createAnsiLiveRegionAdapter({ stdout: processStdout });
     const clipboardAttachments = createCrosscopyClipboardAttachments();
     const pastedImages = createPastedImageRegistry();
     const projectFiles = createProjectFileCatalog(createGitProjectFileSource(environment, root));
     await projectFiles.refresh();
-    screen = createChatScreen({
-      liveRegion,
+    const sharedScreenOptions = {
       initialHistory: promptHistory.entries,
-      matchesSlashCommand: (query) => suggestChatInputRoots(query, commandContext).length > 0,
+      matchesSlashCommand: (query: string) =>
+        suggestChatInputRoots(query, commandContext).length > 0,
       editorCompletionOptions: createEditorCompletionProvider({
         completeInitialSlash: (state) =>
           completeChatInput(state.text, state.cursor, commandContext),
@@ -1298,10 +1242,10 @@ export async function runAgentjChat(
             summary: "Project file",
           })),
       }),
-      shouldRememberInput: (text) =>
+      shouldRememberInput: (text: string) =>
         shouldRememberChatInput(text) && !pastedImages.hasReference(text),
       callbacks: {
-        onSubmit: (text) => {
+        onSubmit: (text: string) => {
           if (shouldRememberChatInput(text) && !pastedImages.hasReference(text))
             rememberPrompt(text);
           const parsed = parseInput(text);
@@ -1367,7 +1311,14 @@ export async function runAgentjChat(
         },
         onQuit: () => quitResolve?.(),
       },
-    });
+    };
+    screen =
+      process.env.GLORIOUS_TUI === "opentui"
+        ? await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions })
+        : createChatScreen({
+            liveRegion: createAnsiLiveRegionAdapter({ stdout: processStdout }),
+            ...sharedScreenOptions,
+          });
 
     screen.start();
     refreshProgress();
@@ -1377,7 +1328,10 @@ export async function runAgentjChat(
     }
     for (const notice of skillNotices) emit({ type: "notice", text: notice });
     for (const turn of (resumed?.turns ?? []).slice(-5)) {
-      screen.printAbove(formatUserTurnBlock(turn.user, turn.transcriptText), "turn");
+      screen.printAbove(
+        formatUserTurnBlock(turn.user, turn.transcriptText, screen.width()),
+        "turn",
+      );
       screen.printAbove(turn.assistant);
     }
     void composition.startMcp().catch((error) => {
@@ -1415,10 +1369,10 @@ export async function runAgentjChat(
 }
 
 /** Non-interactive one-shot: one turn, transcript to stderr, result to stdout. */
-export async function runAgentjOnce(
+export async function runGloriousOnce(
   task: string,
   options: { plan: boolean; allowAll: boolean; signal: AbortSignal },
-  configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
+  configPath: string = new URL("./glorious.ts", import.meta.url).pathname,
 ): Promise<number> {
   const gate: PermissionGate = async (request) => {
     if (options.allowAll) return "allow";
@@ -1463,7 +1417,7 @@ export async function runAgentjOnce(
     }
     await composition.startMcp();
     const log = await createChatLog({
-      root: join(composition.stateRoot, "agentj", "chats"),
+      root: join(composition.stateRoot, "glorious", "chats"),
       projectRoot: composition.root,
       title: task,
     });
@@ -1481,8 +1435,6 @@ export async function runAgentjOnce(
         agentFor: composition.agentFor,
         log,
         undo,
-        reflectionEvents: composition.reflectionEvents,
-        reflectPlan: composition.reflectPlan,
         onEvent: (event) => {
           if (event.type === "assistant") {
             resultText = event.text;
@@ -1558,7 +1510,7 @@ const createProductionUpdateService = async (): Promise<{
   return {
     service: createUpdateService({
       config: config.update,
-      packageName: "@glrs-dev/aj",
+      packageName: "@glrs-dev/glorious",
       registry: createNpmRegistryAdapter(),
       ...(installer ? { installer } : {}),
       state: createUpdateStateStore(),
@@ -1579,14 +1531,14 @@ const runProductionUpdate = async (channel: UpdateChannel): Promise<number> => {
     const { service } = await createProductionUpdateService();
     const result = await service.update(COMMAND_VERSION, channel);
     if (result.available) {
-      processStdout.write(`Updated agentj to ${result.available} (${result.channel}).\n`);
+      processStdout.write(`Updated glorious to ${result.available} (${result.channel}).\n`);
     } else {
-      processStdout.write(`agentj ${COMMAND_VERSION} is current on ${result.channel}.\n`);
+      processStdout.write(`glorious ${COMMAND_VERSION} is current on ${result.channel}.\n`);
     }
     return EXIT_SUCCESS;
   } catch (error) {
     processStderr.write(
-      `Unable to update agentj: ${error instanceof Error ? error.message : String(error)}\n`,
+      `Unable to update glorious: ${error instanceof Error ? error.message : String(error)}\n`,
     );
     return EXIT_FAILURE;
   }
@@ -1622,22 +1574,22 @@ const main = async (): Promise<void> => {
 
   process.on("SIGINT", handleSigint);
   try {
-    process.exitCode = await runAgentjCli(
+    process.exitCode = await runGloriousCli(
       argv,
       {
         version: COMMAND_VERSION,
         runChat: (options) =>
-          runAgentjChat(
+          runGloriousChat(
             options,
             undefined,
             async (channel) => {
               if ((await runProductionUpdate(channel)) !== EXIT_SUCCESS) {
-                throw new Error("AgentJ update failed.");
+                throw new Error("Glorious update failed.");
               }
             },
             runProductionUpdateCheck,
           ),
-        runOnce: (task, options) => runAgentjOnce(task, options),
+        runOnce: (task, options) => runGloriousOnce(task, options),
         update: ({ channel }) => runProductionUpdate(channel),
         createAbortSignal: () => abortController.signal,
         configHandlers,

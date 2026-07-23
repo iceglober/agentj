@@ -6,9 +6,9 @@ import type { Sandbox, SandboxCommandResult } from "./index";
 /** The `sandbox.*` section of the agent config. */
 export const microsandboxOptionsSchema = z.object({
   name: z.string().default("worker"),
-  /** Generic AgentJ base image; users may override it with any OCI image. */
-  image: z.string().default("ghcr.io/iceglober/agentj-sandbox-base:1"),
-  /** Commands run once after the sandbox starts and before AgentJ creates a session worktree. */
+  /** Generic Glorious base image; users may override it with any OCI image. */
+  image: z.string().default("ghcr.io/iceglober/glorious-sandbox-base:1"),
+  /** Commands run once after the sandbox starts and before Glorious creates a session worktree. */
   bootstrap: z.array(z.string().min(1)).default([]),
   /** Created via rootfs patch before boot; commands run here. */
   workdir: z.string().default("/workspace"),

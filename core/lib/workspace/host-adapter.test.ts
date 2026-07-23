@@ -5,7 +5,7 @@ import path from "node:path";
 import { createHostExecutionEnvironment } from "./host-adapter";
 
 test("host execution uses cwd and never owns or removes it", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-host-workspace-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-host-workspace-"));
   try {
     await writeFile(path.join(root, "source.txt"), "before");
     const environment = await createHostExecutionEnvironment(root);

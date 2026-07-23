@@ -110,7 +110,7 @@ export function createUpdateService(options: {
       const result = await checkFresh(current, requested);
       if (!result.available) return result;
       if (!options.installer)
-        throw new Error("This AgentJ installation cannot be updated automatically.");
+        throw new Error("This Glorious installation cannot be updated automatically.");
       await options.installer.install(options.packageName, result.channel);
       return result;
     },

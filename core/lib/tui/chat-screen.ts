@@ -80,8 +80,6 @@ export interface ChatScreen extends GuidedInputPort {
   restoreInput(text: string): void;
   /** Replace the progress block (empty array hides it). */
   setProgressLines(lines: UiTextLine[]): void;
-  /** Current session state, immediately above the editor. */
-  setPresenceLine(line: UiTextLine): void;
   /** Set the visible composer identity and empty-state guidance. */
   setComposer(options: { label: string; placeholder: string }): void;
   /** Replace the status section below the editor (idle repaints are skipped). */
@@ -107,8 +105,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: UiTextLine[] = [];
-  let presenceLine: UiTextLine = "● Ready";
-  let composer = { label: "› ", placeholder: "Ask AgentJ anything" };
+  let composer = { label: "› ", placeholder: "Ask Glorious anything" };
   let statusLines: UiTextLine[] = [];
   let hasTranscript = false;
   let started = false;
@@ -136,7 +133,10 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   const modalQueue: PendingModal[] = [];
   let inputQueue: Promise<void> | null = null;
 
-  const safeLine = (line: UiTextLine): string => styler.renderLine(line, contentWidth());
+  // Keep layouts semantic until the selected live-region adapter renders them.
+  // This is required by OpenTUI, while the ANSI adapter applies width limiting.
+  const safeLine = (line: UiTextLine): UiTextLine => line;
+  const comparableLine = (line: UiTextLine): string => styler.renderLine(line, contentWidth());
 
   interface ActiveCompletion {
     token: Pick<EditorCompletionToken, "start" | "end">;
@@ -211,10 +211,10 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       return {
         lines: [...progress, ...askLines, ...safeStatus],
         cursorRow: askCursorRow,
-        cursorColumn: displayWidth(askLines.at(-1) ?? ""),
+        cursorColumn: displayWidth(styler.renderLine(askLines.at(-1) ?? "")),
       };
     }
-    const editorLead = [...progress, safeLine(presenceLine)];
+    const editorLead = [...progress];
     if (pendingModal?.kind === "input") {
       const prompt = pendingModal;
       const labelLines = wrapToDisplayWidth(
@@ -334,10 +334,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
   };
 
   const printTranscript = (text: string | UiBlock, spacing: "none" | "turn" = "none"): void => {
-    liveRegion.printAbove(
-      styler.renderBlock(text).join("\r\n"),
-      spacing === "turn" && hasTranscript ? "turn" : "none",
-    );
+    liveRegion.printAbove(text, spacing === "turn" && hasTranscript ? "turn" : "none");
     hasTranscript = true;
     paint();
   };
@@ -696,6 +693,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       // the chat loop returns; without this, /quit tears down but never exits.
       stdin.pause?.();
       clearLive();
+      liveRegion.dispose?.();
       const modals = pendingModal ? [pendingModal, ...modalQueue] : [...modalQueue];
       pendingModal = null;
       modalQueue.length = 0;
@@ -711,7 +709,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
 
     clearTranscript() {
       progressLines = [];
-      presenceLine = "● Ready";
       statusLines = [];
       liveRegion.clearScreen();
       hasTranscript = false;
@@ -733,12 +730,6 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
       paint();
     },
 
-    setPresenceLine(line) {
-      if (safeLine(presenceLine) === safeLine(line)) return;
-      presenceLine = line;
-      paint();
-    },
-
     setComposer(next) {
       if (composer.label === next.label && composer.placeholder === next.placeholder) return;
       composer = next;
@@ -750,7 +741,9 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     setStatusLines(lines) {
       if (
         lines.length === statusLines.length &&
-        lines.every((line, index) => safeLine(line) === safeLine(statusLines[index] ?? ""))
+        lines.every(
+          (line, index) => comparableLine(line) === comparableLine(statusLines[index] ?? ""),
+        )
       ) {
         return;
       }

@@ -6,7 +6,7 @@ describe("delegation worktree identity", () => {
     const one = delegationWorktreeRoot("/tmp", "/repos/one/.git");
     const two = delegationWorktreeRoot("/tmp", "/repos/two/.git");
 
-    expect(one).toMatch(/^\/tmp\/agentj-worktrees\/[0-9a-f]{16}$/);
+    expect(one).toMatch(/^\/tmp\/glorious-worktrees\/[0-9a-f]{16}$/);
     expect(one).not.toBe(two);
     expect(delegationWorktreeRoot("/tmp", "/repos/one/.git")).toBe(one);
   });

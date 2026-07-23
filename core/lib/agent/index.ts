@@ -39,7 +39,6 @@ import {
   withRequestOrigin,
 } from "./permissions";
 import { createQuestionTool, type QuestionPort } from "./questions";
-import { reflectionsConfigSchema } from "./reflections";
 import {
   type CreateSubagentsToolOptions,
   createRunOneSubagentTool,
@@ -59,7 +58,7 @@ import { createTodoTool, type TodoPort } from "./todos";
  * valid agent.
  */
 export const agentConfigSchema = z.object({
-  name: z.string().default("agentj"),
+  name: z.string().default("glorious"),
   role: z.enum(["primary", "delegate"]).default("primary"),
   /** Project rules ({{PROJECT_RULES}}), composed with AGENTS.md and scoped extensions. */
   rules: z.string().default(""),
@@ -84,7 +83,6 @@ export const agentConfigSchema = z.object({
     .prefault({}),
   llm: llmConfigSchema.prefault({}),
   prompt: promptConfigSchema.prefault({}),
-  reflections: reflectionsConfigSchema,
   tools: z
     .object({
       /**
@@ -273,16 +271,6 @@ export function childAgentConfig(config: AgentConfig, role: AgentConfig["role"])
   return routedChildAgentConfig(config, role, {
     provider: config.tools.subagents.provider,
     model: subagentModel(config),
-  });
-}
-
-/** Reflection routing wins over subagent routing, then inherits the plan model. */
-export function reflectionAgentConfig(config: AgentConfig): AgentConfig {
-  const { provider, model, tier } = config.reflections;
-  return routedChildAgentConfig(config, "delegate", {
-    provider: provider ?? config.tools.subagents.provider,
-    model:
-      model ?? (tier === undefined ? subagentModel(config) : resolveTierModel(config.llm, tier)),
   });
 }
 
@@ -649,26 +637,23 @@ export async function createAgent(
           new Error(`The selected model (${config.llm.model}) does not support image input.`),
         );
       }
-      return generateWithGroundedCompletion(
-        runtime,
-        {
-          instructions: composed.instructions,
-          prompt,
-          images: generateOpts?.images,
-          messages: generateOpts?.messages,
-          tools,
-          maxOutputChars: config.tools.maxOutputChars,
-          spill: opts.spill?.write,
-          temperature: config.llm.temperature ?? composed.params.temperature,
-          topP: config.llm.topP ?? composed.params.topP,
-          providerOptions: composed.params.providerOptions,
-          stopSteps: opts.stopSteps ?? config.steps,
-          stopContextTokens: opts.stopContextTokens,
-          abortSignal: generateOpts?.abortSignal,
-          onStep: generateOpts?.onStep,
-        },
-        { todos: opts.todos },
-      );
+      const request = {
+        instructions: composed.instructions,
+        prompt,
+        images: generateOpts?.images,
+        messages: generateOpts?.messages,
+        tools,
+        maxOutputChars: config.tools.maxOutputChars,
+        spill: opts.spill?.write,
+        temperature: config.llm.temperature ?? composed.params.temperature,
+        topP: config.llm.topP ?? composed.params.topP,
+        providerOptions: composed.params.providerOptions,
+        stopSteps: opts.stopSteps ?? config.steps,
+        stopContextTokens: opts.stopContextTokens,
+        abortSignal: generateOpts?.abortSignal,
+        onStep: generateOpts?.onStep,
+      };
+      return generateWithGroundedCompletion(runtime, request, { todos: opts.todos });
     },
   };
 }

@@ -15,11 +15,11 @@ export const embeddedSkillsRoot = fileURLToPath(new URL("./embedded", import.met
  * activates a skill by reading its SKILL.md, and an explicit `/name`
  * invocation injects the full body as the turn prompt (renderSkillInvocation).
  *
- * agentj-specific behavior uses both frontmatter and the spec's `metadata`
+ * glorious-specific behavior uses both frontmatter and the spec's `metadata`
  * escape hatch:
  *   user-invocable: false — do not register a /name command
- *   metadata.agentj-mode: plan | build — mode to switch to on /name
- *   metadata.agentj-model-invocation: disabled — omit from the prompt listing
+ *   metadata.glorious-mode: plan | build — mode to switch to on /name
+ *   metadata.glorious-model-invocation: disabled — omit from the prompt listing
  */
 
 /** 1-64 chars, lowercase alphanumerics and single interior hyphens. */
@@ -38,8 +38,8 @@ export const skillFrontmatterSchema = z.object({
   metadata: z.record(z.string(), z.string()).prefault({}),
 });
 
-const MODE_KEY = "agentj-mode";
-const MODEL_INVOCATION_KEY = "agentj-model-invocation";
+const MODE_KEY = "glorious-mode";
+const MODEL_INVOCATION_KEY = "glorious-model-invocation";
 
 export interface Skill {
   name: string;

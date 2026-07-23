@@ -21,7 +21,7 @@ export const resolveEvalAuth = async (
     throw new Error(
       key.status === "store-unavailable"
         ? "Azure API key unavailable: the secure secret store could not be read."
-        : "Azure API key missing; run: agentj config set --secret providers.azure.api_key",
+        : "Azure API key missing; run: glorious config set --secret providers.azure.api_key",
     );
   }
   return {

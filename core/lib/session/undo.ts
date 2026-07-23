@@ -4,7 +4,7 @@ import { shq } from "../shell";
 /**
  * Undo/redo over the agent's file changes, using the same temp-index snapshot
  * and verified binary-patch techniques as workspace/git-integration.ts, under
- * a dedicated ref namespace (`refs/agentj/undo/<session>/<n>`). Snapshots and
+ * a dedicated ref namespace (`refs/glorious/undo/<session>/<n>`). Snapshots and
  * restores never touch HEAD, the user's index, or any branch.
  */
 
@@ -29,8 +29,8 @@ export interface UndoStack {
 }
 
 const IDENTITY =
-  "GIT_AUTHOR_NAME=agentj GIT_AUTHOR_EMAIL=agentj@sandbox.local " +
-  "GIT_COMMITTER_NAME=agentj GIT_COMMITTER_EMAIL=agentj@sandbox.local ";
+  "GIT_AUTHOR_NAME=glorious GIT_AUTHOR_EMAIL=glorious@sandbox.local " +
+  "GIT_COMMITTER_NAME=glorious GIT_COMMITTER_EMAIL=glorious@sandbox.local ";
 
 export function createUndoStack(
   environment: Sandbox,
@@ -46,7 +46,7 @@ export function createUndoStack(
     return result.stdout.trim();
   };
 
-  const scratch = `/tmp/agentj-undo-${sessionId}`;
+  const scratch = `/tmp/glorious-undo-${sessionId}`;
   const entries: UndoSnapshot[] = [];
   let pointer = -1;
   let counter = 0;
@@ -61,7 +61,7 @@ export function createUndoStack(
     initialized ??= (async () => {
       const output = await run(
         git(
-          `for-each-ref --format=${shq("%(refname)|%(objectname)|%(contents:subject)")} ${shq(`refs/agentj/undo/${sessionId}/`)}`,
+          `for-each-ref --format=${shq("%(refname)|%(objectname)|%(contents:subject)")} ${shq(`refs/glorious/undo/${sessionId}/`)}`,
         ),
       );
       if (!output) return;
@@ -72,7 +72,7 @@ export function createUndoStack(
         const index = Number(ref.slice(ref.lastIndexOf("/") + 1));
         if (!Number.isInteger(index) || index <= 0) continue;
         const tree = await run(git(`rev-parse ${shq(`${commit}^{tree}`)}`));
-        const label = subject.join("|").replace(/^agentj undo: /u, "");
+        const label = subject.join("|").replace(/^glorious undo: /u, "");
         found.push({ index, entry: { ref, commit, tree, label } });
       }
       found.sort((a, b) => a.index - b.index);
@@ -112,10 +112,10 @@ export function createUndoStack(
     const head = await run(git("rev-parse -q --verify 'HEAD^{commit}'"));
     counter += 1;
     const commit = await run(
-      `${IDENTITY}${git(`commit-tree ${shq(tree)} -p ${shq(head)} -m ${shq(`agentj undo: ${label}`)}`)}`,
+      `${IDENTITY}${git(`commit-tree ${shq(tree)} -p ${shq(head)} -m ${shq(`glorious undo: ${label}`)}`)}`,
     );
-    const ref = `refs/agentj/undo/${sessionId}/${counter}`;
-    await run(git(`update-ref -m ${shq("agentj undo snapshot")} ${shq(ref)} ${shq(commit)} ''`));
+    const ref = `refs/glorious/undo/${sessionId}/${counter}`;
+    await run(git(`update-ref -m ${shq("glorious undo snapshot")} ${shq(ref)} ${shq(commit)} ''`));
     entries.splice(pointer + 1);
     entries.push({ ref, commit, tree, label });
     pointer = entries.length - 1;

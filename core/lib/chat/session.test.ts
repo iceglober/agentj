@@ -24,7 +24,7 @@ function makeAgent(impl: (prompt: string, opts?: GenerateOptions) => Promise<Run
 async function withLog<T>(
   run: (log: Awaited<ReturnType<typeof createChatLog>>, root: string) => Promise<T>,
 ) {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chat-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chat-"));
   try {
     const log = await createChatLog({ root, projectRoot: "/repo/x", title: "test" });
     return await run(log, root);
@@ -251,7 +251,7 @@ describe("createChatSession", () => {
     });
   });
 
-  test("turn-usage reflects only the foreground agent's own steps — subagent usage stays out", async () => {
+  test("turn-usage counts only the foreground agent's own steps — subagent usage stays out", async () => {
     await withLog(async (log) => {
       const events: ChatEvent[] = [];
       // The session's turn-usage stream is fed exclusively by the foreground
@@ -661,79 +661,5 @@ test("a failed turn's request survives into the next turn's notice", async () =>
     expect(prompts[1]).toContain("The previous turn failed (The operation timed out.)");
     expect(prompts[1]).toContain('Its request was: "add Orwell\'s rules to the base prompt"');
     expect(prompts[1]).toContain("try again");
-  });
-});
-
-describe("plan reflections", () => {
-  test("persists a draft, shows a labeled synthetic turn, then revises it once", async () => {
-    await withLog(async (log, root) => {
-      const prompts: string[] = [];
-      const events: ChatEvent[] = [];
-      const session = createChatSession({
-        agentFor: async () =>
-          makeAgent(async (prompt, options) => {
-            prompts.push(prompt);
-            return result(prompts.length === 1 ? "draft plan" : "revised plan", {
-              messages: [{ turn: prompts.length, prior: options?.messages }],
-            });
-          }),
-        log,
-        refinePlan: async ({ request, draft }) => {
-          expect(request).toBe("plan this");
-          expect(draft).toBe("draft plan");
-          return { text: "apply reflections", transcriptText: "Reflections: architecture ✓" };
-        },
-        onEvent: (event) => {
-          events.push(event);
-        },
-      });
-
-      await session.send("plan this");
-
-      expect(prompts).toEqual(["plan this", "apply reflections"]);
-      expect(
-        events.filter((event) => event.type === "assistant").map((event) => event.text),
-      ).toEqual(["draft plan", "revised plan"]);
-      expect(events.filter((event) => event.type === "turn-started")).toContainEqual({
-        type: "turn-started",
-        mode: "plan",
-        text: "apply reflections",
-        transcriptText: "Reflections: architecture ✓",
-      });
-      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
-      expect(loaded?.turns.map((turn) => [turn.user, turn.transcriptText, turn.assistant])).toEqual(
-        [
-          ["plan this", undefined, "draft plan"],
-          ["apply reflections", "Reflections: architecture ✓", "revised plan"],
-        ],
-      );
-    });
-  });
-
-  test("keeps the draft when reflections return a notice and never refines build turns", async () => {
-    await withLog(async (log, root) => {
-      let refinements = 0;
-      const events: ChatEvent[] = [];
-      const session = createChatSession({
-        agentFor: async () => makeAgent(async () => result("draft")),
-        log,
-        refinePlan: async () => {
-          refinements += 1;
-          return { notice: "Reflections failed; keeping draft." };
-        },
-        onEvent: (event) => {
-          events.push(event);
-        },
-      });
-
-      await session.send("plan");
-      session.setMode("build");
-      await session.send("build");
-
-      expect(refinements).toBe(1);
-      expect(events).toContainEqual({ type: "notice", text: "Reflections failed; keeping draft." });
-      const loaded = await loadChatLog({ root, projectRoot: "/repo/x", id: log.id });
-      expect(loaded?.turns).toHaveLength(2);
-    });
   });
 });

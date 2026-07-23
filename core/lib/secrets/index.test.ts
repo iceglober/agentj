@@ -57,7 +57,7 @@ describe("resolveAzureApiKey", () => {
       source: "secret-store",
     });
 
-    expect(AZURE_SECRET_SERVICE).toBe("agentj");
+    expect(AZURE_SECRET_SERVICE).toBe("glorious");
     expect(AZURE_API_KEY_ACCOUNT).toBe("azure-api-key");
     expect(get).toHaveBeenCalledWith(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT);
   });

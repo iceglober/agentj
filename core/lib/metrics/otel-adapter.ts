@@ -37,22 +37,25 @@ export function createOtelMetricsSink(options: OtelMetricsSinkOptions = {}): Met
   if (options.enabled !== true) return noopMetricsSink;
 
   try {
-    const meter = options.meterFactory?.() ?? (options.metricsApi ?? metrics).getMeter("agentj");
+    const meter = options.meterFactory?.() ?? (options.metricsApi ?? metrics).getMeter("glorious");
     const instruments: OtelInstruments = {
-      duration: meter.createHistogram("agentj.llm.duration", instrumentOptions.duration),
-      inputTokens: meter.createCounter("agentj.llm.tokens.input", instrumentOptions.tokens),
-      noCacheTokens: meter.createCounter("agentj.llm.tokens.no_cache", instrumentOptions.tokens),
+      duration: meter.createHistogram("glorious.llm.duration", instrumentOptions.duration),
+      inputTokens: meter.createCounter("glorious.llm.tokens.input", instrumentOptions.tokens),
+      noCacheTokens: meter.createCounter("glorious.llm.tokens.no_cache", instrumentOptions.tokens),
       cacheReadTokens: meter.createCounter(
-        "agentj.llm.tokens.cache_read",
+        "glorious.llm.tokens.cache_read",
         instrumentOptions.tokens,
       ),
       cacheWriteTokens: meter.createCounter(
-        "agentj.llm.tokens.cache_write",
+        "glorious.llm.tokens.cache_write",
         instrumentOptions.tokens,
       ),
-      outputTokens: meter.createCounter("agentj.llm.tokens.output", instrumentOptions.tokens),
-      totalTokens: meter.createCounter("agentj.llm.tokens.total", instrumentOptions.tokens),
-      cacheReadRatio: meter.createHistogram("agentj.llm.cache_read_ratio", instrumentOptions.ratio),
+      outputTokens: meter.createCounter("glorious.llm.tokens.output", instrumentOptions.tokens),
+      totalTokens: meter.createCounter("glorious.llm.tokens.total", instrumentOptions.tokens),
+      cacheReadRatio: meter.createHistogram(
+        "glorious.llm.cache_read_ratio",
+        instrumentOptions.ratio,
+      ),
     };
 
     let failed = false;

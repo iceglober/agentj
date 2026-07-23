@@ -8,7 +8,7 @@ import type { Sandbox } from "./index";
 
 export const localSandboxOptionsSchema = z.object({
   base: z.string().optional(),
-  prefix: z.string().default("agentj-local-"),
+  prefix: z.string().default("glorious-local-"),
 });
 
 export type LocalSandboxProviderOptions = z.input<typeof localSandboxOptionsSchema>;

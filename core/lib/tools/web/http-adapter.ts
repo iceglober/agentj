@@ -115,7 +115,7 @@ const requestOnce = (
         host: url.host,
         accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
         "accept-encoding": "identity",
-        "user-agent": "agentj/0.1 web_fetch",
+        "user-agent": "glorious/0.1 web_fetch",
       },
       servername: url.hostname,
       timeout: timeoutMs,

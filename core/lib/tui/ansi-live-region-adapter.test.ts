@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
 import { createAnsiLiveRegionAdapter } from "./ansi-live-region-adapter";
 
+const ESC = "";
 const createRegion = () => {
   const output = new PassThrough() as PassThrough & { columns: number; rows: number };
   output.columns = 40;
@@ -20,6 +21,9 @@ const createRegion = () => {
 };
 
 const newlineCount = (s: string): number => (s.match(/\r\n/g) ?? []).length;
+// Drop the synchronized-update markers so content assertions ignore the wrapper.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matches the sync markers
+const stripSync = (s: string): string => s.replace(/\[\?2026[hl]/gu, "");
 
 describe("createAnsiLiveRegionAdapter (floating)", () => {
   test("paint draws the layout beneath the transcript with relative moves, not absolute rows", () => {
@@ -27,11 +31,14 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
     const written = tap(() =>
       region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 }),
     );
+    // A repaint is one atomic synchronized update, so the cursor never flickers.
+    expect(written.startsWith(`${ESC}[?2026h`)).toBe(true);
+    expect(written.endsWith(`${ESC}[?2026l`)).toBe(true);
     expect(written).toContain("editor\r\nstatus");
     // Floating never addresses an absolute row (…;1H) — that was the pinned design.
-    expect(written).not.toMatch(/\[\d+;1H/);
+    expect(written).not.toMatch(/\[\d+;1H/u);
     // Cursor parks back up onto the editor row.
-    expect(written).toContain("[1A");
+    expect(written).toContain(`${ESC}[1A`);
   });
 
   test("a transcript write adds no implicit spacing", () => {
@@ -41,8 +48,8 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
 
     const written = tap(() => region.printAbove("row1"));
     // Walks up to the region top, clears, and writes only the event line.
-    expect(written).toContain("[3A");
-    expect(written.endsWith("row1\r\n")).toBe(true);
+    expect(written).toContain(`${ESC}[3A`);
+    expect(stripSync(written).endsWith("row1\r\n")).toBe(true);
     expect(newlineCount(written)).toBe(1);
   });
 
@@ -54,10 +61,10 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
     region.paint({ lines: ["", "editor", "status"], cursorRow: 1, cursorColumn: 0 });
     const second = tap(() => region.printAbove("b"));
 
-    expect(second.endsWith("b\r\n")).toBe(true);
+    expect(stripSync(second).endsWith("b\r\n")).toBe(true);
     expect(newlineCount(second)).toBe(1);
     const turn = tap(() => region.printAbove("next", "turn"));
-    expect(turn.endsWith("\r\nnext\r\n")).toBe(true);
+    expect(stripSync(turn).endsWith("\r\nnext\r\n")).toBe(true);
   });
 
   test("a tall transcript block scrolls naturally with only the one separator", () => {
@@ -67,21 +74,21 @@ describe("createAnsiLiveRegionAdapter (floating)", () => {
 
     const written = tap(() => region.printAbove(block));
     // The block's own 7 newlines plus its terminating newline.
-    expect(written.endsWith("L8\r\n")).toBe(true);
+    expect(stripSync(written).endsWith("L8\r\n")).toBe(true);
     expect(newlineCount(written)).toBe(8);
   });
 
   test("clearScreen clears the full viewport and homes the cursor", () => {
     const { region, tap } = createRegion();
     region.paint({ lines: ["editor", "status"], cursorRow: 0, cursorColumn: 0 });
-    expect(tap(() => region.clearScreen())).toBe("\u001b[2J\u001b[H");
+    expect(tap(() => region.clearScreen())).toBe(`${ESC}[2J${ESC}[H`);
   });
 
   test("clear erases the drawn region and forgets it", () => {
     const { region, tap } = createRegion();
     region.paint({ lines: ["a", "b", "editor"], cursorRow: 2, cursorColumn: 0 });
     const written = tap(() => region.clear());
-    expect(written).toContain("[2A"); // up to the region top
-    expect(written).toContain("[J"); // clear to end of screen
+    expect(written).toContain(`${ESC}[2A`); // up to the region top
+    expect(written).toContain(`${ESC}[J`); // clear to end of screen
   });
 });

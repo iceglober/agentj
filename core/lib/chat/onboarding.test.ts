@@ -33,7 +33,7 @@ describe("runOnboarding", () => {
     const { port, out, stored } = makePort({ key: "  sk-abc  " });
     expect(await runOnboarding(port)).toBe("ready");
     expect(stored).toEqual(["sk-abc"]); // trimmed
-    expect(out.join("")).toContain("Welcome to agentj");
+    expect(out.join("")).toContain("Welcome to glorious");
     expect(out.join("")).toContain("Saved to your keychain");
   });
 
@@ -41,7 +41,7 @@ describe("runOnboarding", () => {
     const { port, out, stored } = makePort({ key: null });
     expect(await runOnboarding(port)).toBe("cancelled");
     expect(stored).toEqual([]);
-    expect(out.join("")).toContain("agentj config set --secret");
+    expect(out.join("")).toContain("glorious config set --secret");
   });
 
   test("a blank key counts as cancel", async () => {

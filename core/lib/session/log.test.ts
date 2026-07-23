@@ -5,7 +5,7 @@ import path from "node:path";
 import { createChatLog, latestChatLogId, loadChatLog } from "./log";
 
 test("append, load with last-state-wins, and torn-tail tolerance", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chatlog-"));
   const projectRoot = "/repo/example";
   try {
     const log = await createChatLog({ root, projectRoot, title: "fix the flaky test" });
@@ -39,7 +39,7 @@ test("append, load with last-state-wins, and torn-tail tolerance", async () => {
 });
 
 test("latestChatLogId picks the newest session for the project, null when none", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chatlog-"));
   const projectRoot = "/repo/example";
   try {
     expect(await latestChatLogId({ root, projectRoot })).toBeNull();
@@ -55,7 +55,7 @@ test("latestChatLogId picks the newest session for the project, null when none",
 });
 
 test("loadChatLog returns null for unknown sessions", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chatlog-"));
   try {
     expect(await loadChatLog({ root, projectRoot: "/repo/x", id: "nope" })).toBeNull();
   } finally {
@@ -64,7 +64,7 @@ test("loadChatLog returns null for unknown sessions", async () => {
 });
 
 test("usage records round-trip and logs without them load with an empty list", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chatlog-"));
   const projectRoot = "/repo/example";
   try {
     const bare = await createChatLog({ root, projectRoot, id: "bare" });
@@ -94,7 +94,7 @@ test("usage records round-trip and logs without them load with an empty list", a
 });
 
 test("a reset state starts resumed history and usage at its boundary", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chatlog-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chatlog-"));
   const projectRoot = "/repo/example";
   try {
     const log = await createChatLog({ root, projectRoot, id: "reset" });

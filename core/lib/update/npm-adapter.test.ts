@@ -10,14 +10,14 @@ describe("npm update adapter", () => {
   });
 
   test("only updates recognized global installs with argv", async () => {
-    expect(detectPackageManager("/Users/a/.bun/install/global/node_modules/@glrs-dev/aj")).toBe(
-      "bun",
-    );
-    expect(detectPackageManager("/usr/local/lib/node_modules/@glrs-dev/aj")).toBe("npm");
-    expect(detectPackageManager("/repo/agentj")).toBeUndefined();
+    expect(
+      detectPackageManager("/Users/a/.bun/install/global/node_modules/@glrs-dev/glorious"),
+    ).toBe("bun");
+    expect(detectPackageManager("/usr/local/lib/node_modules/@glrs-dev/glorious")).toBe("npm");
+    expect(detectPackageManager("/repo/glorious")).toBeUndefined();
     const calls: unknown[] = [];
     const installer = createNpmInstaller({
-      packageRoot: "/usr/local/lib/node_modules/@glrs-dev/aj",
+      packageRoot: "/usr/local/lib/node_modules/@glrs-dev/glorious",
       command: async (file, args) => {
         calls.push([file, args]);
         return { stderr: "", exitCode: 0 };

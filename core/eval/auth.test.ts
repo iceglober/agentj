@@ -38,6 +38,6 @@ describe("resolveEvalAuth", () => {
   test("fails once with actionable copy when no credential is available", async () => {
     await expect(
       resolveEvalAuth([], llmConfigSchema.parse({}), { env: {}, store: store() }),
-    ).rejects.toThrow("agentj config set --secret providers.azure.api_key");
+    ).rejects.toThrow("glorious config set --secret providers.azure.api_key");
   });
 });

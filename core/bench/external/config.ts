@@ -7,7 +7,7 @@ export const pilotTaskIds = [
 ] as const;
 
 export const benchmarkArms = [
-  { id: "agentj-luna", model: "gpt-5.6-luna", priceProvider: "azure" },
+  { id: "glorious-luna", model: "gpt-5.6-luna", priceProvider: "azure" },
   { id: "codex-sol", model: "gpt-5.6-sol", priceProvider: "azure" },
   { id: "claude-opus-4.7", model: "claude-opus-4-7", priceProvider: "anthropic" },
   { id: "claude-fable-5", model: "claude-fable-5", priceProvider: "anthropic" },

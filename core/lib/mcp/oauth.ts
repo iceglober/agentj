@@ -22,7 +22,7 @@ import { type SecretStore, SecretStoreUnavailableError } from "../secrets";
  * otherwise — the runtime classifies it and points at `/mcp auth <server>`.
  */
 
-const OAUTH_SECRET_SERVICE = "agentj-mcp-oauth";
+const OAUTH_SECRET_SERVICE = "glorious-mcp-oauth";
 
 export interface McpOAuthState {
   clientInformation?: OAuthClientInformationMixed;
@@ -84,7 +84,7 @@ export interface McpOAuthRedirect {
  *  refresh takes its normal path; anything that actually needs the browser
  *  lands in redirectToAuthorization, which throws the typed 401. The URL
  *  never serves traffic. */
-const BACKGROUND_REDIRECT_PLACEHOLDER = "http://127.0.0.1/agentj-oauth-unavailable";
+const BACKGROUND_REDIRECT_PLACEHOLDER = "http://127.0.0.1/glorious-oauth-unavailable";
 
 /** SDK-facing provider. With `redirect` it can run the full interactive flow;
  *  without, it only serves saved credentials (token attach + refresh) and
@@ -104,7 +104,7 @@ export const createMcpOAuthProvider = (args: {
     },
     get clientMetadata() {
       return {
-        client_name: "agentj",
+        client_name: "glorious",
         redirect_uris: args.redirect ? [args.redirect.url] : [],
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
@@ -221,7 +221,7 @@ export async function runMcpOAuthFlow(
         state: url.searchParams.get("state") ?? undefined,
       });
       return new Response(
-        "<!doctype html><title>agentj</title><body>agentj is authorized — you can close this tab.</body>",
+        "<!doctype html><title>glorious</title><body>glorious is authorized — you can close this tab.</body>",
         { headers: { "Content-Type": "text/html" } },
       );
     },
@@ -246,7 +246,7 @@ export async function runMcpOAuthFlow(
     authProvider: provider,
     ...(options.headers ? { requestInit: { headers: options.headers } } : {}),
   });
-  const client = new Client({ name: `agentj-${server}-auth`, version: "0.1.0" });
+  const client = new Client({ name: `glorious-${server}-auth`, version: "0.1.0" });
 
   try {
     try {

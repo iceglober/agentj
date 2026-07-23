@@ -2,7 +2,22 @@ import type { ChatMode } from "../session/log";
 import { splitGraphemes } from "./editor";
 import { displayWidth, graphemeWidth, truncateToDisplayWidth } from "./terminal-editor";
 
-const SPINNER = ["◐", "◓", "◑", "◒"];
+const SPINNER = ["▏", "▎", "▍", "▌", "▋", "▊", "▉", "▊", "▋", "▌", "▍", "▎"];
+
+const VU_BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/** An ambient "working" meter: a bank of block bars that bob like an audio VU
+ *  meter. Deterministic in `frame` so the 250ms status ticker animates it, and
+ *  so it stays testable. Each bar rides a sine wave offset from its neighbours,
+ *  giving a continuous hum rather than a rotating spinner. */
+export const formatVuMeter = (frame: number, bars = 5): string => {
+  let out = "";
+  for (let index = 0; index < bars; index += 1) {
+    const level = Math.sin(frame * 0.55 + index * 1.1) * 0.5 + 0.5;
+    out += VU_BLOCKS[Math.min(VU_BLOCKS.length - 1, Math.floor(level * VU_BLOCKS.length))];
+  }
+  return out;
+};
 
 export const formatClock = (ms: number): string => {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -24,17 +39,6 @@ const formatStatusTokens = (count: number): string => {
 };
 
 const normalizedWidth = (width: number): number => Math.max(0, Math.floor(width));
-
-const fitsTogether = (left: string, right: string, width: number): boolean =>
-  displayWidth(left) + displayWidth(right) + 2 <= width;
-
-/** Left and right hug opposite edges once both fit with a readable gap. */
-const splitEnds = (left: string, right: string, width: number): string => {
-  if (right.length === 0) return truncateToDisplayWidth(left, width);
-  const gap = width - displayWidth(left) - displayWidth(right);
-  if (gap >= 2) return `${left}${" ".repeat(gap)}${right}`;
-  return truncateToDisplayWidth(`${left} ${right}`, width);
-};
 
 /** Long paths keep their head and leaf: ~/repos/…/nested/repo. */
 const middleEllipsis = (text: string, maxWidth: number): string => {
@@ -87,40 +91,6 @@ export interface StatusSectionState {
   now?: number;
 }
 
-/** The always-visible foreground state immediately above the composer. */
-export const composePresenceLine = (
-  state: {
-    busy: boolean;
-    interruptRequested: boolean;
-    spinnerFrame: number;
-    turnStartedAt: number | null;
-    activeTools?: number;
-    queued?: number;
-    now?: number;
-  },
-  width: number,
-): string => {
-  const frame = SPINNER[state.spinnerFrame % SPINNER.length] ?? "◐";
-  const elapsed =
-    state.turnStartedAt === null
-      ? ""
-      : ` ${Math.round(((state.now ?? Date.now()) - state.turnStartedAt) / 1000)}s`;
-  const queued = state.queued ? ` · ${state.queued} queued` : "";
-  if (state.interruptRequested)
-    return truncateToDisplayWidth(`${frame} Stopping safely…${queued}`, width);
-  if (state.busy) {
-    const activity = state.activeTools ? "Working" : "Thinking";
-    const full = `${frame} ${activity}${elapsed}${queued} · Esc interrupt`;
-    return displayWidth(full) <= width
-      ? full
-      : truncateToDisplayWidth(`${frame} ${activity}${elapsed}${queued}`, width);
-  }
-  return truncateToDisplayWidth(
-    state.queued ? `● Ready · ${state.queued} queued` : "● Ready",
-    width,
-  );
-};
-
 /** Re-warn after enough growth to be useful without repeating every step. */
 export const contextWarningRearmThreshold = (softLimit: number): number =>
   Math.max(1, Math.ceil(softLimit * 0.1));
@@ -153,18 +123,19 @@ export const composeStatusSection = (
   const controls = "Tab mode · / commands";
   const fullContext = `${state.model} · ctx ${context}`;
   const compactContext = `ctx ${context}`;
-  const rootBudget = Math.max(0, width - displayWidth(controls) - 2);
-  const rootWidth = rootBudget - displayWidth(fullContext) - 3;
-  const detailedLeft =
-    rootWidth >= 8 ? `${middleEllipsis(state.root, rootWidth)} · ${fullContext}` : "";
-  const footer =
-    detailedLeft && fitsTogether(detailedLeft, controls, width)
-      ? splitEnds(detailedLeft, controls, width)
-      : fitsTogether(fullContext, controls, width)
-        ? splitEnds(fullContext, controls, width)
-        : fitsTogether(compactContext, controls, width)
-          ? splitEnds(compactContext, controls, width)
-          : truncateToDisplayWidth(`${state.mode} · ${compactContext}`, width);
+  // The controls live on their own line now, so the info line gets the full
+  // width. It degrades location → model → context → the essential mode.
+  const rootWidth = width - displayWidth(fullContext) - 3;
+  const info =
+    rootWidth >= 8
+      ? `${middleEllipsis(state.root, rootWidth)} · ${fullContext}`
+      : displayWidth(fullContext) <= width
+        ? fullContext
+        : displayWidth(compactContext) <= width
+          ? compactContext
+          : `${state.mode} · ${compactContext}`;
+  const infoLine = truncateToDisplayWidth(info, width);
+  const controlsLine = truncateToDisplayWidth(controls, width);
 
   const jobRows = state.jobs.map((job) => {
     const prefix = `  ${frame} [${job.id}] ${job.mode}: `;
@@ -178,5 +149,5 @@ export const composeStatusSection = (
     return `${prefix}${snippet}${suffix}`;
   });
 
-  return [footer, ...jobRows];
+  return [infoLine, controlsLine, ...jobRows];
 };

@@ -16,7 +16,7 @@ Before writing, inspect the host's skill discovery code, existing skills, tests,
 and package rules. Reuse its discovery path and frontmatter schema. Do not add
 special-case registration or runtime branches for one skill.
 
-For agentj embedded skills:
+For glorious embedded skills:
 
 - Put each skill in `core/lib/skills/embedded/<name>/SKILL.md`.
 - Keep `name` equal to its directory name: lowercase letters, numbers, and

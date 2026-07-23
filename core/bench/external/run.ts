@@ -22,7 +22,7 @@ const flag = (name: string): string | undefined => {
   return index < 0 ? undefined : argv[index + 1];
 };
 const has = (name: string): boolean => argv.includes(`--${name}`);
-const benchRoot = resolve(flag("root") ?? "/tmp/agentj-external-bench");
+const benchRoot = resolve(flag("root") ?? "/tmp/glorious-external-bench");
 const sourceRoot = new URL("../../", import.meta.url).pathname;
 
 const exec = async (args: string[], cwd?: string): Promise<string> => {
@@ -86,7 +86,7 @@ const prepareWorkspace = async (task: SweTask, arm: ArmId): Promise<string> => {
 
 const commandFor = (arm: ArmId, workspace: string, prompt: string): string[] => {
   switch (arm) {
-    case "agentj-luna":
+    case "glorious-luna":
       return ["bun", join(sourceRoot, "agent-loop.ts"), "run", "--allow-all", prompt];
     case "codex-sol":
       return [
@@ -136,7 +136,7 @@ const commandFor = (arm: ArmId, workspace: string, prompt: string): string[] => 
   }
 };
 
-const parseAgentjUsage = async (stateRoot: string): Promise<NormalizedUsage> => {
+const parseGloriousUsage = async (stateRoot: string): Promise<NormalizedUsage> => {
   const glob = new Bun.Glob("**/*.jsonl");
   let inputTokens = 0;
   let outputTokens = 0;
@@ -187,8 +187,8 @@ const runAgent = async (task: SweTask, arm: ArmId) => {
   await exec(["git", "add", "--intent-to-add", "--all"], workspace);
   const patch = await exec(["git", "diff", "--binary"], workspace);
   const usage =
-    arm === "agentj-luna"
-      ? await parseAgentjUsage(stateRoot)
+    arm === "glorious-luna"
+      ? await parseGloriousUsage(stateRoot)
       : arm === "codex-sol"
         ? parseCodexUsage(stdout)
         : arm.startsWith("claude-")

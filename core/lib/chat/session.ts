@@ -1,5 +1,4 @@
 import type { Agent } from "../agent";
-import type { ReflectionEvent, ReflectionPreparation } from "../agent/reflections";
 import type { ImageAttachment } from "../llm";
 import type { ChatLog, ChatMode } from "../session/log";
 import type { UndoStack } from "../session/undo";
@@ -38,27 +37,12 @@ export interface ChatSessionDependencies {
    * returns opaque messages; session logic never interprets either shape.
    */
   transformContinuation?(messages: unknown[], mode: ChatMode): Promise<unknown[]> | unknown[];
-  /** Reflection runner; scheduling is controlled by reflectionEvents. */
-  reflectPlan?(input: {
-    request: string;
-    draft: string;
-    phase: "pre_turn" | "post_turn";
-    abortSignal: AbortSignal;
-  }): Promise<ReflectionPreparation | null>;
-  reflectionEvents?: readonly ReflectionEvent[];
-  /** Backward-compatible post-turn hook for embedders. */
-  refinePlan?(input: {
-    request: string;
-    draft: string;
-    abortSignal: AbortSignal;
-  }): Promise<ReflectionPreparation | null>;
   now?: () => string;
 }
 
 export interface ChatSessionInitialState {
   messages?: unknown[];
   mode?: ChatMode;
-  reflectionOnce?: Partial<Record<"pre_turn" | "post_turn", boolean>>;
 }
 
 export interface ChatSession {
@@ -109,7 +93,6 @@ export function createChatSession(
   let mode: ChatMode = initial.mode ?? "plan";
   let pendingMode: ChatMode = mode;
   let messages: unknown[] = initial.messages ?? [];
-  let reflectionOnce = { pre_turn: false, post_turn: false, ...initial.reflectionOnce };
   let busy = false;
   let turnAbort: AbortController | null = null;
   const notices: string[] = [];
@@ -131,17 +114,19 @@ export function createChatSession(
     text: string,
     transcriptText?: string,
     images?: readonly ImageAttachment[],
-    fixedMode?: ChatMode,
-    extraContext?: string,
-  ): Promise<{ succeeded: boolean; mode: ChatMode; text?: string }> => {
-    mode = fixedMode ?? pendingMode;
+  ): Promise<{
+    succeeded: boolean;
+    mode: ChatMode;
+    text?: string;
+    stepLimitReached?: boolean;
+  }> => {
+    mode = pendingMode;
     turnAbort = new AbortController();
     const abort = turnAbort;
     emit({ type: "turn-started", mode, text, ...(transcriptText ? { transcriptText } : {}) });
 
     const drained = notices.splice(0);
-    const baseContent = drained.length > 0 ? `${drained.join("\n")}\n\n${text}` : text;
-    const content = extraContext ? `${baseContent}\n\n${extraContext}` : baseContent;
+    const content = drained.length > 0 ? `${drained.join("\n")}\n\n${text}` : text;
 
     try {
       if (mode === "build") await deps.undo?.snapshot("pre-turn");
@@ -184,8 +169,13 @@ export function createChatSession(
           emit({ type: "notice", text: "Context compacted after reaching 75% of its soft limit." });
         }
       }
-      await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
-      return { succeeded: true, mode, text: result.text };
+      await deps.log.append({ type: "state", messages, mode, ts: now() });
+      return {
+        succeeded: true,
+        mode,
+        text: result.text,
+        ...(result.stepLimitReached ? { stepLimitReached: true } : {}),
+      };
     } catch (error) {
       if (abort.signal.aborted) {
         emit({ type: "turn-aborted" });
@@ -211,86 +201,7 @@ export function createChatSession(
   ): Promise<void> => {
     busy = true;
     try {
-      if (pendingMode === "plan" && mode === "build")
-        reflectionOnce = { pre_turn: false, post_turn: false };
-      const reflectPlan =
-        deps.reflectPlan ??
-        (deps.refinePlan
-          ? (input: {
-              request: string;
-              draft: string;
-              phase: "pre_turn" | "post_turn";
-              abortSignal: AbortSignal;
-            }) =>
-              input.phase === "post_turn"
-                ? deps.refinePlan!({
-                    request: input.request,
-                    draft: input.draft,
-                    abortSignal: input.abortSignal,
-                  })
-                : Promise.resolve(null)
-          : undefined);
-      const events = new Set(
-        deps.reflectionEvents ?? (deps.refinePlan ? ["plan.once.post_turn" as const] : []),
-      );
-      const hook = (phase: "pre_turn" | "post_turn") => {
-        const each = events.has(`plan.each.${phase}` as ReflectionEvent);
-        const once = events.has(`plan.once.${phase}` as ReflectionEvent) && !reflectionOnce[phase];
-        return each || once ? { once } : null;
-      };
-      let context: string | undefined;
-      const pre = pendingMode === "plan" && reflectPlan ? hook("pre_turn") : null;
-      if (pre) {
-        if (pre.once) {
-          reflectionOnce.pre_turn = true;
-          await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
-        }
-        const controller = new AbortController();
-        turnAbort = controller;
-        try {
-          const preparation = await reflectPlan!({
-            request: text,
-            draft: "",
-            phase: "pre_turn",
-            abortSignal: controller.signal,
-          });
-          if (preparation && "notice" in preparation)
-            emit({ type: "notice", text: preparation.notice });
-          else if (preparation && "context" in preparation) context = preparation.context;
-        } finally {
-          if (turnAbort === controller) turnAbort = null;
-        }
-      }
-      const draft = await runExchange(text, transcriptText, images, undefined, context);
-      if (!draft.succeeded || draft.mode !== "plan" || !reflectPlan) return;
-      const post = hook("post_turn");
-      if (!post) return;
-      const controller = new AbortController();
-      turnAbort = controller;
-      try {
-        if (post.once) {
-          reflectionOnce.post_turn = true;
-          await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
-        }
-        const followUp = await reflectPlan({
-          request: text,
-          draft: draft.text ?? "",
-          phase: "post_turn",
-          abortSignal: controller.signal,
-        });
-        if (followUp && "notice" in followUp) emit({ type: "notice", text: followUp.notice });
-        else if (followUp && "text" in followUp)
-          await runExchange(followUp.text, followUp.transcriptText, undefined, "plan");
-      } catch (error) {
-        if (controller.signal.aborted) emit({ type: "turn-aborted" });
-        else
-          emit({
-            type: "notice",
-            text: `Reflections failed; keeping draft. (${error instanceof Error ? error.message : String(error)})`,
-          });
-      } finally {
-        if (turnAbort === controller) turnAbort = null;
-      }
+      await runExchange(text, transcriptText, images);
     } finally {
       busy = false;
       if (pendingMode !== mode) emit({ type: "mode-changed", mode: pendingMode, pending: false });
@@ -405,12 +316,10 @@ export function createChatSession(
       messages = [];
       notices.length = 0;
       await deps.todos?.clear();
-      reflectionOnce = { pre_turn: false, post_turn: false };
       await deps.log.append({
         type: "state",
         messages,
         mode,
-        reflectionOnce,
         ts: now(),
         reset: true,
       });
@@ -424,7 +333,7 @@ export function createChatSession(
       const compacted = agent.compactContinuation?.(messages) ?? messages;
       const changed = compacted !== messages;
       messages = compacted;
-      await deps.log.append({ type: "state", messages, mode, reflectionOnce, ts: now() });
+      await deps.log.append({ type: "state", messages, mode, ts: now() });
       emit({
         type: "notice",
         text: changed ? "Context compacted." : "Context is already compact.",

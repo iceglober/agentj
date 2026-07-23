@@ -4,7 +4,7 @@ import { seededDefects } from "../../sources/seeded-defect";
 
 /**
  * TypeScript symptom-voice fixes: same shape as the clinic symptom tasks, in
- * the language AgentJ itself is written in. Tests run with bun.
+ * the language Glorious itself is written in. Tests run with bun.
  */
 const tasks: Task[] = seededDefects({
   idPrefix: "ops",

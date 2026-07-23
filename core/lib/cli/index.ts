@@ -10,7 +10,7 @@ export const EXIT_SUCCESS = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_ABORTED = 130;
 
-export const DEFAULT_COMMAND_NAME = "agentj";
+export const DEFAULT_COMMAND_NAME = "glorious";
 export const DEFAULT_COMMAND_DESCRIPTION =
   "Interactive coding agent. Bare invocation opens a chat session; `run` executes one task.";
 
@@ -22,9 +22,9 @@ export interface RunOnceOptions {
   signal: AbortSignal;
 }
 
-export interface AgentjCommandDependencies {
+export interface GloriousCommandDependencies {
   version: string;
-  /** Update the installed AgentJ CLI. */
+  /** Update the installed Glorious CLI. */
   update?: (options: { channel: UpdateChannel }) => Promise<number>;
   /** The interactive chat session (default command). */
   runChat(options?: { resume?: string; continueLatest?: boolean }): Promise<number>;
@@ -34,19 +34,19 @@ export interface AgentjCommandDependencies {
   name?: string;
   description?: string;
   configHandlers?: ConfigCliHandlers;
-  /** Interactive `agentj config` (no subcommand). Omitted → bare config errors. */
+  /** Interactive `glorious config` (no subcommand). Omitted → bare config errors. */
   runConfigUi?: () => Promise<number>;
   evalHandlers?: EvalCliHandlers;
   createEvalHandlers?: () => EvalCliHandlers | Promise<EvalCliHandlers>;
-  writers?: AgentjCliIo;
+  writers?: GloriousCliIo;
 }
 
-export interface AgentjCliIo {
+export interface GloriousCliIo {
   stdout?: Pick<typeof processStdout, "write">;
   stderr?: Pick<typeof processStderr, "write">;
 }
 
-const createChatCommand = (deps: AgentjCommandDependencies) =>
+const createChatCommand = (deps: GloriousCommandDependencies) =>
   command({
     name: deps.name ?? DEFAULT_COMMAND_NAME,
     version: deps.version,
@@ -66,11 +66,11 @@ const createChatCommand = (deps: AgentjCommandDependencies) =>
       deps.runChat({ ...(resume ? { resume } : {}), continueLatest }),
   });
 
-const createUpdateCommand = (deps: AgentjCommandDependencies) =>
+const createUpdateCommand = (deps: GloriousCommandDependencies) =>
   command({
     name: `${deps.name ?? DEFAULT_COMMAND_NAME} update`,
     version: deps.version,
-    description: "Update the AgentJ CLI.",
+    description: "Update the Glorious CLI.",
     args: {
       channel: option({
         long: "channel",
@@ -81,7 +81,7 @@ const createUpdateCommand = (deps: AgentjCommandDependencies) =>
     handler: ({ channel }) => deps.update!({ channel: channel ?? "auto" }),
   });
 
-const createRunCommand = (deps: AgentjCommandDependencies) =>
+const createRunCommand = (deps: GloriousCommandDependencies) =>
   command({
     name: `${deps.name ?? DEFAULT_COMMAND_NAME} run`,
     version: deps.version,
@@ -104,8 +104,8 @@ const createRunCommand = (deps: AgentjCommandDependencies) =>
 
 const createConfigSetCommand = (handlers: ConfigCliHandlers) =>
   command({
-    name: "agentj config set",
-    description: "Set an AgentJ configuration value.",
+    name: "glorious config set",
+    description: "Set an Glorious configuration value.",
     args: {
       secret: flag({
         long: "secret",
@@ -127,8 +127,8 @@ const createConfigSetCommand = (handlers: ConfigCliHandlers) =>
 
 const createConfigDeleteCommand = (handlers: ConfigCliHandlers) =>
   command({
-    name: "agentj config delete",
-    description: "Delete an AgentJ configuration value.",
+    name: "glorious config delete",
+    description: "Delete an Glorious configuration value.",
     args: {
       secret: flag({
         long: "secret",
@@ -145,8 +145,8 @@ const createConfigDeleteCommand = (handlers: ConfigCliHandlers) =>
 
 const createConfigGetCommand = (handlers: ConfigCliHandlers) =>
   command({
-    name: "agentj config get",
-    description: "Read an AgentJ configuration value.",
+    name: "glorious config get",
+    description: "Read an Glorious configuration value.",
     args: {
       key: positional({
         type: string,
@@ -162,7 +162,7 @@ const createConfigListMutationCommand = (
   operation: "add" | "remove",
 ) =>
   command({
-    name: `agentj config ${operation}`,
+    name: `glorious config ${operation}`,
     description: `${operation === "add" ? "Append to" : "Remove from"} an array configuration value.`,
     args: {
       key: positional({
@@ -233,7 +233,7 @@ export function describeCli(): CliCommandDoc[] {
     version: "",
     runChat: async () => EXIT_SUCCESS,
     runOnce: async () => EXIT_SUCCESS,
-  } as AgentjCommandDependencies;
+  } as GloriousCommandDependencies;
   const handlers = {} as ConfigCliHandlers;
   return [
     createChatCommand(deps),
@@ -247,7 +247,7 @@ export function describeCli(): CliCommandDoc[] {
 
 const writeResult = (
   result: Awaited<ReturnType<typeof runSafely>>,
-  writers: Required<AgentjCliIo>,
+  writers: Required<GloriousCliIo>,
 ): number | undefined => {
   if (result._tag !== "error") {
     return undefined;
@@ -270,8 +270,8 @@ const isEvalRoute = (argv: string[]): boolean => argv[0] === "eval";
 
 const dispatchUpdate = async (
   argv: string[],
-  deps: AgentjCommandDependencies,
-  writers: Required<AgentjCliIo>,
+  deps: GloriousCommandDependencies,
+  writers: Required<GloriousCliIo>,
 ): Promise<number> => {
   if (deps.update === undefined) {
     writers.stderr.write("error: update command is not available.\n");
@@ -282,7 +282,7 @@ const dispatchUpdate = async (
 
 const evalHelp = (name: string, version: string): string =>
   `${name} eval ${version}\n` +
-  "> Run AgentJ evaluation commands.\n\n" +
+  "> Run Glorious evaluation commands.\n\n" +
   "ARGUMENTS:\n" +
   "  [str] - Optional command: report or selfcheck. [optional]\n\n" +
   "FLAGS:\n" +
@@ -292,7 +292,7 @@ const evalHelp = (name: string, version: string): string =>
 const dispatchConfig = async (
   argv: string[],
   handlers: ConfigCliHandlers | undefined,
-  writers: Required<AgentjCliIo>,
+  writers: Required<GloriousCliIo>,
 ): Promise<number> => {
   if (handlers === undefined) {
     writers.stderr.write("error: config commands are not available.\n");
@@ -317,8 +317,8 @@ const dispatchConfig = async (
 
 const dispatchEval = async (
   argv: string[],
-  deps: AgentjCommandDependencies,
-  writers: Required<AgentjCliIo>,
+  deps: GloriousCommandDependencies,
+  writers: Required<GloriousCliIo>,
 ): Promise<number> => {
   const args = argv.slice(1);
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
@@ -333,7 +333,7 @@ const dispatchEval = async (
         ? args[0]
         : undefined;
   if (route === undefined) {
-    writers.stderr.write("error: unknown eval command. Try 'agentj eval --help'.\n");
+    writers.stderr.write("error: unknown eval command. Try 'glorious eval --help'.\n");
     return 2;
   }
 
@@ -349,19 +349,19 @@ const dispatchEval = async (
 const dispatchLeaf = async (
   parser: Parameters<typeof runSafely>[0],
   argv: string[],
-  writers: Required<AgentjCliIo>,
+  writers: Required<GloriousCliIo>,
 ): Promise<number> => {
   const result = await runSafely(parser, argv);
   if (result._tag === "error") return writeResult(result, writers) ?? EXIT_FAILURE;
   return await Promise.resolve(result.value as number);
 };
 
-export async function runAgentjCli(
+export async function runGloriousCli(
   argv: string[],
-  deps: AgentjCommandDependencies,
-  io: AgentjCliIo = {},
+  deps: GloriousCommandDependencies,
+  io: GloriousCliIo = {},
 ): Promise<number> {
-  const writers: Required<AgentjCliIo> = {
+  const writers: Required<GloriousCliIo> = {
     stdout: io.stdout ?? deps.writers?.stdout ?? processStdout,
     stderr: io.stderr ?? deps.writers?.stderr ?? processStderr,
   };

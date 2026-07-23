@@ -3,7 +3,7 @@ import type { Sandbox } from "../../lib/sandbox";
 import * as scm from "../../lib/scm/git";
 import { shq } from "../../lib/shell";
 
-const FIXTURE_IDENTITY = { name: "agentj-eval", email: "eval@sandbox.local" };
+const FIXTURE_IDENTITY = { name: "glorious-eval", email: "eval@sandbox.local" };
 
 // Build artifacts a run legitimately produces but that must not count as
 // "changed files" — otherwise diff_scope flags e.g. __pycache__ from any

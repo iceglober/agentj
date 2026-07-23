@@ -98,8 +98,8 @@ class FakeSandbox implements Sandbox {
 
   get identityCommand(): string {
     return [
-      `git -C '${this.repoDir}' config user.name 'agentj'`,
-      `git -C '${this.repoDir}' config user.email 'agentj@example.com'`,
+      `git -C '${this.repoDir}' config user.name 'glorious'`,
+      `git -C '${this.repoDir}' config user.email 'glorious@example.com'`,
     ].join(" && ");
   }
 
@@ -334,7 +334,7 @@ function makeConfig(sb: FakeSandbox) {
     repoDir: sb.repoDir,
     root: sb.root,
     branchPrefix: sb.branchPrefix,
-    identity: { name: "agentj", email: "agentj@example.com" },
+    identity: { name: "glorious", email: "glorious@example.com" },
   });
 }
 
@@ -445,10 +445,10 @@ describe("createChildSession", () => {
   });
 
   test("clean success recognizes Git's canonical worktree path", async () => {
-    const root = "/var/folders/agentj";
+    const root = "/var/folders/glorious";
     const { sb, session } = await makeChildSession({
       root,
-      listedChildPath: "/private/var/folders/agentj/child-1",
+      listedChildPath: "/private/var/folders/glorious/child-1",
     });
 
     await expect(

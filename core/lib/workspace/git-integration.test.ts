@@ -18,11 +18,11 @@ async function git(root: string, ...args: string[]): Promise<string> {
 }
 
 test("snapshots dirty parent state and integrates child commits without changing the index", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-integration-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-integration-"));
   const child = `${root}-child`;
   try {
     await git(root, "init", "-q", "-b", "main");
-    await git(root, "config", "user.name", "AgentJ Test");
+    await git(root, "config", "user.name", "Glorious Test");
     await git(root, "config", "user.email", "test@example.com");
     await writeFile(path.join(root, "source.txt"), "base\n");
     await git(root, "add", "source.txt");
@@ -32,7 +32,7 @@ test("snapshots dirty parent state and integrates child commits without changing
 
     const environment = await createHostExecutionEnvironment(root);
     const snapshot = await createGitDelegationSnapshot(environment, root, "test-session");
-    await git(root, "worktree", "add", "-q", "-b", "agentj-child", child, snapshot.commit);
+    await git(root, "worktree", "add", "-q", "-b", "glorious-child", child, snapshot.commit);
     await writeFile(path.join(child, "source.txt"), "base dirty\nchild\n");
     await git(child, "add", "source.txt");
     await git(child, "commit", "-qm", "child change");
@@ -42,7 +42,7 @@ test("snapshots dirty parent state and integrates child commits without changing
     const result: GitDelegationResult = {
       index: 0,
       outcome: "changed",
-      branch: "agentj-child",
+      branch: "glorious-child",
       commit: childCommit,
       preserved: true,
     };
@@ -51,7 +51,7 @@ test("snapshots dirty parent state and integrates child commits without changing
     ).resolves.toMatchObject({ outcome: "applied" });
     expect(await readFile(path.join(root, "source.txt"), "utf8")).toBe("base dirty\nchild\n");
     expect(await git(root, "write-tree")).toBe(indexBefore);
-    await expect(git(root, "show-ref", "--verify", "refs/heads/agentj-child")).resolves.toContain(
+    await expect(git(root, "show-ref", "--verify", "refs/heads/glorious-child")).resolves.toContain(
       childCommit,
     );
     await expect(git(root, "show-ref", "--verify", snapshot.ref)).rejects.toThrow();

@@ -19,9 +19,9 @@ async function git(root: string, ...args: string[]): Promise<string> {
 }
 
 async function makeRepo(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-undo-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-undo-"));
   await git(root, "init", "-q", "-b", "main");
-  await git(root, "config", "user.name", "AgentJ Test");
+  await git(root, "config", "user.name", "Glorious Test");
   await git(root, "config", "user.email", "test@example.com");
   await writeFile(path.join(root, "file.txt"), "one\n");
   await git(root, "add", "file.txt");
@@ -92,7 +92,7 @@ test("dispose prunes refs beyond the keep window", async () => {
       await stack.snapshot(`turn ${i}`);
     }
     await stack.dispose(2);
-    const refs = (await git(root, "for-each-ref", "refs/agentj/undo/s3", "--format=%(refname)"))
+    const refs = (await git(root, "for-each-ref", "refs/glorious/undo/s3", "--format=%(refname)"))
       .split("\n")
       .filter(Boolean);
     expect(refs).toHaveLength(2);
@@ -115,7 +115,7 @@ test("a resumed session continues the undo ref counter instead of colliding", as
     const second = createUndoStack(environment, root, "resumed");
     await writeFile(path.join(root, "file.txt"), "three\n");
     await expect(second.snapshot("turn 3")).resolves.toMatchObject({
-      ref: "refs/agentj/undo/resumed/3",
+      ref: "refs/glorious/undo/resumed/3",
     });
 
     // Prior-run snapshots are loaded and stay undoable across the resume.

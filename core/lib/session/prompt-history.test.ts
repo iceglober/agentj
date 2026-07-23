@@ -5,7 +5,7 @@ import path from "node:path";
 import { createPromptHistory } from "./prompt-history";
 
 test("persists exact prompts and shares history by common Git directory", async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), "agentj-prompt-history-"));
+  const parent = await mkdtemp(path.join(tmpdir(), "glorious-prompt-history-"));
   const root = path.join(parent, "history");
   try {
     const mainWorktree = await createPromptHistory({
@@ -39,7 +39,7 @@ test("persists exact prompts and shares history by common Git directory", async 
 });
 
 test("keeps the newest entries and tolerates malformed JSONL records", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-prompt-history-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-prompt-history-"));
   try {
     const history = await createPromptHistory({
       root,

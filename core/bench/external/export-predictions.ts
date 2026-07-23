@@ -8,7 +8,7 @@ const flag = (name: string): string | undefined => {
   return index < 0 ? undefined : argv[index + 1];
 };
 
-const benchRoot = resolve(flag("root") ?? "/tmp/agentj-external-bench");
+const benchRoot = resolve(flag("root") ?? "/tmp/glorious-external-bench");
 const selectedTasks = pilotTaskIds.filter(
   (id) => !flag("task") || flag("task")?.split(",").includes(id),
 );

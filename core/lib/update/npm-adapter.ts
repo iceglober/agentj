@@ -69,7 +69,7 @@ export function createNpmInstaller(options: NpmAdapterOptions): UpdateInstaller 
 export function createUpdateStateStore(
   cachePath = join(
     process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"),
-    "agentj",
+    "glorious",
     "update.json",
   ),
 ): UpdateStateStore {

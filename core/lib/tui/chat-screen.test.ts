@@ -792,7 +792,7 @@ describe("createChatScreen", () => {
     screen.stop();
   });
 
-  test("keeps transcript, progress, presence, and composer in a stable hierarchy", async () => {
+  test("keeps transcript, progress, and composer in a stable hierarchy", async () => {
     const { screen, text } = makeScreen();
     screen.start();
     screen.printAbove("earlier transcript item");
@@ -807,25 +807,22 @@ describe("createChatScreen", () => {
       "earlier transcript item",
       "latest transcript item",
     ]);
-    expect(rendered.slice(latest + 1, idleEditor)).toEqual(["● Ready"]);
+    expect(rendered.slice(latest + 1, idleEditor)).toEqual([]);
 
     screen.setProgressLines([
-      "  ◐ tool running",
+      "  ▏ tool running",
       "",
-      "  Plan · 0/1 complete",
+      "  Todos · 0/1 complete",
       "    → Implement the change",
     ]);
-    screen.setPresenceLine("◐ Working 1s · Esc interrupt");
     await settle();
     rendered = renderScreen(text());
-    const todo = rendered.findIndex((line) => line.includes("Plan · 0/1 complete"));
+    const todo = rendered.findIndex((line) => line.includes("Todos · 0/1 complete"));
     const tool = rendered.findIndex((line) => line.includes("tool running"));
-    const thinking = rendered.findIndex((line) => line.includes("Working 1s"));
     const activeEditor = rendered.findIndex((line) => line.startsWith("› "));
     expect(tool).toBeLessThan(todo);
     expect(rendered.slice(tool + 1, todo)).toEqual([""]);
-    expect(todo).toBeLessThan(thinking);
-    expect(thinking).toBe(activeEditor - 1);
+    expect(todo).toBeLessThan(activeEditor);
     screen.stop();
   });
 
@@ -850,11 +847,11 @@ describe("createChatScreen", () => {
     const { screen, text } = makeScreen();
     screen.start();
     screen.setStatusLines(["204ed50c · build", "~/repos/demo"]);
-    screen.setProgressLines(["t1 ◐ mapping modules"]);
+    screen.setProgressLines(["t1 ▏ mapping modules"]);
     await settle();
     expect(text()).toContain("204ed50c · build");
     expect(text()).toContain("~/repos/demo");
-    expect(text()).toContain("t1 ◐ mapping modules");
+    expect(text()).toContain("t1 ▏ mapping modules");
     screen.stop();
   });
 
@@ -862,7 +859,7 @@ describe("createChatScreen", () => {
     const { screen, output, text } = makeScreen();
     screen.start();
     screen.setStatusLines(["⏵ build · a deliberately long status"]);
-    screen.setProgressLines(["t1 ◐ a deliberately long progress description"]);
+    screen.setProgressLines(["t1 ▏ a deliberately long progress description"]);
     const beforeResize = text().length;
 
     output.columns = 14;

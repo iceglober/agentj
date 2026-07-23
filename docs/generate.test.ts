@@ -38,7 +38,7 @@ describe("docs generator", () => {
 
   test("the CLI reference is sourced from the command definitions (flags and options)", () => {
     const cli = renderCliMarkdown();
-    expect(cli).toContain("### `agentj run <task>`");
+    expect(cli).toContain("### `glorious run <task>`");
     expect(cli).toContain("`--allow-all` — Resolve permission asks to allow");
     // An option (value-taking), not just a boolean flag, so both categories are covered.
     expect(cli).toContain("`--resume <str>` — Resume a chat session by id.");
@@ -63,8 +63,8 @@ describe("docs generator", () => {
   });
 
   test("fenced code blocks render verbatim and escaped", () => {
-    expect(markdownToHtml("```\nagentj run <task>\n```").html).toBe(
-      "<pre><code>agentj run &lt;task&gt;</code></pre>",
+    expect(markdownToHtml("```\nglorious run <task>\n```").html).toBe(
+      "<pre><code>glorious run &lt;task&gt;</code></pre>",
     );
   });
 

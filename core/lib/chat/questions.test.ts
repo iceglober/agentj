@@ -37,7 +37,7 @@ test("question port collects described choices and emits structured answers", as
         { label: "TUI", value: "TUI", description: "Change the terminal interface." },
         {
           label: "Type your own answer",
-          value: "__agentj_question_custom__",
+          value: "__glorious_question_custom__",
           description: "Enter a response not listed above.",
         },
       ],
@@ -74,7 +74,7 @@ test("question port accepts a directly typed answer", async () => {
 });
 
 test("question port repeats multi-select input until Done", async () => {
-  const answers = ["CLI", "TUI", "__agentj_question_done__"];
+  const answers = ["CLI", "TUI", "__glorious_question_done__"];
   const port = createQuestionPort({
     guided: { askInput: async () => answers.shift() ?? null },
   });
@@ -100,7 +100,7 @@ test("question port repeats multi-select input until Done", async () => {
 test("question port accepts and trims an explicit custom answer", async () => {
   const prompts: Array<{ label: string; validate?: (text: string) => string | null | undefined }> =
     [];
-  const answers = ["__agentj_question_custom__", "  API  "];
+  const answers = ["__glorious_question_custom__", "  API  "];
   const port = createQuestionPort({
     guided: {
       askInput: async (options) => {
@@ -129,12 +129,12 @@ test("question port accepts and trims an explicit custom answer", async () => {
 
 test("question port returns to multi-select choices after cancelling custom input", async () => {
   const answers = [
-    "__agentj_question_custom__",
+    "__glorious_question_custom__",
     null,
     "CLI",
-    "__agentj_question_custom__",
+    "__glorious_question_custom__",
     "Other",
-    "__agentj_question_done__",
+    "__glorious_question_done__",
   ];
   const port = createQuestionPort({
     guided: { askInput: async () => answers.shift() ?? null },

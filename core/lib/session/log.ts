@@ -29,7 +29,6 @@ export type ChatLogRecord =
       mode: ChatMode;
       ts: string;
       reset?: true;
-      reflectionOnce?: Partial<Record<"pre_turn" | "post_turn", boolean>>;
     }
   | {
       type: "usage";
@@ -71,7 +70,7 @@ const projectDir = (root: string, projectRoot: string): string =>
   join(root, projectHash(projectRoot));
 
 export interface CreateChatLogOptions {
-  /** Session-log root, e.g. `$XDG_STATE_HOME/agentj/chats` (caller resolves). */
+  /** Session-log root, e.g. `$XDG_STATE_HOME/glorious/chats` (caller resolves). */
   root: string;
   projectRoot: string;
   id?: string;

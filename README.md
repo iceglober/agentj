@@ -1,4 +1,4 @@
-# agentj
+# glorious
 
 A terminal coding agent — same category as Claude Code and OpenCode. It runs as a persistent chat
 session in your repo: you talk, it reads and edits files, runs commands, and fans out parallel
@@ -16,23 +16,23 @@ The implementation lives in [`core/`](core/) — a Bun TypeScript agent.
 ## Run it
 
 ```sh
-bun add --global @glrs-dev/aj@next       # install the prerelease channel
-git clone git@github.com:iceglober/agentj.git && cd agentj  # or develop from source
+bun add --global @glrs-dev/glorious@next       # install the prerelease channel
+git clone git@github.com:iceglober/glorious.git && cd glorious  # or develop from source
 ```
 
 ```sh
-bun run agentj                         # open a chat session in this repo (plan mode)
-bun run agentj -- --continue           # reopen the newest session for this project
-bun run agentj -- --resume <id>        # reopen a specific session
-bun run agentj -- run "add a --json flag"              # non-interactive one-shot (build)
-bun run agentj -- run --plan "how does auth work?"     # non-interactive, read-only
-bun run agentj -- run --allow-all "fix the tests"      # asks auto-resolve to allow
-./bin/agentj config set agent.llm.model gpt-5.6-luna  # default; cost-efficient primary
-./bin/agentj config set agent.tools.subagents.model gpt-5.6-luna  # explicit fan-out override
-./bin/agentj config set --secret providers.azure.api_key
-agentj update --channel next             # update an installed CLI now
-./bin/agentj eval | eval report | eval selfcheck
-./bin/agentj --help
+bun run glorious                         # open a chat session in this repo (plan mode)
+bun run glorious -- --continue           # reopen the newest session for this project
+bun run glorious -- --resume <id>        # reopen a specific session
+bun run glorious -- run "add a --json flag"              # non-interactive one-shot (build)
+bun run glorious -- run --plan "how does auth work?"     # non-interactive, read-only
+bun run glorious -- run --allow-all "fix the tests"      # asks auto-resolve to allow
+./bin/glorious config set agent.llm.model gpt-5.6-luna  # default; cost-efficient primary
+./bin/glorious config set agent.tools.subagents.model gpt-5.6-luna  # explicit fan-out override
+./bin/glorious config set --secret providers.azure.api_key
+glorious update --channel next             # update an installed CLI now
+./bin/glorious eval | eval report | eval selfcheck
+./bin/glorious --help
 ```
 
 ## The chat session
@@ -96,7 +96,7 @@ Keys and commands:
 - **`/help /jobs /undo /redo /clear /quit`** — other built-in commands. `/undo` and `/redo` step
   the agent's file changes through git snapshots without touching your HEAD, index, or branch.
 
-Skills in `.aj/skills/<name>/SKILL.md` are available to the model. They register a `/name` command
+Skills in `.glorious/skills/<name>/SKILL.md` are available to the model. They register a `/name` command
 by default; set `user-invocable: false` in the SKILL.md frontmatter to keep a skill model-only.
 
 Editor shortcuts: Ctrl+V pastes copied local files as `@file` references or screenshots as
@@ -120,7 +120,7 @@ and response size.
 Installed interactive sessions check for updates after the TUI starts and notify you when one is
 available; they never auto-install or restart. Prerelease versions follow the `next` tag and stable
 versions follow `latest`. The check is controlled by `update.auto`:
-`agentj config set update.auto false` disables it, while `agentj config set update.channel next`
+`glorious config set update.auto false` disables it, while `glorious config set update.channel next`
 selects a persistent channel. Use `/update [next|latest]` explicitly to install an update;
 source checkouts are never modified.
 
@@ -130,27 +130,27 @@ Host-first execution is gated at the tool layer. Repository read/search tools ar
 research has its own policy, and plan mode has no mutating tools. In build mode:
 
 ```sh
-./bin/agentj config set permissions.edit allow            # allow | ask | deny (default allow)
-./bin/agentj config set permissions.web ask               # outbound web search/fetch (default allow)
-./bin/agentj config set permissions.bash.default ask      # unlisted commands ask
-./bin/agentj config add permissions.bash.allow "git *"    # literal prefix, optional trailing *
-./bin/agentj config add permissions.bash.deny "git push*"
+./bin/glorious config set permissions.edit allow            # allow | ask | deny (default allow)
+./bin/glorious config set permissions.web ask               # outbound web search/fetch (default allow)
+./bin/glorious config set permissions.bash.default ask      # unlisted commands ask
+./bin/glorious config add permissions.bash.allow "git *"    # literal prefix, optional trailing *
+./bin/glorious config add permissions.bash.deny "git push*"
 ```
 
 The complete, terminal-escaped request is printed into the transcript before the inline controls
 (`[y]es once · [a]lways this session · [n]o`) appear; concurrent asks are queued. Session-wide
 approval applies only to policy outcomes of `ask`; configured denies remain authoritative.
-In `agentj run` there is no TTY: asks resolve to deny with a notice unless `--allow-all` is passed. A
+In `glorious run` there is no TTY: asks resolve to deny with a notice unless `--allow-all` is passed. A
 denial is returned to the model as a tool result, so it adapts instead of crashing the turn.
 
 ## MCP tools and resources
 
-Agentj connects configured [Model Context Protocol](https://modelcontextprotocol.io/) servers over
+Glorious connects configured [Model Context Protocol](https://modelcontextprotocol.io/) servers over
 stdio or Streamable HTTP. Interactive startup does not wait for MCP: servers connect independently
-in the background, and one failed server cannot block Agentj or another server. MCP capabilities are
+in the background, and one failed server cannot block Glorious or another server. MCP capabilities are
 available only to the primary agent; subagents and background jobs do not inherit the connection.
 
-Configure a project-local stdio server in `.aj/config.json`:
+Configure a project-local stdio server in `.glorious/config.json`:
 
 ```json
 {
@@ -169,14 +169,14 @@ Configure a project-local stdio server in `.aj/config.json`:
 }
 ```
 
-`envFrom` maps a child-process variable to a source variable in agentj's environment. Relative
+`envFrom` maps a child-process variable to a source variable in glorious's environment. Relative
 `cwd` values resolve from the project root. Stdio servers inherit only the MCP SDK's safe baseline
 environment plus configured values.
 
 For a remote server, use Streamable HTTP and environment-derived headers:
 
 ```sh
-./bin/agentj config set mcp.servers.docs '{
+./bin/glorious config set mcp.servers.docs '{
   "transport":"http",
   "url":"https://mcp.example.com/mcp",
   "headersFromEnv":{"Authorization":"MCP_AUTH_HEADER"},
@@ -199,14 +199,14 @@ untrusted external instructions before being submitted through the normal chat p
 the opaque model continuation and works unchanged after a session is resumed. `/mcp reload [name]` reconnects one or all servers;
 successful replacements (including direct-tool changes) activate at the next foreground turn. If a
 reload fails, an existing working connection stays active and `/mcp` shows a deterministic recovery
-hint when Agentj can identify one. External file or environment changes require a manual reload.
+hint when Glorious can identify one. External file or environment changes require a manual reload.
 
 Build-mode MCP calls default to `ask` and are authorized by canonical names such as
 `mcp_github_search_code`, including calls routed through the generic catalog tool:
 
 ```sh
-./bin/agentj config add permissions.mcp.allow "mcp_github_search_*"
-./bin/agentj config add permissions.mcp.deny "mcp_github_delete_*"
+./bin/glorious config add permissions.mcp.allow "mcp_github_search_*"
+./bin/glorious config add permissions.mcp.deny "mcp_github_delete_*"
 ```
 
 Credentials can also be supplied as static `env` or `headers`, but environment mappings avoid
@@ -214,7 +214,7 @@ persisting them in config. For hosted servers that advertise OAuth on their 401 
 `/mcp auth <http-server>` runs the OAuth 2.1 flow: metadata discovery, dynamic client registration,
 PKCE, and a browser round-trip to a localhost callback. Access and refresh tokens live in the OS
 keychain, never in the configuration file, and expired tokens refresh automatically on later
-connects. Non-interactive contexts — `agentj run` and every background connect — never open a
+connects. Non-interactive contexts — `glorious run` and every background connect — never open a
 browser: saved tokens are used and refreshed, and a server that was never authorized fails with a
 notice pointing at `/mcp auth`, so authorize once interactively before non-interactive use. When a
 server does not support OAuth or dynamic client registration, the same command falls back to a
@@ -240,7 +240,7 @@ restores primary-model inheritance; the equivalent config paths are
 
 ## Sessions and persistence
 
-Every session appends to one JSONL log under `$XDG_STATE_HOME/agentj/chats/`. `--continue` /
+Every session appends to one JSONL log under `$XDG_STATE_HOME/glorious/chats/`. `--continue` /
 `--resume <id>` restore the conversation (including the model's tool-call memory), its todo list,
 and recent turns. For multi-step work, the agent maintains that list with `update_todos`; it stays
 visible in the terminal live region and clears with `/clear`. Crash-safe by construction: a torn
@@ -251,7 +251,7 @@ final line is skipped on load.
 `core/eval/` holds the eval harness: fixture-based tasks (Python and TypeScript), deterministic
 graders plus trajectory/report checks, seeded-defect and punch-list task sources, and a selfcheck
 gate proving every task solvable and falsifiable. Eval runs use the Microsandbox adapter; the
-interactive agent itself is host-first. See `bun run agentj -- eval --help`.
+interactive agent itself is host-first. See `bun run glorious -- eval --help`.
 
 ## Development
 
@@ -259,5 +259,5 @@ interactive agent itself is host-first. See `bun run agentj -- eval --help`.
 bun test core        # unit tests
 bun run typecheck
 bun run check        # biome lint + format
-bun run agentj -- eval selfcheck   # model-free eval QA gate
+bun run glorious -- eval selfcheck   # model-free eval QA gate
 ```

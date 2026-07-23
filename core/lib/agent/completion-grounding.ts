@@ -170,7 +170,7 @@ const detectViolation = (
         "No background job was started because this session has no background-job runner.",
       ),
       unresolvedFailure: blockedReport(
-        "No background job was started, so AgentJ is not monitoring this work.",
+        "No background job was started, so Glorious is not monitoring this work.",
       ),
       canRetry: Boolean(request.tools.run_background_job),
     };
