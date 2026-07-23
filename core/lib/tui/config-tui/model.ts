@@ -58,6 +58,8 @@ export interface ConfigViewRow {
   /** Non-focusable header/blank rows are skipped by the cursor. */
   header?: boolean;
   action?: boolean;
+  /** Draw a faint separator line above this row (e.g. before the floor). */
+  divider?: boolean;
 }
 
 export interface ConfigOverlayView {
@@ -212,7 +214,10 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       onRight: () => ({ kind: "setUncaged", on: !data.trust.uncaged }),
       onEnter: () => ({ kind: "setUncaged", on: !data.trust.uncaged }),
     });
-    out.push({ focusable: false, row: { label: "access control · default-deny", header: true } });
+    out.push({
+      focusable: false,
+      row: { label: "Rules", value: "decision", note: "source", header: true },
+    });
     if (data.trust.uncaged) {
       out.push({
         focusable: false,
@@ -244,7 +249,10 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
         return null;
       },
     });
-    out.push({ focusable: false, row: { label: "everything else", value: "deny", tone: "muted" } });
+    out.push({
+      focusable: false,
+      row: { label: "everything else", value: "deny", tone: "muted", divider: true },
+    });
     return out;
   };
 

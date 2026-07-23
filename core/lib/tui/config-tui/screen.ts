@@ -29,8 +29,6 @@ export interface ConfigTuiScreenOptions {
   renderer?: CliRenderer;
 }
 
-const LEFT_WIDTH = 18;
-
 export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promise<void> {
   const opentui = await import("@opentui/core");
   const stdout = options.stdout ?? process.stdout;
@@ -56,57 +54,32 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
 
   const model = createConfigTuiModel(await options.loadData());
 
-  // ---- UI tree ----
+  // ---- UI tree: title · rule · tabs · body (rows) · footer (hint + keys) ----
+  // No panes or borders — hierarchy comes from spacing, weight, and aligned
+  // columns, so the screen reads like a quiet document, not a boxed dashboard.
   const root = new opentui.BoxRenderable(renderer, {
     flexDirection: "column",
     width: "100%",
     height: "100%",
+    paddingLeft: 1,
+    paddingRight: 1,
   });
-  const content = new opentui.BoxRenderable(renderer, {
-    flexDirection: "row",
-    flexGrow: 1,
-    width: "100%",
-    minHeight: 0,
-  });
-  const leftBox = new opentui.BoxRenderable(renderer, {
-    border: true,
-    borderStyle: "single",
-    width: LEFT_WIDTH,
-    flexShrink: 0,
-    title: "config",
-    flexDirection: "column",
-  });
-  const leftText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
-  leftBox.add(leftText);
-  const rightBox = new opentui.BoxRenderable(renderer, {
-    border: true,
-    borderStyle: "single",
-    flexGrow: 1,
-    flexDirection: "column",
-    minHeight: 0,
-  });
-  const rightText = new opentui.TextRenderable(renderer, {
+  const titleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  const ruleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  const tabsText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  const gapText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  const bodyText = new opentui.TextRenderable(renderer, {
     content: "",
-    wrapMode: "word",
     width: "100%",
+    flexGrow: 1,
+    minHeight: 0,
   });
   const hintText = new opentui.TextRenderable(renderer, {
     content: "",
     wrapMode: "word",
     width: "100%",
   });
-  rightBox.add(rightText);
-  rightBox.add(hintText);
-  content.add(leftBox);
-  content.add(rightBox);
-
-  const barBg = colorEnabled ? { backgroundColor: opentui.RGBA.fromHex("#383f47") } : {};
-  const topBar = new opentui.BoxRenderable(renderer, { flexShrink: 0, width: "100%", ...barBg });
-  const titleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
-  topBar.add(titleText);
-  const keybar = new opentui.BoxRenderable(renderer, { flexShrink: 0, width: "100%", ...barBg });
   const keysText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
-  keybar.add(keysText);
 
   const overlayBox = new opentui.BoxRenderable(renderer, {
     position: "absolute",
@@ -124,42 +97,95 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   overlayBox.add(overlayText);
   overlayBox.visible = false;
 
-  root.add(topBar);
-  root.add(content);
-  root.add(keybar);
+  root.add(titleText);
+  root.add(ruleText);
+  root.add(tabsText);
+  root.add(gapText);
+  root.add(bodyText);
+  root.add(hintText);
+  root.add(keysText);
   root.add(overlayBox);
   renderer.root.add(root);
 
-  const rightWidth = (): number => Math.max(24, renderer.terminalWidth - LEFT_WIDTH - 5);
+  const contentWidth = (): number => Math.max(30, renderer.terminalWidth - 2);
+  // Value and provenance sit in fixed columns so the eye scans straight down.
+  const VALUE_COL = 30;
+  const NOTE_COL = 42;
+  const barWidth = (): number => Math.min(contentWidth(), 62);
+  const hr = (): UiLine => [{ text: "─".repeat(contentWidth()), tone: "muted" }];
 
   // ---- view → styled lines ----
-  const sectionLines = (v: ConfigView): UiLine[] =>
-    v.sections.map(
-      (s): UiLine =>
+  const tabStrip = (v: ConfigView): UiLine => {
+    const spans: UiSpan[] = [{ text: " " }];
+    v.sections.forEach((s, i) => {
+      if (i > 0) spans.push({ text: "   " });
+      spans.push(
         s.active
-          ? [{ text: `▌${s.label}`, bold: true, background: "muted" }]
-          : [{ text: ` ${s.label}`, tone: "muted" }],
-    );
+          ? { text: ` ${s.label} `, background: "muted", bold: true }
+          : { text: ` ${s.label} `, tone: "muted" },
+      );
+    });
+    return spans;
+  };
 
-  const rowLine = (r: ConfigViewRow, width: number): UiLine => {
-    if (r.header) return [{ text: `  ${r.label}`, tone: r.tone ?? "muted", bold: true }];
+  const pad = (col: number, at: number): string => " ".repeat(Math.max(1, at - col));
+
+  const rowLine = (r: ConfigViewRow): UiLine => {
+    if (r.header) {
+      // Group header: uppercase, faint, with column captions over value/note.
+      const label = `  ${r.label.toUpperCase()}`;
+      const spans: UiSpan[] = [{ text: label, tone: "muted", bold: true }];
+      let col = label.length;
+      if (r.value) {
+        spans.push({ text: pad(col, VALUE_COL), tone: "muted" });
+        spans.push({ text: r.value, tone: "muted" });
+        col = Math.max(col + 1, VALUE_COL) + r.value.length;
+      }
+      if (r.note) {
+        spans.push({ text: pad(col, NOTE_COL), tone: "muted" });
+        spans.push({ text: r.note, tone: "muted" });
+      }
+      return spans;
+    }
     const bg: UiSpan["background"] = r.cursor ? "muted" : undefined;
-    const label = `${r.cursor ? "▸ " : "  "}${r.label}`;
-    const value = r.value ?? "";
-    const note = r.note ? `  ${r.note}` : "";
-    const pad = Math.max(1, width - label.length - value.length - note.length);
-    const line: UiSpan[] = [
+    const arrow = r.cursor ? "▸ " : "  ";
+    const spans: UiSpan[] = [
       {
-        text: label,
+        text: `${arrow}${r.label}`,
         background: bg,
         bold: r.cursor || r.action,
         tone: r.action ? r.tone : undefined,
       },
-      { text: " ".repeat(pad), background: bg },
     ];
-    if (value) line.push({ text: value, tone: r.tone, background: bg, bold: r.cursor });
-    if (note) line.push({ text: note, tone: "muted", background: bg });
-    return line;
+    let col = arrow.length + r.label.length;
+    if (r.value) {
+      const gap = pad(col, VALUE_COL);
+      spans.push({ text: gap, background: bg });
+      col += gap.length;
+      spans.push({ text: r.value, tone: r.tone, background: bg });
+      col += r.value.length;
+    }
+    if (r.note) {
+      const gap = pad(col, NOTE_COL);
+      spans.push({ text: gap, background: bg });
+      col += gap.length;
+      spans.push({ text: r.note, tone: "muted", background: bg });
+      col += r.note.length;
+    }
+    // Extend the highlight into a full-width bar under the cursor.
+    if (r.cursor && col < barWidth())
+      spans.push({ text: " ".repeat(barWidth() - col), background: bg });
+    return spans;
+  };
+
+  const bodyLines = (v: ConfigView): UiLine[] => {
+    const lines: UiLine[] = [];
+    for (const r of v.rows) {
+      if (r.header) lines.push([{ text: "" }]); // breathe before a group
+      if (r.divider) lines.push(hr());
+      lines.push(rowLine(r));
+    }
+    return lines;
   };
 
   const overlayLines = (o: ConfigOverlayView): UiLine[] => {
@@ -186,27 +212,27 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
 
   const render = (): void => {
     const v = model.view();
-    const width = rightWidth();
-    const title = ` ▍ ${v.title}`;
-    const scope = `writing to ${v.scopeLabel} `;
-    const titlePad = Math.max(2, renderer.terminalWidth - title.length - scope.length - 1);
+    const title = ` ${v.title}`;
+    const scope = `writing to · ${v.scopeLabel}`;
+    const titlePad = Math.max(2, contentWidth() - title.length - scope.length);
     titleText.content = styled.toStyledText([
       [
         { text: title, bold: true },
         { text: " ".repeat(titlePad) },
-        { text: scope, tone: "accent", bold: true },
+        { text: scope, tone: "accent" },
       ],
     ]);
-    leftText.content = styled.toStyledText(sectionLines(v));
-    rightText.content = styled.toStyledText(v.rows.map((r) => rowLine(r, width)));
+    ruleText.content = styled.toStyledText([hr()]);
+    tabsText.content = styled.toStyledText([tabStrip(v)]);
+    bodyText.content = styled.toStyledText(bodyLines(v));
     hintText.content = styled.toStyledText([
       v.toast
-        ? [{ text: `  ${v.toast}`, tone: "success" } as UiSpan]
+        ? [{ text: ` ${v.toast}`, tone: "success" } as UiSpan]
         : v.hint
-          ? [{ text: `  ${v.hint}`, tone: "muted" } as UiSpan]
+          ? [{ text: ` ${v.hint}`, tone: "muted" } as UiSpan]
           : [{ text: "" } as UiSpan],
     ]);
-    keysText.content = styled.toStyledText([keyLine(v.keys)]);
+    keysText.content = styled.toStyledText([[{ text: " " } as UiSpan, ...keyLine(v.keys)]]);
     if (v.overlay) {
       overlayText.content = styled.toStyledText(overlayLines(v.overlay));
       overlayBox.visible = true;
