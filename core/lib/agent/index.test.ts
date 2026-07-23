@@ -219,7 +219,7 @@ describe("createAgentTools", () => {
     const gated = await createAgentTools(sandbox, config, {
       ...baseOptions,
       permissions: {
-        config: permissionsConfigSchema.parse({ bash: { default: "deny" } }),
+        config: permissionsConfigSchema.parse({ rules: { "bash(*)": "deny" } }),
         gate: async () => "deny",
       },
     });
@@ -240,7 +240,7 @@ describe("createAgentTools", () => {
       ...baseOptions,
       onToolActivity: record,
       permissions: {
-        config: permissionsConfigSchema.parse({ bash: { default: "deny" } }),
+        config: permissionsConfigSchema.parse({ rules: { "bash(*)": "deny" } }),
         gate: async () => "deny",
       },
     });
@@ -252,7 +252,7 @@ describe("createAgentTools", () => {
       ...baseOptions,
       onToolActivity: record,
       permissions: {
-        config: permissionsConfigSchema.parse({ bash: { default: "ask" } }),
+        config: permissionsConfigSchema.parse({ rules: { "bash(*)": "ask" } }),
         gate: async () => {
           events.push("permission:bash");
           return "allow";
@@ -398,7 +398,7 @@ describe("createAgentTools", () => {
         },
       },
       permissions: {
-        config: permissionsConfigSchema.parse({}),
+        config: permissionsConfigSchema.parse({ rules: { "mcp_*": "ask" } }),
         gate: async (request) => {
           events.push(`gate:${request.tool}`);
           return "allow";

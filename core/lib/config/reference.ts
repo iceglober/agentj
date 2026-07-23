@@ -67,27 +67,12 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
       "Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.",
   },
   {
-    path: "permissions.edit",
-    description: "Policy for file edits in build mode: `allow`, `ask`, or `deny`.",
+    path: "permissions.uncaged",
+    description: "Open season: allow every gated tool call, bypassing the rules. Off by default.",
   },
   {
-    path: "permissions.bash.default",
-    description: "Default policy for bash commands, before the allow/deny lists.",
-  },
-  {
-    path: "permissions.bash.allow",
-    description: "Command prefixes (optional trailing `*`) that skip the prompt.",
-  },
-  {
-    path: "permissions.bash.deny",
-    description: "Command prefixes that are always refused; checked before allow.",
-  },
-  {
-    path: "permissions.mcp.default",
-    description: "Default policy for MCP tool calls, before the allow/deny lists.",
-  },
-  {
-    path: "permissions.web",
-    description: "Policy for outbound web searches and URL fetches: `allow`, `ask`, or `deny`.",
+    path: "permissions.rules",
+    description:
+      "Default-deny access control. A map of tool-call patterns to `allow`/`ask`/`deny`; anything unmatched is denied. Patterns: `bash(pnpm *)`, `edit`, `web`, `mcp_linear_get_issue` (or `mcp_linear_*`). deny beats allow beats ask. Set with `glorious config allow|ask|deny <pattern>`.",
   },
 ];

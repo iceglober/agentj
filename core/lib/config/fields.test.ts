@@ -9,7 +9,7 @@ describe("configField", () => {
     });
     expect(configField("agent.llm.tiers")).toMatchObject({ kind: "string-array" });
     expect(configField("agent.steps")).toMatchObject({ kind: "number", defaultValue: 100 });
-    expect(configField("permissions.edit")).toMatchObject({ kind: "enum" });
+    expect(configField("agent.tools.edit.mode")).toMatchObject({ kind: "enum" });
     expect(configField("agent.tools.subagents.concurrency")).toMatchObject({ kind: "number" });
   });
 

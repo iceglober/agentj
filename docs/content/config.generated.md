@@ -18,11 +18,7 @@ Set with `glorious config set <key> <value>`; read with `glorious config get <ke
 - `agent.context.softLimit` (default: unset) — Request input-token threshold: interactive history compacts at 75%, then `onLimit` applies at the threshold. Unset means no ceiling.
 - `agent.context.onLimit` (default: `"warn"`) — Behavior when a request crosses the soft limit: `warn` posts a notice to wrap up or delegate.
 - `agent.steps` (default: `100`) — Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.
-- `permissions.edit` (default: `"allow"`) — Policy for file edits in build mode: `allow`, `ask`, or `deny`.
-- `permissions.bash.default` (default: `"ask"`) — Default policy for bash commands, before the allow/deny lists.
-- `permissions.bash.allow` (default: `[]`) — Command prefixes (optional trailing `*`) that skip the prompt.
-- `permissions.bash.deny` (default: `[]`) — Command prefixes that are always refused; checked before allow.
-- `permissions.mcp.default` (default: `"ask"`) — Default policy for MCP tool calls, before the allow/deny lists.
-- `permissions.web` (default: `"allow"`) — Policy for outbound web searches and URL fetches: `allow`, `ask`, or `deny`.
+- `permissions.uncaged` (default: `false`) — Open season: allow every gated tool call, bypassing the rules. Off by default.
+- `permissions.rules` (default: `{}`) — Default-deny access control. A map of tool-call patterns to `allow`/`ask`/`deny`; anything unmatched is denied. Patterns: `bash(pnpm *)`, `edit`, `web`, `mcp_linear_get_issue` (or `mcp_linear_*`). deny beats allow beats ask. Set with `glorious config allow|ask|deny <pattern>`.
 
 :::

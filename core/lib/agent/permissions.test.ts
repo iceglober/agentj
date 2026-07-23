@@ -16,22 +16,41 @@ import {
 
 const bashRequest = (detail: string): PermissionRequest => ({ tool: "bash", kind: "bash", detail });
 const mcpRequest = (tool: string): PermissionRequest => ({ tool, kind: "mcp", detail: tool });
+const editRequest: PermissionRequest = { tool: "edit", kind: "edit", detail: "src/a.ts" };
 const webRequest: PermissionRequest = {
   tool: "web_fetch",
   kind: "web",
   detail: "https://example.com",
 };
+const rules = (r: Record<string, "allow" | "ask" | "deny">) =>
+  permissionsConfigSchema.parse({ rules: r });
 
 describe("resolvePermission", () => {
-  test("deny beats allow beats default, with prefix wildcards", () => {
-    const config = permissionsConfigSchema.parse({
-      bash: {
-        default: "ask",
-        allow: ["git *", "bun test*"],
-        deny: ["git push*", "rm -rf*"],
-      },
-    });
+  test("default-deny: an empty ruleset denies every gated request", () => {
+    const empty = permissionsConfigSchema.parse({});
+    expect(resolvePermission(empty, bashRequest("ls"))).toBe("deny");
+    expect(resolvePermission(empty, editRequest)).toBe("deny");
+    expect(resolvePermission(empty, webRequest)).toBe("deny");
+    expect(resolvePermission(empty, mcpRequest("mcp_github_get_issue"))).toBe("deny");
+  });
 
+  test("uncaged allows everything, bypassing the rules", () => {
+    const config = permissionsConfigSchema.parse({
+      uncaged: true,
+      rules: { "bash(rm -rf *)": "deny" },
+    });
+    expect(resolvePermission(config, bashRequest("rm -rf /"))).toBe("allow");
+    expect(resolvePermission(config, mcpRequest("mcp_x_y"))).toBe("allow");
+  });
+
+  test("bash: deny beats allow beats ask, with prefix wildcards", () => {
+    const config = rules({
+      "bash(*)": "ask",
+      "bash(git *)": "allow",
+      "bash(bun test*)": "allow",
+      "bash(git push*)": "deny",
+      "bash(rm -rf*)": "deny",
+    });
     expect(resolvePermission(config, bashRequest("git push origin main"))).toBe("deny");
     expect(resolvePermission(config, bashRequest("git status"))).toBe("allow");
     expect(resolvePermission(config, bashRequest("bun test core"))).toBe("allow");
@@ -39,42 +58,32 @@ describe("resolvePermission", () => {
     expect(resolvePermission(config, bashRequest("curl example.com"))).toBe("ask");
   });
 
-  test("exact patterns (no wildcard) match the whole command only", () => {
-    const config = permissionsConfigSchema.parse({ bash: { allow: ["ls"] } });
+  test("exact patterns (no trailing *) match the whole command only", () => {
+    const config = rules({ "bash(*)": "ask", "bash(ls)": "allow" });
     expect(resolvePermission(config, bashRequest("ls"))).toBe("allow");
     expect(resolvePermission(config, bashRequest("ls -la /etc"))).toBe("ask");
   });
 
-  test("edits follow the single edit policy", () => {
-    const allow = permissionsConfigSchema.parse({});
-    const deny = permissionsConfigSchema.parse({ edit: "deny" });
-    const request: PermissionRequest = { tool: "edit", kind: "edit", detail: "src/a.ts" };
-    expect(resolvePermission(allow, request)).toBe("allow");
-    expect(resolvePermission(deny, request)).toBe("deny");
+  test("edit and web use bare-tool patterns, with an optional inner matcher", () => {
+    expect(resolvePermission(rules({ edit: "allow" }), editRequest)).toBe("allow");
+    expect(resolvePermission(rules({ edit: "deny" }), editRequest)).toBe("deny");
+    expect(resolvePermission(rules({ "edit(src/*)": "allow" }), editRequest)).toBe("allow");
+    expect(resolvePermission(rules({ "edit(docs/*)": "allow" }), editRequest)).toBe("deny");
+    expect(resolvePermission(rules({ web: "allow" }), webRequest)).toBe("allow");
+    expect(resolvePermission(rules({ web: "deny" }), webRequest)).toBe("deny");
   });
 
-  test("web access defaults to allow and can be denied", () => {
-    expect(resolvePermission(permissionsConfigSchema.parse({}), webRequest)).toBe("allow");
-    expect(resolvePermission(permissionsConfigSchema.parse({ web: "deny" }), webRequest)).toBe(
-      "deny",
-    );
-  });
-
-  test("MCP defaults to ask and matches canonical names with deny before allow", () => {
-    const defaults = permissionsConfigSchema.parse({});
-    expect(resolvePermission(defaults, mcpRequest("github::get_issue"))).toBe("ask");
-
-    const config = permissionsConfigSchema.parse({
-      mcp: {
-        default: "ask",
-        allow: ["github::*", "linear::get_issue"],
-        deny: ["github::delete_*"],
-      },
+  test("MCP matches canonical ids, server wildcards, and the mcp__ alias", () => {
+    const config = rules({
+      "mcp_*": "ask",
+      "mcp_github_*": "allow",
+      "mcp_github_delete_*": "deny",
+      mcp__linear_get_issue: "allow",
     });
-    expect(resolvePermission(config, mcpRequest("github::delete_issue"))).toBe("deny");
-    expect(resolvePermission(config, mcpRequest("github::get_issue"))).toBe("allow");
-    expect(resolvePermission(config, mcpRequest("linear::get_issue"))).toBe("allow");
-    expect(resolvePermission(config, mcpRequest("linear::get_issue_comments"))).toBe("ask");
+    expect(resolvePermission(config, mcpRequest("mcp_github_get_issue"))).toBe("allow");
+    expect(resolvePermission(config, mcpRequest("mcp_github_delete_issue"))).toBe("deny");
+    expect(resolvePermission(config, mcpRequest("mcp_linear_get_issue"))).toBe("allow");
+    expect(resolvePermission(config, mcpRequest("mcp_sentry_list"))).toBe("ask");
   });
 });
 
@@ -134,10 +143,7 @@ describe("withPermissions", () => {
     const executed: string[] = [];
     const asks: PermissionRequest[] = [];
     const tools = withPermissions(makeTools(executed), {
-      config: permissionsConfigSchema.parse({
-        edit: "deny",
-        bash: { default: "ask", allow: ["ls*"] },
-      }),
+      config: rules({ edit: "deny", "bash(*)": "ask", "bash(ls*)": "allow" }),
       gate: async (request) => {
         asks.push(request);
         return "deny";
@@ -174,17 +180,17 @@ describe("withPermissions", () => {
           execute: async () => "fetched",
         },
       },
-      { config: permissionsConfigSchema.parse({ web: "deny" }), gate: async () => "allow" },
+      { config: rules({ web: "deny" }), gate: async () => "allow" },
     );
     await expect(tools.web_fetch!.execute({ url: "https://example.com" })).resolves.toContain(
       "Denied by user",
     );
   });
 
-  test("gate approval executes the tool", async () => {
+  test("an ask that the gate approves executes the tool", async () => {
     const executed: string[] = [];
     const tools = withPermissions(makeTools(executed), {
-      config: permissionsConfigSchema.parse({}),
+      config: rules({ "bash(*)": "ask" }),
       gate: async () => "allow",
     });
 
@@ -239,29 +245,27 @@ describe("withPermissions", () => {
       },
     };
     const tools = withPermissions(mcpTools, {
-      config: permissionsConfigSchema.parse({
-        mcp: { allow: ["github::get_issue"], deny: ["github::delete_*"] },
-      }),
+      config: rules({ mcp_github_get_issue: "allow", "mcp_github_delete_*": "deny" }),
       gate: async (request) => {
         asks.push(request);
         return "deny";
       },
-      resolveTarget: (tool) => (tool === directName ? "github::delete_issue" : undefined),
+      resolveTarget: (tool) => (tool === directName ? "mcp_github_delete_issue" : undefined),
     });
 
     await expect(
-      tools.call_mcp_tool!.execute({ tool: "github::get_issue", arguments: { issue: 42 } }),
+      tools.call_mcp_tool!.execute({ tool: "mcp_github_get_issue", arguments: { issue: 42 } }),
     ).resolves.toBe("called");
     const denied = await tools[directName]!.execute({ issue: 42 });
-    expect(String(denied)).toContain("github::delete_issue");
+    expect(String(denied)).toContain("mcp_github_delete_issue");
     expect(asks).toHaveLength(0);
-    expect(executed).toEqual(["call:github::get_issue"]);
+    expect(executed).toEqual(["call:mcp_github_get_issue"]);
 
     await tools.find_mcp_tools!.execute({ query: "issue" });
     await tools.find_mcp_resources!.execute({ query: "docs" });
-    await tools.read_mcp_resource!.execute({ name: "github::docs/start" });
+    await tools.read_mcp_resource!.execute({ name: "github/docs/start" });
     expect(executed).toEqual([
-      "call:github::get_issue",
+      "call:mcp_github_get_issue",
       "find-tools",
       "find-resources",
       "read-resource",
@@ -285,24 +289,24 @@ describe("withPermissions", () => {
         },
       },
       {
-        config: permissionsConfigSchema.parse({}),
+        config: rules({ "mcp_*": "ask" }),
         gate: async (request) => {
           asks.push(request);
           return "deny";
         },
-        resolveTarget: (tool) => (tool === directName ? "linear::create_issue" : undefined),
+        resolveTarget: (tool) => (tool === directName ? "mcp_linear_create_issue" : undefined),
       },
     );
 
     await tools[directName]!.execute({ title: "Bug" });
-    await tools.call_mcp_tool!.execute({ tool: "github::get_issue" });
+    await tools.call_mcp_tool!.execute({ tool: "mcp_github_get_issue" });
     expect(asks).toEqual([
       {
-        tool: "linear::create_issue",
+        tool: "mcp_linear_create_issue",
         kind: "mcp",
-        detail: 'linear::create_issue: {"title":"Bug"}',
+        detail: 'mcp_linear_create_issue: {"title":"Bug"}',
       },
-      { tool: "github::get_issue", kind: "mcp", detail: "github::get_issue" },
+      { tool: "mcp_github_get_issue", kind: "mcp", detail: "mcp_github_get_issue" },
     ]);
   });
 });
@@ -311,8 +315,8 @@ describe("describeToolInput", () => {
   test("summarizes commands, paths, tool targets, task and question batches, and falls back to JSON", () => {
     expect(describeToolInput({ command: "git status" })).toBe("git status");
     expect(describeToolInput({ path: "src/a.ts" })).toBe("src/a.ts");
-    expect(describeToolInput({ tool: "github::get_issue", arguments: {} })).toBe(
-      "github::get_issue",
+    expect(describeToolInput({ tool: "mcp_github_get_issue", arguments: {} })).toBe(
+      "mcp_github_get_issue",
     );
     expect(describeToolInput({ tasks: [{}, {}, {}] })).toBe("3 tasks");
     expect(describeToolInput({ questions: [{}, {}] })).toBe("2 questions");
@@ -324,11 +328,11 @@ describe("describeToolInput", () => {
       resolveToolTarget(
         "mcp_linear_create_issue_7654321",
         { title: "Bug" },
-        () => "linear::create_issue",
+        () => "mcp_linear_create_issue",
       ),
     ).toEqual({
-      tool: "linear::create_issue",
-      detail: 'linear::create_issue: {"title":"Bug"}',
+      tool: "mcp_linear_create_issue",
+      detail: 'mcp_linear_create_issue: {"title":"Bug"}',
     });
   });
 });

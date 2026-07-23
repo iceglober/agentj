@@ -120,11 +120,11 @@ describe("global config reads and merges", () => {
           },
         },
       },
-      permissions: { mcp: { allow: ["mcp_docs_search*"] } },
+      permissions: { rules: { "mcp_docs_search*": "allow" } },
     });
     expect(config.mcp.servers.docs?.tools.build).toEqual(["*"]);
     expect(config.mcp.servers.docs?.resources.plan).toEqual(["docs*"]);
-    expect(config.permissions.mcp.allow).toEqual(["mcp_docs_search*"]);
+    expect(config.permissions.rules["mcp_docs_search*"]).toEqual("allow");
   });
 
   test("treats a missing global config as empty and rejects malformed or non-object files", async () => {
