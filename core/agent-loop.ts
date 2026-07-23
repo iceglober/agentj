@@ -90,6 +90,7 @@ import {
   AZURE_SECRET_SERVICE,
   hasAzureApiKey,
   resolveAzureApiKey,
+  type SecretStore,
 } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession } from "./lib/session";
@@ -115,7 +116,7 @@ import {
 } from "./lib/tui/chat-event-format";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
-import { createConfigTuiHost } from "./lib/tui/config-tui/host";
+import { type ConfigTuiHost, createConfigTuiHost } from "./lib/tui/config-tui/host";
 import { runConfigTuiScreen } from "./lib/tui/config-tui/screen";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
@@ -178,6 +179,35 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
   });
 }
 
+/** The interactive config-TUI host for the current project, wired to the real
+ *  config layers and keychain. Shared by `glorious config` and in-chat `/config`. */
+function createProjectConfigTuiHost(secretStore: SecretStore): ConfigTuiHost {
+  const configOptions = {
+    baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
+    projectRoot: process.cwd(),
+  };
+  const home = process.env.HOME ?? "";
+  const cwd = process.cwd();
+  // Shorten for display: home → ~, and project files relative to the cwd.
+  const displayPath = (layer: WritableConfigLayer): string => {
+    const path = resolveConfigLayerPath(layer, configOptions) ?? "";
+    if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+    if (path.startsWith(`${cwd}/`)) return path.slice(cwd.length + 1);
+    return path;
+  };
+  return createConfigTuiHost({
+    loadConfig: () => loadConfig(undefined, configOptions),
+    loadLayers: () => readConfigLayers(configOptions),
+    mutate: (layer, mutations) => mutateConfigLayer(layer, mutations, configOptions),
+    hasKey: async () => Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
+    layerPaths: {
+      global: displayPath("global"),
+      project: displayPath("project"),
+      local: displayPath("local"),
+    },
+  });
+}
+
 /** `glorious config` with no subcommand: a prompts-driven editor over the config
  *  keys, persisting through the same handlers as `config set`. */
 function createProductionConfigUi(): () => Promise<number> {
@@ -200,32 +230,7 @@ function createProductionConfigUi(): () => Promise<number> {
     });
     // The full-screen OpenTUI config surface is the common path; the clack
     // menu below is the fallback when OpenTUI can't run.
-    const configOptions = {
-      baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
-      projectRoot: process.cwd(),
-    };
-    const home = process.env.HOME ?? "";
-    const cwd = process.cwd();
-    // Shorten for display: home → ~, and project files relative to the cwd.
-    const displayPath = (layer: WritableConfigLayer): string => {
-      const path = resolveConfigLayerPath(layer, configOptions) ?? "";
-      if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
-      if (path.startsWith(`${cwd}/`)) return path.slice(cwd.length + 1);
-      return path;
-    };
-    const layerPaths = {
-      global: displayPath("global"),
-      project: displayPath("project"),
-      local: displayPath("local"),
-    };
-    const host = createConfigTuiHost({
-      loadConfig: () => loadConfig(undefined, configOptions),
-      loadLayers: () => readConfigLayers(configOptions),
-      mutate: (layer, mutations) => mutateConfigLayer(layer, mutations, configOptions),
-      hasKey: async () =>
-        Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
-      layerPaths,
-    });
+    const host = createProjectConfigTuiHost(secretStore);
     try {
       await runConfigTuiScreen({ loadData: host.loadData, applyEffect: host.applyEffect });
       return EXIT_SUCCESS;
@@ -1229,6 +1234,24 @@ export async function runGloriousChat(
         requestedUpdate = channel;
       },
       config: interactiveConfig,
+      launchConfigTui: async () => {
+        const runModal = screen?.runModalScreen;
+        if (!runModal) {
+          emit({
+            type: "notice",
+            text: "Interactive config needs the full-screen renderer; use /config get|set|delete or `glorious config`.",
+          });
+          return;
+        }
+        const configHost = createProjectConfigTuiHost(createKeyringSecretStore({}));
+        await runModal((renderer) =>
+          runConfigTuiScreen({
+            renderer,
+            loadData: configHost.loadData,
+            applyEffect: configHost.applyEffect,
+          }),
+        );
+      },
       cost: { rows: () => usageRows, prices: composition.evalPrices },
       activity: { list: () => completedActivities },
       models: {

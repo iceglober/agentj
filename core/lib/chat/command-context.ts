@@ -45,6 +45,8 @@ export interface ChatCommandContext {
   /** Requests a self-update and then allows the caller to exit cleanly. */
   requestUpdate?(channel: UpdateChannel): Promise<void> | void;
   config?: Pick<ConfigCliHandlers, "get" | "set" | "delete">;
+  /** Launch the full-screen interactive config TUI (bare `/config`). */
+  launchConfigTui?(): Promise<void>;
   models?: ModelController;
   cost?: {
     rows(): readonly UsageRecord[];
