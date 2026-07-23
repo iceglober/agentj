@@ -16,7 +16,7 @@ export interface PromptHistory {
 }
 
 export interface CreatePromptHistoryOptions {
-  /** History root, e.g. `$XDG_STATE_HOME/agentj/prompt-history`. */
+  /** History root, e.g. `$XDG_STATE_HOME/glorious/prompt-history`. */
   root: string;
   /** Canonical common Git directory so every worktree shares one history. */
   projectIdentity: string;

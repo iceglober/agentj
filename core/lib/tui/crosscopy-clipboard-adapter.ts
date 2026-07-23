@@ -18,7 +18,7 @@ const loadCrosscopyClipboard: CrosscopyClipboardLoader = async () =>
 
 /**
  * Reads copied local paths or PNG images through CrossCopy. The native module
- * stays lazy so unsupported systems can still start Agentj and report a safe
+ * stays lazy so unsupported systems can still start Glorious and report a safe
  * error on paste.
  */
 export function createCrosscopyClipboardAttachments({

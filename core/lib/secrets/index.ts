@@ -1,4 +1,4 @@
-export const AZURE_SECRET_SERVICE = "agentj";
+export const AZURE_SECRET_SERVICE = "glorious";
 export const AZURE_API_KEY_ACCOUNT = "azure-api-key";
 
 export type AzureApiKeySource = "azure-foundry-api-key" | "azure-api-key" | "secret-store";

@@ -5,7 +5,7 @@ import path from "node:path";
 import { createSandboxProviderLocal } from "./local-adapter";
 
 async function withTempBase(run: (base: string) => Promise<void>) {
-  const base = await mkdtemp(path.join(tmpdir(), "agentj-local-adapter-test-"));
+  const base = await mkdtemp(path.join(tmpdir(), "glorious-local-adapter-test-"));
   try {
     await run(base);
   } finally {

@@ -29,5 +29,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/agentj-sandbox-base:1
-            ghcr.io/${{ github.repository_owner }}/agentj-sandbox-base:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/glorious-sandbox-base:1
+            ghcr.io/${{ github.repository_owner }}/glorious-sandbox-base:sha-${{ github.sha }}

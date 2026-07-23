@@ -27,7 +27,7 @@ export interface OpenTuiStyledText {
 }
 
 /**
- * Maps agentj's semantic UI spans to OpenTUI StyledText. Text is escaped and
+ * Maps glorious's semantic UI spans to OpenTUI StyledText. Text is escaped and
  * newlines are collapsed to single spaces so a chunk never smuggles control
  * bytes into the renderer; row breaks are added only between whole lines.
  */

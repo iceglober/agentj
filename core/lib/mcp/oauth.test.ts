@@ -57,7 +57,7 @@ describe("keyring OAuth storage", () => {
 
   test("corrupt payloads read as absent", async () => {
     const store = memoryStore();
-    await store.set("agentj-mcp-oauth", "bad", "not json");
+    await store.set("glorious-mcp-oauth", "bad", "not json");
     expect(await createKeyringMcpOAuthStorage(store).load("bad")).toBeUndefined();
   });
 });
@@ -318,7 +318,7 @@ describe("runMcpOAuthFlow", () => {
   });
 });
 
-/** What `agentj run` and interactive startup do: connect with saved
+/** What `glorious run` and interactive startup do: connect with saved
  *  credentials only, never a browser. */
 describe("background connects", () => {
   const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];

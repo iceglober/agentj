@@ -58,7 +58,7 @@ import { createTodoTool, type TodoPort } from "./todos";
  * valid agent.
  */
 export const agentConfigSchema = z.object({
-  name: z.string().default("agentj"),
+  name: z.string().default("glorious"),
   role: z.enum(["primary", "delegate"]).default("primary"),
   /** Project rules ({{PROJECT_RULES}}), composed with AGENTS.md and scoped extensions. */
   rules: z.string().default(""),

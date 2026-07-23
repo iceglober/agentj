@@ -18,13 +18,13 @@ export interface OnboardingPort {
 
 export type OnboardingResult = "ready" | "cancelled";
 
-const SET_KEY_HINT = "  agentj config set --secret providers.azure.api_key";
+const SET_KEY_HINT = "  glorious config set --secret providers.azure.api_key";
 
 export async function runOnboarding(port: OnboardingPort): Promise<OnboardingResult> {
   if (await port.hasKey()) return "ready";
 
   port.write(
-    "\nWelcome to agentj.\n\n" +
+    "\nWelcome to glorious.\n\n" +
       "One thing to set up: your Azure AI Foundry API key.\n" +
       "It goes in your OS keychain, never a file.\n\n",
   );
@@ -34,6 +34,6 @@ export async function runOnboarding(port: OnboardingPort): Promise<OnboardingRes
     return "cancelled";
   }
   await port.storeKey(key.trim());
-  port.write("\nSaved to your keychain. Starting agentj…\n\n");
+  port.write("\nSaved to your keychain. Starting glorious…\n\n");
   return "ready";
 }

@@ -98,7 +98,7 @@ export const connectModelContextProtocolServer: McpServerConnector = async (
           requestInit: { headers: resolved.headers },
           ...(authProvider ? { authProvider } : {}),
         });
-  const client = new Client({ name: `agentj-${name}`, version: "0.1.0" });
+  const client = new Client({ name: `glorious-${name}`, version: "0.1.0" });
   let connected = false;
   try {
     await client.connect(transport, {

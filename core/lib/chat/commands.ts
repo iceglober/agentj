@@ -366,7 +366,7 @@ export const chatCommands: Record<string, ChatCommand> = {
     run: runConfigCommand,
   },
   update: {
-    summary: "Update agentj and exit",
+    summary: "Update glorious and exit",
     run: runUpdateCommand,
   },
   model: {

@@ -5,7 +5,7 @@ import { displayWidth } from "./terminal-editor";
 const base = {
   sessionId: "204ed50c",
   version: "0.1.0-next.32",
-  root: "~/repos/agentj",
+  root: "~/repos/glorious",
   model: "azure/gpt-5.6-sol",
   mode: "plan" as const,
   spinnerFrame: 0,
@@ -18,7 +18,7 @@ const base = {
 describe("composeStatusSection", () => {
   test("splits the footer into an info line and a controls line", () => {
     expect(composeStatusSection(base, 120)).toEqual([
-      "~/repos/agentj · azure/gpt-5.6-sol · ctx 8.7k",
+      "~/repos/glorious · azure/gpt-5.6-sol · ctx 8.7k",
       "Tab mode · / commands",
     ]);
   });
@@ -27,7 +27,7 @@ describe("composeStatusSection", () => {
     const lines = composeStatusSection(
       {
         ...base,
-        root: "~/.glrs/worktrees/agentj/wt-260718-231658-7yr",
+        root: "~/.glrs/worktrees/glorious/wt-260718-231658-7yr",
       },
       60,
     );

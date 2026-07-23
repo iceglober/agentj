@@ -24,7 +24,7 @@ function makeAgent(impl: (prompt: string, opts?: GenerateOptions) => Promise<Run
 async function withLog<T>(
   run: (log: Awaited<ReturnType<typeof createChatLog>>, root: string) => Promise<T>,
 ) {
-  const root = await mkdtemp(path.join(tmpdir(), "agentj-chat-"));
+  const root = await mkdtemp(path.join(tmpdir(), "glorious-chat-"));
   try {
     const log = await createChatLog({ root, projectRoot: "/repo/x", title: "test" });
     return await run(log, root);

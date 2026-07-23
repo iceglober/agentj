@@ -105,7 +105,7 @@ export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {
     .slice(-100);
   let historyIndex: number | null = null;
   let progressLines: UiTextLine[] = [];
-  let composer = { label: "› ", placeholder: "Ask AgentJ anything" };
+  let composer = { label: "› ", placeholder: "Ask Glorious anything" };
   let statusLines: UiTextLine[] = [];
   let hasTranscript = false;
   let started = false;

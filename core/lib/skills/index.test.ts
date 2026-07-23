@@ -17,8 +17,8 @@ const skillSource = (frontmatter: string, body = "Do the thing."): string =>
 const makeSkill = (overrides: Partial<Skill> = {}): Skill => ({
   name: "ship",
   description: "Ship finished work.",
-  path: "/repo/.aj/skills/ship/SKILL.md",
-  dir: "/repo/.aj/skills/ship",
+  path: "/repo/.glorious/skills/ship/SKILL.md",
+  dir: "/repo/.glorious/skills/ship",
   body: "Open a PR.",
   userInvocable: true,
   metadata: {},
@@ -36,7 +36,7 @@ describe("parseSkillMarkdown", () => {
           "metadata:",
           "  author: example-org",
           '  version: "1.0"',
-          "  agentj-mode: build",
+          "  glorious-mode: build",
         ].join("\n"),
         "Step one.\n\nStep two.",
       ),
@@ -45,7 +45,7 @@ describe("parseSkillMarkdown", () => {
       name: "pdf-processing",
       description: "Extract PDF text. Use when handling PDFs.",
       userInvocable: true,
-      metadata: { author: "example-org", version: "1.0", "agentj-mode": "build" },
+      metadata: { author: "example-org", version: "1.0", "glorious-mode": "build" },
       body: "Step one.\n\nStep two.",
     });
   });
@@ -75,12 +75,12 @@ describe("parseSkillMarkdown", () => {
     });
   });
 
-  test("rejects an unknown agentj-mode while tolerating unknown top-level fields", () => {
+  test("rejects an unknown glorious-mode while tolerating unknown top-level fields", () => {
     expect(
       parseSkillMarkdown(
-        skillSource("name: ship\ndescription: Ship.\nmetadata:\n  agentj-mode: yolo"),
+        skillSource("name: ship\ndescription: Ship.\nmetadata:\n  glorious-mode: yolo"),
       ),
-    ).toEqual({ detail: "invalid frontmatter — metadata.agentj-mode: use plan or build" });
+    ).toEqual({ detail: "invalid frontmatter — metadata.glorious-mode: use plan or build" });
     const parsed = parseSkillMarkdown(
       skillSource("name: ship\ndescription: Ship.\ncompatibility: Requires git and gh"),
     );
@@ -114,18 +114,18 @@ describe("discoverSkills", () => {
 
   test("earlier roots win name collisions and issues never block other skills", async () => {
     const fileSystem = fixture({
-      "/project/.aj/skills/ship/SKILL.md": skillSource(
+      "/project/.glorious/skills/ship/SKILL.md": skillSource(
         "name: ship\ndescription: Project ship flow.",
       ),
-      "/project/.aj/skills/broken/SKILL.md": "no frontmatter",
-      "/project/.aj/skills/renamed/SKILL.md": skillSource(
+      "/project/.glorious/skills/broken/SKILL.md": "no frontmatter",
+      "/project/.glorious/skills/renamed/SKILL.md": skillSource(
         "name: other\ndescription: Name mismatch.",
       ),
       "/global/skills/ship/SKILL.md": skillSource("name: ship\ndescription: Global ship flow."),
       "/global/skills/review/SKILL.md": skillSource("name: review\ndescription: Review changes."),
     });
     const { skills, issues } = await discoverSkills({
-      roots: ["/project/.aj/skills", "/global/skills"],
+      roots: ["/project/.glorious/skills", "/global/skills"],
       fileSystem,
     });
     expect(skills.map(({ name, description }) => ({ name, description }))).toEqual([
@@ -133,30 +133,30 @@ describe("discoverSkills", () => {
       { name: "review", description: "Review changes." },
     ]);
     expect(skills[0]).toMatchObject({
-      path: "/project/.aj/skills/ship/SKILL.md",
-      dir: "/project/.aj/skills/ship",
+      path: "/project/.glorious/skills/ship/SKILL.md",
+      dir: "/project/.glorious/skills/ship",
     });
     expect(issues).toEqual([
       {
-        path: "/project/.aj/skills/broken/SKILL.md",
+        path: "/project/.glorious/skills/broken/SKILL.md",
         detail: "SKILL.md must start with YAML frontmatter (--- fences)",
       },
       {
-        path: "/project/.aj/skills/renamed/SKILL.md",
+        path: "/project/.glorious/skills/renamed/SKILL.md",
         detail: 'name "other" must match its directory "renamed"',
       },
     ]);
   });
 
   test("a skill directory without SKILL.md is an issue; a missing root is empty", async () => {
-    const fileSystem = fixture({ "/project/.aj/skills/empty/notes.txt": "x" });
+    const fileSystem = fixture({ "/project/.glorious/skills/empty/notes.txt": "x" });
     const { skills, issues } = await discoverSkills({
-      roots: ["/project/.aj/skills", "/nowhere"],
+      roots: ["/project/.glorious/skills", "/nowhere"],
       fileSystem,
     });
     expect(skills).toEqual([]);
     expect(issues).toEqual([
-      { path: "/project/.aj/skills/empty/SKILL.md", detail: "missing SKILL.md" },
+      { path: "/project/.glorious/skills/empty/SKILL.md", detail: "missing SKILL.md" },
     ]);
   });
 
@@ -199,7 +199,7 @@ describe("invocation and prompt section", () => {
     const bare = renderSkillInvocation(makeSkill(), "  ");
     expect(bare).not.toContain("Arguments:");
     expect(bare).toContain('Skill "ship" invoked');
-    expect(bare).toContain("/repo/.aj/skills/ship");
+    expect(bare).toContain("/repo/.glorious/skills/ship");
   });
 
   test("prompt section lists model-eligible skills regardless of user invocation", () => {
@@ -219,17 +219,19 @@ describe("invocation and prompt section", () => {
       makeSkill({
         name: "secret",
         description: "User-only.",
-        metadata: { "agentj-model-invocation": "disabled" },
+        metadata: { "glorious-model-invocation": "disabled" },
       }),
     ]);
     expect(section).toContain("# Skills");
-    expect(section).toContain("- ship — Ship finished work. (/repo/.aj/skills/ship/SKILL.md)");
+    expect(section).toContain(
+      "- ship — Ship finished work. (/repo/.glorious/skills/ship/SKILL.md)",
+    );
     expect(section).not.toContain("secret");
     expect(composeSkillsPromptSection([])).toBe("");
   });
 
-  test("skillMode reads the agentj-mode metadata key", () => {
+  test("skillMode reads the glorious-mode metadata key", () => {
     expect(skillMode(makeSkill())).toBeUndefined();
-    expect(skillMode(makeSkill({ metadata: { "agentj-mode": "build" } }))).toBe("build");
+    expect(skillMode(makeSkill({ metadata: { "glorious-mode": "build" } }))).toBe("build");
   });
 });

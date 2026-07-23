@@ -198,7 +198,7 @@ export function normalizeSubagentTasks(input: SubagentsInput): NormalizedSubagen
       title: task.title,
       prompt: task.prompt,
       waitsOn: task.waitsOn,
-      commitMessage: task.commitMessage ?? `agentj subagent: ${task.title.slice(0, 64)}`,
+      commitMessage: task.commitMessage ?? `glorious subagent: ${task.title.slice(0, 64)}`,
     }),
   );
 

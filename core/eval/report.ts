@@ -4,7 +4,7 @@ import { loadConfig } from "../lib/config";
 import { type ResultRow, resultRowSchema } from "../lib/eval/config";
 
 const REPO_ROOT = new URL("../../", import.meta.url).pathname;
-const CONFIG_PATH = new URL("../agentj.ts", import.meta.url).pathname;
+const CONFIG_PATH = new URL("../glorious.ts", import.meta.url).pathname;
 
 const argv = process.argv.slice(2);
 const flag = (name: string): string | undefined => {

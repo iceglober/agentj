@@ -63,7 +63,7 @@ export function createInProcessAdapter(sb: Sandbox): AgentAdapter<RunConfig> {
           root: `${env.dir}-workers`,
           branchPrefix: "eval-worker/",
           base: "head",
-          identity: { name: "agentj-eval", email: "eval@sandbox.local" },
+          identity: { name: "glorious-eval", email: "eval@sandbox.local" },
         });
 
         const { generate, composed } = await createAgent(sb, config.agent, {

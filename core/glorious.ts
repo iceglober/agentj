@@ -21,7 +21,7 @@ export default defineConfig({
     instructions: {
       extensions: {
         "architecture-plan": {
-          path: ".aj/extensions/plan.md",
+          path: ".glorious/extensions/plan.md",
           modes: ["plan"],
           roles: ["primary"],
         },

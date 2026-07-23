@@ -3,8 +3,8 @@ import type { ChatEvent } from "./events";
 import type { GuidedInputPort } from "./guided-input";
 
 const questionLabel = (header: string, question: string): string => `${header}\n${question}`;
-const customAnswerValue = "__agentj_question_custom__";
-const doneValue = "__agentj_question_done__";
+const customAnswerValue = "__glorious_question_custom__";
+const doneValue = "__glorious_question_done__";
 
 /** Adapts agent questions to the chat's serialized guided-input capability. */
 export const createQuestionPort = (options: {

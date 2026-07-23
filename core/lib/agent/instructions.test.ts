@@ -17,7 +17,7 @@ const sandbox = (files: Record<string, string>): Sandbox =>
 test("instruction extensions apply only in their configured scope", async () => {
   const extensions: Record<string, InstructionExtension> = {
     plan: {
-      path: ".aj/extensions/plan.md",
+      path: ".glorious/extensions/plan.md",
       modes: ["plan"],
       roles: ["primary"],
       required: true,
@@ -25,7 +25,7 @@ test("instruction extensions apply only in their configured scope", async () => 
   };
   expect(
     await loadInstructionExtensions(
-      sandbox({ ".aj/extensions/plan.md": "plan policy" }),
+      sandbox({ ".glorious/extensions/plan.md": "plan policy" }),
       extensions,
       { mode: "plan", role: "primary" },
     ),

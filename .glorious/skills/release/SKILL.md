@@ -3,10 +3,10 @@ name: release
 description: Merge the open Changesets Version Packages PR and report the released package versions and changelog. Use when the user asks to release packages, merge the Version Packages PR, or publish a prepared release.
 compatibility: Requires git and the gh CLI authenticated against github.com
 metadata:
-  agentj-mode: build
+  glorious-mode: build
 ---
 
-# Release packages in agentj
+# Release packages in glorious
 
 The release workflow creates the version and publish PR. This skill only finds
 and merges that PR; do not version or publish packages by hand.

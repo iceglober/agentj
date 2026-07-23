@@ -56,7 +56,7 @@ import { createQuestionPort } from "./lib/chat/questions";
 import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { bootstrapInteractiveSession } from "./lib/chat/session-bootstrap";
 import { createSessionTodos } from "./lib/chat/todos";
-import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runAgentjCli } from "./lib/cli";
+import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runGloriousCli } from "./lib/cli";
 import { loadChatConfig, loadConfig } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
@@ -122,8 +122,8 @@ import type { UiSpan, UiTextLine } from "./lib/tui/styles";
 import { formatTodoProgressLines } from "./lib/tui/todos";
 import { formatUserTurnBlock } from "./lib/tui/transcript";
 import {
-  renderTranscriptItem,
   renderToolRow,
+  renderTranscriptItem,
   type ToolRow,
   toTranscriptItem,
 } from "./lib/tui/transcript-item";
@@ -169,12 +169,14 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
   });
 }
 
-/** `agentj config` with no subcommand: a prompts-driven editor over the config
+/** `glorious config` with no subcommand: a prompts-driven editor over the config
  *  keys, persisting through the same handlers as `config set`. */
 function createProductionConfigUi(): () => Promise<number> {
   return async () => {
     if (!processStdout.isTTY) {
-      processStderr.write("Run `agentj config` in a terminal, or use `agentj config set <key>`.\n");
+      processStderr.write(
+        "Run `glorious config` in a terminal, or use `glorious config set <key>`.\n",
+      );
       return EXIT_FAILURE;
     }
     const guided = createClackGuidedInput();
@@ -211,7 +213,7 @@ function createProductionConfigUi(): () => Promise<number> {
 
 /** Command shown after an interactive session has restored the terminal. */
 export const formatResumeCommand = (sessionId: string): string =>
-  `Resume with: agentj --resume ${sessionId}\n`;
+  `Resume with: glorious --resume ${sessionId}\n`;
 
 export const notifyAvailableUpdate = async (
   check: () => Promise<{ available?: string } | undefined>,
@@ -222,7 +224,7 @@ export const notifyAvailableUpdate = async (
     if (result?.available)
       emit({
         type: "notice",
-        text: `agentj ${result.available} is available. Run /update to install it.`,
+        text: `glorious ${result.available} is available. Run /update to install it.`,
       });
   } catch {}
 };
@@ -354,20 +356,20 @@ async function composeChat(
   const key = await resolveAzureApiKey({ store: secretStore });
   if (key.status !== "resolved") {
     throw new Error(
-      "Azure API key missing; run: agentj config set --secret providers.azure.api_key",
+      "Azure API key missing; run: glorious config set --secret providers.azure.api_key",
     );
   }
   const mcpOAuth = createKeyringMcpOAuthStorage(secretStore);
   // Config-first with the historical env var kept as a fallback enable. The
   // provider is only stood up when an OTLP endpoint is configured; otherwise
   // the sink reads the global meter (an external bootstrap's, or a no-op).
-  const metricsEnabled = config.metrics.enabled || process.env.AGENTJ_OTEL_METRICS === "1";
+  const metricsEnabled = config.metrics.enabled || process.env.GLORIOUS_OTEL_METRICS === "1";
   const metricsProvider = metricsEnabled ? startMetricsProvider(config.metrics) : undefined;
   const metricsSink: MetricsSink = createOtelMetricsSink({ enabled: metricsEnabled });
   const environment = await createHostExecutionEnvironment(root);
   // Over-cap tool output spills here in full; tools reference the file in
   // their truncation notices so the model can slice it back in.
-  const spillSink = createSpillSink(join(tmpdir(), "agentj-spill", entrypoint));
+  const spillSink = createSpillSink(join(tmpdir(), "glorious-spill", entrypoint));
   const spill = { dir: spillSink.dir, write: spillSink.write };
   // Web capabilities are client-side and model-provider independent. Exa only
   // backs the search port; direct URL fetching never flows through an LLM API.
@@ -385,8 +387,8 @@ async function composeChat(
   // activate a skill by reading its SKILL.md (progressive disclosure).
   const skillsDiscovery = await discoverSkills({
     roots: [
-      join(root, ".aj", "skills"),
-      join(homedir(), ".config", "agentj", "skills"),
+      join(root, ".glorious", "skills"),
+      join(homedir(), ".config", "glorious", "skills"),
       embeddedSkillsRoot,
     ],
   });
@@ -716,9 +718,9 @@ async function composeChat(
 }
 
 /** The interactive chat session (the default command). */
-export async function runAgentjChat(
+export async function runGloriousChat(
   options: { resume?: string; continueLatest?: boolean } = {},
-  configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
+  configPath: string = new URL("./glorious.ts", import.meta.url).pathname,
   update?: (channel: UpdateChannel) => Promise<void>,
   checkForUpdate?: () => Promise<{ available?: string } | undefined>,
 ): Promise<number> {
@@ -845,7 +847,7 @@ export async function runAgentjChat(
 
   // First-run gate: walk the user through setting a provider key before
   // standing up the session, which otherwise hard-errors on a missing key.
-  // Interactive TTY only — `agentj run` and pipes keep the clean error.
+  // Interactive TTY only — `glorious run` and pipes keep the clean error.
   if (processStdout.isTTY) {
     const onboardingStore = createKeyringSecretStore({});
     const guided = createPromptsGuidedInput();
@@ -1311,7 +1313,7 @@ export async function runAgentjChat(
       },
     };
     screen =
-      process.env.AGENTJ_TUI === "opentui"
+      process.env.GLORIOUS_TUI === "opentui"
         ? await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions })
         : createChatScreen({
             liveRegion: createAnsiLiveRegionAdapter({ stdout: processStdout }),
@@ -1367,10 +1369,10 @@ export async function runAgentjChat(
 }
 
 /** Non-interactive one-shot: one turn, transcript to stderr, result to stdout. */
-export async function runAgentjOnce(
+export async function runGloriousOnce(
   task: string,
   options: { plan: boolean; allowAll: boolean; signal: AbortSignal },
-  configPath: string = new URL("./agentj.ts", import.meta.url).pathname,
+  configPath: string = new URL("./glorious.ts", import.meta.url).pathname,
 ): Promise<number> {
   const gate: PermissionGate = async (request) => {
     if (options.allowAll) return "allow";
@@ -1415,7 +1417,7 @@ export async function runAgentjOnce(
     }
     await composition.startMcp();
     const log = await createChatLog({
-      root: join(composition.stateRoot, "agentj", "chats"),
+      root: join(composition.stateRoot, "glorious", "chats"),
       projectRoot: composition.root,
       title: task,
     });
@@ -1508,7 +1510,7 @@ const createProductionUpdateService = async (): Promise<{
   return {
     service: createUpdateService({
       config: config.update,
-      packageName: "@glrs-dev/aj",
+      packageName: "@glrs-dev/glorious",
       registry: createNpmRegistryAdapter(),
       ...(installer ? { installer } : {}),
       state: createUpdateStateStore(),
@@ -1529,14 +1531,14 @@ const runProductionUpdate = async (channel: UpdateChannel): Promise<number> => {
     const { service } = await createProductionUpdateService();
     const result = await service.update(COMMAND_VERSION, channel);
     if (result.available) {
-      processStdout.write(`Updated agentj to ${result.available} (${result.channel}).\n`);
+      processStdout.write(`Updated glorious to ${result.available} (${result.channel}).\n`);
     } else {
-      processStdout.write(`agentj ${COMMAND_VERSION} is current on ${result.channel}.\n`);
+      processStdout.write(`glorious ${COMMAND_VERSION} is current on ${result.channel}.\n`);
     }
     return EXIT_SUCCESS;
   } catch (error) {
     processStderr.write(
-      `Unable to update agentj: ${error instanceof Error ? error.message : String(error)}\n`,
+      `Unable to update glorious: ${error instanceof Error ? error.message : String(error)}\n`,
     );
     return EXIT_FAILURE;
   }
@@ -1572,22 +1574,22 @@ const main = async (): Promise<void> => {
 
   process.on("SIGINT", handleSigint);
   try {
-    process.exitCode = await runAgentjCli(
+    process.exitCode = await runGloriousCli(
       argv,
       {
         version: COMMAND_VERSION,
         runChat: (options) =>
-          runAgentjChat(
+          runGloriousChat(
             options,
             undefined,
             async (channel) => {
               if ((await runProductionUpdate(channel)) !== EXIT_SUCCESS) {
-                throw new Error("AgentJ update failed.");
+                throw new Error("Glorious update failed.");
               }
             },
             runProductionUpdateCheck,
           ),
-        runOnce: (task, options) => runAgentjOnce(task, options),
+        runOnce: (task, options) => runGloriousOnce(task, options),
         update: ({ channel }) => runProductionUpdate(channel),
         createAbortSignal: () => abortController.signal,
         configHandlers,

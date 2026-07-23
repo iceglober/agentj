@@ -336,7 +336,7 @@ describe("createConfigCliHandlers", () => {
 
     const result = await handlers.set({ key: AZURE_API_KEY_KEY, secret: true });
 
-    expect(fake.sets).toEqual([["agentj", "azure-api-key", SECRET_FIXTURE]]);
+    expect(fake.sets).toEqual([["glorious", "azure-api-key", SECRET_FIXTURE]]);
     expect(JSON.stringify(result)).not.toContain(SECRET_FIXTURE);
     expect(`${stdout.text()}${stderr.text()}`).not.toContain(SECRET_FIXTURE);
     expect(stdout.text()).toBe("Stored providers.azure.api_key in the secure keychain.\n");
@@ -356,7 +356,7 @@ describe("createConfigCliHandlers", () => {
     });
 
     expect(result).toMatchObject({ ok: true, storage: "keychain" });
-    expect(fake.sets).toEqual([["agentj", "azure-api-key", SECRET_FIXTURE]]);
+    expect(fake.sets).toEqual([["glorious", "azure-api-key", SECRET_FIXTURE]]);
     expect(`${stdout.text()}${stderr.text()}`).not.toContain(SECRET_FIXTURE);
   });
 
@@ -452,7 +452,7 @@ describe("createConfigCliHandlers", () => {
         storage: "keychain",
         changed,
       });
-      expect(fake.deletes).toEqual([["agentj", "azure-api-key"]]);
+      expect(fake.deletes).toEqual([["glorious", "azure-api-key"]]);
       expect(`${stdout.text()}${stderr.text()}`).not.toContain(SECRET_FIXTURE);
       expect(stdout.text()).toBe("Deleted providers.azure.api_key from the secure keychain.\n");
     }

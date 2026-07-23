@@ -14,7 +14,7 @@ describe("updates", () => {
     const installs: string[] = [];
     const service = createUpdateService({
       config: updateConfigSchema.parse({}),
-      packageName: "@glrs-dev/aj",
+      packageName: "@glrs-dev/glorious",
       registry: {
         latest: async () => {
           calls += 1;
@@ -45,7 +45,7 @@ describe("updates", () => {
     };
     const service = createUpdateService({
       config: updateConfigSchema.parse({}),
-      packageName: "@glrs-dev/aj",
+      packageName: "@glrs-dev/glorious",
       registry: {
         latest: async () => {
           calls += 1;
@@ -72,7 +72,7 @@ describe("updates", () => {
     let calls = 0;
     const service = createUpdateService({
       config: updateConfigSchema.parse({}),
-      packageName: "@glrs-dev/aj",
+      packageName: "@glrs-dev/glorious",
       registry: {
         latest: async () => {
           calls += 1;
@@ -108,7 +108,7 @@ describe("updates", () => {
     let calls = 0;
     const service = createUpdateService({
       config: updateConfigSchema.parse({}),
-      packageName: "@glrs-dev/aj",
+      packageName: "@glrs-dev/glorious",
       registry: {
         latest: async () => {
           calls += 1;

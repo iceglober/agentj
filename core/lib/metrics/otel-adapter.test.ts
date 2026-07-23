@@ -83,16 +83,16 @@ describe("createOtelMetricsSink", () => {
     const getMeter = mock(() => fake.meter);
     const sink = createOtelMetricsSink({ enabled: true, metricsApi: { getMeter } as never });
 
-    expect(getMeter).toHaveBeenCalledWith("agentj");
+    expect(getMeter).toHaveBeenCalledWith("glorious");
     expect(fake.created).toEqual([
-      { kind: "histogram", name: "agentj.llm.duration", unit: "ms" },
-      { kind: "counter", name: "agentj.llm.tokens.input", unit: "tokens" },
-      { kind: "counter", name: "agentj.llm.tokens.no_cache", unit: "tokens" },
-      { kind: "counter", name: "agentj.llm.tokens.cache_read", unit: "tokens" },
-      { kind: "counter", name: "agentj.llm.tokens.cache_write", unit: "tokens" },
-      { kind: "counter", name: "agentj.llm.tokens.output", unit: "tokens" },
-      { kind: "counter", name: "agentj.llm.tokens.total", unit: "tokens" },
-      { kind: "histogram", name: "agentj.llm.cache_read_ratio", unit: "1" },
+      { kind: "histogram", name: "glorious.llm.duration", unit: "ms" },
+      { kind: "counter", name: "glorious.llm.tokens.input", unit: "tokens" },
+      { kind: "counter", name: "glorious.llm.tokens.no_cache", unit: "tokens" },
+      { kind: "counter", name: "glorious.llm.tokens.cache_read", unit: "tokens" },
+      { kind: "counter", name: "glorious.llm.tokens.cache_write", unit: "tokens" },
+      { kind: "counter", name: "glorious.llm.tokens.output", unit: "tokens" },
+      { kind: "counter", name: "glorious.llm.tokens.total", unit: "tokens" },
+      { kind: "histogram", name: "glorious.llm.cache_read_ratio", unit: "1" },
     ]);
 
     for (const measurement of [
@@ -106,23 +106,23 @@ describe("createOtelMetricsSink", () => {
     }
 
     expect(fake.counters).toEqual([
-      { name: "agentj.llm.tokens.input", unit: "tokens", value: 100, attributes: safeAttributes },
+      { name: "glorious.llm.tokens.input", unit: "tokens", value: 100, attributes: safeAttributes },
       {
-        name: "agentj.llm.tokens.cache_read",
+        name: "glorious.llm.tokens.cache_read",
         unit: "tokens",
         value: 80,
         attributes: safeAttributes,
       },
       {
-        name: "agentj.llm.tokens.cache_write",
+        name: "glorious.llm.tokens.cache_write",
         unit: "tokens",
         value: 5,
         attributes: safeAttributes,
       },
-      { name: "agentj.llm.tokens.total", unit: "tokens", value: 120, attributes: safeAttributes },
+      { name: "glorious.llm.tokens.total", unit: "tokens", value: 120, attributes: safeAttributes },
     ]);
     expect(fake.histograms).toEqual([
-      { name: "agentj.llm.cache_read_ratio", unit: "1", value: 0.8, attributes: safeAttributes },
+      { name: "glorious.llm.cache_read_ratio", unit: "1", value: 0.8, attributes: safeAttributes },
     ]);
     for (const call of [...fake.counters, ...fake.histograms]) {
       expect(call.attributes).toEqual(safeAttributes);

@@ -10,7 +10,8 @@ export const formatUserTurnBlock = (
   transcriptText?: string,
   width?: number,
 ): UiBlock => {
-  if (transcriptText !== undefined) return transcriptText.split("\n").map((line) => [{ text: line }]);
+  if (transcriptText !== undefined)
+    return transcriptText.split("\n").map((line) => [{ text: line }]);
 
   const background = { background: "muted" as const };
   const fill = (line: UiLine): UiLine => {

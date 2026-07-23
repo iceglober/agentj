@@ -15,17 +15,17 @@ describe("skill command catalog", () => {
       {
         name: "ship",
         description: "Ship finished work.",
-        path: "/repo/.aj/skills/ship/SKILL.md",
-        dir: "/repo/.aj/skills/ship",
+        path: "/repo/.glorious/skills/ship/SKILL.md",
+        dir: "/repo/.glorious/skills/ship",
         body: "Ship it.",
         userInvocable: true,
-        metadata: { "agentj-mode": "build" },
+        metadata: { "glorious-mode": "build" },
       },
       {
         name: "running-background-work",
         description: "Continue work after this turn.",
-        path: "/repo/.aj/skills/running-background-work/SKILL.md",
-        dir: "/repo/.aj/skills/running-background-work",
+        path: "/repo/.glorious/skills/running-background-work/SKILL.md",
+        dir: "/repo/.glorious/skills/running-background-work",
         body: "Use run_background_job.",
         userInvocable: false,
         metadata: {},
@@ -47,7 +47,7 @@ describe("update notices", () => {
     expect(events).toEqual([
       {
         type: "notice",
-        text: "agentj 0.1.0-next.44 is available. Run /update to install it.",
+        text: "glorious 0.1.0-next.44 is available. Run /update to install it.",
       },
     ]);
   });
@@ -84,7 +84,7 @@ describe("update notices", () => {
 
 describe("interactive chat shutdown", () => {
   test("formats the exact resume command", () => {
-    expect(formatResumeCommand("204ed50c")).toBe("Resume with: agentj --resume 204ed50c\n");
+    expect(formatResumeCommand("204ed50c")).toBe("Resume with: glorious --resume 204ed50c\n");
   });
 
   test("prints the resume command after terminal and composition cleanup", async () => {
@@ -102,7 +102,7 @@ describe("interactive chat shutdown", () => {
     expect(events).toEqual([
       "screen stopped",
       "composition closed",
-      "Resume with: agentj --resume 204ed50c",
+      "Resume with: glorious --resume 204ed50c",
     ]);
   });
 
@@ -139,7 +139,7 @@ describe("interactive chat shutdown", () => {
     expect(events).toEqual([
       "screen stopped",
       "composition closed",
-      "Resume with: agentj --resume 204ed50c",
+      "Resume with: glorious --resume 204ed50c",
     ]);
   });
 });

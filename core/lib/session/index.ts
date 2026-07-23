@@ -20,8 +20,8 @@ export const sessionConfigSchema = z.object({
   base: z.string().default("auto"),
   identity: z
     .object({
-      name: z.string().default("agentj"),
-      email: z.string().default("agentj@sandbox.local"),
+      name: z.string().default("glorious"),
+      email: z.string().default("glorious@sandbox.local"),
     })
     .prefault({}),
 });

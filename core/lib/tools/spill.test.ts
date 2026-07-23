@@ -7,7 +7,7 @@ import { createSpillSink } from "./spill";
 
 describe("createSpillSink", () => {
   test("writes sequenced files under the dir and removes them on close", () => {
-    const sink = createSpillSink(join(tmpdir(), `agentj-spill-test-${process.pid}`));
+    const sink = createSpillSink(join(tmpdir(), `glorious-spill-test-${process.pid}`));
     try {
       const first = sink.write("bash-stdout", "abc");
       const second = sink.write("mcp", "def");
@@ -21,7 +21,7 @@ describe("createSpillSink", () => {
   });
 
   test("sanitizes hostile labels into safe file names", () => {
-    const sink = createSpillSink(join(tmpdir(), `agentj-spill-test2-${process.pid}`));
+    const sink = createSpillSink(join(tmpdir(), `glorious-spill-test2-${process.pid}`));
     try {
       const path = sink.write("../../etc passwd!", "x");
       expect(path).toBe(join(sink.dir, "0001-_etc_passwd_.txt"));

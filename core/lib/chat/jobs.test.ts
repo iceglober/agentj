@@ -195,7 +195,7 @@ describe("createJobRunner", () => {
     const runner = createJobRunner({
       runJob: async () => ({
         text: "completed",
-        branch: "agentj/j1-work",
+        branch: "glorious/j1-work",
         warnings: ["git worktree remove --force /child exited 1: busy"],
       }),
       addTurnNotice: (text) => {
@@ -208,7 +208,7 @@ describe("createJobRunner", () => {
       status: "done",
       warnings: ["git worktree remove --force /child exited 1: busy"],
     });
-    expect(notices[0]).toContain("work preserved on agentj/j1-work");
+    expect(notices[0]).toContain("work preserved on glorious/j1-work");
     expect(notices[0]).toContain("warning: git worktree remove --force /child exited 1: busy");
   });
 });

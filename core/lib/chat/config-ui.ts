@@ -3,7 +3,7 @@ import { CONFIG_DOCS, type ConfigDoc } from "../config/reference";
 import type { GuidedInputPort } from "./guided-input";
 
 /**
- * The `agentj config` interactive editor. It builds a navigable tree from the
+ * The `glorious config` interactive editor. It builds a navigable tree from the
  * curated documentation paths and uses an injected guided-input port, keeping
  * config policy and terminal rendering outside this pure flow.
  */
@@ -146,7 +146,7 @@ const browse = async (
       ),
     );
     const chosen = await port.askInput({
-      label: promptLabel(segments.length === 0 ? "agentj configuration" : segments.join(".")),
+      label: promptLabel(segments.length === 0 ? "glorious configuration" : segments.join(".")),
       choices,
     });
     if (chosen === null) return;

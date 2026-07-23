@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import type { ConfigCliHandlers } from "../config-cli";
 import {
-  type AgentjCommandDependencies,
   describeCli,
   EXIT_FAILURE,
   EXIT_SUCCESS,
+  type GloriousCommandDependencies,
   type RunOnceOptions,
-  runAgentjCli,
+  runGloriousCli,
 } from "./index";
 
 function createMemoryWriter(): { write: (text: string) => true; text: () => string } {
@@ -24,10 +24,10 @@ function createMemoryWriter(): { write: (text: string) => true; text: () => stri
   };
 }
 
-function makeDeps(over: Partial<AgentjCommandDependencies> = {}) {
+function makeDeps(over: Partial<GloriousCommandDependencies> = {}) {
   const chatCalls: Array<{ resume?: string; continueLatest?: boolean } | undefined> = [];
   const onceCalls: Array<{ task: string; options: RunOnceOptions }> = [];
-  const deps: AgentjCommandDependencies = {
+  const deps: GloriousCommandDependencies = {
     version: "1.2.3",
     async runChat(options) {
       chatCalls.push(options);
@@ -42,17 +42,17 @@ function makeDeps(over: Partial<AgentjCommandDependencies> = {}) {
   return { deps, chatCalls, onceCalls };
 }
 
-describe("runAgentjCli", () => {
+describe("runGloriousCli", () => {
   test("bare invocation opens the chat session", async () => {
     const { deps, chatCalls } = makeDeps();
-    await expect(runAgentjCli([], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli([], deps)).resolves.toBe(EXIT_SUCCESS);
     expect(chatCalls).toEqual([{ continueLatest: false }]);
   });
 
   test("--continue and --resume route into chat with resume options", async () => {
     const { deps, chatCalls } = makeDeps();
-    await expect(runAgentjCli(["--continue"], deps)).resolves.toBe(EXIT_SUCCESS);
-    await expect(runAgentjCli(["--resume", "abc123"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli(["--continue"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli(["--resume", "abc123"], deps)).resolves.toBe(EXIT_SUCCESS);
     expect(chatCalls[0]).toEqual({ continueLatest: true });
     expect(chatCalls[1]).toEqual({ resume: "abc123", continueLatest: false });
   });
@@ -61,7 +61,7 @@ describe("runAgentjCli", () => {
     const abort = new AbortController();
     const { deps, onceCalls } = makeDeps({ createAbortSignal: () => abort.signal });
     await expect(
-      runAgentjCli(["run", "--plan", "--allow-all", "  fix the flaky test  "], deps),
+      runGloriousCli(["run", "--plan", "--allow-all", "  fix the flaky test  "], deps),
     ).resolves.toBe(EXIT_SUCCESS);
     expect(onceCalls).toEqual([
       {
@@ -75,7 +75,7 @@ describe("runAgentjCli", () => {
     const stdout = createMemoryWriter();
     const stderr = createMemoryWriter();
     const { deps, chatCalls, onceCalls } = makeDeps();
-    const code = await runAgentjCli(["run"], deps, { stdout, stderr });
+    const code = await runGloriousCli(["run"], deps, { stdout, stderr });
     expect(code).not.toBe(EXIT_SUCCESS);
     expect(chatCalls).toHaveLength(0);
     expect(onceCalls).toHaveLength(0);
@@ -83,7 +83,7 @@ describe("runAgentjCli", () => {
 
   test("runOnce exit codes propagate", async () => {
     const { deps } = makeDeps({ runOnce: async () => 130 });
-    await expect(runAgentjCli(["run", "task"], deps)).resolves.toBe(130);
+    await expect(runGloriousCli(["run", "task"], deps)).resolves.toBe(130);
   });
 
   test("update routes the selected channel and defaults to automatic channel selection", async () => {
@@ -95,8 +95,8 @@ describe("runAgentjCli", () => {
       },
     });
 
-    await expect(runAgentjCli(["update"], deps)).resolves.toBe(EXIT_SUCCESS);
-    await expect(runAgentjCli(["update", "--channel", "next"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli(["update"], deps)).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli(["update", "--channel", "next"], deps)).resolves.toBe(EXIT_SUCCESS);
     expect(calls).toEqual([{ channel: "auto" }, { channel: "next" }]);
   });
 
@@ -106,7 +106,7 @@ describe("runAgentjCli", () => {
     const { deps } = makeDeps({ update });
 
     await expect(
-      runAgentjCli(["update", "--channel", "stable"], deps, { stderr }),
+      runGloriousCli(["update", "--channel", "stable"], deps, { stderr }),
     ).resolves.not.toBe(EXIT_SUCCESS);
     expect(stderr.text()).toContain("stable");
   });
@@ -128,10 +128,10 @@ describe("runAgentjCli", () => {
     } as unknown as ConfigCliHandlers;
     const { deps } = makeDeps({ configHandlers: handlers });
 
-    await expect(runAgentjCli(["config", "set", "agent.llm.model", "m"], deps)).resolves.toBe(
+    await expect(runGloriousCli(["config", "set", "agent.llm.model", "m"], deps)).resolves.toBe(
       EXIT_SUCCESS,
     );
-    await expect(runAgentjCli(["config", "get", "agent.llm.model"], deps)).resolves.toBe(
+    await expect(runGloriousCli(["config", "get", "agent.llm.model"], deps)).resolves.toBe(
       EXIT_FAILURE,
     );
     expect(calls).toEqual(["set:agent.llm.model", "get:agent.llm.model"]);
@@ -141,7 +141,7 @@ describe("runAgentjCli", () => {
     const stderr = createMemoryWriter();
     const { deps } = makeDeps();
     await expect(
-      runAgentjCli(["config", "get", "agent.llm.model"], deps, { stderr }),
+      runGloriousCli(["config", "get", "agent.llm.model"], deps, { stderr }),
     ).resolves.toBe(EXIT_FAILURE);
     expect(stderr.text()).toContain("config commands are not available");
   });
@@ -166,22 +166,22 @@ describe("runAgentjCli", () => {
     const stderr = createMemoryWriter();
     const { deps } = makeDeps({ evalHandlers: handlers });
 
-    await expect(runAgentjCli(["eval"], deps)).resolves.toBe(0);
-    await expect(runAgentjCli(["eval", "report"], deps)).resolves.toBe(0);
-    await expect(runAgentjCli(["eval", "selfcheck"], deps)).resolves.toBe(0);
+    await expect(runGloriousCli(["eval"], deps)).resolves.toBe(0);
+    await expect(runGloriousCli(["eval", "report"], deps)).resolves.toBe(0);
+    await expect(runGloriousCli(["eval", "selfcheck"], deps)).resolves.toBe(0);
     expect(invoked).toEqual(["run", "report", "selfcheck"]);
 
-    await expect(runAgentjCli(["eval", "--help"], deps, { stdout })).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli(["eval", "--help"], deps, { stdout })).resolves.toBe(EXIT_SUCCESS);
     expect(stdout.text()).toContain("report or selfcheck");
 
-    await expect(runAgentjCli(["eval", "bogus"], deps, { stderr })).resolves.toBe(2);
+    await expect(runGloriousCli(["eval", "bogus"], deps, { stderr })).resolves.toBe(2);
     expect(stderr.text()).toContain("unknown eval command");
   });
 
   test("--help renders the chat surface without invoking anything", async () => {
     const stdout = createMemoryWriter();
     const { deps, chatCalls, onceCalls } = makeDeps();
-    await expect(runAgentjCli(["--help"], deps, { stdout })).resolves.toBe(EXIT_SUCCESS);
+    await expect(runGloriousCli(["--help"], deps, { stdout })).resolves.toBe(EXIT_SUCCESS);
     expect(stdout.text()).toContain("chat");
     expect(chatCalls).toHaveLength(0);
     expect(onceCalls).toHaveLength(0);
@@ -189,11 +189,11 @@ describe("runAgentjCli", () => {
 
   test("describeCli extracts every command's args and flags without running handlers", () => {
     const cli = describeCli();
-    const run = cli.find((c) => c.name === "agentj run");
+    const run = cli.find((c) => c.name === "glorious run");
     expect(run?.args.map((a) => a.usage)).toEqual(["<task>"]);
     expect(run?.flags.map((f) => f.usage)).toEqual(["--plan", "--allow-all"]);
     // A value-taking option is captured too, not only boolean flags.
-    const chat = cli.find((c) => c.name === "agentj");
+    const chat = cli.find((c) => c.name === "glorious");
     expect(chat?.flags.some((f) => f.usage === "--resume <str>")).toBe(true);
     // The auto-added help flag is excluded from the reference.
     expect(cli.every((c) => c.flags.every((f) => !f.usage.startsWith("--help")))).toBe(true);

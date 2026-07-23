@@ -14,7 +14,7 @@ import type { ChatSession } from "./session";
 export interface SkillCommand {
   name: string;
   summary: string;
-  /** Mode to switch to before the skill turn starts (metadata agentj-mode). */
+  /** Mode to switch to before the skill turn starts (metadata glorious-mode). */
   mode?: "plan" | "build";
   /** The full turn prompt for an explicit invocation with these arguments. */
   prompt(args: string): string;

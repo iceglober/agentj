@@ -12,11 +12,11 @@ describe("configHash", () => {
   test("stable under input key reordering", () => {
     const a = runConfigSchema.parse({
       id: "x",
-      agent: { name: "agentj", role: "primary", llm: { model: "m", provider: "azure" } },
+      agent: { name: "glorious", role: "primary", llm: { model: "m", provider: "azure" } },
     });
     const b = runConfigSchema.parse({
       id: "x",
-      agent: { llm: { provider: "azure", model: "m" }, role: "primary", name: "agentj" },
+      agent: { llm: { provider: "azure", model: "m" }, role: "primary", name: "glorious" },
     });
     expect(configHash(a)).toBe(configHash(b));
   });

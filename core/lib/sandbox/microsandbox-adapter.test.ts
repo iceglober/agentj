@@ -56,7 +56,7 @@ async function runHost(command: string[], cwd?: string) {
 }
 
 async function withTempGitRepo(run: (repo: string, nested: string) => Promise<void>) {
-  const base = await mkdtemp(path.join(tmpdir(), "agentj-microsandbox-adapter-test-"));
+  const base = await mkdtemp(path.join(tmpdir(), "glorious-microsandbox-adapter-test-"));
   const repo = path.join(base, "project");
   const nested = path.join(repo, "nested", "directory");
   try {
@@ -64,7 +64,7 @@ async function withTempGitRepo(run: (repo: string, nested: string) => Promise<vo
     await writeFile(path.join(repo, "source.txt"), "private fixture contents");
     await runHost(["git", "init", "--quiet", repo]);
     await runHost(["git", "-C", repo, "config", "user.email", "test@example.com"]);
-    await runHost(["git", "-C", repo, "config", "user.name", "AgentJ Test"]);
+    await runHost(["git", "-C", repo, "config", "user.name", "Glorious Test"]);
     await runHost(["git", "-C", repo, "add", "source.txt"]);
     await runHost(["git", "-C", repo, "commit", "--quiet", "-m", "fixture"]);
     await run(repo, nested);
@@ -119,7 +119,7 @@ describe("Microsandbox project-directory configuration", () => {
 
     expect(builder.mounts).toEqual([]);
     expect(builder.calls).toEqual([
-      "image:ghcr.io/iceglober/agentj-sandbox-base:1",
+      "image:ghcr.io/iceglober/glorious-sandbox-base:1",
       "patch",
       "workdir:/workspace",
       "replace",

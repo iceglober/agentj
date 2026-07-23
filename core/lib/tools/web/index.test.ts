@@ -23,13 +23,13 @@ describe("createWebTools", () => {
     });
     const signal = new AbortController().signal;
     const search = String(
-      await tools.web_search.execute({ query: "agentj", limit: 3 }, { abortSignal: signal }),
+      await tools.web_search.execute({ query: "glorious", limit: 3 }, { abortSignal: signal }),
     );
     const page = String(await tools.web_fetch.execute({ url: "https://example.com/guide" }));
 
-    expect(calls).toEqual([{ query: "agentj", limit: 3, signal }]);
+    expect(calls).toEqual([{ query: "glorious", limit: 3, signal }]);
     expect(search).toContain("Untrusted web content");
-    expect(search).toContain("agentj");
+    expect(search).toContain("glorious");
     expect(page).toContain("URL: https://example.com/guide");
     expect(page).toContain("page text");
   });

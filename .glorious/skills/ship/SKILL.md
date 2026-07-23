@@ -3,10 +3,10 @@ name: ship
 description: Ship completed engineering work in this repo — validate, add a changeset, open a pull request, and merge once CI is green. Use when code changes are complete and validated and the user wants them merged, or when the user says ship, open a PR, or merge this.
 compatibility: Requires git and the gh CLI authenticated against github.com
 metadata:
-  agentj-mode: build
+  glorious-mode: build
 ---
 
-# Shipping work in agentj
+# Shipping work in glorious
 
 Work is shipped when it is merged to `main` — not when the code is written.
 Follow every step; do not skip the review loop.
@@ -27,7 +27,7 @@ Follow every step; do not skip the review loop.
 
   ```markdown
   ---
-  "@glrs-dev/aj": minor
+  "@glrs-dev/glorious": minor
   ---
 
   One paragraph: what changed, from the user's point of view, with a concrete example.

@@ -38,9 +38,9 @@ export async function createGitDelegationSnapshot(
   sessionId: string,
 ): Promise<GitDelegationSnapshot> {
   const batchId = crypto.randomUUID();
-  const scratch = `/tmp/agentj-${sessionId}-${batchId}`;
+  const scratch = `/tmp/glorious-${sessionId}-${batchId}`;
   const index = `${scratch}/snapshot.index`;
-  const ref = `refs/agentj/sessions/${sessionId}/snapshots/${batchId}`;
+  const ref = `refs/glorious/sessions/${sessionId}/snapshots/${batchId}`;
   await run(environment, `mkdir -p ${shq(scratch)}`);
   const head = await run(environment, git(parentRoot, "rev-parse -q --verify 'HEAD^{commit}'"));
   await run(
@@ -54,18 +54,18 @@ export async function createGitDelegationSnapshot(
   );
   const commit = await run(
     environment,
-    `GIT_AUTHOR_NAME=agentj GIT_AUTHOR_EMAIL=agentj@sandbox.local ` +
-      `GIT_COMMITTER_NAME=agentj GIT_COMMITTER_EMAIL=agentj@sandbox.local ` +
+    `GIT_AUTHOR_NAME=glorious GIT_AUTHOR_EMAIL=glorious@sandbox.local ` +
+      `GIT_COMMITTER_NAME=glorious GIT_COMMITTER_EMAIL=glorious@sandbox.local ` +
       git(
         parentRoot,
-        `commit-tree ${shq(tree)} -p ${shq(head)} -m ${shq(`agentj delegation snapshot ${batchId}`)}`,
+        `commit-tree ${shq(tree)} -p ${shq(head)} -m ${shq(`glorious delegation snapshot ${batchId}`)}`,
       ),
   );
   await run(
     environment,
     git(
       parentRoot,
-      `update-ref -m ${shq("agentj delegation snapshot")} ${shq(ref)} ${shq(commit)} ''`,
+      `update-ref -m ${shq("glorious delegation snapshot")} ${shq(ref)} ${shq(commit)} ''`,
     ),
   );
   await run(environment, `rm -f ${shq(index)} ${shq(`${index}.lock`)}`);
@@ -138,14 +138,14 @@ export async function integrateGitDelegation(
 
     const integratedCommit = await run(
       environment,
-      `GIT_AUTHOR_NAME=agentj GIT_AUTHOR_EMAIL=agentj@sandbox.local ` +
-        `GIT_COMMITTER_NAME=agentj GIT_COMMITTER_EMAIL=agentj@sandbox.local ` +
+      `GIT_AUTHOR_NAME=glorious GIT_AUTHOR_EMAIL=glorious@sandbox.local ` +
+        `GIT_COMMITTER_NAME=glorious GIT_COMMITTER_EMAIL=glorious@sandbox.local ` +
         git(
           parentRoot,
-          `commit-tree ${shq(integratedTree)} -p ${shq(snapshot.commit)} -m ${shq("agentj integrated delegation")}`,
+          `commit-tree ${shq(integratedTree)} -p ${shq(snapshot.commit)} -m ${shq("glorious integrated delegation")}`,
         ),
     );
-    const integrationRef = `refs/agentj/sessions/${sessionId}/integrations/${crypto.randomUUID()}`;
+    const integrationRef = `refs/glorious/sessions/${sessionId}/integrations/${crypto.randomUUID()}`;
     await run(
       environment,
       git(parentRoot, `update-ref ${shq(integrationRef)} ${shq(integratedCommit)} ''`),

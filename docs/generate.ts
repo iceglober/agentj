@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Builds the agentj docs site under `docs/`. The user-facing reference is
+ * Builds the glorious docs site under `docs/`. The user-facing reference is
  * generated from the same code the CLI runs — the `chatCommands` registry and
  * the key-binding constant that back `/help` — so the command list can never
  * drift from the product. Hand-written prose lives in `docs/content/*.md`.
@@ -73,7 +73,7 @@ export function renderConfigMarkdown(docs: readonly ConfigDoc[] = CONFIG_DOCS): 
   return [
     "## Configuration reference",
     "",
-    "Set with `agentj config set <key> <value>`; read with `agentj config get <key>`. Global writes use `~/.config/aj/config.json`; project settings layer from `.aj/config.json` and `.aj/config.local.json`. Defaults come straight from the schema.",
+    "Set with `glorious config set <key> <value>`; read with `glorious config get <key>`. Global writes use `~/.config/glorious/config.json`; project settings layer from `.glorious/config.json` and `.glorious/config.local.json`. Defaults come straight from the schema.",
     "",
     ":::details Show all configuration keys",
     "",
@@ -88,13 +88,13 @@ export function renderConfigMarkdown(docs: readonly ConfigDoc[] = CONFIG_DOCS): 
 
 /**
  * The command-line reference, sourced from the CLI's own `command()` definitions
- * via `describeCli()` — so it can never disagree with `agentj --help`.
+ * via `describeCli()` — so it can never disagree with `glorious --help`.
  */
 export function renderCliMarkdown(commands: readonly CliCommandDoc[] = describeCli()): string {
   const lines = [
     "## Command line",
     "",
-    "Every subcommand, argument, and flag — generated from the same definitions `agentj --help` prints.",
+    "Every subcommand, argument, and flag — generated from the same definitions `glorious --help` prints.",
     "",
     ":::details Show all commands and flags",
     "",
@@ -313,7 +313,7 @@ export function renderSite(sections: string[]): string {
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    "<title>agentj — docs</title>",
+    "<title>glorious — docs</title>",
     `<style>\n${PAGE_STYLE}\n</style>`,
     "</head>",
     "<body>",
@@ -321,7 +321,7 @@ export function renderSite(sections: string[]): string {
     renderNav(headings),
     "<main>",
     html,
-    "<footer>Reference generated from the agentj source. Rebuild with <code>bun run docs</code>.</footer>",
+    "<footer>Reference generated from the glorious source. Rebuild with <code>bun run docs</code>.</footer>",
     "</main>",
     "</div>",
     `<script>\n${SCROLLSPY}\n</script>`,

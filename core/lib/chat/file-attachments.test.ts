@@ -10,7 +10,8 @@ import {
   formatFileReferences,
 } from "./file-attachments";
 
-const createAttachmentDirectory = (): Promise<string> => mkdtemp(path.join(tmpdir(), "agentj-at-"));
+const createAttachmentDirectory = (): Promise<string> =>
+  mkdtemp(path.join(tmpdir(), "glorious-at-"));
 
 describe("file attachments", () => {
   test("attaches referenced files bounded and leaves misses untouched", async () => {

@@ -32,9 +32,9 @@ export const bootstrapInteractiveSession = async (
   },
   dependencies: SessionBootstrapDependencies = defaults,
 ) => {
-  const chatsRoot = join(options.stateRoot, "agentj", "chats");
+  const chatsRoot = join(options.stateRoot, "glorious", "chats");
   const promptHistory = await dependencies.createPromptHistory({
-    root: join(options.stateRoot, "agentj", "prompt-history"),
+    root: join(options.stateRoot, "glorious", "prompt-history"),
     projectIdentity: options.projectIdentity,
   });
   let resumeId = options.resume ?? null;

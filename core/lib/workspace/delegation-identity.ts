@@ -12,12 +12,12 @@ const childTaskSegment = (value: string): string =>
 export const delegationWorktreeRoot = (temporaryRoot: string, commonGitDir: string): string =>
   join(
     temporaryRoot,
-    "agentj-worktrees",
+    "glorious-worktrees",
     createHash("sha256").update(commonGitDir).digest("hex").slice(0, 16),
   );
 
 /**
- * Names must be unique across concurrent AgentJ processes, not merely within a
+ * Names must be unique across concurrent Glorious processes, not merely within a
  * single scheduler. The random instance segment avoids stale branches and
  * worktrees from previous sessions without deleting any uncertain work.
  */

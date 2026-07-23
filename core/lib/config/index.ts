@@ -79,15 +79,13 @@ const nodeFileSystem: ConfigFileSystem = {
 export interface GlobalConfigOptions {
   /** An explicit test or caller override for the canonical global config file. */
   globalConfigPath?: string;
-  /** An explicit test or caller override for the legacy global config file. */
-  legacyGlobalConfigPath?: string;
   /** Defaults to process.env.HOME; pass explicitly in tests. */
   home?: string;
   fileSystem?: ConfigFileSystem;
 }
 
 export interface ConfigLoadOptions extends GlobalConfigOptions {
-  /** The Git worktree root whose `.aj` JSON layers should be loaded. */
+  /** The Git worktree root whose `.glorious` JSON layers should be loaded. */
   projectRoot?: string;
   /** Trusted bundled TypeScript config, loaded below user-controlled layers. */
   baseConfigPath?: string;
@@ -131,25 +129,11 @@ export function resolveGlobalConfigPath(options: GlobalConfigOptions = {}): stri
   const home = options.home ?? process.env.HOME;
   if (!home) {
     throw new Error(
-      "Cannot resolve the global AgentJ config path: HOME is unavailable and no globalConfigPath override was provided.",
+      "Cannot resolve the global Glorious config path: HOME is unavailable and no globalConfigPath override was provided.",
     );
   }
 
-  return join(home, ".config", "aj", "config.json");
-}
-
-/** Resolve the pre-rename global config path for read-only compatibility. */
-export function resolveLegacyGlobalConfigPath(options: GlobalConfigOptions = {}): string {
-  if (options.legacyGlobalConfigPath) return options.legacyGlobalConfigPath;
-
-  const home = options.home ?? process.env.HOME;
-  if (!home) {
-    throw new Error(
-      "Cannot resolve the legacy AgentJ config path: HOME is unavailable and no legacyGlobalConfigPath override was provided.",
-    );
-  }
-
-  return join(home, ".config", "agentj", "config.json");
+  return join(home, ".config", "glorious", "config.json");
 }
 
 /** Resolve the committed and machine-local config files for one Git worktree. */
@@ -158,8 +142,8 @@ export function resolveProjectConfigPaths(projectRoot: string): {
   localConfigPath: string;
 } {
   return {
-    configPath: join(projectRoot, ".aj", "config.json"),
-    localConfigPath: join(projectRoot, ".aj", "config.local.json"),
+    configPath: join(projectRoot, ".glorious", "config.json"),
+    localConfigPath: join(projectRoot, ".glorious", "config.local.json"),
   };
 }
 
@@ -221,11 +205,7 @@ async function readConfigObject(
   }
 }
 
-/**
- * Read canonical global config, falling back to the pre-rename location only
- * when the canonical file is absent. This avoids stale legacy fields leaking
- * into a deliberately created canonical config.
- */
+/** Read the canonical global config, or an empty object when absent. */
 export async function readGlobalConfig(options: GlobalConfigOptions = {}): Promise<ConfigObject> {
   const fileSystem = options.fileSystem ?? nodeFileSystem;
   const global = await readOptionalJsonObject(
@@ -233,14 +213,7 @@ export async function readGlobalConfig(options: GlobalConfigOptions = {}): Promi
     "global",
     fileSystem,
   );
-  if (global) return global;
-  return (
-    (await readOptionalJsonObject(
-      resolveLegacyGlobalConfigPath(options),
-      "legacy global",
-      fileSystem,
-    )) ?? {}
-  );
+  return global ?? {};
 }
 
 async function writeGlobalConfig(
@@ -344,7 +317,7 @@ export async function deleteGlobalConfigValue(
 /**
  * Compose configuration layers in precedence order. The explicit `path` keeps
  * its public API meaning as a caller-supplied final override; chat startup uses
- * `baseConfigPath` for AgentJ's bundled TypeScript defaults instead.
+ * `baseConfigPath` for Glorious's bundled TypeScript defaults instead.
  */
 async function readLayeredConfig(
   path: string | undefined,

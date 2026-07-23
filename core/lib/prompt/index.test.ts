@@ -18,7 +18,7 @@ const CTX: PromptContext = {
 
 const inputs = (over: Partial<PromptInputs> = {}): PromptInputs => ({
   model: "claude-x",
-  agentName: "agentj",
+  agentName: "glorious",
   role: "primary",
   rules: "- be nice",
   ...over,
@@ -77,7 +77,7 @@ describe("composePrompt", () => {
 
     const fallback = composePrompt(AUTO, inputs({ model: "claude-x" }), CTX);
     expect(fallback.profile).toBe("default");
-    expect(fallback.instructions).toContain("You are agentj");
+    expect(fallback.instructions).toContain("You are glorious");
     expect(fallback.instructions).not.toContain("{{");
   });
 
@@ -126,7 +126,7 @@ describe("composePrompt", () => {
     expect(delegate.instructions.startsWith("You are a coding executor")).toBe(true);
 
     const primary = composePrompt(AUTO, inputs({ model: "gpt-5.4-nano" }), CTX);
-    expect(primary.instructions.startsWith("You are agentj")).toBe(true);
+    expect(primary.instructions.startsWith("You are glorious")).toBe(true);
     expect(primary.instructions).toContain("# Execution discipline");
     expect(primary.instructions).toContain("# Subagent contract");
   });
@@ -240,18 +240,18 @@ describe("composePrompt", () => {
   });
 
   test("13. hash pin: mode authority, evidence rules, and background-job guidance", () => {
-    // Versions captured 2026-07-21 after moving Luna to the externally
-    // benchmarked medium-effort default. A failure here means prompt CONTENT
-    // changed — a separate, eval-validated decision, never a refactor side
+    // Versions recaptured 2026-07-22 after the agentj → glorious rebrand, which
+    // changed the agent name embedded in the prompt. A failure here means prompt
+    // CONTENT changed — a separate, eval-validated decision, never a refactor side
     // effect. Nano's standalone delegate remains unaffected.
     const pinned: Record<string, { primary: string; delegate: string }> = {
-      "gpt-5.6-sol": { primary: "e4baf021b573", delegate: "e4baf021b573" },
-      "gpt-5.6-terra": { primary: "f3ba218684a6", delegate: "f3ba218684a6" },
-      "gpt-5.6-luna": { primary: "0d196868fd30", delegate: "0d196868fd30" },
-      "gpt-5.4": { primary: "230a76bdfaad", delegate: "230a76bdfaad" },
-      "gpt-5.4-nano": { primary: "e34394d49d93", delegate: "096ae64c4caf" },
-      "deepseek-v4-pro": { primary: "dc05e7dcffa8", delegate: "dc05e7dcffa8" },
-      "claude-x": { primary: "814ef31ccd1c", delegate: "814ef31ccd1c" },
+      "gpt-5.6-sol": { primary: "8a3f2f3ee5ad", delegate: "8a3f2f3ee5ad" },
+      "gpt-5.6-terra": { primary: "2232b0303279", delegate: "2232b0303279" },
+      "gpt-5.6-luna": { primary: "1d7de94223b1", delegate: "1d7de94223b1" },
+      "gpt-5.4": { primary: "e3e36fa46922", delegate: "e3e36fa46922" },
+      "gpt-5.4-nano": { primary: "6cf41d48e8b2", delegate: "096ae64c4caf" },
+      "deepseek-v4-pro": { primary: "9e783ce6cfd9", delegate: "9e783ce6cfd9" },
+      "claude-x": { primary: "1d9a079fa9dd", delegate: "1d9a079fa9dd" },
     };
     const pinCtx = {
       cwd: "/repo",

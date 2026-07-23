@@ -52,7 +52,7 @@ describe("resolveMcpTransportConfig", () => {
 
 describe("connectModelContextProtocolServer", () => {
   test("connects to a real stdio server and supports tools, resources, cancellation metadata, and close", async () => {
-    const fixture = join(process.cwd(), `.agentj-mcp-fixture-${crypto.randomUUID()}.ts`);
+    const fixture = join(process.cwd(), `.glorious-mcp-fixture-${crypto.randomUUID()}.ts`);
     fixtures.push(fixture);
     await writeFile(
       fixture,
@@ -107,8 +107,14 @@ await server.connect(new StdioServerTransport());
   });
 
   test("isolates noisy stdio startup errors from the parent terminal", async () => {
-    const serverFixture = join(process.cwd(), `.agentj-mcp-noisy-server-${crypto.randomUUID()}.ts`);
-    const clientFixture = join(process.cwd(), `.agentj-mcp-noisy-client-${crypto.randomUUID()}.ts`);
+    const serverFixture = join(
+      process.cwd(),
+      `.glorious-mcp-noisy-server-${crypto.randomUUID()}.ts`,
+    );
+    const clientFixture = join(
+      process.cwd(),
+      `.glorious-mcp-noisy-client-${crypto.randomUUID()}.ts`,
+    );
     fixtures.push(serverFixture, clientFixture);
     await writeFile(
       serverFixture,
@@ -178,8 +184,8 @@ try {
       );
       const tools = await client.listTools();
       expect(tools.items.map((tool) => tool.name)).toEqual(["greet"]);
-      expect(await client.callTool("greet", { name: "agentj" })).toMatchObject({
-        content: [{ type: "text", text: "hello agentj" }],
+      expect(await client.callTool("greet", { name: "glorious" })).toMatchObject({
+        content: [{ type: "text", text: "hello glorious" }],
       });
       expect(authorizationHeaders).not.toContain(null);
       expect(authorizationHeaders).toContain("Bearer test-token");

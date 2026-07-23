@@ -1,5 +1,5 @@
-import { rgPath } from "@vscode/ripgrep";
 import { describe, expect, test } from "bun:test";
+import { rgPath } from "@vscode/ripgrep";
 import type z from "zod";
 import type { ToolDef } from "../../llm";
 import type { Sandbox, SandboxCommandResult } from "../../sandbox";
