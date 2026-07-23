@@ -99,7 +99,11 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   content.add(leftBox);
   content.add(rightBox);
 
-  const keybar = new opentui.BoxRenderable(renderer, { flexShrink: 0, width: "100%" });
+  const barBg = colorEnabled ? { backgroundColor: opentui.RGBA.fromHex("#383f47") } : {};
+  const topBar = new opentui.BoxRenderable(renderer, { flexShrink: 0, width: "100%", ...barBg });
+  const titleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  topBar.add(titleText);
+  const keybar = new opentui.BoxRenderable(renderer, { flexShrink: 0, width: "100%", ...barBg });
   const keysText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   keybar.add(keysText);
 
@@ -119,6 +123,7 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   overlayBox.add(overlayText);
   overlayBox.visible = false;
 
+  root.add(topBar);
   root.add(content);
   root.add(keybar);
   root.add(overlayBox);
@@ -181,6 +186,7 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   const render = (): void => {
     const v = model.view();
     const width = rightWidth();
+    titleText.content = styled.toStyledText([[{ text: ` ▍ ${v.title}`, bold: true }]]);
     leftText.content = styled.toStyledText(sectionLines(v));
     rightText.content = styled.toStyledText(v.rows.map((r) => rowLine(r, width)));
     hintText.content = styled.toStyledText([
