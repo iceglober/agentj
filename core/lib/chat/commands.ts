@@ -3,6 +3,7 @@ import { fuzzyFilter } from "../fuzzy";
 import { providerNames } from "../llm";
 import { mcpServerConfigSchema, renderMcpPrompt } from "../mcp";
 import type { McpRuntimeStatus } from "../mcp/runtime";
+import { buildHandoffPrompt } from "../prompt";
 import { formatDuration, formatToolActivityLabel } from "../tui/progress";
 import { formatTodoDetails } from "../tui/todos";
 import type { UpdateChannel } from "../update";
@@ -419,16 +420,26 @@ export const chatCommands: Record<string, ChatCommand> = {
     },
   },
   build: {
-    summary: "Switch to build mode and implement the plan",
+    summary: "Approve the plan and build it (fresh context: task + plan)",
     startsTurn: true,
     async run(context, args) {
-      context.session.setMode("build");
       const feedback = args.trim();
+      const restoreText = `/build${feedback ? ` ${feedback}` : ""}`;
+      context.session.setMode("build");
+      const { task, plan } = context.session.planContext();
+      if (plan) {
+        // Clean handoff: the builder starts from a fresh continuation carrying
+        // only the task and the approved plan, not the planner's transcript.
+        await context.session.send(buildHandoffPrompt(task, plan, feedback), {
+          transcriptText: "→ building from the approved plan (fresh context)",
+          restoreText,
+          freshContext: true,
+        });
+        return;
+      }
+      // No plan captured this stage — keep building from the live conversation.
       const prompt = `Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback${feedback ? `, including this additional feedback: ${feedback}` : ""}. Complete and validate it end to end.`;
-      await context.session.send(prompt, {
-        transcriptText: "Command: build",
-        restoreText: `/build${feedback ? ` ${feedback}` : ""}`,
-      });
+      await context.session.send(prompt, { transcriptText: "Command: build", restoreText });
     },
   },
   jobs: {

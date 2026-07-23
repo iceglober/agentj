@@ -331,25 +331,59 @@ describe("runChatCommand", () => {
     });
   });
 
-  test("build switches mode before sending an implementation turn", async () => {
-    const { context } = makeContext();
-    const calls: string[] = [];
-    context.session = {
-      setMode: (mode) => {
-        calls.push(`mode:${mode}`);
+  const buildSessionStub = (
+    plan: string | null,
+    sink: Array<{ text: string; options?: Parameters<ChatCommandContext["session"]["send"]>[1] }>,
+    modes: string[],
+  ) =>
+    ({
+      setMode: (mode?: "plan" | "build") => {
+        modes.push(mode ?? "toggle");
         return mode ?? "plan";
       },
-      send: async (text, options) => {
-        calls.push(`send:${options?.transcriptText}:${options?.restoreText}:${text}`);
+      planContext: () => ({ task: "fix the flaky test", plan }),
+      send: async (
+        text: string,
+        options?: Parameters<ChatCommandContext["session"]["send"]>[1],
+      ) => {
+        sink.push({ text, options });
       },
-    } as ChatCommandContext["session"];
+    }) as unknown as ChatCommandContext["session"];
 
-    await runChatCommand(context, "build", "please prioritize the API tests");
+  test("build with a captured plan hands off on a fresh context seeded with task+plan", async () => {
+    const { context } = makeContext();
+    const sends: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const modes: string[] = [];
+    context.session = buildSessionStub("PLAN: change frobnicate()", sends, modes);
 
-    expect(calls).toEqual([
-      "mode:build",
-      "send:Command: build:/build please prioritize the API tests:Implement the work agreed on in this conversation, incorporating the plan, discussion, and user feedback, including this additional feedback: please prioritize the API tests. Complete and validate it end to end.",
-    ]);
+    await runChatCommand(context, "build", "prioritize the API tests");
+
+    expect(modes).toEqual(["build"]);
+    expect(sends).toHaveLength(1);
+    expect(sends[0]?.options).toMatchObject({
+      freshContext: true,
+      transcriptText: "→ building from the approved plan (fresh context)",
+      restoreText: "/build prioritize the API tests",
+    });
+    expect(sends[0]?.text).toContain("<task>\nfix the flaky test\n</task>");
+    expect(sends[0]?.text).toContain(
+      "<approved-plan>\nPLAN: change frobnicate()\n</approved-plan>",
+    );
+    expect(sends[0]?.text).toContain("prioritize the API tests");
+  });
+
+  test("build without a captured plan falls back to building from the live conversation", async () => {
+    const { context } = makeContext();
+    const sends: Array<{ text: string; options?: Record<string, unknown> }> = [];
+    const modes: string[] = [];
+    context.session = buildSessionStub(null, sends, modes);
+
+    await runChatCommand(context, "build", "");
+
+    expect(modes).toEqual(["build"]);
+    expect(sends[0]?.options).toMatchObject({ transcriptText: "Command: build" });
+    expect(sends[0]?.options?.freshContext).toBeUndefined();
+    expect(sends[0]?.text).toContain("Implement the work agreed on in this conversation");
   });
 
   test("jobs lists, inspects, and aborts; undo/redo report labels; unknown suggests help", async () => {

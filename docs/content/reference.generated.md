@@ -14,7 +14,7 @@ In-session slash commands and key bindings — the same list `/help` prints, gen
 - `/cost` — Show foreground token usage and estimated cost
 - `/activity` — Show completed tool activity for this session
 - `/todos` — Show all session todos
-- `/build` — Switch to build mode and implement the plan
+- `/build` — Approve the plan and build it (fresh context: task + plan)
 - `/jobs` — Inspect background jobs, or `/jobs abort <id>`
 - `/undo` — Revert the agent's last file changes
 - `/redo` — Re-apply reverted changes
