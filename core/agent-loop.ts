@@ -179,20 +179,24 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
   });
 }
 
-/** The interactive config-TUI host for the current project, wired to the real
- *  config layers and keychain. Shared by `glorious config` and in-chat `/config`. */
-function createProjectConfigTuiHost(secretStore: SecretStore): ConfigTuiHost {
-  const configOptions = {
-    baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
-    projectRoot: process.cwd(),
-  };
+/** The bundled base config path (below the user-writable layers). */
+function baseConfigPath(): string {
+  return new URL("./glorious.ts", import.meta.url).pathname;
+}
+
+/** The interactive config-TUI host for a project, wired to the real config
+ *  layers and keychain. Shared by `glorious config` and in-chat `/config`. */
+function createProjectConfigTuiHost(
+  secretStore: SecretStore,
+  configOptions: { baseConfigPath: string; projectRoot: string },
+): ConfigTuiHost {
   const home = process.env.HOME ?? "";
-  const cwd = process.cwd();
-  // Shorten for display: home → ~, and project files relative to the cwd.
+  const root = configOptions.projectRoot;
+  // Shorten for display: home → ~, and project files relative to the root.
   const displayPath = (layer: WritableConfigLayer): string => {
     const path = resolveConfigLayerPath(layer, configOptions) ?? "";
     if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
-    if (path.startsWith(`${cwd}/`)) return path.slice(cwd.length + 1);
+    if (root && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
     return path;
   };
   return createConfigTuiHost({
@@ -230,7 +234,10 @@ function createProductionConfigUi(): () => Promise<number> {
     });
     // The full-screen OpenTUI config surface is the common path; the clack
     // menu below is the fallback when OpenTUI can't run.
-    const host = createProjectConfigTuiHost(secretStore);
+    const host = createProjectConfigTuiHost(secretStore, {
+      baseConfigPath: baseConfigPath(),
+      projectRoot: process.cwd(),
+    });
     try {
       await runConfigTuiScreen({ loadData: host.loadData, applyEffect: host.applyEffect });
       return EXIT_SUCCESS;
@@ -371,6 +378,11 @@ interface ChatComposition {
   skillIssues: readonly SkillIssue[];
   startMcp(): Promise<void>;
   reloadMcp(name?: string): Promise<void>;
+  /** A config-TUI host bound to this session's config layers and keychain. */
+  createConfigTuiHost(): ConfigTuiHost;
+  /** Re-read config from disk and apply what this session can change live:
+   *  model routing (tiers/variants/modes), permissions, and MCP servers. */
+  reloadSessionConfig(): Promise<void>;
   mcpStatuses(): readonly McpRuntimeStatus[];
   mcpPrompts(): readonly McpPromptCatalogEntry[];
   getMcpPrompt(
@@ -759,6 +771,35 @@ async function composeChat(
     skillIssues: skillsDiscovery.issues,
     startMcp: mcpController.start,
     reloadMcp: mcpController.reload,
+    createConfigTuiHost: () => createProjectConfigTuiHost(secretStore, configLoadOptions),
+    reloadSessionConfig: async () => {
+      const latest = await loadChatConfig(undefined, configLoadOptions);
+      // Permissions are read live from this object on every tool call, so
+      // updating it in place applies Trust changes without a restart.
+      config.permissions = latest.config.permissions;
+      // Only re-route models when the llm config actually changed — reload clears
+      // the agent cache and drops any live `/model` override, so a no-op close
+      // must not disturb the session.
+      if (JSON.stringify(latest.config.agent.llm) !== JSON.stringify(config.agent.llm)) {
+        config.agent.llm = latest.config.agent.llm;
+        modelRouting.reload({
+          ...agentConfig,
+          llm: {
+            ...latest.config.agent.llm,
+            providers: {
+              ...latest.config.agent.llm.providers,
+              azure: { ...latest.config.agent.llm.providers?.azure, apiKey: key.apiKey },
+            },
+          },
+        });
+      }
+      // Reconnecting MCP servers is disruptive, so only reconcile when the mcp
+      // config actually changed (add/remove/edit), not on every editor close.
+      if (JSON.stringify(latest.config.mcp) !== JSON.stringify(config.mcp)) {
+        config.mcp = latest.config.mcp;
+        await mcpController.reload();
+      }
+    },
     authorizeMcp: mcpController.authorize,
     mcpPrompts: () => mcp.prompts(),
     getMcpPrompt: (server, prompt, args) => mcp.getPrompt(server, prompt, args),
@@ -1243,7 +1284,7 @@ export async function runGloriousChat(
           });
           return;
         }
-        const configHost = createProjectConfigTuiHost(createKeyringSecretStore({}));
+        const configHost = composition.createConfigTuiHost();
         await runModal((renderer) =>
           runConfigTuiScreen({
             renderer,
@@ -1251,6 +1292,8 @@ export async function runGloriousChat(
             applyEffect: configHost.applyEffect,
           }),
         );
+        // Apply anything the editor changed to the running session.
+        await composition.reloadSessionConfig();
       },
       cost: { rows: () => usageRows, prices: composition.evalPrices },
       activity: { list: () => completedActivities },

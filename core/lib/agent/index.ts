@@ -312,6 +312,7 @@ export function createAgentModelRouting(
   configFor(mode: AgentMode): AgentConfig;
   selections(): { primary: AgentModelSelection; subagents: AgentModelSelection | null };
   configure(target: "primary" | "subagents", selection: AgentModelSelection | null): void;
+  reload(config: AgentConfig): void;
 } {
   let config = initialConfig;
   let primaryOverride = false;
@@ -351,6 +352,15 @@ export function createAgentModelRouting(
           : null,
       );
       if (target === "primary") primaryOverride = selection !== null;
+      onChange();
+    },
+    reload: (next) => {
+      // Adopt a freshly loaded config (e.g. after the config editor writes new
+      // tiers/variants/modes) and drop any live primary override — disk is now
+      // authoritative. onChange clears the per-mode agent cache so the next turn
+      // rebuilds on the new selection.
+      config = next;
+      primaryOverride = false;
       onChange();
     },
   };

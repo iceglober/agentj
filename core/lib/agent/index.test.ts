@@ -157,6 +157,28 @@ describe("createAgentModelRouting", () => {
     expect(changes).toBe(1);
   });
 
+  test("reload adopts a fresh config, drops any primary override, and signals change", () => {
+    let changes = 0;
+    const routing = createAgentModelRouting(
+      agentConfigSchema.parse({
+        llm: { model: "base", tiers: ["frontier", "economy"], modes: { plan: 0, build: 1 } },
+      }),
+      () => changes++,
+    );
+    routing.configure("primary", { provider: "azure", model: "pinned" });
+    expect(routing.configFor("plan").llm.model).toBe("pinned");
+
+    routing.reload(
+      agentConfigSchema.parse({
+        llm: { model: "base", tiers: ["sol", "luna"], modes: { plan: 0, build: 1 } },
+      }),
+    );
+    // Fresh tiers route again; the live override is gone.
+    expect(routing.configFor("plan").llm.model).toBe("sol");
+    expect(routing.configFor("build").llm.model).toBe("luna");
+    expect(changes).toBe(2); // configure + reload
+  });
+
   test("reports explicit child routing and clears it back to inheritance", () => {
     const routing = createAgentModelRouting(agentConfigSchema.parse({ llm: { model: "primary" } }));
     expect(routing.selections().subagents).toBeNull();
