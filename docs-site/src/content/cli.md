@@ -1,56 +1,36 @@
-# CLI
+# CLI reference
 
-`@glrs-dev/cli` — one binary, five subcommands.
+Every subcommand, argument, and flag — the same definitions `glorious --help` prints. `aj` is a short alias for `glorious`.
 
-```bash
-npm i -g @glrs-dev/cli
-```
+## `glorious`
 
-Requires [Bun](https://bun.sh) ≥ 1.2.0 on PATH.
+Open an interactive chat session in the current repo (plan mode).
 
-## `glrs harness`
+- `--continue` — reopen the newest session for this project
+- `--resume <id>` — reopen a specific session
 
-Plugin management for the [OpenCode agent harness](/harness).
+## `glorious run <task>`
 
-```bash
-glrs harness install       # register in opencode.json
-glrs harness configure     # interactive configuration
-glrs harness doctor        # check installation health
-glrs harness uninstall     # remove from opencode.json
-```
+Run one task non-interactively and exit.
 
-See [configuration](/harness/config) for what the harness configures.
+- `<task>` — the task to run
+- `--plan` — plan only: read-only tools, no edits
+- `--allow-all` — resolve permission asks to allow (default: deny with a notice)
 
-## `glrs wt`
+## `glorious config <set|get|delete> <key> [value]`
 
-Worktree management.
+Inspect or update configuration. See [config](/config).
 
-```bash
-glrs wt new                # create worktree (auto-named)
-glrs wt list               # list all worktrees
-glrs wt switch             # interactive picker
-glrs wt delete             # remove worktrees
-glrs wt cleanup            # delete merged/stale
-```
+- `set <key> [value]` — `--secret` reads from masked input and stores in the OS keychain
+- `get <key>` — read a value
+- `delete <key>` — `--secret` removes a keychain secret
 
-Bare `glrs wt` in a TTY drops into the interactive picker.
+## `glorious update`
 
-## `glrs autopilot`
+Update the installed CLI.
 
-Structured scope → plan → execute orchestrator. See [autopilot](/autopilot).
+- `--channel <next|latest>` — release channel to install
 
-```bash
-glrs autopilot --plan docs/plans/my-feature/
-```
+## `glorious eval`
 
-## `glrs loop`
-
-Raw prompt loop. Runs [`prime`](/harness/agents) until done or budget hit. See [autopilot](/autopilot).
-
-```bash
-glrs loop "implement feature X"
-```
-
-## `glrs upgrade`
-
-Self-update. Also runs automatically on every CLI invocation (rate-limited to hourly).
+Run the eval harness (`eval`, `eval report`, `eval selfcheck`) — for contributors validating model behavior.

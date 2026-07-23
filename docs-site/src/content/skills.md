@@ -1,25 +1,30 @@
-# Skills
+# Agent Skills
 
-19 bundled skills. The harness loads them automatically; agents pull a skill into context with the Skill tool when its trigger matches.
+Skills are reusable, model-activatable playbooks in the [agentskills.io](https://agentskills.io) format. Drop a `SKILL.md` in a directory and the agent can invoke it.
 
-| Skill | Description |
-|-------|-------------|
-| `adr` | Use when drafting, revising, or reading any engineering ADR in `docs/adr/`. Encodes grounding steps, the mandatory section template, the Unspecified-interactions-vs-Open-questions rubric, the security-default-deny rule, and self-check red flags. Use when the task is to write an ADR, draft an architecture decision, produce a design doc for a schema/contract/cross-package change, propose a new table/entity, or capture a consequential decision. Do NOT draft an ADR without this skill loaded. |
-| `adversarial-review-rubric` | Use when reviewing a diff or PR against a plan or acceptance criteria. |
-| `agent-estimation` | Estimate AI-agent task effort in tool-call rounds first, convert to wallclock only at the end. Use when the user asks 'how long will this take', 'estimate this', 'scope this work', 'round budget', 'effort estimate', or asks for a timeline on agent-executed work. Produces a structured module-breakdown table with risk coefficients and a final wallclock range. Avoids the systematic overestimation that happens when agents anchor to human-developer timelines from training data. |
-| `cloud-credentials` | Use when the task requires AWS or GCP credentials — deploying infrastructure, reading from S3, querying DynamoDB, running Terraform, calling cloud APIs. This skill configures the gsa MCP server if not already set up, then teaches the agent how to use cloud credentials safely through the permission-gated agent interface. Activate proactively whenever you detect cloud SDK usage, IaC files, or AWS/GCP API calls in the task. |
-| `code-quality` | Four principles for autonomous code quality — think before coding, simplicity first, surgical changes, goal-driven execution. Load this skill when planning, building, or reviewing any non-trivial change. Derived from observed patterns in AI-agent-authored PRs where review feedback clustered around wrong assumptions, overcomplication, scope creep, and missing failure-mode coverage. |
-| `design-for-ai` | Build and review UI that feels handcrafted, not AI-generated. Grounded in real design theory (Kadavy, Tufte, Refactoring UI). Use when: building any user-facing interface, choosing fonts/colors/layout, reviewing designs for visual issues, establishing visual hierarchy, or making responsive decisions. |
-| `pattern-first` | Decide the implementation pattern BEFORE writing code that introduces a new concept or repeats an existing theme. Inventory the incumbent pattern, test its sustainability, then follow / extend / replace / quarantine — never silently propagate a bad pattern. Load when planning a new concept, adding the Nth instance of a theme, or when a Mirror file looks like a shaky precedent. |
-| `research` | Research orchestrator — plans workstreams, dispatches parallel research agents (local, web, or auto), reviews results, identifies gaps, and iterates until comprehensive. Use when user says 'research', '/research', 'investigate', 'deep dive', 'explore', 'understand how', 'what do we know about'. Provide the research topic and context. |
-| `research-auto` | Autonomous experimentation skill — agent interviews the user, sets up a lab, then explores freely (think, test, reflect) until stopped or a target is hit. Works for any domain where you can measure or evaluate a result. Use when user says 'optimize this', 'experiment with', 'find the best approach', 'iterate on', 'research mode'. Do NOT use for binary validation tests (use /spec-lab instead). Based on ResearcherSkill v1.4.4 by krzysztofdudek. |
-| `research-local` | Deep codebase research using parallel Explore subagents. Decomposes a question about the local codebase into research tasks, launches parallel explorations, reviews for gaps, iterates, and synthesizes findings with specific file paths and line numbers. Use when user says 'how does X work in this codebase', 'where is Y implemented', 'trace the data flow for Z', 'what patterns does this repo use', 'explain the architecture of'. Provide the research topic as arguments. |
-| `research-web` | Multi-agent research orchestrator. Decomposes a research question into parallel agent workstreams, launches them, monitors progress, and synthesizes results. Use when user says 'research this topic', 'I need to understand', 'deep dive into', 'investigate the market for', 'what do we know about'. Provide the research topic and context. |
-| `researcher` | Use when user wants to optimize or tune something measurable through repeated experiments — "make X faster", "improve [metric]", "find best config", "iterate overnight", "run experiments until it hits N". Triggers on quantitative goals (build time, latency, pass rate, accuracy) or qualitative ones scoreable against a rubric (prompt quality, doc parsing). Skip for one-shot bugs with a clear fix or tasks where the user wants direct implementation without exploration. |
-| `review-plan` | After changes are made to a plan, review for inconsistencies in structure, concepts, or terminology that may derail the implementation |
-| `root-cause-diagnosis` | Use when a test, lint, or typecheck failure appears unexpectedly — before assuming it's pre-existing or unrelated. |
-| `spear-protocol` | Use when executing multi-step implementation requests end-to-end. |
-| `ux-for-ai` | Use when designing or auditing a user experience — a flow, screen, interaction, or product. Use when diagnosing why a UI feels off, generic, or wrong. Use when trying to take something competent and make it joyful. Symptoms include: "users will navigate to the dashboard"-style UX descriptions, flows missing edge states, polish without substance, the default AI aesthetic (beige palettes, Inter, four cards in a grid), or "improve the UX" requests without specifics. |
-| `vercel-composition-patterns` | React composition patterns that scale. Use when refactoring components with boolean prop proliferation, building flexible component libraries, or designing reusable APIs. Triggers on tasks involving compound components, render props, context providers, or component architecture. Includes React 19 API changes. |
-| `vercel-react-best-practices` | React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns. Triggers on tasks involving React components, Next.js pages, data fetching, bundle optimization, or performance improvements. |
-| `web-design-guidelines` | Review UI code for Web Interface Guidelines compliance. Use when asked to "review my UI", "check accessibility", "audit design", "review UX", or "check my site against best practices". |
+## Where they live
+
+- Project: `.glorious/skills/<name>/SKILL.md`
+- Global: `~/.config/glorious/skills/<name>/SKILL.md`
+
+Project skills win name collisions.
+
+## How they activate
+
+Each skill's name and description are injected into the system prompt, so the model can read a skill's body and follow it when a task matches — progressive disclosure, not a wall of instructions. Every skill is **also** a slash command: `/<name> <args>` starts a turn with the skill body as the prompt, substituting `$ARGUMENTS`.
+
+## Frontmatter
+
+```markdown
+---
+name: ship
+description: Ship finished work — changeset, PR, and merge.
+user-invocable: true        # false → model-only, no slash command
+metadata:
+  glorious-mode: build      # switch to build mode on invocation
+---
+
+Steps the agent should follow…
+```
+
+Set `user-invocable: false` to keep a skill model-only. Malformed skills surface as startup notices without blocking the session.

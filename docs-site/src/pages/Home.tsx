@@ -9,8 +9,8 @@ export function Home() {
   return (
     <main className="home">
       <div className="home-hero">
-        <h1>glrs</h1>
-        <p className="tagline">glorious tools for tomorrow</p>
+        <h1>glorious</h1>
+        <p className="tagline">a terminal coding agent</p>
       </div>
 
       <NpmVersions />
@@ -23,7 +23,7 @@ export function Home() {
           <div className="install-or">or via package manager:</div>
           <div className="install-alt-row">
             <PkgSwitcher />
-            <Cmd action="install" pkg="@glrs-dev/cli" />
+            <Cmd action="install" pkg="@glrs-dev/glorious@next" />
           </div>
         </div>
       </div>
@@ -33,16 +33,17 @@ export function Home() {
       <div className="links">
         <Link to="/install">install</Link>
         <Link to="/quickstart">quickstart</Link>
-        <Link to="/harness">agent harness</Link>
-        <Link to="/harness/agents">agents</Link>
-        <Link to="/harness/commands">commands</Link>
-        <Link to="/harness/skills">skills</Link>
-        <Link to="/harness/tools">tools</Link>
-        <Link to="/harness/config">configuration</Link>
-        <Link to="/autopilot">autopilot</Link>
-        <Link to="/headroom">headroom (compression)</Link>
+        <Link to="/modes">plan &amp; build modes</Link>
         <Link to="/cli">cli</Link>
-        <Link to="/assume">assume (sso)</Link>
+        <Link to="/commands">commands &amp; keys</Link>
+        <Link to="/config">configuration</Link>
+        <Link to="/permissions">permissions</Link>
+        <Link to="/subagents">parallel subagents</Link>
+        <Link to="/jobs">background jobs</Link>
+        <Link to="/skills">skills</Link>
+        <Link to="/mcp">mcp servers</Link>
+        <Link to="/tools">tools</Link>
+        <Link to="/sessions">sessions</Link>
       </div>
 
       <div className="external">

@@ -7,16 +7,17 @@ import { Doc } from "./pages/Doc";
 import { Changelog } from "./pages/Changelog";
 
 import quickstartMd from "./content/quickstart.md?raw";
-import harnessMd from "./content/harness.md?raw";
-import agentsMd from "./content/agents.md?raw";
-import configMd from "./content/config.md?raw";
-import commandsMd from "./content/commands.md?raw";
+import modesMd from "./content/modes.md?raw";
+import permissionsMd from "./content/permissions.md?raw";
+import subagentsMd from "./content/subagents.md?raw";
+import jobsMd from "./content/jobs.md?raw";
 import skillsMd from "./content/skills.md?raw";
+import mcpMd from "./content/mcp.md?raw";
 import toolsMd from "./content/tools.md?raw";
-import autopilotMd from "./content/autopilot.md?raw";
 import cliMd from "./content/cli.md?raw";
-import assumeMd from "./content/assume.md?raw";
-import headroomMd from "./content/headroom.md?raw";
+import commandsMd from "./content/commands.md?raw";
+import configMd from "./content/config.md?raw";
+import sessionsMd from "./content/sessions.md?raw";
 
 export function App() {
   return (
@@ -27,16 +28,17 @@ export function App() {
             <Route index element={<Home />} />
             <Route path="install" element={<Install />} />
             <Route path="quickstart" element={<Doc md={quickstartMd} title="quickstart" />} />
-            <Route path="harness" element={<Doc md={harnessMd} title="harness" />} />
-            <Route path="harness/agents" element={<Doc md={agentsMd} title="agents" />} />
-            <Route path="harness/config" element={<Doc md={configMd} title="config" />} />
-            <Route path="harness/commands" element={<Doc md={commandsMd} title="commands" />} />
-            <Route path="harness/skills" element={<Doc md={skillsMd} title="skills" />} />
-            <Route path="harness/tools" element={<Doc md={toolsMd} title="tools" />} />
-            <Route path="autopilot" element={<Doc md={autopilotMd} title="autopilot" />} />
-            <Route path="headroom" element={<Doc md={headroomMd} title="headroom" />} />
+            <Route path="modes" element={<Doc md={modesMd} title="modes" />} />
+            <Route path="permissions" element={<Doc md={permissionsMd} title="permissions" />} />
+            <Route path="subagents" element={<Doc md={subagentsMd} title="subagents" />} />
+            <Route path="jobs" element={<Doc md={jobsMd} title="jobs" />} />
+            <Route path="skills" element={<Doc md={skillsMd} title="skills" />} />
+            <Route path="mcp" element={<Doc md={mcpMd} title="mcp" />} />
+            <Route path="tools" element={<Doc md={toolsMd} title="tools" />} />
             <Route path="cli" element={<Doc md={cliMd} title="cli" />} />
-            <Route path="assume" element={<Doc md={assumeMd} title="assume" />} />
+            <Route path="commands" element={<Doc md={commandsMd} title="commands" />} />
+            <Route path="config" element={<Doc md={configMd} title="config" />} />
+            <Route path="sessions" element={<Doc md={sessionsMd} title="sessions" />} />
             <Route path="changelog" element={<Changelog />} />
           </Route>
         </Routes>

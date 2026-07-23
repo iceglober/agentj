@@ -1,45 +1,30 @@
 import { useState, useEffect } from "react";
 
-const PACKAGES = [
-  { name: "@glrs-dev/cli", label: "cli" },
-  { name: "@glrs-dev/harness-plugin-opencode", label: "harness" },
-  { name: "@glrs-dev/assume", label: "assume" },
-];
-
-type VersionInfo = { name: string; label: string; version: string | null };
+const PACKAGE = { name: "@glrs-dev/glorious", label: "glorious", tag: "next" };
 
 export function NpmVersions() {
-  const [versions, setVersions] = useState<VersionInfo[]>(
-    PACKAGES.map((p) => ({ ...p, version: null })),
-  );
+  const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    PACKAGES.forEach((pkg, i) => {
-      fetch(`https://registry.npmjs.org/${pkg.name}/latest`)
-        .then((r) => r.json())
-        .then((data) => {
-          setVersions((prev) => {
-            const next = [...prev];
-            next[i] = { ...pkg, version: data.version ?? null };
-            return next;
-          });
-        })
-        .catch(() => {});
-    });
+    // Prerelease ships on the `next` dist-tag; fall back to latest.
+    fetch(`https://registry.npmjs.org/${PACKAGE.name}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const tags = data["dist-tags"] ?? {};
+        setVersion(tags[PACKAGE.tag] ?? tags.latest ?? null);
+      })
+      .catch(() => {});
   }, []);
 
   return (
     <div className="npm-versions">
-      {versions.map((v) => (
-        <a
-          key={v.name}
-          href={`https://www.npmjs.com/package/${v.name}`}
-          className="npm-badge"
-        >
-          <span className="npm-label">{v.label}</span>
-          <span className="npm-version">{v.version ?? "..."}</span>
-        </a>
-      ))}
+      <a
+        href={`https://www.npmjs.com/package/${PACKAGE.name}`}
+        className="npm-badge"
+      >
+        <span className="npm-label">{PACKAGE.label}</span>
+        <span className="npm-version">{version ?? "..."}</span>
+      </a>
     </div>
   );
 }
