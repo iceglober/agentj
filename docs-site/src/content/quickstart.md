@@ -1,82 +1,51 @@
 # Quickstart
 
-After [installing](/install), open any git repo:
+Zero to a working session in two minutes.
 
-```bash
-cd your-project
-opencode
+## Install
+
+```sh
+bun add --global @glrs-dev/glorious@next
 ```
 
-The [harness](/harness) loads automatically. You're talking to the [`prime`](/harness/agents) agent.
+Requires [Bun](https://bun.sh) ≥ 1.2 and git. See [install](/install) for the bootstrap script and platform notes.
 
-## Start a task
+## Set your model key
 
-From a ticket:
+Glorious talks to models through Azure AI Foundry. Store the key once — it lives in your OS keychain, never in a config file:
 
-```
-/fresh ENG-1234
-```
-
-From a description:
-
-```
-/fresh add rate limiting to the upload endpoint
+```sh
+glorious config set --secret agent.llm.providers.azure.apiKey
 ```
 
-Or just ask:
+## Open a session
 
-```
-fix the null pointer in UserService.getProfile
-```
+From inside any git repo:
 
-[`/fresh`](/harness/commands) creates a branch, scopes the work, and starts the [SPEAR](https://www.edge.ceo/p/introducing-spear-the-management) workflow.
-
-## Ship your work
-
-```
-/ship
+```sh
+glorious
 ```
 
-Squashes commits, pushes, opens a PR. See [`/ship`](/harness/commands).
+You land in **plan mode**: the agent can read, search, and fan out research, but it cannot change a single file. Ask it anything:
 
-## Review a PR
+> how does auth work in this codebase?
 
-```
-/review 87
-```
+When you're ready to make changes, press **Tab** to switch to **build mode**, or type **`/build`** to switch and immediately implement what you just discussed. See [modes](/modes).
 
-Read-only adversarial review. Delegates to [`@code-reviewer`](/harness/agents). See [`/review`](/harness/commands).
+## One-shot, no chat
 
-## Deep research
-
-```
-/research how does authentication work in this codebase?
+```sh
+glorious run "add a --json flag to the export command"
+glorious run --plan "where is rate limiting enforced?"   # read-only
 ```
 
-Parallel subagents, synthesized findings with file:line references. See [`/research`](/harness/commands).
+## The safety net
 
-## Run hands-off
+Every file change the agent makes is snapshotted in git behind the scenes. `/undo` and `/redo` step through them without touching your HEAD, index, or branch. Build-mode actions are gated by [permissions](/permissions) you control.
 
-```bash
-glrs loop "implement the auth middleware"
-```
+## Next
 
-Stops on completion, budget limits, or kill switch (`.agent/autopilot-disable`). See [autopilot](/autopilot).
-
-## Check costs
-
-```
-/costs
-```
-
-## All commands
-
-| Command | What it does |
-|---------|-------------|
-| [`/fresh`](/harness/commands) | Branch from ticket or description, start PRIME |
-| [`/ship`](/harness/commands) | Squash, push, open PR |
-| [`/review`](/harness/commands) | Adversarial review (PR#, SHA, branch, or file) |
-| [`/research`](/harness/commands) | Parallel codebase exploration |
-| [`/init-deep`](/harness/commands) | Generate AGENTS.md files |
-| [`/costs`](/harness/commands) | LLM spend totals |
-| [`/dispatches`](/harness/commands) | Subagent dispatch history |
+- [modes](/modes) — the plan/build mental model
+- [cli](/cli) — every command and flag
+- [commands](/commands) — in-session slash commands and keys
+- [config](/config) — models, permissions, tools

@@ -1,62 +1,33 @@
-# Commands
+# Slash commands & keys
 
-7 slash commands available inside OpenCode. Type them in the chat input.
+The same list `/help` prints in-session, generated from the registry so it always matches your version.
 
-## /fresh
+## Slash commands
 
-```
-/fresh ENG-1234
-/fresh add rate limiting to the upload endpoint
-```
+| command | what it does |
+|---|---|
+| `/build` | switch to build mode and implement the plan so far |
+| `/model [primary\|subagents]` | choose a provider and model |
+| `/config get\|set\|delete` | read or update global configuration |
+| `/mcp` | manage and reload MCP servers |
+| `/jobs` | inspect background jobs (`/jobs abort <id>`) |
+| `/undo` · `/redo` | step the agent's file changes through git snapshots |
+| `/cost` | foreground token usage and estimated cost |
+| `/activity` | completed tool activity for this session |
+| `/todos` | show all session todos |
+| `/compact` | compact old conversation and tool history |
+| `/clear` | start a fresh conversation context |
+| `/update [next\|latest]` | update glorious and exit |
+| `/help` · `/quit` | list commands and keys · end the session |
 
-Creates a branch from a ticket reference or description, then starts the [SPEAR workflow](https://www.edge.ceo/p/introducing-spear-the-management) via the `prime` [agent](/harness/agents). If given a ticket ID, fetches context from your issue tracker.
+## Keys
 
-## /ship
+- **Tab** — complete a shown suggestion, or toggle plan/build otherwise
+- **Enter** — send (**Shift+Return** = newline); messages typed mid-turn queue
+- **Esc** — dismiss suggestions / dequeue the newest waiting message / interrupt the turn (the session survives; the model is told it was cut short)
+- **Ctrl+C** — clear input; interrupt on empty input; double-press quits
+- **↑/↓** or **Ctrl+P/N** — pick a suggestion, or browse recent prompts from an empty editor
+- **`& task`** — run as a [background job](/jobs)
+- **`@path`** — attach file contents (images `.png/.jpg/.gif/.webp` are sent as vision); **Ctrl+V** pastes copied files or screenshots
 
-```
-/ship
-```
-
-Squashes commits on the current branch, pushes to the remote, and opens a pull request with a structured description.
-
-## /review
-
-```
-/review 87
-/review feat/auth-middleware
-/review abc1234
-```
-
-Read-only adversarial review. Accepts a PR number, branch name, or commit SHA. Fetches the diff, runs [typecheck and lint](/harness/tools), delegates to the [`code-reviewer`](/harness/agents) agent, and outputs a structured verdict.
-
-## /research
-
-```
-/research how does authentication work in this codebase?
-```
-
-Spawns parallel subagents ([`research-web`](/harness/agents), [`research-local`](/harness/agents), [`research-auto`](/harness/agents)) that search the codebase from different angles, then synthesizes findings with exact `file:line` references.
-
-## /init-deep
-
-```
-/init-deep
-```
-
-Generates hierarchical `AGENTS.md` files for directories in the codebase. Delegates to the [`agents-md-writer`](/harness/agents) agent.
-
-## /costs
-
-```
-/costs
-```
-
-Shows cumulative LLM spend for the current session, broken down by provider and model. Data comes from the [cost-tracker sub-plugin](/harness).
-
-## /dispatches
-
-```
-/dispatches
-```
-
-Shows subagent dispatch history — which agents were called, when, and their tier classification. Data comes from the [dispatch-tracker sub-plugin](/harness).
+Full editor motions (word hop, line bounds, `Shift+Return`) need a modifier-aware terminal protocol (CSI-u — kitty, WezTerm, Ghostty, or mapped keys in iTerm2). Home/End, Ctrl+A/E/U/K, and Esc+B/F/D fallbacks work in any terminal.

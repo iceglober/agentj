@@ -3,12 +3,6 @@ import { Link } from "react-router";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const PACKAGES = [
-  { key: "harness", label: "harness", file: "harness-opencode" },
-  { key: "cli", label: "cli", file: "cli" },
-  { key: "assume", label: "assume", file: "assume" },
-];
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function MdLink({ href, children }: { href?: string; children?: any }) {
   if (href && href.startsWith("/")) {
@@ -19,61 +13,34 @@ function MdLink({ href, children }: { href?: string; children?: any }) {
 
 function cleanChangelog(raw: string): string {
   return raw
-    // Strip the h1 title line (e.g. "# @glrs-dev/harness-plugin-opencode")
+    // Strip the h1 title line (e.g. "# @glrs-dev/glorious")
     .replace(/^#\s+@glrs-dev\/.*\n+/, "")
     // Remove empty version sections (just "## X.Y.Z" with no content before next heading)
     .replace(/^(## \d+\.\d+\.\d+)\n+(## )/gm, "$2");
 }
 
 export function Changelog() {
-  const [active, setActive] = useState("harness");
-  const [changelogs, setChangelogs] = useState<Record<string, string>>({});
+  const [changelog, setChangelog] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "changelog — glrs";
   }, []);
 
   useEffect(() => {
-    if (changelogs[active]) return;
-
-    const pkg = PACKAGES.find((p) => p.key === active);
-    if (!pkg) return;
-
-    fetch(
-      `https://raw.githubusercontent.com/iceglober/glrs/main/packages/${pkg.file}/CHANGELOG.md`,
-    )
+    fetch("https://raw.githubusercontent.com/iceglober/glorious/main/CHANGELOG.md")
       .then((r) => r.text())
-      .then((text) => {
-        setChangelogs((prev) => ({ ...prev, [active]: cleanChangelog(text) }));
-      })
-      .catch(() => {
-        setChangelogs((prev) => ({
-          ...prev,
-          [active]: "Failed to load changelog.",
-        }));
-      });
-  }, [active, changelogs]);
+      .then((text) => setChangelog(cleanChangelog(text).trim() || "No releases yet."))
+      .catch(() => setChangelog("Failed to load changelog."));
+  }, []);
 
   return (
     <main className="site-main doc">
       <h1>Changelog</h1>
 
-      <div className="changelog-tabs">
-        {PACKAGES.map((pkg) => (
-          <button
-            key={pkg.key}
-            className={active === pkg.key ? "active" : ""}
-            onClick={() => setActive(pkg.key)}
-          >
-            {pkg.label}
-          </button>
-        ))}
-      </div>
-
       <div className="changelog-content">
-        {changelogs[active] ? (
+        {changelog ? (
           <Markdown remarkPlugins={[remarkGfm]} components={{ a: MdLink }}>
-            {changelogs[active]}
+            {changelog}
           </Markdown>
         ) : (
           <p>Loading...</p>

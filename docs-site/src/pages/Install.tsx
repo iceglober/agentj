@@ -1,26 +1,11 @@
 import { useEffect } from "react";
-import { Cmd, PkgSwitcher, usePkgManager } from "~/components/PkgManager";
+import { Cmd, PkgSwitcher } from "~/components/PkgManager";
 import { CodeBlock } from "~/components/CodeBlock";
 
-const INSTALL_CMDS: Record<string, string> = {
-  npm: "npm i -g @glrs-dev/cli",
-  pnpm: "pnpm add -g @glrs-dev/cli",
-  bun: "bun add -g @glrs-dev/cli",
-  yarn: "yarn global add @glrs-dev/cli",
-};
-
-function ManualBlock() {
-  const { mgr } = usePkgManager();
-  const cmd = `${INSTALL_CMDS[mgr]}\nglrs harness install\nopencode`;
-  return (
-    <CodeBlock copy={cmd}>
-      <Cmd action="install" pkg="@glrs-dev/cli" />{"\n"}glrs harness install{"\n"}opencode
-    </CodeBlock>
-  );
-}
-
 export function Install() {
-  useEffect(() => { document.title = "install — glrs"; }, []);
+  useEffect(() => {
+    document.title = "install — glrs";
+  }, []);
 
   return (
     <main className="site-main doc">
@@ -32,48 +17,90 @@ export function Install() {
         curl -fsSL https://glrs.dev/install.sh | bash
       </CodeBlock>
 
-      <p>Installs bun, gh, and glrs. Confirms before touching your system.</p>
+      <p>Installs bun and glorious, and offers gh. Confirms before touching your system.</p>
 
       <hr />
 
       <h2>Manual</h2>
 
+      <p>
+        Requires <a href="https://bun.sh">Bun</a> ≥ 1.2 and git on PATH. Glorious ships on the{" "}
+        <code>next</code> prerelease channel:
+      </p>
+
+      <CodeBlock copy="bun add --global @glrs-dev/glorious@next">
+        bun add --global @glrs-dev/glorious@next
+      </CodeBlock>
+
+      <p>Or with another package manager:</p>
+
       <div className="pkg-bar">
         <PkgSwitcher />
       </div>
 
-      <p>Requires <a href="https://bun.sh">Bun</a> ≥ 1.2.0 on PATH.</p>
+      <pre>
+        <code>
+          <Cmd action="install" pkg="@glrs-dev/glorious@next" />
+        </code>
+      </pre>
 
-      <ManualBlock />
+      <h2>First run</h2>
 
-      <h2>Subcommands</h2>
+      <pre>
+        <code>
+          glorious config set --secret agent.llm.providers.azure.apiKey{"\n"}
+          glorious
+        </code>
+      </pre>
+
+      <p>
+        Set your Azure AI Foundry key once (stored in the OS keychain), then open a session in any git
+        repo. See the <a href="/quickstart">quickstart</a>.
+      </p>
+
+      <h2>Binaries</h2>
 
       <table>
         <thead>
-          <tr><th>Command</th><th>What it does</th></tr>
+          <tr>
+            <th>Command</th>
+            <th>What it does</th>
+          </tr>
         </thead>
         <tbody>
-          <tr><td><code>glrs harness</code></td><td>Plugin management (install, configure, uninstall, doctor)</td></tr>
-          <tr><td><code>glrs wt</code></td><td>Worktree management (create, list, switch, delete, cleanup)</td></tr>
-          <tr><td><code>glrs autopilot</code></td><td>Autonomous scope → plan → execute orchestrator</td></tr>
-          <tr><td><code>glrs loop</code></td><td>Raw prompt loop runner</td></tr>
-          <tr><td><code>glrs upgrade</code></td><td>Self-update to latest version</td></tr>
+          <tr>
+            <td>
+              <code>glorious</code>
+            </td>
+            <td>the coding agent — chat session, or `run` one task</td>
+          </tr>
+          <tr>
+            <td>
+              <code>aj</code>
+            </td>
+            <td>short alias for `glorious`</td>
+          </tr>
         </tbody>
       </table>
 
-      <h2>Assume (optional, separate)</h2>
-
-      <pre><code><Cmd action="install" pkg="@glrs-dev/assume" /></code></pre>
-
-      <p>Standalone Rust binary for AWS/GCP SSO.</p>
-
       <h2>Update</h2>
 
-      <pre><code><Cmd action="update" pkg="@glrs-dev/cli" /></code></pre>
+      <pre>
+        <code>glorious update --channel next</code>
+      </pre>
+
+      <p>
+        Installed sessions check for updates on startup and notify you; they never auto-install. See{" "}
+        <a href="/config">config</a> (<code>update.auto</code>, <code>update.channel</code>).
+      </p>
 
       <h2>Uninstall</h2>
 
-      <pre><code>glrs harness uninstall{"\n"}<Cmd action="remove" pkg="@glrs-dev/cli" /></code></pre>
+      <pre>
+        <code>
+          <Cmd action="remove" pkg="@glrs-dev/glorious" />
+        </code>
+      </pre>
     </main>
   );
 }

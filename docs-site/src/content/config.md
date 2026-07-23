@@ -1,76 +1,49 @@
 # Configuration
 
-All config lives in `~/.config/opencode/opencode.json`. Your values always win over plugin defaults.
+Set with `glorious config set <key> <value>`; read with `glorious config get <key>`.
 
-## Model overrides
+## Where it lives
 
-Override by tier or by [agent](/harness/agents):
+- Global: `~/.config/glorious/config.json`
+- Project: `.glorious/config.json`, then `.glorious/config.local.json` (machine-local, keep it gitignored)
 
-```json
-{
-  "harness": {
-    "models": {
-      "deep": ["bedrock/claude-opus-4"],
-      "mid": ["bedrock/claude-sonnet-4"],
-      "fast": ["bedrock/claude-haiku-4"],
-      "prime": ["my-custom-model"]
-    }
-  }
-}
-```
+Project layers override global; explicit CLI input wins over all. Secrets like the Azure key live in the OS keychain, never in these files.
 
-**Precedence:** per-agent > tier > plugin default. Direct `agent.<name>.model` in opencode.json wins over all.
+## Models
 
-## Per-agent overrides
+Glorious routes by **tier**, not a raw model id: you define an ordered ladder once, and modes and subagents point at a rung. Swapping the ladder never touches routing config.
 
-```json
-{
-  "agent": {
-    "prime": { "model": "anthropic/claude-sonnet-4-6" }
-  }
-}
-```
+| key | default | meaning |
+|---|---|---|
+| `agent.llm.model` | `gpt-5.6-luna` | primary model id |
+| `agent.llm.provider` | `azure` | provider (Azure AI Foundry is wired in) |
+| `agent.llm.providers.azure.apiKey` | — | Azure key — keychain only, set with `--secret` |
+| `agent.llm.tiers` | `[]` | ordered model ladder |
+| `agent.llm.modes.plan` | `0` | ladder tier for plan mode (0 = frontier) |
+| `agent.llm.modes.build` | `1` | ladder tier for build mode |
+| `agent.tools.subagents.tier` | — | tier for subagents and planning workers |
+| `agent.tools.subagents.concurrency` | `2` | max concurrent subagents per fan-out |
 
-See the [agents reference](/harness/agents) for the full list of agent names and their default tiers.
+## Permissions
 
-## MCP servers
+The full model is in [permissions](/permissions).
 
-Three enabled by default, two opt-in:
+| key | default | meaning |
+|---|---|---|
+| `permissions.edit` | `allow` | file edits: allow / ask / deny |
+| `permissions.bash.default` | `ask` | unlisted bash commands |
+| `permissions.bash.allow` / `.deny` | `[]` | command prefixes (trailing `*` ok) |
+| `permissions.mcp.default` | `ask` | MCP tool calls |
+| `permissions.web` | `allow` | outbound search and fetch |
 
-| Server | Default | Backend |
-|--------|---------|---------|
-| serena | enabled | AST code intelligence via `uvx` |
-| memory | enabled | Per-repo JSON memory via `npx` |
-| git | enabled | Structured blame/log via `uvx` |
-| playwright | disabled | Browser automation via `npx` |
-| linear | disabled | Linear issue tracker via `npx` |
+## Tools & context
 
-Enable in opencode.json:
-
-```json
-{
-  "mcp": {
-    "playwright": { "enabled": true },
-    "linear": { "enabled": true }
-  }
-}
-```
-
-After enabling playwright:
-
-```bash
-npx playwright install chromium
-```
-
-## Environment variables
-
-| Variable | Effect |
-|----------|--------|
-| `HARNESS_OPENCODE_UPDATE_CHECK=0` | Disable daily npm version check |
-| `HARNESS_OPENCODE_PERM_DEBUG=1` | Write permission snapshots to `~/.local/state/harness-opencode/perm-debug.json` |
-
-## Diagnostics
-
-```bash
-glrs harness doctor
-```
+| key | default | meaning |
+|---|---|---|
+| `agent.tools.edit.mode` | `batch` | edit strategy: exact / batch / hash |
+| `agent.tools.maxOutputChars` | `30000` | cap on tool output to the model (overflow spills to a file) |
+| `agent.context.softLimit` | — | input-token threshold; interactive history compacts at 75% |
+| `agent.context.onLimit` | `warn` | behavior when a request crosses the soft limit |
+| `agent.steps` | `100` | per-turn tool-loop ceiling — runaway guard, not a work budget |
+| `update.auto` | `true` | check for updates on startup (never auto-installs) |
+| `update.channel` | `auto` | persistent release channel: `next` or `latest` |
