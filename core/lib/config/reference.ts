@@ -24,6 +24,11 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
       "Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.",
   },
   {
+    path: "agent.llm.variants",
+    description:
+      "Per-tier model variant (reasoning effort: none/minimal/low/medium/high/xhigh/max), aligned with tiers. An unset tier uses the model profile's default.",
+  },
+  {
     path: "agent.llm.modes.plan",
     description: "Ladder tier plan mode runs on. Defaults to the frontier tier (0).",
   },

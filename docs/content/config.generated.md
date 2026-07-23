@@ -8,6 +8,7 @@ Set with `glorious config set <key> <value>`; read with `glorious config get <ke
 - `agent.llm.provider` (default: `"azure"`) — Model provider. Azure AI Foundry is wired in.
 - `agent.llm.providers.azure.apiKey` (default: unset) — Azure AI Foundry API key, stored only in your OS keychain.
 - `agent.llm.tiers` (default: `[]`) — Ordered model ladder. Modes and subagents route to a tier index instead of a raw model id, so swapping the ladder never touches routing config.
+- `agent.llm.variants` (default: `[]`) — Per-tier model variant (reasoning effort: none/minimal/low/medium/high/xhigh/max), aligned with tiers. An unset tier uses the model profile's default.
 - `agent.llm.modes.plan` (default: `0`) — Ladder tier plan mode runs on. Defaults to the frontier tier (0).
 - `agent.llm.modes.build` (default: `1`) — Ladder tier build mode runs on.
 - `agent.tools.subagents.tier` (default: unset) — Ladder tier subagents and planning workers run on — route fan-out to a cheaper rung.

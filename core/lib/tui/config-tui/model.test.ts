@@ -2,8 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { type ConfigTuiData, createConfigTuiModel, type KeyPress } from "./model";
 
 const DATA: ConfigTuiData = {
-  models: { plan: "gpt-5.6-sol", build: "gpt-5.6-luna" },
+  models: {
+    plan: "gpt-5.6-sol",
+    build: "gpt-5.6-luna",
+    planVariant: "high",
+    buildVariant: "medium",
+  },
   availableModels: ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4-nano"],
+  availableVariants: ["low", "medium", "high"],
   providers: { connected: ["azure"], keySet: true },
   trust: {
     uncaged: false,
@@ -53,15 +59,23 @@ describe("config TUI model", () => {
     ]);
   });
 
-  test("model overlay picks a model with ⏎", () => {
+  test("model overlay picks a model and its variant with ⏎", () => {
     const m = fresh();
-    expect(m.handleKey(k("return"))).toEqual([]); // opens overlay
-    expect(m.view().overlay?.title).toBe("plan model");
-    m.handleKey(k("down"));
+    expect(m.handleKey(k("return"))).toEqual([]); // opens overlay, seeded with the role's variant
+    expect(m.view().overlay?.title).toBe("plan model · variant high");
+    m.handleKey(k("down")); // second model
+    m.handleKey(k("left")); // variant high → medium
+    expect(m.view().overlay?.title).toBe("plan model · variant medium");
     expect(m.handleKey(k("return"))).toEqual([
-      { kind: "setModel", role: "plan", model: "gpt-5.6-luna" },
+      { kind: "setModel", role: "plan", model: "gpt-5.6-luna", variant: "medium" },
     ]);
     expect(m.view().overlay).toBeUndefined();
+  });
+
+  test("Plan/Build rows show the effective variant as a note", () => {
+    const m = fresh();
+    expect(m.view().rows[0]).toMatchObject({ label: "Plan model", note: "high" });
+    expect(m.view().rows[1]).toMatchObject({ label: "Build model", note: "medium" });
   });
 
   test("Trust: uncaged toggles, and rules cycle deny→allow→ask", () => {

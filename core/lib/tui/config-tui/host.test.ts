@@ -94,16 +94,35 @@ describe("config TUI host", () => {
     ]);
   });
 
-  test("setModel compiles named roles into a two-rung tier ladder", async () => {
+  test("setModel writes tiers + parallel variants, keeping the untouched role's override", async () => {
     const { host, writes } = makeHost({
-      cfg: config({ agent: { llm: { tiers: ["a", "b"], modes: { plan: 0, build: 1 } } } }),
+      cfg: config({
+        agent: {
+          llm: { tiers: ["a", "b"], variants: ["high", "low"], modes: { plan: 0, build: 1 } },
+        },
+      }),
     });
-    await host.applyEffect({ kind: "setModel", role: "build", model: "c" }, "global");
+    // Change only the build model + variant; plan's variant override is preserved.
+    await host.applyEffect(
+      { kind: "setModel", role: "build", model: "c", variant: "xhigh" },
+      "global",
+    );
     expect(writes[0]?.mutations).toEqual([
       { type: "set", path: ["agent", "llm", "tiers"], value: ["a", "c"] },
+      { type: "set", path: ["agent", "llm", "variants"], value: ["high", "xhigh"] },
       { type: "set", path: ["agent", "llm", "modes", "plan"], value: 0 },
       { type: "set", path: ["agent", "llm", "modes", "build"], value: 1 },
     ]);
+  });
+
+  test("setModel with no override falls back to the model profile's default variant", async () => {
+    const { host, writes } = makeHost({}); // empty config: no tiers/variants
+    await host.applyEffect({ kind: "setModel", role: "plan", model: "gpt-5.6-sol" }, "project");
+    const variants = writes[0]?.mutations.find(
+      (m) => m.type === "set" && m.path.join(".") === "agent.llm.variants",
+    );
+    // gpt-5.6-sol's profile default is "high"; build falls back to its default too.
+    expect(variants).toMatchObject({ value: ["high", "medium"] });
   });
 
   test("loadData tags each value with the highest writable layer that set it", async () => {

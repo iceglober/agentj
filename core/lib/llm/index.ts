@@ -123,6 +123,15 @@ const runtimeNames = ["ai-sdk"] as const;
 export type RuntimeName = (typeof runtimeNames)[number];
 
 /**
+ * Model variant — for the reasoning-model families this is the reasoning
+ * effort, forwarded as `providerOptions.openai.reasoningEffort`. The set is
+ * what the provider accepts; a model's profile supplies the default.
+ */
+export const MODEL_VARIANTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ModelVariant = (typeof MODEL_VARIANTS)[number];
+export const modelVariantSchema = z.enum(MODEL_VARIANTS);
+
+/**
  * Serializable model selection; the `llm.*` section of the agent config.
  *
  * Auth and provider props are config-first with env fallback: explicit values
@@ -142,6 +151,12 @@ export const llmConfigSchema = z.object({
    * every tier resolves to `model`.
    */
   tiers: z.array(z.string().min(1)).default([]),
+  /**
+   * Per-tier model variant (reasoning effort), aligned index-for-index with
+   * `tiers`. An unset tier falls back to the model profile's default variant,
+   * so this only records deliberate overrides.
+   */
+  variants: z.array(modelVariantSchema).default([]),
   /**
    * Which ladder tier each chat mode runs on. Plan defaults to the frontier
    * tier: planning is the highest-leverage phase of an agentic workstream.
@@ -174,6 +189,14 @@ export const resolveTierModel = (llm: LlmConfig, tier: number): string => {
   const last = llm.tiers.length - 1;
   return last < 0 ? llm.model : (llm.tiers[Math.min(Math.max(tier, 0), last)] as string);
 };
+
+/**
+ * The explicit variant override for a tier, or undefined when none is set (the
+ * caller then uses the model profile's default). Unlike the model ladder this
+ * does not clamp: an unset index means "no override", not "inherit a sibling".
+ */
+export const resolveTierVariant = (llm: LlmConfig, tier: number): ModelVariant | undefined =>
+  llm.variants[Math.max(tier, 0)];
 
 /**
  * Registry keyed by config value (`llm.runtime`); same idiom as editModes. The

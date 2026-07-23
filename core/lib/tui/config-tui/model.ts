@@ -11,9 +11,19 @@ import type { ConfigLayer, WritableConfigLayer } from "../../config";
 
 export interface ConfigTuiData {
   /** Named model roles (compiled to the tier ladder by the host on apply). */
-  models: { plan: string; build: string; planLayer?: ConfigLayer; buildLayer?: ConfigLayer };
+  models: {
+    plan: string;
+    build: string;
+    planLayer?: ConfigLayer;
+    buildLayer?: ConfigLayer;
+    /** Effective variant (reasoning effort) per role — override or profile default. */
+    planVariant: string;
+    buildVariant: string;
+  };
   /** Model ids offered in the picker (from the connected providers). */
   availableModels: string[];
+  /** Variants offered per model (what the model accepts). */
+  availableVariants: string[];
   providers: { connected: string[]; keySet: boolean };
   trust: {
     uncaged: boolean;
@@ -37,7 +47,7 @@ const layerNote = (layer: ConfigLayer | undefined): string | undefined =>
   !layer || layer === "default" || layer === "base" ? undefined : layer;
 
 export type ConfigEffect =
-  | { kind: "setModel"; role: "plan" | "build"; model: string }
+  | { kind: "setModel"; role: "plan" | "build"; model: string; variant?: string }
   | { kind: "setRule"; pattern: string; decision: PermissionDecision }
   | { kind: "removeRule"; pattern: string }
   | { kind: "setUncaged"; on: boolean }
@@ -128,7 +138,7 @@ type ServerForm = {
 };
 
 type Overlay =
-  | { kind: "model"; role: "plan" | "build"; idx: number }
+  | { kind: "model"; role: "plan" | "build"; idx: number; variant: string }
   | { kind: "rule-add"; idx: number; decision: PermissionDecision }
   | ServerForm
   | null;
@@ -173,25 +183,31 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
   };
 
   const modelItems = (): Item[] => {
-    const pick = (role: "plan" | "build"): Item => ({
-      focusable: true,
-      row: {
-        label: role === "plan" ? "Plan model" : "Build model",
-        value: data.models[role],
-        note: layerNote(role === "plan" ? data.models.planLayer : data.models.buildLayer),
-      },
-      hint: `which model ${role === "plan" ? "investigates and drafts the plan" : "writes the code"} · ←→ cycle · ⏎ pick`,
-      onLeft: () => cycleModel(role, -1),
-      onRight: () => cycleModel(role, 1),
-      onEnter: () => {
-        overlay = {
-          kind: "model",
-          role,
-          idx: Math.max(0, data.availableModels.indexOf(data.models[role])),
-        };
-        return null;
-      },
-    });
+    const pick = (role: "plan" | "build"): Item => {
+      const variant = role === "plan" ? data.models.planVariant : data.models.buildVariant;
+      const layer = layerNote(role === "plan" ? data.models.planLayer : data.models.buildLayer);
+      return {
+        focusable: true,
+        row: {
+          label: role === "plan" ? "Plan model" : "Build model",
+          value: data.models[role],
+          // Note carries the effective variant, plus the source layer if pinned.
+          note: layer ? `${variant} · ${layer}` : variant,
+        },
+        hint: `which model ${role === "plan" ? "investigates and drafts the plan" : "writes the code"} · ←→ model · ⏎ model + variant`,
+        onLeft: () => cycleModel(role, -1),
+        onRight: () => cycleModel(role, 1),
+        onEnter: () => {
+          overlay = {
+            kind: "model",
+            role,
+            idx: Math.max(0, data.availableModels.indexOf(data.models[role])),
+            variant,
+          };
+          return null;
+        },
+      };
+    };
     return [pick("plan"), pick("build")];
   };
 
@@ -340,17 +356,23 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     const esc = key.name === "escape";
     if (overlay.kind === "model") {
       const list = data.availableModels;
+      const variants = data.availableVariants;
       if (esc) {
         overlay = null;
         return [];
       }
       if (key.name === "up") overlay.idx = Math.max(0, overlay.idx - 1);
       else if (key.name === "down") overlay.idx = Math.min(list.length - 1, overlay.idx + 1);
-      else if (key.name === "return" || key.name === "kpenter") {
+      else if ((key.name === "left" || key.name === "right") && variants.length) {
+        const dir = key.name === "right" ? 1 : -1;
+        const at = variants.indexOf(overlay.variant);
+        overlay.variant = variants[(at + dir + variants.length) % variants.length];
+      } else if (key.name === "return" || key.name === "kpenter") {
         const model = list[overlay.idx];
         const role = overlay.role;
+        const variant = overlay.variant;
         overlay = null;
-        return model ? [{ kind: "setModel", role, model }] : [];
+        return model ? [{ kind: "setModel", role, model, variant }] : [];
       }
       return [];
     }
@@ -465,14 +487,15 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     if (overlay && overlay.kind === "model") {
       const o = overlay;
       ov = {
-        title: `${o.role} model`,
+        title: `${o.role} model · variant ${o.variant}`,
         items: data.availableModels.map((m, i) => ({
           label: modelShort(m),
           note: m,
           cursor: i === o.idx,
         })),
         keys: [
-          ["↑↓", "move"],
+          ["↑↓", "model"],
+          ["←→", "variant"],
           ["⏎", "select"],
           ["esc", "cancel"],
         ],

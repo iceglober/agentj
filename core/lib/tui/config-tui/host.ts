@@ -6,6 +6,8 @@ import {
   valueAtConfigPath,
   type WritableConfigLayer,
 } from "../../config";
+import { MODEL_VARIANTS, resolveTierVariant } from "../../llm";
+import { defaultModelVariant } from "../../prompt/profiles";
 import type { ConfigEffect, ConfigTuiData } from "./model";
 
 /**
@@ -46,6 +48,11 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
     return { plan: tier(llm.modes.plan), build: tier(llm.modes.build) };
   };
 
+  // Effective variant for a role: the config override for its tier, else the
+  // model profile's default.
+  const roleVariant = (cfg: Config, role: "plan" | "build", model: string): string =>
+    resolveTierVariant(cfg.agent.llm, cfg.agent.llm.modes[role]) ?? defaultModelVariant(model);
+
   const loadData = async (): Promise<ConfigTuiData> => {
     const cfg = await deps.loadConfig();
     const layers = await deps.loadLayers();
@@ -60,8 +67,16 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
     const modelLayer = source(["agent", "llm", "tiers"], ["agent", "llm", "model"]);
     const { plan, build } = roleModels(cfg);
     return {
-      models: { plan, build, planLayer: modelLayer, buildLayer: modelLayer },
+      models: {
+        plan,
+        build,
+        planLayer: modelLayer,
+        buildLayer: modelLayer,
+        planVariant: roleVariant(cfg, "plan", plan),
+        buildVariant: roleVariant(cfg, "build", build),
+      },
       availableModels: Array.from(new Set([...AZURE_MODELS, plan, build])),
+      availableVariants: [...MODEL_VARIANTS],
       providers: { connected: ["azure"], keySet: await deps.hasKey() },
       trust: {
         uncaged: cfg.permissions.uncaged,
@@ -98,15 +113,25 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
     switch (effect.kind) {
       case "setModel": {
         // Named roles compile to a two-rung tier ladder: plan=tier 0, build=tier 1.
-        const { plan, build } = roleModels(await deps.loadConfig());
+        // Variants ride alongside in a parallel array; both are pinned to their
+        // effective value so config always matches what the editor shows.
+        const cfg = await deps.loadConfig();
+        const { plan, build } = roleModels(cfg);
         const nextPlan = effect.role === "plan" ? effect.model : plan;
         const nextBuild = effect.role === "build" ? effect.model : build;
+        const variantFor = (role: "plan" | "build", model: string): string =>
+          effect.role === role && effect.variant ? effect.variant : roleVariant(cfg, role, model);
         await deps.mutate(scope, [
           set(["agent", "llm", "tiers"], [nextPlan, nextBuild]),
+          set(
+            ["agent", "llm", "variants"],
+            [variantFor("plan", nextPlan), variantFor("build", nextBuild)],
+          ),
           set(["agent", "llm", "modes", "plan"], 0),
           set(["agent", "llm", "modes", "build"], 1),
         ]);
-        return `${effect.role} model → ${effect.model}${where}`;
+        const tag = effect.variant ? ` · ${effect.variant}` : "";
+        return `${effect.role} model → ${effect.model}${tag}${where}`;
       }
       case "setRule":
         await deps.mutate(scope, [set(["permissions", "rules", effect.pattern], effect.decision)]);
