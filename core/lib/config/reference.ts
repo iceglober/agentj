@@ -67,6 +67,11 @@ export const CONFIG_DOCS: readonly ConfigDoc[] = [
       "Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.",
   },
   {
+    path: "tui.renderer",
+    description:
+      "Terminal UI: `opentui` (full-screen, default) or `ansi` (live-region). `GLORIOUS_TUI` overrides for one session.",
+  },
+  {
     path: "permissions.uncaged",
     description: "Open season: allow every gated tool call, bypassing the rules. Off by default.",
   },

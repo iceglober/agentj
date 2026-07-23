@@ -18,6 +18,7 @@ Set with `glorious config set <key> <value>`; read with `glorious config get <ke
 - `agent.context.softLimit` (default: unset) — Request input-token threshold: interactive history compacts at 75%, then `onLimit` applies at the threshold. Unset means no ceiling.
 - `agent.context.onLimit` (default: `"warn"`) — Behavior when a request crosses the soft limit: `warn` posts a notice to wrap up or delegate.
 - `agent.steps` (default: `100`) — Per-turn tool-loop ceiling (model round-trips) — runaway protection, not a work budget.
+- `tui.renderer` (default: `"opentui"`) — Terminal UI: `opentui` (full-screen, default) or `ansi` (live-region). `GLORIOUS_TUI` overrides for one session.
 - `permissions.uncaged` (default: `false`) — Open season: allow every gated tool call, bypassing the rules. Off by default.
 - `permissions.rules` (default: `{}`) — Default-deny access control. A map of tool-call patterns to `allow`/`ask`/`deny`; anything unmatched is denied. Patterns: `bash(pnpm *)`, `edit`, `web`, `mcp_linear_get_issue` (or `mcp_linear_*`). deny beats allow beats ask. Set with `glorious config allow|ask|deny <pattern>`.
 

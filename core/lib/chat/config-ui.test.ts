@@ -42,7 +42,7 @@ describe("runConfigUi", () => {
     const { port, applied, prompts } = scriptedPort({ inputs: [null] });
     await runConfigUi(port);
     expect(applied).toEqual([]);
-    expect(labels(prompts[0]!)).toEqual(["agent", "permissions"]);
+    expect(labels(prompts[0]!)).toEqual(["agent", "tui", "permissions"]);
   });
 
   test("navigates nested groups and edits an enum key", async () => {

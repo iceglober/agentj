@@ -14,6 +14,7 @@ import {
 import { metricsConfigSchema } from "../metrics";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
 import { sessionConfigSchema } from "../session";
+import { tuiConfigSchema } from "../tui/config";
 import { updateConfigSchema } from "../update";
 import { projectSetupConfigSchema } from "../workspace";
 
@@ -35,6 +36,7 @@ export const configSchema = z.object({
   project: projectSetupConfigSchema.prefault({}),
   metrics: metricsConfigSchema.prefault({}),
   update: updateConfigSchema.prefault({}),
+  tui: tuiConfigSchema.prefault({}),
 });
 
 export type Config = z.infer<typeof configSchema>;

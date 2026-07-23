@@ -317,6 +317,8 @@ interface ChatComposition {
   modelFor(mode: ChatMode): ModelSelection;
   /** The configured context soft limit (agent.context.softLimit), if any. */
   contextSoftLimit: number | undefined;
+  /** The selected terminal renderer (opentui default, ansi opt-out). */
+  tuiRenderer: "opentui" | "ansi";
   /** The eval $/Mtok map, reused by /cost for terminal pricing. */
   evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
@@ -717,6 +719,7 @@ async function composeChat(
       return { provider: active.provider, model: active.model };
     },
     contextSoftLimit: config.agent.context.softLimit,
+    tuiRenderer: config.tui.renderer,
     evalPrices: config.eval.prices,
     agentFor,
     runBuildJob,
@@ -1335,13 +1338,16 @@ export async function runGloriousChat(
         onQuit: () => quitResolve?.(),
       },
     };
+    // OpenTUI is the default full-screen surface; `tui.renderer: ansi` (or
+    // GLORIOUS_TUI=ansi for a one-off) opts into the live-region renderer.
+    const tuiRenderer = process.env.GLORIOUS_TUI ?? composition.tuiRenderer;
     screen =
-      process.env.GLORIOUS_TUI === "opentui"
-        ? await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions })
-        : createChatScreen({
+      tuiRenderer === "ansi"
+        ? createChatScreen({
             liveRegion: createAnsiLiveRegionAdapter({ stdout: processStdout }),
             ...sharedScreenOptions,
-          });
+          })
+        : await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions });
 
     screen.start();
     refreshProgress();
