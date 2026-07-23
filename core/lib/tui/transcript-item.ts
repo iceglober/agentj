@@ -212,7 +212,7 @@ export const toTranscriptItem = (event: ChatEvent): TranscriptItem | null => {
         text: `error: ${event.error}`,
         ...(filtered
           ? {
-              hint: "The provider's content filter rejected this request. It often fires intermittently — retry once; if it keeps happening, start a new session (aj) instead of resuming this one.",
+              hint: "The provider's content filter rejected this request. It often fires intermittently — retry once; if it keeps happening, start a new session (glorious) instead of resuming this one.",
             }
           : {}),
       };

@@ -1,17 +1,17 @@
 # Agent Skills
 
-Skills are reusable, model-activatable playbooks in the [agentskills.io](https://agentskills.io) format. Drop a `SKILL.md` in a directory and the agent can invoke it.
+[agentskills.io](https://agentskills.io) format. A `SKILL.md` in a directory becomes model-activatable and a slash command.
 
-## Where they live
+## Location
 
 - Project: `.glorious/skills/<name>/SKILL.md`
 - Global: `~/.config/glorious/skills/<name>/SKILL.md`
 
-Project skills win name collisions.
+Project wins name collisions.
 
-## How they activate
+## Activation
 
-Each skill's name and description are injected into the system prompt, so the model can read a skill's body and follow it when a task matches — progressive disclosure, not a wall of instructions. Every skill is **also** a slash command: `/<name> <args>` starts a turn with the skill body as the prompt, substituting `$ARGUMENTS`.
+Name and description are injected into the system prompt; the model reads the body when a task matches. `/<name> <args>` runs the body as a turn, substituting `$ARGUMENTS`.
 
 ## Frontmatter
 
@@ -19,12 +19,12 @@ Each skill's name and description are injected into the system prompt, so the mo
 ---
 name: ship
 description: Ship finished work — changeset, PR, and merge.
-user-invocable: true        # false → model-only, no slash command
+user-invocable: true        # false → model-only
 metadata:
-  glorious-mode: build      # switch to build mode on invocation
+  glorious-mode: build      # switch mode on invocation
 ---
 
-Steps the agent should follow…
+Steps the agent follows…
 ```
 
-Set `user-invocable: false` to keep a skill model-only. Malformed skills surface as startup notices without blocking the session.
+Malformed skills surface as startup notices.

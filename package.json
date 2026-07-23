@@ -26,8 +26,7 @@
     "tag": "next"
   },
   "bin": {
-    "glorious": "bin/glorious",
-    "aj": "bin/aj"
+    "glorious": "bin/glorious"
   },
   "packageManager": "bun@1.3.14",
   "scripts": {
