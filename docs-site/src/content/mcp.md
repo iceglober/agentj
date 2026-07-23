@@ -43,7 +43,7 @@ Patterns are exact names with an optional trailing `*`. `tools.plan` defaults to
 
 - Prompts appear as `/mcp:<server>:<prompt>`.
 - `/mcp auth <server>` runs OAuth 2.1 (discovery, dynamic client registration, PKCE, localhost callback); tokens live in the OS keychain and refresh automatically. Falls back to a masked header prompt.
-- Calls are gated by `permissions.mcp` under names like `mcp_github_search_code`.
+- Calls are gated by the [permissions](/permissions) ACL under canonical ids like `mcp_github_search_code` (rule `mcp_github_*` covers a whole server).
 - `/mcp` shows status; `/mcp reload [name]` reconnects. Changes apply on the next foreground turn.
 
 ## Inheritance
@@ -51,4 +51,4 @@ Patterns are exact names with an optional trailing `*`. `tools.plan` defaults to
 - HTTP: `inherit: "shared"` — children get a read-only view of the catalog.
 - stdio: `inherit: "isolated"` — each child spawns its own process rooted at its worktree.
 
-Children's calls ride `permissions.mcp`. Non-interactive contexts reuse saved tokens and never open a browser.
+Children's calls ride the same permission ACL. Non-interactive contexts reuse saved tokens and never open a browser.

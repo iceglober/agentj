@@ -6,7 +6,7 @@ Read and search are always available; mutating tools are build-mode only and [pe
 
 - **read / search** — ripgrep-powered.
 - **edit** — strategy set by `agent.tools.edit.mode`: `exact`, `batch` (default), `hash`.
-- **bash** — gated by `permissions.bash`.
+- **bash** — gated by the [permissions](/permissions) ACL (e.g. `bash(pnpm *)`).
 
 ## Web
 

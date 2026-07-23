@@ -22,6 +22,15 @@ See [config](/config).
 - `set <key> [value]` — `--secret` reads masked input into the keychain
 - `get <key>`
 - `delete <key>` — `--secret` removes a keychain secret
+- `add|remove <key> <value>` — for array values
+
+## `glorious config <allow|ask|deny|unrule|uncaged>`
+
+Permission [ACL](/permissions) — idempotent.
+
+- `allow|ask|deny <pattern>` — set a rule (`bash(pnpm *)`, `edit`, `web`, `mcp_linear_get_issue`)
+- `unrule <pattern>` — remove a rule
+- `uncaged on|off` — open everything, or restore default-deny
 
 ## `glorious update`
 

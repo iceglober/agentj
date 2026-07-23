@@ -29,15 +29,20 @@ Modes and subagents route to a ladder tier, not a raw model id.
 
 ## Permissions
 
-See [permissions](/permissions).
+A default-deny access-control list — see [permissions](/permissions).
 
 | key | default | meaning |
 |---|---|---|
-| `permissions.edit` | `allow` | file edits: allow / ask / deny |
-| `permissions.bash.default` | `ask` | unlisted bash commands |
-| `permissions.bash.allow` / `.deny` | `[]` | command prefixes (trailing `*` ok) |
-| `permissions.mcp.default` | `ask` | MCP tool calls |
-| `permissions.web` | `allow` | outbound search and fetch |
+| `permissions.uncaged` | `false` | allow every gated tool call (open season) |
+| `permissions.rules` | `{}` | map of tool-call patterns → `allow`/`ask`/`deny`; unmatched → deny |
+
+Edit rules with the idempotent verbs rather than by hand:
+
+```sh
+glorious config allow "bash(pnpm *)"
+glorious config deny  "bash(rm -rf *)"
+glorious config uncaged on
+```
 
 ## Tools & context
 
