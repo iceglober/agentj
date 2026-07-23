@@ -179,6 +179,48 @@ const createConfigListMutationCommand = (
     handler: ({ key, value }) => handlers[operation]({ key, value }),
   });
 
+const createConfigRuleCommand = (handlers: ConfigCliHandlers, decision: "allow" | "ask" | "deny") =>
+  command({
+    name: `glorious config ${decision}`,
+    description: `Set a permission rule to ${decision} (default-deny access control).`,
+    args: {
+      pattern: positional({
+        type: string,
+        displayName: "pattern",
+        description: "Tool-call pattern: bash(pnpm *), edit, web, or mcp_<server>_<tool>.",
+      }),
+    },
+    handler: ({ pattern }) => handlers.rule({ pattern, decision }),
+  });
+
+const createConfigUnruleCommand = (handlers: ConfigCliHandlers) =>
+  command({
+    name: "glorious config unrule",
+    description: "Remove a permission rule.",
+    args: {
+      pattern: positional({
+        type: string,
+        displayName: "pattern",
+        description: "The rule pattern to remove.",
+      }),
+    },
+    handler: ({ pattern }) => handlers.unrule({ pattern }),
+  });
+
+const createConfigUncagedCommand = (handlers: ConfigCliHandlers) =>
+  command({
+    name: "glorious config uncaged",
+    description: "Allow every gated tool call, or restore default-deny.",
+    args: {
+      state: positional({
+        type: string,
+        displayName: "on|off",
+        description: "`on` opens every gated call; `off` restores the rules.",
+      }),
+    },
+    handler: ({ state }) => handlers.uncaged({ on: state === "on" }),
+  });
+
 /** One argument or flag of a CLI command, as shown in `--help`. */
 export interface CliArgDoc {
   usage: string;
@@ -242,6 +284,11 @@ export function describeCli(): CliCommandDoc[] {
     createConfigSetCommand(handlers),
     createConfigGetCommand(handlers),
     createConfigDeleteCommand(handlers),
+    createConfigRuleCommand(handlers, "allow"),
+    createConfigRuleCommand(handlers, "ask"),
+    createConfigRuleCommand(handlers, "deny"),
+    createConfigUnruleCommand(handlers),
+    createConfigUncagedCommand(handlers),
   ].map((command) => describeCommand(command as unknown as Introspectable));
 }
 
@@ -262,9 +309,20 @@ const writeResult = (
   return exitCode;
 };
 
+const CONFIG_ROUTES = [
+  "set",
+  "get",
+  "add",
+  "remove",
+  "delete",
+  "allow",
+  "ask",
+  "deny",
+  "unrule",
+  "uncaged",
+];
 const isConfigRoute = (argv: string[]): boolean =>
-  (argv[0] === "config" && argv[1] === "set") ||
-  (argv[0] === "config" && ["get", "add", "remove", "delete"].includes(argv[1] ?? ""));
+  argv[0] === "config" && CONFIG_ROUTES.includes(argv[1] ?? "");
 
 const isEvalRoute = (argv: string[]): boolean => argv[0] === "eval";
 
@@ -299,14 +357,21 @@ const dispatchConfig = async (
     return EXIT_FAILURE;
   }
 
+  const route = argv[1];
   const commandForRoute =
-    argv[1] === "set"
+    route === "set"
       ? createConfigSetCommand(handlers)
-      : argv[1] === "delete"
+      : route === "delete"
         ? createConfigDeleteCommand(handlers)
-        : argv[1] === "get"
+        : route === "get"
           ? createConfigGetCommand(handlers)
-          : createConfigListMutationCommand(handlers, argv[1] as "add" | "remove");
+          : route === "allow" || route === "ask" || route === "deny"
+            ? createConfigRuleCommand(handlers, route)
+            : route === "unrule"
+              ? createConfigUnruleCommand(handlers)
+              : route === "uncaged"
+                ? createConfigUncagedCommand(handlers)
+                : createConfigListMutationCommand(handlers, route as "add" | "remove");
   const result = await runSafely(commandForRoute, argv.slice(2));
   if (result._tag === "error") {
     return writeResult(result, writers) ?? EXIT_FAILURE;

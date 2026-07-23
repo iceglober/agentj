@@ -1,4 +1,5 @@
 import type z from "zod";
+import { parseRulePattern } from "./agent/permissions";
 import {
   type ConfigObject,
   configSchema,
@@ -56,6 +57,19 @@ export interface ConfigDeleteInput {
   secret?: boolean;
 }
 
+export interface ConfigRuleInput {
+  pattern: string;
+  decision: "allow" | "ask" | "deny";
+}
+
+export interface ConfigUnruleInput {
+  pattern: string;
+}
+
+export interface ConfigUncagedInput {
+  on: boolean;
+}
+
 export type ConfigCliErrorCode =
   | "unknown_key"
   | "secret_flag_required"
@@ -65,6 +79,7 @@ export type ConfigCliErrorCode =
   | "invalid_model"
   | "invalid_value"
   | "operation_not_supported"
+  | "invalid_pattern"
   | "prompt_cancelled"
   | "config_write_failed"
   | "config_read_failed"
@@ -92,6 +107,12 @@ export interface ConfigCliHandlers {
   add(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   remove(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   delete(input: ConfigDeleteInput): Promise<ConfigCliResult>;
+  /** Idempotently set a permission rule (`config allow|ask|deny <pattern>`). */
+  rule(input: ConfigRuleInput): Promise<ConfigCliResult>;
+  /** Remove a permission rule (`config unrule <pattern>`). */
+  unrule(input: ConfigUnruleInput): Promise<ConfigCliResult>;
+  /** Toggle the uncaged escape hatch (`config uncaged on|off`). */
+  uncaged(input: ConfigUncagedInput): Promise<ConfigCliResult>;
 }
 
 type InternalSchema = z.ZodType & {
@@ -119,6 +140,8 @@ const errorCopy: Record<ConfigCliErrorCode, string> = {
   invalid_model: "llm.model must use provider/model format.\n",
   invalid_value: "Configuration value does not match the key's schema.\n",
   operation_not_supported: "This operation is not supported for the configuration key.\n",
+  invalid_pattern:
+    "Not a recognized tool-call pattern. Use bash(git *), edit, web, or mcp_<server>_<tool>.\n",
   prompt_cancelled: "Secret entry cancelled.\n",
   config_write_failed: "Unable to update global configuration.\n",
   config_read_failed: "Unable to read global configuration.\n",
@@ -283,6 +306,26 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
     }
   };
 
+  /** Like `write`, but with a caller-supplied confirmation message. */
+  const commit = async (
+    key: string,
+    mutations: readonly GlobalConfigMutation[],
+    message: string,
+  ): Promise<ConfigCliResult> => {
+    try {
+      const changed = await mutateConfig(mutations, dependencies.config);
+      dependencies.writers.stdout.write(`${message}\n`);
+      return { ok: true, key, storage: "global_config", changed };
+    } catch {
+      return writeError(dependencies.writers, "config_write_failed", key);
+    }
+  };
+
+  /** A rule record key is not a dotted path; permissions.rules.<pattern> writes
+   *  the pattern literally as the record key. */
+  const rulePath = (pattern: string): ValidatedConfigPath =>
+    ["permissions", "rules", pattern] as unknown as ValidatedConfigPath;
+
   const readEffectiveConfig = async (): Promise<ConfigObject | null> => {
     try {
       return configSchema.parse(
@@ -444,6 +487,41 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       } catch {
         return writeError(dependencies.writers, "config_write_failed", input.key);
       }
+    },
+
+    async rule(input) {
+      if (!parseRulePattern(input.pattern)) {
+        return writeError(dependencies.writers, "invalid_pattern", input.pattern);
+      }
+      return commit(
+        input.pattern,
+        [{ type: "set", path: rulePath(input.pattern), value: input.decision }],
+        `${input.decision}  ${input.pattern}`,
+      );
+    },
+
+    async unrule(input) {
+      return commit(
+        input.pattern,
+        [{ type: "delete", path: rulePath(input.pattern) }],
+        `removed  ${input.pattern}`,
+      );
+    },
+
+    async uncaged(input) {
+      return commit(
+        "permissions.uncaged",
+        [
+          {
+            type: "set",
+            path: ["permissions", "uncaged"] as unknown as ValidatedConfigPath,
+            value: input.on,
+          },
+        ],
+        input.on
+          ? "uncaged: ON — every gated tool call is allowed"
+          : "uncaged: off — default-deny rules apply",
+      );
     },
   };
 }

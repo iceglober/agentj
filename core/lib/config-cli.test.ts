@@ -458,3 +458,60 @@ describe("createConfigCliHandlers", () => {
     }
   });
 });
+
+describe("permission rule verbs", () => {
+  const setup = () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const { stdout, writers } = createWriters();
+    const handlers = createConfigCliHandlers({
+      ...createDependencies(config, fake.store, undefined, writers),
+      readConfig: async () => ({}),
+    });
+    return { config, stdout, handlers };
+  };
+
+  test("allow/ask/deny write the pattern as a rules record key (idempotent set)", async () => {
+    const { config, handlers, stdout } = setup();
+    await expect(
+      handlers.rule({ pattern: "bash(pnpm *)", decision: "allow" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      handlers.rule({ pattern: "mcp_linear_get_issue", decision: "ask" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(config.calls).toEqual([
+      [{ type: "set", path: ["permissions", "rules", "bash(pnpm *)"], value: "allow" }],
+      [{ type: "set", path: ["permissions", "rules", "mcp_linear_get_issue"], value: "ask" }],
+    ]);
+    expect(stdout.text()).toContain("allow  bash(pnpm *)");
+  });
+
+  test("rejects a pattern that is not a tool-call form", async () => {
+    const { config, handlers } = setup();
+    await expect(
+      handlers.rule({ pattern: "not a tool", decision: "allow" }),
+    ).resolves.toMatchObject({ ok: false, code: "invalid_pattern" });
+    expect(config.calls).toEqual([]);
+  });
+
+  test("unrule deletes the rule key", async () => {
+    const { config, handlers } = setup();
+    await expect(handlers.unrule({ pattern: "bash(rm -rf *)" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(config.calls).toEqual([
+      [{ type: "delete", path: ["permissions", "rules", "bash(rm -rf *)"] }],
+    ]);
+  });
+
+  test("uncaged toggles the boolean and reports state", async () => {
+    const { config, handlers, stdout } = setup();
+    await expect(handlers.uncaged({ on: true })).resolves.toMatchObject({ ok: true });
+    await expect(handlers.uncaged({ on: false })).resolves.toMatchObject({ ok: true });
+    expect(config.calls).toEqual([
+      [{ type: "set", path: ["permissions", "uncaged"], value: true }],
+      [{ type: "set", path: ["permissions", "uncaged"], value: false }],
+    ]);
+    expect(stdout.text()).toContain("uncaged: ON");
+  });
+});

@@ -46,4 +46,34 @@ Delete an Glorious configuration value.
 - `<key>` — Public configuration key to delete.
 - `--secret` — Delete a secret stored in the keychain.
 
+### `glorious config allow <pattern>`
+
+Set a permission rule to allow (default-deny access control).
+
+- `<pattern>` — Tool-call pattern: bash(pnpm *), edit, web, or mcp_<server>_<tool>.
+
+### `glorious config ask <pattern>`
+
+Set a permission rule to ask (default-deny access control).
+
+- `<pattern>` — Tool-call pattern: bash(pnpm *), edit, web, or mcp_<server>_<tool>.
+
+### `glorious config deny <pattern>`
+
+Set a permission rule to deny (default-deny access control).
+
+- `<pattern>` — Tool-call pattern: bash(pnpm *), edit, web, or mcp_<server>_<tool>.
+
+### `glorious config unrule <pattern>`
+
+Remove a permission rule.
+
+- `<pattern>` — The rule pattern to remove.
+
+### `glorious config uncaged <on|off>`
+
+Allow every gated tool call, or restore default-deny.
+
+- `<on|off>` — `on` opens every gated call; `off` restores the rules.
+
 :::
