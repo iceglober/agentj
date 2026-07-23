@@ -1,0 +1,25 @@
+{
+  "name": "@glrs-dev/infra-gcp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pulumi infrastructure for glrs.dev: GCS bucket, Cloud CDN, managed TLS, GH OIDC WIF. Not published.",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "preview": "pulumi preview",
+    "up": "pulumi up",
+    "destroy": "pulumi destroy",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no linter configured yet'",
+    "test": "echo 'no tests'",
+    "build": "echo 'infra is not built; executed via pulumi'"
+  },
+  "dependencies": {
+    "@pulumi/gcp": "^8.0.0",
+    "@pulumi/pulumi": "^3.143.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,21 @@
+name: glrs-infra
+runtime: nodejs
+description: >
+  Infrastructure for the glrs ecosystem.
+  Resources: GCS bucket for glrs.dev docs, Cloud CDN via HTTPS load balancer
+  with a Google-managed TLS cert, and a Workload Identity Federation pool
+  that lets GitHub Actions (iceglober/glrs) impersonate a service account
+  for deploys.
+
+  State is stored in a GCS bucket (see `backend.url` — set per-stack in
+  Pulumi.<stack>.yaml). Not Pulumi Cloud.
+
+backend:
+  url: gs://glrs-pulumi-state
+
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: glrs-infra
+
+main: index.ts

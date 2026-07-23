@@ -1,0 +1,83 @@
+name: Deploy docs to glrs.dev
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs-site/**"
+      - "docs/**"
+      - ".github/workflows/docs-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + auth check only; skip rsync + cache invalidation"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write  # for GCP workload identity federation
+
+jobs:
+  deploy:
+    name: Build + deploy docs
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install docs deps
+        working-directory: docs-site
+        run: bun install --frozen-lockfile
+
+      - name: Build docs
+        working-directory: docs-site
+        run: bun run build
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Verify auth
+        run: |
+          gcloud auth list
+          gcloud config list
+
+      - name: Rsync to GCS bucket
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == false }}
+        run: |
+          gsutil -m rsync -d -r docs-site/dist/ gs://${{ vars.GCP_DOCS_BUCKET }}/
+
+      # SPA routing: bucket 404 page must be index.html so React Router
+      # handles all paths. This is a one-time bucket setting — run manually:
+      #   gsutil web set -m index.html -e index.html gs://<bucket>
+      # The deploy SA doesn't have storage.buckets.update permission.
+
+      - name: Invalidate CDN cache
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run == false }}
+        run: |
+          gcloud compute url-maps invalidate-cdn-cache \
+            ${{ vars.GCP_URL_MAP }} \
+            --path "/*" \
+            --project ${{ vars.GCP_PROJECT_ID }} \
+            --async
+
+      - name: Dry-run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
+        run: |
+          echo "DRY RUN: would rsync docs-site/dist/ → gs://${{ vars.GCP_DOCS_BUCKET }}/"
+          echo "DRY RUN: would invalidate cache on url-map ${{ vars.GCP_URL_MAP }}"
+          ls -la docs-site/dist/ | head -20

@@ -1,0 +1,29 @@
+{
+  "name": "@glrs-dev/docs-site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Docs site for the @glrs-dev ecosystem. Published to https://glrs.dev.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'no tests yet'",
+    "lint": "echo 'no linter configured yet'"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router": "^7.6.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
