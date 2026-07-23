@@ -29,6 +29,11 @@ function makeHost(opts: { cfg?: Config; layers?: Record<ConfigLayer, ConfigObjec
       return true;
     },
     hasKey: async () => true,
+    layerPaths: {
+      global: "~/.config/glorious/config.json",
+      project: ".glorious/config.json",
+      local: ".glorious/config.local.json",
+    },
   });
   return { host, writes };
 }

@@ -57,7 +57,14 @@ import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { bootstrapInteractiveSession } from "./lib/chat/session-bootstrap";
 import { createSessionTodos } from "./lib/chat/todos";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runGloriousCli } from "./lib/cli";
-import { loadChatConfig, loadConfig, mutateConfigLayer, readConfigLayers } from "./lib/config";
+import {
+  loadChatConfig,
+  loadConfig,
+  mutateConfigLayer,
+  readConfigLayers,
+  resolveConfigLayerPath,
+  type WritableConfigLayer,
+} from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import { providerNames, type RunStep } from "./lib/llm";
@@ -197,12 +204,27 @@ function createProductionConfigUi(): () => Promise<number> {
       baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
       projectRoot: process.cwd(),
     };
+    const home = process.env.HOME ?? "";
+    const cwd = process.cwd();
+    // Shorten for display: home → ~, and project files relative to the cwd.
+    const displayPath = (layer: WritableConfigLayer): string => {
+      const path = resolveConfigLayerPath(layer, configOptions) ?? "";
+      if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+      if (path.startsWith(`${cwd}/`)) return path.slice(cwd.length + 1);
+      return path;
+    };
+    const layerPaths = {
+      global: displayPath("global"),
+      project: displayPath("project"),
+      local: displayPath("local"),
+    };
     const host = createConfigTuiHost({
       loadConfig: () => loadConfig(undefined, configOptions),
       loadLayers: () => readConfigLayers(configOptions),
       mutate: (layer, mutations) => mutateConfigLayer(layer, mutations, configOptions),
       hasKey: async () =>
         Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
+      layerPaths,
     });
     try {
       await runConfigTuiScreen({ loadData: host.loadData, applyEffect: host.applyEffect });

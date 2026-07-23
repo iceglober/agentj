@@ -27,6 +27,8 @@ export interface ConfigTuiHostDeps {
   ) => Promise<boolean>;
   /** Whether the Azure API key is present in the keychain. */
   hasKey: () => Promise<boolean>;
+  /** Display path of each writable layer's file (static for the session). */
+  layerPaths: Record<WritableConfigLayer, string>;
 }
 
 /** Models offered in the picker for the (only wired) Azure provider. */
@@ -74,6 +76,7 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
         name,
         transport: server.transport,
       })),
+      layerPaths: deps.layerPaths,
     };
   };
 

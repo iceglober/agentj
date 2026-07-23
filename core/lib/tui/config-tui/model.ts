@@ -21,6 +21,8 @@ export interface ConfigTuiData {
     rules: Array<{ pattern: string; decision: PermissionDecision; layer?: ConfigLayer }>;
   };
   mcp: Array<{ name: string; transport: string }>;
+  /** Display path of each writable layer's file (shown next to the scope). */
+  layerPaths: Record<WritableConfigLayer, string>;
 }
 
 /** Writable layers the editor can target, in cycle order, with short labels. */
@@ -77,9 +79,10 @@ export interface ConfigView {
   keys: Array<[string, string]>;
   overlay?: ConfigOverlayView;
   toast?: string;
-  /** Layer edits write to, and its human label — shown in the top bar. */
+  /** Layer edits write to, its human label, and the file it lands in. */
   scope: WritableConfigLayer;
   scopeLabel: string;
+  scopePath: string;
 }
 
 export interface KeyPress {
@@ -537,6 +540,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       toast: toastText,
       scope,
       scopeLabel: SCOPE_LABELS[scope],
+      scopePath: data.layerPaths[scope],
     };
   };
 

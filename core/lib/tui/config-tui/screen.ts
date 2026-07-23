@@ -214,12 +214,14 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     const v = model.view();
     const title = ` ${v.title}`;
     const scope = `writing to · ${v.scopeLabel}`;
-    const titlePad = Math.max(2, contentWidth() - title.length - scope.length);
+    const path = `  ${v.scopePath}`;
+    const titlePad = Math.max(2, contentWidth() - title.length - scope.length - path.length);
     titleText.content = styled.toStyledText([
       [
         { text: title, bold: true },
         { text: " ".repeat(titlePad) },
         { text: scope, tone: "accent" },
+        { text: path, tone: "muted" },
       ],
     ]);
     ruleText.content = styled.toStyledText([hr()]);

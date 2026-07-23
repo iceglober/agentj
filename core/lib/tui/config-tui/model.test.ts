@@ -13,6 +13,11 @@ const DATA: ConfigTuiData = {
     ],
   },
   mcp: [{ name: "github", transport: "stdio" }],
+  layerPaths: {
+    global: "~/.config/glorious/config.json",
+    project: ".glorious/config.json",
+    local: ".glorious/config.local.json",
+  },
 };
 
 const k = (name: string, extra: Partial<KeyPress> = {}): KeyPress => ({ name, ...extra });
@@ -137,18 +142,21 @@ describe("config TUI model", () => {
     expect(fresh().handleKey(k("c", { ctrl: true }))).toEqual([{ kind: "quit" }]);
   });
 
-  test("s cycles the write scope global→project→local→global", () => {
+  test("s cycles the write scope global→project→local→global, path follows", () => {
     const m = fresh();
-    expect(m.scope()).toBe("global");
-    expect(m.view().scopeLabel).toBe("you");
+    expect(m.view()).toMatchObject({
+      scopeLabel: "you",
+      scopePath: "~/.config/glorious/config.json",
+    });
     m.handleKey(k("s"));
     expect(m.scope()).toBe("project");
     expect(m.view()).toMatchObject({
       scopeLabel: "this project",
+      scopePath: ".glorious/config.json",
       toast: "writing to this project",
     });
     m.handleKey(k("s"));
-    expect(m.scope()).toBe("local");
+    expect(m.view()).toMatchObject({ scope: "local", scopePath: ".glorious/config.local.json" });
     m.handleKey(k("s"));
     expect(m.scope()).toBe("global");
   });
