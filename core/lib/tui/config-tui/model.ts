@@ -78,6 +78,9 @@ export interface ConfigOverlayView {
   title: string;
   items: Array<{ label: string; note?: string; cursor: boolean }>;
   input?: { prompt: string; value: string; masked?: boolean };
+  /** A ←→-cycled value shown by the title (e.g. the model variant), with the
+   *  value highlighted as the anchor for that control. */
+  control?: { label: string; value: string };
   keys: Array<[string, string]>;
 }
 
@@ -478,7 +481,8 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     if (overlay && overlay.kind === "model") {
       const o = overlay;
       ov = {
-        title: `${o.role} model · variant ${o.variant}`,
+        title: `${o.role} model`,
+        control: { label: "variant", value: o.variant },
         items: data.availableModels.map((m, i) => ({
           label: modelShort(m),
           note: m,
@@ -486,7 +490,6 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
         })),
         keys: [
           ["↑↓", "model"],
-          ["←→", "variant"],
           ["⏎", "select"],
           ["esc", "cancel"],
         ],
@@ -533,14 +536,17 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       };
     }
 
+    // Only advertise keys the focused row actually responds to, so ←→/⏎/x never
+    // show on a row that ignores them.
+    const pair = (k: string, label: string): Array<[string, string]> => [[k, label]];
     const keys: Array<[string, string]> = [
       ["↑↓", "move"],
       ["tab", "section"],
-      ["←→", "change"],
-      ["⏎", "edit"],
-      ["x", "remove"],
+      ...(cur?.onLeft || cur?.onRight ? pair("←→", "change") : []),
+      ...(cur?.onEnter ? pair("⏎", cur.row.action ? "open" : "edit") : []),
+      ...(cur?.onRemove ? pair("x", "remove") : []),
       ["s", "scope"],
-      ...(sec === "mcp" ? ([["r", "reload"]] as Array<[string, string]>) : []),
+      ...(sec === "mcp" ? pair("r", "reload") : []),
       ["q", "quit"],
     ];
 

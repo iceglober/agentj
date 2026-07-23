@@ -184,7 +184,17 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   };
 
   const overlayLines = (o: ConfigOverlayView): UiLine[] => {
-    const lines: UiLine[] = [[{ text: o.title, bold: true, tone: "accent" }], [{ text: "" }]];
+    const lines: UiLine[] = [[{ text: o.title, bold: true, tone: "accent" }]];
+    if (o.control) {
+      // The ←→-cycled value sits by the title, its value highlighted as the
+      // anchor for the ←→ control.
+      lines.push([
+        { text: `${o.control.label}  `, tone: "muted" },
+        { text: "←→ ", tone: "muted" },
+        { text: o.control.value, tone: "warning", bold: true },
+      ]);
+    }
+    lines.push([{ text: "" }]);
     for (const it of o.items) {
       const bg: UiSpan["background"] = it.cursor ? "muted" : undefined;
       const spans: UiSpan[] = [

@@ -56,16 +56,19 @@ describe("config TUI model", () => {
     expect(m.view().overlay).toBeUndefined();
     // Enter is the only way to change the model.
     expect(m.handleKey(k("return"))).toEqual([]);
-    expect(m.view().overlay?.title).toBe("plan model · variant high");
+    expect(m.view().overlay?.title).toBe("plan model");
   });
 
   test("model overlay picks a model and its variant with ⏎", () => {
     const m = fresh();
     expect(m.handleKey(k("return"))).toEqual([]); // opens overlay, seeded with the role's variant
-    expect(m.view().overlay?.title).toBe("plan model · variant high");
+    expect(m.view().overlay).toMatchObject({
+      title: "plan model",
+      control: { label: "variant", value: "high" },
+    });
     m.handleKey(k("down")); // second model
     m.handleKey(k("left")); // variant high → medium
-    expect(m.view().overlay?.title).toBe("plan model · variant medium");
+    expect(m.view().overlay?.control?.value).toBe("medium");
     expect(m.handleKey(k("return"))).toEqual([
       { kind: "setModel", role: "plan", model: "gpt-5.6-luna", variant: "medium" },
     ]);
@@ -172,6 +175,25 @@ describe("config TUI model", () => {
     expect(m.view()).toMatchObject({ scope: "local", scopePath: ".glorious/config.local.json" });
     m.handleKey(k("s"));
     expect(m.scope()).toBe("global");
+  });
+
+  test("the keybar advertises ←→ only where the focused row responds to it", () => {
+    const m = fresh();
+    const keyNames = () => m.view().keys.map(([k]) => k);
+    // Models: Enter opens the picker; ←→ does nothing → not shown.
+    expect(keyNames()).toContain("⏎");
+    expect(keyNames()).not.toContain("←→");
+    // Trust rules cycle their decision with ←→ → shown, plus x to remove.
+    m.handleKey(k("tab"));
+    m.handleKey(k("down")); // onto the first rule ("edit")
+    expect(m.view().rows.find((r) => r.cursor)?.label).toBe("edit");
+    expect(keyNames()).toContain("←→");
+    expect(keyNames()).toContain("x");
+    // MCP server row: only removable → x but no ←→.
+    m.handleKey(k("tab"));
+    m.handleKey(k("tab")); // → MCP, cursor on the github server
+    expect(keyNames()).toContain("x");
+    expect(keyNames()).not.toContain("←→");
   });
 
   test("provenance: a value's source layer shows as a note; base/default do not", () => {
