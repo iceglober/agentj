@@ -167,7 +167,6 @@ describe("config TUI model", () => {
     expect(m.view()).toMatchObject({
       scopeLabel: "Project",
       scopePath: ".glorious/config.json",
-      toast: "scope: Project",
     });
     m.handleKey(k("s"));
     expect(m.view()).toMatchObject({ scope: "local", scopePath: ".glorious/config.local.json" });

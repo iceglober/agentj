@@ -452,8 +452,8 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     }
     if (key.name === "r" && SECTIONS[section] === "mcp") return [{ kind: "reloadMcp" }];
     if (key.name === "s") {
+      // The footer's scope line shows the current scope live, so no toast.
       scope = SCOPES[(SCOPES.indexOf(scope) + 1) % SCOPES.length];
-      toastText = `scope: ${SCOPE_LABELS[scope]}`;
       return [];
     }
 

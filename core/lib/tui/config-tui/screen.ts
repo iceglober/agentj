@@ -65,7 +65,6 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     paddingRight: 1,
   });
   const titleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
-  const sectionText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const ruleText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const gapText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const bodyText = new opentui.TextRenderable(renderer, {
@@ -79,6 +78,9 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     wrapMode: "word",
     width: "100%",
   });
+  // Footer: the write scope, then the target file below it, then the key legend.
+  const scopeText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
+  const pathText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
   const keysText = new opentui.TextRenderable(renderer, { content: "", width: "100%" });
 
   const overlayBox = new opentui.BoxRenderable(renderer, {
@@ -98,11 +100,12 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   overlayBox.visible = false;
 
   root.add(titleText);
-  root.add(sectionText);
   root.add(ruleText);
   root.add(gapText);
   root.add(bodyText);
   root.add(hintText);
+  root.add(scopeText);
+  root.add(pathText);
   root.add(keysText);
   root.add(overlayBox);
   renderer.root.add(root);
@@ -115,15 +118,8 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   const hr = (): UiLine => [{ text: "─".repeat(contentWidth()), tone: "muted" }];
 
   // ---- view → styled lines ----
-  // A header row: a bold left label and a right-aligned detail, filling width.
-  const headerLine = (left: UiSpan[], right: UiSpan[]): UiLine => {
-    const width = (spans: UiSpan[]): number => spans.reduce((n, s) => n + s.text.length, 0);
-    const gap = Math.max(2, contentWidth() - width(left) - width(right));
-    return [...left, { text: " ".repeat(gap) }, ...right];
-  };
-
   // Keep the meaningful tail (filename, parent dirs) and drop the head with a
-  // leading ellipsis, so a deep path never wraps the header.
+  // leading ellipsis, so a deep path never wraps its line.
   const truncateStart = (s: string, max: number): string =>
     s.length <= max ? s : `…${s.slice(s.length - max + 1)}`;
 
@@ -211,25 +207,9 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
 
   const render = (): void => {
     const v = model.view();
-    const app = v.title.split(" · ")[0] ?? "glorious config";
     const section = v.sections.find((s) => s.active)?.label ?? "";
-    // Line 1: app name · scope.  Line 2: current section · target file.
-    titleText.content = styled.toStyledText([
-      headerLine(
-        [{ text: ` ${app}`, bold: true }],
-        [
-          { text: "scope: ", tone: "muted" },
-          { text: v.scopeLabel, tone: "accent", bold: true },
-        ],
-      ),
-    ]);
-    const pathRoom = Math.max(12, contentWidth() - section.length - 3);
-    sectionText.content = styled.toStyledText([
-      headerLine(
-        [{ text: ` ${section}`, bold: true }],
-        [{ text: truncateStart(v.scopePath, pathRoom), tone: "muted" }],
-      ),
-    ]);
+    // Header: one line, `glorious / <section>`.
+    titleText.content = styled.toStyledText([[{ text: ` glorious / ${section}`, bold: true }]]);
     ruleText.content = styled.toStyledText([hr()]);
     bodyText.content = styled.toStyledText(bodyLines(v));
     hintText.content = styled.toStyledText([
@@ -238,6 +218,17 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
         : v.hint
           ? [{ text: ` ${v.hint}`, tone: "muted" } as UiSpan]
           : [{ text: "" } as UiSpan],
+    ]);
+    // Footer: scope (green), the target file below it (truncated from the start
+    // so a deep path never wraps), then the key legend.
+    scopeText.content = styled.toStyledText([
+      [
+        { text: " scope: ", tone: "success" },
+        { text: v.scopeLabel, tone: "success", bold: true },
+      ],
+    ]);
+    pathText.content = styled.toStyledText([
+      [{ text: ` ${truncateStart(v.scopePath, Math.max(12, contentWidth() - 2))}`, tone: "muted" }],
     ]);
     keysText.content = styled.toStyledText([[{ text: " " } as UiSpan, ...keyLine(v.keys)]]);
     if (v.overlay) {
