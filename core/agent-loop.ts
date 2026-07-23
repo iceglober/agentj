@@ -57,7 +57,7 @@ import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { bootstrapInteractiveSession } from "./lib/chat/session-bootstrap";
 import { createSessionTodos } from "./lib/chat/todos";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runGloriousCli } from "./lib/cli";
-import { loadChatConfig, loadConfig } from "./lib/config";
+import { loadChatConfig, loadConfig, mutateConfigLayer, readConfigLayers } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import { providerNames, type RunStep } from "./lib/llm";
@@ -193,13 +193,14 @@ function createProductionConfigUi(): () => Promise<number> {
     });
     // The full-screen OpenTUI config surface is the common path; the clack
     // menu below is the fallback when OpenTUI can't run.
+    const configOptions = {
+      baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
+      projectRoot: process.cwd(),
+    };
     const host = createConfigTuiHost({
-      handlers,
-      loadConfig: () =>
-        loadConfig(undefined, {
-          baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
-          projectRoot: process.cwd(),
-        }),
+      loadConfig: () => loadConfig(undefined, configOptions),
+      loadLayers: () => readConfigLayers(configOptions),
+      mutate: (layer, mutations) => mutateConfigLayer(layer, mutations, configOptions),
       hasKey: async () =>
         Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
     });

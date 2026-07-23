@@ -1,18 +1,30 @@
-import type { Config } from "../../config";
-import type { ConfigCliHandlers } from "../../config-cli";
+import {
+  type Config,
+  type ConfigLayer,
+  type ConfigObject,
+  type GlobalConfigMutation,
+  valueAtConfigPath,
+  type WritableConfigLayer,
+} from "../../config";
 import type { ConfigEffect, ConfigTuiData } from "./model";
 
 /**
  * Bridges the pure config-TUI model to the real config: loads a snapshot from
- * the effective merged config and applies each effect through the existing
- * config handlers (schema validation, keychain routing, and the permission
- * rule/uncaged writers all come free). Writes land in the global config, same
- * as every other config surface.
+ * the effective merged config (with per-value provenance from the raw layers)
+ * and applies each effect by writing mutations to the layer the editor is
+ * scoped to. Schema validation and the atomic write come from the config core;
+ * the host only shapes effects into mutations and paths into provenance.
  */
 export interface ConfigTuiHostDeps {
-  handlers: ConfigCliHandlers;
   /** The effective merged config (defaults + base + global + project + local). */
   loadConfig: () => Promise<Config>;
+  /** Each writable layer's raw object, for "where is this set" provenance. */
+  loadLayers: () => Promise<Record<ConfigLayer, ConfigObject>>;
+  /** Apply mutations to one writable layer's file (validated + atomic). */
+  mutate: (
+    layer: WritableConfigLayer,
+    mutations: readonly GlobalConfigMutation[],
+  ) => Promise<boolean>;
   /** Whether the Azure API key is present in the keychain. */
   hasKey: () => Promise<boolean>;
 }
@@ -22,7 +34,7 @@ const AZURE_MODELS = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4",
 
 export interface ConfigTuiHost {
   loadData: () => Promise<ConfigTuiData>;
-  applyEffect: (effect: ConfigEffect) => Promise<string | undefined>;
+  applyEffect: (effect: ConfigEffect, scope: WritableConfigLayer) => Promise<string | undefined>;
 }
 
 export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
@@ -34,16 +46,28 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
 
   const loadData = async (): Promise<ConfigTuiData> => {
     const cfg = await deps.loadConfig();
+    const layers = await deps.loadLayers();
+    // The highest writable layer (local > project > global) that sets any of the
+    // given paths; base/default (bundled + schema) get no provenance tag.
+    const source = (...paths: string[][]): ConfigLayer => {
+      for (const layer of ["local", "project", "global"] as const) {
+        if (paths.some((p) => valueAtConfigPath(layers[layer], p) !== undefined)) return layer;
+      }
+      return "base";
+    };
+    const modelLayer = source(["agent", "llm", "tiers"], ["agent", "llm", "model"]);
     const { plan, build } = roleModels(cfg);
     return {
-      models: { plan, build },
+      models: { plan, build, planLayer: modelLayer, buildLayer: modelLayer },
       availableModels: Array.from(new Set([...AZURE_MODELS, plan, build])),
       providers: { connected: ["azure"], keySet: await deps.hasKey() },
       trust: {
         uncaged: cfg.permissions.uncaged,
+        uncagedLayer: source(["permissions", "uncaged"]),
         rules: Object.entries(cfg.permissions.rules).map(([pattern, decision]) => ({
           pattern,
           decision,
+          layer: source(["permissions", "rules", pattern]),
         })),
       },
       mcp: Object.entries(cfg.mcp.servers).map(([name, server]) => ({
@@ -53,41 +77,56 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
     };
   };
 
-  const applyEffect = async (effect: ConfigEffect): Promise<string | undefined> => {
+  const set = (path: string[], value: unknown): GlobalConfigMutation => ({
+    type: "set",
+    path: path as [string, ...string[]],
+    value,
+  });
+  const del = (path: string[]): GlobalConfigMutation => ({
+    type: "delete",
+    path: path as [string, ...string[]],
+  });
+
+  const applyEffect = async (
+    effect: ConfigEffect,
+    scope: WritableConfigLayer,
+  ): Promise<string | undefined> => {
+    const where = ` · ${scope}`;
     switch (effect.kind) {
       case "setModel": {
         // Named roles compile to a two-rung tier ladder: plan=tier 0, build=tier 1.
         const { plan, build } = roleModels(await deps.loadConfig());
         const nextPlan = effect.role === "plan" ? effect.model : plan;
         const nextBuild = effect.role === "build" ? effect.model : build;
-        await deps.handlers.set({
-          key: "agent.llm.tiers",
-          value: JSON.stringify([nextPlan, nextBuild]),
-        });
-        await deps.handlers.set({ key: "agent.llm.modes.plan", value: "0" });
-        await deps.handlers.set({ key: "agent.llm.modes.build", value: "1" });
-        return `${effect.role} model → ${effect.model}`;
+        await deps.mutate(scope, [
+          set(["agent", "llm", "tiers"], [nextPlan, nextBuild]),
+          set(["agent", "llm", "modes", "plan"], 0),
+          set(["agent", "llm", "modes", "build"], 1),
+        ]);
+        return `${effect.role} model → ${effect.model}${where}`;
       }
       case "setRule":
-        await deps.handlers.rule({ pattern: effect.pattern, decision: effect.decision });
-        return `${effect.decision}  ${effect.pattern}`;
+        await deps.mutate(scope, [set(["permissions", "rules", effect.pattern], effect.decision)]);
+        return `${effect.decision}  ${effect.pattern}${where}`;
       case "removeRule":
-        await deps.handlers.unrule({ pattern: effect.pattern });
-        return `removed  ${effect.pattern}`;
+        await deps.mutate(scope, [del(["permissions", "rules", effect.pattern])]);
+        return `removed  ${effect.pattern}${where}`;
       case "setUncaged":
-        await deps.handlers.uncaged({ on: effect.on });
-        return effect.on ? "uncaged: ON — every gated call allowed" : "uncaged: off — rules apply";
+        await deps.mutate(scope, [set(["permissions", "uncaged"], effect.on)]);
+        return effect.on
+          ? `uncaged: ON — every gated call allowed${where}`
+          : `uncaged: off — rules apply${where}`;
       case "addServer": {
         const value =
           effect.transport === "http"
-            ? JSON.stringify({ transport: "http", url: `https://${effect.name}.example.com/mcp` })
-            : JSON.stringify({ transport: "stdio", command: `${effect.name}-mcp-server` });
-        await deps.handlers.set({ key: `mcp.servers.${effect.name}`, value });
-        return `↻ added ${effect.name}`;
+            ? { transport: "http", url: `https://${effect.name}.example.com/mcp` }
+            : { transport: "stdio", command: `${effect.name}-mcp-server` };
+        await deps.mutate(scope, [set(["mcp", "servers", effect.name], value)]);
+        return `↻ added ${effect.name}${where}`;
       }
       case "removeServer":
-        await deps.handlers.delete({ key: `mcp.servers.${effect.name}` });
-        return `↻ removed ${effect.name}`;
+        await deps.mutate(scope, [del(["mcp", "servers", effect.name])]);
+        return `↻ removed ${effect.name}${where}`;
       case "reloadMcp":
         return "↻ reloaded MCP servers";
       case "connectProvider":

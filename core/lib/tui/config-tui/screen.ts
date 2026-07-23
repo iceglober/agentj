@@ -1,4 +1,5 @@
 import type { CliRenderer, KeyEvent } from "@opentui/core";
+import type { WritableConfigLayer } from "../../config";
 import { createOpenTuiStyledText } from "../opentui-styled-text";
 import type { UiLine, UiSpan } from "../styles";
 import {
@@ -20,8 +21,8 @@ import {
 export interface ConfigTuiScreenOptions {
   /** Load a fresh config snapshot (called at start and after every edit). */
   loadData: () => Promise<ConfigTuiData>;
-  /** Persist one effect; return a short confirmation toast. */
-  applyEffect: (effect: ConfigEffect) => Promise<string | undefined>;
+  /** Persist one effect to the scoped layer; return a short confirmation toast. */
+  applyEffect: (effect: ConfigEffect, scope: WritableConfigLayer) => Promise<string | undefined>;
   stdin?: NodeJS.ReadStream;
   stdout?: NodeJS.WriteStream;
   /** Reuse an existing renderer (in-chat `/config`); otherwise one is created + owned. */
@@ -186,7 +187,16 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
   const render = (): void => {
     const v = model.view();
     const width = rightWidth();
-    titleText.content = styled.toStyledText([[{ text: ` ▍ ${v.title}`, bold: true }]]);
+    const title = ` ▍ ${v.title}`;
+    const scope = `writing to ${v.scopeLabel} `;
+    const titlePad = Math.max(2, renderer.terminalWidth - title.length - scope.length - 1);
+    titleText.content = styled.toStyledText([
+      [
+        { text: title, bold: true },
+        { text: " ".repeat(titlePad) },
+        { text: scope, tone: "accent", bold: true },
+      ],
+    ]);
     leftText.content = styled.toStyledText(sectionLines(v));
     rightText.content = styled.toStyledText(v.rows.map((r) => rowLine(r, width)));
     hintText.content = styled.toStyledText([
@@ -231,7 +241,7 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
             finish();
             return;
           }
-          const toast = await options.applyEffect(effect);
+          const toast = await options.applyEffect(effect, model.scope());
           if (toast) model.toast(toast);
         }
         if (effects.length) model.reload(await options.loadData());

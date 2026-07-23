@@ -1,4 +1,5 @@
 import type { PermissionDecision } from "../../agent/permissions";
+import type { ConfigLayer, WritableConfigLayer } from "../../config";
 
 /**
  * Pure state machine for the interactive config TUI. No terminal, no I/O: it
@@ -10,13 +11,28 @@ import type { PermissionDecision } from "../../agent/permissions";
 
 export interface ConfigTuiData {
   /** Named model roles (compiled to the tier ladder by the host on apply). */
-  models: { plan: string; build: string };
+  models: { plan: string; build: string; planLayer?: ConfigLayer; buildLayer?: ConfigLayer };
   /** Model ids offered in the picker (from the connected providers). */
   availableModels: string[];
   providers: { connected: string[]; keySet: boolean };
-  trust: { uncaged: boolean; rules: Array<{ pattern: string; decision: PermissionDecision }> };
+  trust: {
+    uncaged: boolean;
+    uncagedLayer?: ConfigLayer;
+    rules: Array<{ pattern: string; decision: PermissionDecision; layer?: ConfigLayer }>;
+  };
   mcp: Array<{ name: string; transport: string }>;
 }
+
+/** Writable layers the editor can target, in cycle order, with short labels. */
+export const SCOPES: readonly WritableConfigLayer[] = ["global", "project", "local"] as const;
+export const SCOPE_LABELS: Record<WritableConfigLayer, string> = {
+  global: "you",
+  project: "this project",
+  local: "this machine",
+};
+/** Short provenance tag shown against a value, e.g. "· project". */
+const layerNote = (layer: ConfigLayer | undefined): string | undefined =>
+  !layer || layer === "default" || layer === "base" ? undefined : layer;
 
 export type ConfigEffect =
   | { kind: "setModel"; role: "plan" | "build"; model: string }
@@ -59,6 +75,9 @@ export interface ConfigView {
   keys: Array<[string, string]>;
   overlay?: ConfigOverlayView;
   toast?: string;
+  /** Layer edits write to, and its human label — shown in the top bar. */
+  scope: WritableConfigLayer;
+  scopeLabel: string;
 }
 
 export interface KeyPress {
@@ -118,6 +137,8 @@ export interface ConfigTuiModel {
   view(): ConfigView;
   /** Handle a key. Returns effects for the host to apply (then call reload). */
   handleKey(key: KeyPress): ConfigEffect[];
+  /** Layer the next edit writes to (the host routes effects here). */
+  scope(): WritableConfigLayer;
   reload(data: ConfigTuiData): void;
   toast(text: string): void;
 }
@@ -128,6 +149,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
   let row = 0;
   let overlay: Overlay = null;
   let toastText: string | undefined;
+  let scope: WritableConfigLayer = "global";
 
   const modelShort = (id: string): string => id.replace(/^gpt-|^claude-/, "");
 
@@ -142,7 +164,11 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
   const modelItems = (): Item[] => {
     const pick = (role: "plan" | "build"): Item => ({
       focusable: true,
-      row: { label: role === "plan" ? "Plan model" : "Build model", value: data.models[role] },
+      row: {
+        label: role === "plan" ? "Plan model" : "Build model",
+        value: data.models[role],
+        note: layerNote(role === "plan" ? data.models.planLayer : data.models.buildLayer),
+      },
       hint: `which model ${role === "plan" ? "investigates and drafts the plan" : "writes the code"} · ←→ cycle · ⏎ pick`,
       onLeft: () => cycleModel(role, -1),
       onRight: () => cycleModel(role, 1),
@@ -173,6 +199,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
         label: "Uncaged",
         value: data.trust.uncaged ? "ON" : "off",
         tone: data.trust.uncaged ? "danger" : "muted",
+        note: layerNote(data.trust.uncagedLayer),
       },
       hint: "bypass the ACL — allow every gated tool call · ←→/space toggle",
       onLeft: () => ({ kind: "setUncaged", on: !data.trust.uncaged }),
@@ -190,7 +217,12 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     for (const r of data.trust.rules) {
       out.push({
         focusable: true,
-        row: { label: r.pattern, value: r.decision, tone: decisionTone(r.decision) },
+        row: {
+          label: r.pattern,
+          value: r.decision,
+          tone: decisionTone(r.decision),
+          note: layerNote(r.layer),
+        },
         hint: "pattern → decision · deny beats allow · ←→ decision · x remove",
         onLeft: () => cycleRule(r.pattern, -1),
         onRight: () => cycleRule(r.pattern, 1),
@@ -360,6 +392,11 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       return [];
     }
     if (key.name === "r" && SECTIONS[section] === "mcp") return [{ kind: "reloadMcp" }];
+    if (key.name === "s") {
+      scope = SCOPES[(SCOPES.indexOf(scope) + 1) % SCOPES.length];
+      toastText = `writing to ${SCOPE_LABELS[scope]}`;
+      return [];
+    }
 
     const it = items()[row];
     if (!it) return [];
@@ -438,6 +475,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       ["←→", "change"],
       ["⏎", "edit"],
       ["x", "remove"],
+      ["s", "scope"],
       ...(sec === "mcp" ? ([["r", "reload"]] as Array<[string, string]>) : []),
       ["q", "quit"],
     ];
@@ -450,12 +488,15 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       keys,
       overlay: ov,
       toast: toastText,
+      scope,
+      scopeLabel: SCOPE_LABELS[scope],
     };
   };
 
   return {
     view,
     handleKey,
+    scope: () => scope,
     reload(next) {
       data = next;
       clampRow();

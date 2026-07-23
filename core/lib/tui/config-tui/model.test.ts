@@ -8,8 +8,8 @@ const DATA: ConfigTuiData = {
   trust: {
     uncaged: false,
     rules: [
-      { pattern: "edit", decision: "allow" },
-      { pattern: "bash(rm -rf *)", decision: "deny" },
+      { pattern: "edit", decision: "allow", layer: "base" },
+      { pattern: "bash(rm -rf *)", decision: "deny", layer: "project" },
     ],
   },
   mcp: [{ name: "github", transport: "stdio" }],
@@ -104,5 +104,30 @@ describe("config TUI model", () => {
   test("q and ctrl-c quit", () => {
     expect(fresh().handleKey(k("q"))).toEqual([{ kind: "quit" }]);
     expect(fresh().handleKey(k("c", { ctrl: true }))).toEqual([{ kind: "quit" }]);
+  });
+
+  test("s cycles the write scope global→project→local→global", () => {
+    const m = fresh();
+    expect(m.scope()).toBe("global");
+    expect(m.view().scopeLabel).toBe("you");
+    m.handleKey(k("s"));
+    expect(m.scope()).toBe("project");
+    expect(m.view()).toMatchObject({
+      scopeLabel: "this project",
+      toast: "writing to this project",
+    });
+    m.handleKey(k("s"));
+    expect(m.scope()).toBe("local");
+    m.handleKey(k("s"));
+    expect(m.scope()).toBe("global");
+  });
+
+  test("provenance: a value's source layer shows as a note; base/default do not", () => {
+    const m = fresh();
+    m.handleKey(k("tab")); // Trust
+    const rows = m.view().rows;
+    // The base-provided rule carries no tag; the project-set rule shows "project".
+    expect(rows.find((r) => r.label === "edit")?.note).toBeUndefined();
+    expect(rows.find((r) => r.label === "bash(rm -rf *)")?.note).toBe("project");
   });
 });
