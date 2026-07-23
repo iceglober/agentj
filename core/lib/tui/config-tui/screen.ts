@@ -224,9 +224,20 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     resolveDone = resolve;
   });
 
-  const mapKey = (e: KeyEvent): { name: string; ctrl?: boolean; shift?: boolean } => {
+  const mapKey = (
+    e: KeyEvent,
+  ): { name: string; ctrl?: boolean; shift?: boolean; char?: string } => {
     const raw = e.name ?? "";
-    return { name: raw === " " || raw === "space" ? "space" : raw, ctrl: e.ctrl, shift: e.shift };
+    // A single printable byte (letters, digits, symbols, space) drives text
+    // fields; control keys carry only a name.
+    const seq = e.sequence ?? "";
+    const char = !e.ctrl && !e.meta && seq.length === 1 && seq >= " " ? seq : undefined;
+    return {
+      name: raw === " " || raw === "space" ? "space" : raw,
+      ctrl: e.ctrl,
+      shift: e.shift,
+      char,
+    };
   };
 
   let handling = false;

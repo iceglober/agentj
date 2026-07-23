@@ -117,10 +117,13 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
           ? `uncaged: ON — every gated call allowed${where}`
           : `uncaged: off — rules apply${where}`;
       case "addServer": {
+        // http: the target is the URL. stdio: it's a command line — split on
+        // whitespace into the executable and its args (how the client spawns it).
+        const [command, ...args] = effect.target.split(/\s+/).filter(Boolean);
         const value =
           effect.transport === "http"
-            ? { transport: "http", url: `https://${effect.name}.example.com/mcp` }
-            : { transport: "stdio", command: `${effect.name}-mcp-server` };
+            ? { transport: "http", url: effect.target }
+            : { transport: "stdio", command, ...(args.length ? { args } : {}) };
         await deps.mutate(scope, [set(["mcp", "servers", effect.name], value)]);
         return `↻ added ${effect.name}${where}`;
       }

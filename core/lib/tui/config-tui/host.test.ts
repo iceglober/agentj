@@ -58,6 +58,37 @@ describe("config TUI host", () => {
     });
   });
 
+  test("addServer stores real user input: URL for http, command+args for stdio", async () => {
+    const { host, writes } = makeHost({});
+    await host.applyEffect(
+      {
+        kind: "addServer",
+        name: "linear",
+        transport: "http",
+        target: "https://mcp.linear.app/sse",
+      },
+      "project",
+    );
+    await host.applyEffect(
+      { kind: "addServer", name: "sentry", transport: "stdio", target: "npx @sentry/mcp-server" },
+      "project",
+    );
+    expect(writes[0]?.mutations).toEqual([
+      {
+        type: "set",
+        path: ["mcp", "servers", "linear"],
+        value: { transport: "http", url: "https://mcp.linear.app/sse" },
+      },
+    ]);
+    expect(writes[1]?.mutations).toEqual([
+      {
+        type: "set",
+        path: ["mcp", "servers", "sentry"],
+        value: { transport: "stdio", command: "npx", args: ["@sentry/mcp-server"] },
+      },
+    ]);
+  });
+
   test("setModel compiles named roles into a two-rung tier ladder", async () => {
     const { host, writes } = makeHost({
       cfg: config({ agent: { llm: { tiers: ["a", "b"], modes: { plan: 0, build: 1 } } } }),

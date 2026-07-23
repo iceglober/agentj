@@ -41,7 +41,7 @@ export type ConfigEffect =
   | { kind: "setUncaged"; on: boolean }
   | { kind: "connectProvider" } // host prompts for key, then reloads
   | { kind: "disconnectProvider"; id: string }
-  | { kind: "addServer"; name: string; transport: "stdio" | "http" }
+  | { kind: "addServer"; name: string; transport: "stdio" | "http"; target: string }
   | { kind: "removeServer"; name: string }
   | { kind: "reloadMcp" }
   | { kind: "quit" };
@@ -84,6 +84,8 @@ export interface KeyPress {
   name: string;
   ctrl?: boolean;
   shift?: boolean;
+  /** The printable character typed, if any (drives text fields in overlays). */
+  char?: string;
 }
 
 const SECTIONS = ["models", "trust", "providers", "mcp"] as const;
@@ -109,17 +111,21 @@ export const RULE_SUGGESTIONS = [
   "web",
   "mcp_*",
 ];
-const MCP_SERVER_SUGGESTIONS: Array<[string, "stdio" | "http"]> = [
-  ["github", "stdio"],
-  ["linear", "http"],
-  ["sentry", "stdio"],
-  ["postgres", "stdio"],
-];
+/** The add-server form: you type the real name, transport, and command/URL —
+ *  no invented catalog. Fields: 0 = name, 1 = transport, 2 = target. */
+const SERVER_FIELDS = 3;
+type ServerForm = {
+  kind: "server-add";
+  field: number;
+  name: string;
+  transport: "stdio" | "http";
+  target: string;
+};
 
 type Overlay =
   | { kind: "model"; role: "plan" | "build"; idx: number }
   | { kind: "rule-add"; idx: number; decision: PermissionDecision }
-  | { kind: "server-add"; idx: number }
+  | ServerForm
   | null;
 
 /** One focusable/renderable row plus what editing it does. */
@@ -284,7 +290,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       row: { label: "+ add server", action: true, tone: "accent" },
       hint: "add a server — idempotent, hot-reloads instantly · ⏎ open",
       onEnter: () => {
-        overlay = { kind: "server-add", idx: 0 };
+        overlay = { kind: "server-add", field: 0, name: "", transport: "stdio", target: "" };
         return null;
       },
     });
@@ -357,17 +363,37 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       return [];
     }
     if (overlay.kind === "server-add") {
+      const form = overlay;
       if (esc) {
         overlay = null;
         return [];
       }
-      if (key.name === "up") overlay.idx = Math.max(0, overlay.idx - 1);
-      else if (key.name === "down")
-        overlay.idx = Math.min(MCP_SERVER_SUGGESTIONS.length - 1, overlay.idx + 1);
+      if (key.name === "up") form.field = Math.max(0, form.field - 1);
+      else if (key.name === "down" || key.name === "tab")
+        form.field = Math.min(SERVER_FIELDS - 1, form.field + 1);
+      else if (
+        form.field === 1 &&
+        (key.name === "left" || key.name === "right" || key.name === "space")
+      )
+        form.transport = form.transport === "stdio" ? "http" : "stdio";
       else if (key.name === "return" || key.name === "kpenter") {
-        const [name, transport] = MCP_SERVER_SUGGESTIONS[overlay.idx];
+        const name = form.name.trim();
+        const target = form.target.trim();
+        if (!name || !target) return []; // both required; keep the form open
         overlay = null;
-        return [{ kind: "addServer", name, transport }];
+        return [{ kind: "addServer", name, transport: form.transport, target }];
+      } else if (form.field === 0 || form.field === 2) {
+        // Text fields: backspace deletes, space and any printable char append.
+        const edit = (s: string): string =>
+          key.name === "backspace"
+            ? s.slice(0, -1)
+            : key.name === "space"
+              ? `${s} `
+              : key.char
+                ? s + key.char
+                : s;
+        if (form.field === 0) form.name = edit(form.name);
+        else form.target = edit(form.target);
       }
       return [];
     }
@@ -454,15 +480,28 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       };
     } else if (overlay && overlay.kind === "server-add") {
       const o = overlay;
+      // A caret marks the focused text field; empty fields show a hint.
+      const field = (value: string, focused: boolean, hint: string): string =>
+        focused ? `${value}▏` : value || hint;
       ov = {
         title: "add MCP server",
-        items: MCP_SERVER_SUGGESTIONS.map(([n, t], i) => ({
-          label: n,
-          note: t,
-          cursor: i === o.idx,
-        })),
+        items: [
+          { label: "name", note: field(o.name, o.field === 0, "…"), cursor: o.field === 0 },
+          {
+            label: "transport",
+            note: o.transport === "stdio" ? "‹stdio› http" : "stdio ‹http›",
+            cursor: o.field === 1,
+          },
+          {
+            label: o.transport === "http" ? "url" : "command",
+            note: field(o.target, o.field === 2, o.transport === "http" ? "https://…" : "npx …"),
+            cursor: o.field === 2,
+          },
+        ],
         keys: [
-          ["↑↓", "move"],
+          ["↑↓", "field"],
+          ["←→", "transport"],
+          ["type", "edit"],
           ["⏎", "add + reload"],
           ["esc", "cancel"],
         ],

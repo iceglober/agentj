@@ -17,6 +17,10 @@ const DATA: ConfigTuiData = {
 
 const k = (name: string, extra: Partial<KeyPress> = {}): KeyPress => ({ name, ...extra });
 const fresh = () => createConfigTuiModel(structuredClone(DATA));
+/** Feed a string into a text field one printable keypress at a time. */
+const type = (m: ReturnType<typeof fresh>, s: string): void => {
+  for (const ch of s) m.handleKey({ name: ch === " " ? "space" : ch, char: ch });
+};
 
 describe("config TUI model", () => {
   test("opens on Models with the first row under the cursor", () => {
@@ -84,7 +88,7 @@ describe("config TUI model", () => {
     expect(eff[0]).toMatchObject({ kind: "setRule", decision: "ask" });
   });
 
-  test("MCP: x removes a server, r reloads, + add opens the picker", () => {
+  test("MCP: x removes a server, r reloads, + add opens the form", () => {
     const m = fresh();
     m.handleKey(k("tab"));
     m.handleKey(k("tab"));
@@ -96,9 +100,36 @@ describe("config TUI model", () => {
     m.reload({ ...DATA, mcp: [] });
     m.handleKey(k("return"));
     expect(m.view().overlay?.title).toBe("add MCP server");
+  });
+
+  test("MCP: the add-server form captures typed name, transport, and target", () => {
+    const m = fresh();
+    m.handleKey(k("tab"));
+    m.handleKey(k("tab"));
+    m.handleKey(k("tab")); // MCP
+    m.reload({ ...DATA, mcp: [] });
+    m.handleKey(k("return")); // open form on the name field
+
+    // ⏎ with empty fields does nothing — both name and target are required.
+    expect(m.handleKey(k("return"))).toEqual([]);
+
+    type(m, "linear"); // type into the name field
+    m.handleKey(k("down")); // → transport
+    m.handleKey(k("right")); // stdio → http
+    expect(m.view().overlay?.items[1]?.note).toBe("stdio ‹http›");
+    m.handleKey(k("down")); // → target (labeled "url" for http)
+    expect(m.view().overlay?.items[2]?.label).toBe("url");
+    type(m, "https://mcp.linear.app/sse");
+
     expect(m.handleKey(k("return"))).toEqual([
-      { kind: "addServer", name: "github", transport: "stdio" },
+      {
+        kind: "addServer",
+        name: "linear",
+        transport: "http",
+        target: "https://mcp.linear.app/sse",
+      },
     ]);
+    expect(m.view().overlay).toBeUndefined();
   });
 
   test("q and ctrl-c quit", () => {
