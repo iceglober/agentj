@@ -108,6 +108,8 @@ import {
 } from "./lib/tui/chat-event-format";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
+import { createConfigTuiHost } from "./lib/tui/config-tui/host";
+import { runConfigTuiScreen } from "./lib/tui/config-tui/screen";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
@@ -181,13 +183,34 @@ function createProductionConfigUi(): () => Promise<number> {
     }
     const guided = createClackGuidedInput();
     const silent = { write: () => {} };
+    const secretStore = createKeyringSecretStore({});
     const handlers = createConfigCliHandlers({
-      secretStore: createKeyringSecretStore({}),
+      secretStore,
       prompt: {
         askSecret: () => guided.askInput({ label: "Secret value · <Esc> Back", masked: true }),
       },
       writers: { stdout: silent, stderr: silent },
     });
+    // The full-screen OpenTUI config surface is the common path; the clack
+    // menu below is the fallback when OpenTUI can't run.
+    const host = createConfigTuiHost({
+      handlers,
+      loadConfig: () =>
+        loadConfig(undefined, {
+          baseConfigPath: new URL("./glorious.ts", import.meta.url).pathname,
+          projectRoot: process.cwd(),
+        }),
+      hasKey: async () =>
+        Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
+    });
+    try {
+      await runConfigTuiScreen({ loadData: host.loadData, applyEffect: host.applyEffect });
+      return EXIT_SUCCESS;
+    } catch (error) {
+      processStderr.write(
+        `Config TUI unavailable (${error instanceof Error ? error.message : String(error)}); falling back to the menu.\n`,
+      );
+    }
     const port: ConfigUiPort = {
       ...guided,
       read: async (path) => {
