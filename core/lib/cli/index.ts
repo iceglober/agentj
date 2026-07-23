@@ -102,6 +102,15 @@ const createRunCommand = (deps: GloriousCommandDependencies) =>
       }),
   });
 
+/** `--scope` picks which layer a write lands in; absent means global (you). */
+const scopeOption = () =>
+  option({
+    long: "scope",
+    type: optional(oneOf(["global", "project", "local"] as const)),
+    description:
+      "Layer to write: global (you, default), project (.glorious), or local (this machine).",
+  });
+
 const createConfigSetCommand = (handlers: ConfigCliHandlers) =>
   command({
     name: "glorious config set",
@@ -111,6 +120,7 @@ const createConfigSetCommand = (handlers: ConfigCliHandlers) =>
         long: "secret",
         description: "Read the value from masked input and store it in the keychain.",
       }),
+      scope: scopeOption(),
       key: positional({
         type: string,
         displayName: "key",
@@ -122,7 +132,7 @@ const createConfigSetCommand = (handlers: ConfigCliHandlers) =>
         description: "Value to store for a normal configuration key.",
       }),
     },
-    handler: ({ key, secret, value }) => handlers.set({ key, secret, value }),
+    handler: ({ key, secret, value, scope }) => handlers.set({ key, secret, value, scope }),
   });
 
 const createConfigDeleteCommand = (handlers: ConfigCliHandlers) =>
@@ -134,13 +144,14 @@ const createConfigDeleteCommand = (handlers: ConfigCliHandlers) =>
         long: "secret",
         description: "Delete a secret stored in the keychain.",
       }),
+      scope: scopeOption(),
       key: positional({
         type: string,
         displayName: "key",
         description: "Public configuration key to delete.",
       }),
     },
-    handler: ({ key, secret }) => handlers.delete({ key, secret }),
+    handler: ({ key, secret, scope }) => handlers.delete({ key, secret, scope }),
   });
 
 const createConfigGetCommand = (handlers: ConfigCliHandlers) =>
@@ -165,6 +176,7 @@ const createConfigListMutationCommand = (
     name: `glorious config ${operation}`,
     description: `${operation === "add" ? "Append to" : "Remove from"} an array configuration value.`,
     args: {
+      scope: scopeOption(),
       key: positional({
         type: string,
         displayName: "key",
@@ -176,7 +188,7 @@ const createConfigListMutationCommand = (
         description: "Array value to mutate.",
       }),
     },
-    handler: ({ key, value }) => handlers[operation]({ key, value }),
+    handler: ({ key, value, scope }) => handlers[operation]({ key, value, scope }),
   });
 
 const createConfigRuleCommand = (handlers: ConfigCliHandlers, decision: "allow" | "ask" | "deny") =>
@@ -184,13 +196,14 @@ const createConfigRuleCommand = (handlers: ConfigCliHandlers, decision: "allow" 
     name: `glorious config ${decision}`,
     description: `Set a permission rule to ${decision} (default-deny access control).`,
     args: {
+      scope: scopeOption(),
       pattern: positional({
         type: string,
         displayName: "pattern",
         description: "Tool-call pattern: bash(pnpm *), edit, web, or mcp_<server>_<tool>.",
       }),
     },
-    handler: ({ pattern }) => handlers.rule({ pattern, decision }),
+    handler: ({ pattern, scope }) => handlers.rule({ pattern, decision, scope }),
   });
 
 const createConfigUnruleCommand = (handlers: ConfigCliHandlers) =>
@@ -198,13 +211,14 @@ const createConfigUnruleCommand = (handlers: ConfigCliHandlers) =>
     name: "glorious config unrule",
     description: "Remove a permission rule.",
     args: {
+      scope: scopeOption(),
       pattern: positional({
         type: string,
         displayName: "pattern",
         description: "The rule pattern to remove.",
       }),
     },
-    handler: ({ pattern }) => handlers.unrule({ pattern }),
+    handler: ({ pattern, scope }) => handlers.unrule({ pattern, scope }),
   });
 
 const createConfigUncagedCommand = (handlers: ConfigCliHandlers) =>
@@ -212,13 +226,14 @@ const createConfigUncagedCommand = (handlers: ConfigCliHandlers) =>
     name: "glorious config uncaged",
     description: "Allow every gated tool call, or restore default-deny.",
     args: {
+      scope: scopeOption(),
       state: positional({
         type: string,
         displayName: "on|off",
         description: "`on` opens every gated call; `off` restores the rules.",
       }),
     },
-    handler: ({ state }) => handlers.uncaged({ on: state === "on" }),
+    handler: ({ state, scope }) => handlers.uncaged({ on: state === "on", scope }),
   });
 
 /** One argument or flag of a CLI command, as shown in `--help`. */

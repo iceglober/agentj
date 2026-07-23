@@ -224,6 +224,52 @@ describe("createConfigCliHandlers", () => {
     expect(stderr.text()).toContain("This operation is not supported for the configuration key.\n");
   });
 
+  test("--scope routes writes to the project and local layer files", async () => {
+    const stored = new Map<string, string>();
+    const fileSystem = {
+      async readFile(path: string) {
+        const contents = stored.get(path);
+        if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        return contents;
+      },
+      async mkdir() {},
+      async writeFile(path: string, contents: string) {
+        stored.set(path, contents);
+      },
+      async rename(from: string, to: string) {
+        stored.set(to, stored.get(from)!);
+        stored.delete(from);
+      },
+      async rm(path: string) {
+        stored.delete(path);
+      },
+      async chmod() {},
+    };
+    const fake = createStore();
+    const { stdout, writers } = createWriters();
+    const handlers = createConfigCliHandlers({
+      config: { projectRoot: "/repo", fileSystem },
+      prompt: { askSecret: async () => SECRET_FIXTURE },
+      secretStore: fake.store,
+      writers,
+    });
+
+    await expect(
+      handlers.rule({ pattern: "edit", decision: "allow", scope: "project" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      handlers.set({ key: "agent.llm.temperature", value: "0.5", scope: "local" }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(JSON.parse(stored.get("/repo/.glorious/config.json")!)).toEqual({
+      permissions: { rules: { edit: "allow" } },
+    });
+    expect(JSON.parse(stored.get("/repo/.glorious/config.local.json")!)).toEqual({
+      agent: { llm: { temperature: 0.5 } },
+    });
+    expect(stdout.text()).toContain("Saved agent.llm.temperature in local configuration.\n");
+  });
+
   test("gets effective values and removes array entries without accepting secret reads", async () => {
     const config = createConfigPort();
     const fake = createStore();

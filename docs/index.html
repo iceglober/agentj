@@ -92,28 +92,28 @@ glorious config get agent.llm.model</code></pre>
 <ul><li><code>--channel &lt;value&gt;</code> — Release channel to install.</li></ul>
 <h3 id="glorious-config-set-key-value"><code>glorious config set &lt;key&gt; [value]</code></h3>
 <p>Set an Glorious configuration value.</p>
-<ul><li><code>&lt;key&gt;</code> — Public configuration key to set.</li><li><code>[value]</code> — Value to store for a normal configuration key.</li><li><code>--secret</code> — Read the value from masked input and store it in the keychain.</li></ul>
+<ul><li><code>&lt;key&gt;</code> — Public configuration key to set.</li><li><code>[value]</code> — Value to store for a normal configuration key.</li><li><code>--secret</code> — Read the value from masked input and store it in the keychain.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 <h3 id="glorious-config-get-key"><code>glorious config get &lt;key&gt;</code></h3>
 <p>Read an Glorious configuration value.</p>
 <ul><li><code>&lt;key&gt;</code> — Configuration key to read.</li></ul>
 <h3 id="glorious-config-delete-key"><code>glorious config delete &lt;key&gt;</code></h3>
 <p>Delete an Glorious configuration value.</p>
-<ul><li><code>&lt;key&gt;</code> — Public configuration key to delete.</li><li><code>--secret</code> — Delete a secret stored in the keychain.</li></ul>
+<ul><li><code>&lt;key&gt;</code> — Public configuration key to delete.</li><li><code>--secret</code> — Delete a secret stored in the keychain.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 <h3 id="glorious-config-allow-pattern"><code>glorious config allow &lt;pattern&gt;</code></h3>
 <p>Set a permission rule to allow (default-deny access control).</p>
-<ul><li><code>&lt;pattern&gt;</code> — Tool-call pattern: bash(pnpm *), edit, web, or mcp_&lt;server&gt;_&lt;tool&gt;.</li></ul>
+<ul><li><code>&lt;pattern&gt;</code> — Tool-call pattern: bash(pnpm *), edit, web, or mcp_&lt;server&gt;_&lt;tool&gt;.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 <h3 id="glorious-config-ask-pattern"><code>glorious config ask &lt;pattern&gt;</code></h3>
 <p>Set a permission rule to ask (default-deny access control).</p>
-<ul><li><code>&lt;pattern&gt;</code> — Tool-call pattern: bash(pnpm *), edit, web, or mcp_&lt;server&gt;_&lt;tool&gt;.</li></ul>
+<ul><li><code>&lt;pattern&gt;</code> — Tool-call pattern: bash(pnpm *), edit, web, or mcp_&lt;server&gt;_&lt;tool&gt;.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 <h3 id="glorious-config-deny-pattern"><code>glorious config deny &lt;pattern&gt;</code></h3>
 <p>Set a permission rule to deny (default-deny access control).</p>
-<ul><li><code>&lt;pattern&gt;</code> — Tool-call pattern: bash(pnpm *), edit, web, or mcp_&lt;server&gt;_&lt;tool&gt;.</li></ul>
+<ul><li><code>&lt;pattern&gt;</code> — Tool-call pattern: bash(pnpm *), edit, web, or mcp_&lt;server&gt;_&lt;tool&gt;.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 <h3 id="glorious-config-unrule-pattern"><code>glorious config unrule &lt;pattern&gt;</code></h3>
 <p>Remove a permission rule.</p>
-<ul><li><code>&lt;pattern&gt;</code> — The rule pattern to remove.</li></ul>
+<ul><li><code>&lt;pattern&gt;</code> — The rule pattern to remove.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 <h3 id="glorious-config-uncaged-on-off"><code>glorious config uncaged &lt;on|off&gt;</code></h3>
 <p>Allow every gated tool call, or restore default-deny.</p>
-<ul><li><code>&lt;on|off&gt;</code> — <code>on</code> opens every gated call; <code>off</code> restores the rules.</li></ul>
+<ul><li><code>&lt;on|off&gt;</code> — <code>on</code> opens every gated call; <code>off</code> restores the rules.</li><li><code>--scope &lt;value&gt;</code> — Layer to write: global (you, default), project (.glorious), or local (this machine).</li></ul>
 </details>
 <h2 id="commands-keys">Commands &amp; keys</h2>
 <p>In-session slash commands and key bindings — the same list <code>/help</code> prints, generated from the registry so it always matches your version.</p>

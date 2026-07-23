@@ -1185,6 +1185,7 @@ export async function runGloriousChat(
       if (text) emit({ type: "notice", text });
     };
     const interactiveConfig = createConfigCliHandlers({
+      config: { projectRoot: process.cwd() },
       secretStore: createKeyringSecretStore({}),
       prompt: {
         askSecret: () =>
@@ -1595,6 +1596,7 @@ const main = async (): Promise<void> => {
   };
   const guided = createPromptsGuidedInput();
   const configHandlers = createConfigCliHandlers({
+    config: { projectRoot: process.cwd() },
     secretStore: createKeyringSecretStore({}),
     prompt: {
       askSecret: () => guided.askInput({ label: "Secret value · <Esc> Back", masked: true }),
