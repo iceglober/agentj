@@ -1,5 +1,6 @@
 import z from "zod";
 import type { ToolSet } from "../llm";
+import { isMcpToolPattern, MCP_TOOL_PREFIX, normalizeMcpToolPattern } from "../mcp/naming";
 
 /**
  * Host-first permission gating, as a default-deny access-control list. On the
@@ -98,9 +99,11 @@ export interface ParsedRule {
  */
 export function parseRulePattern(raw: string): ParsedRule | null {
   const p = raw.trim();
-  if (p === "mcp") return { kind: "mcp", inner: "*" };
-  // MCP tools are matched by their canonical id; accept the mcp__ alias too.
-  if (p.startsWith("mcp_")) return { kind: "mcp", inner: p.replace(/^mcp__/, "mcp_") };
+  // MCP tools are matched by their canonical id (the `lib/mcp` naming
+  // convention); `mcp` alone means the whole family, and `mcp__…` is an alias.
+  if (isMcpToolPattern(p)) {
+    return { kind: "mcp", inner: p === "mcp" ? "*" : normalizeMcpToolPattern(p) };
+  }
   const m = p.match(/^(bash|edit|web)(?:\((.*)\))?$/);
   if (m) {
     const inner = (m[2] ?? "").trim();
@@ -161,7 +164,7 @@ const inputTool = (input: unknown): string | undefined => {
 const permissionKind = (tool: string): PermissionRequest["kind"] | undefined => {
   const builtIn = GATED_TOOLS[tool];
   if (builtIn) return builtIn;
-  if (tool === "call_mcp_tool" || tool.startsWith("mcp_")) return "mcp";
+  if (tool === "call_mcp_tool" || tool.startsWith(MCP_TOOL_PREFIX)) return "mcp";
   return undefined;
 };
 
