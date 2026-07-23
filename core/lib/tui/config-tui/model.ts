@@ -194,9 +194,7 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
           // Note carries the effective variant, plus the source layer if pinned.
           note: layer ? `${variant} · ${layer}` : variant,
         },
-        hint: `which model ${role === "plan" ? "investigates and drafts the plan" : "writes the code"} · ←→ model · ⏎ model + variant`,
-        onLeft: () => cycleModel(role, -1),
-        onRight: () => cycleModel(role, 1),
+        hint: `which model ${role === "plan" ? "investigates and drafts the plan" : "writes the code"} · ⏎ choose model + variant`,
         onEnter: () => {
           overlay = {
             kind: "model",
@@ -209,13 +207,6 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       };
     };
     return [pick("plan"), pick("build")];
-  };
-
-  const cycleModel = (role: "plan" | "build", dir: number): ConfigEffect | null => {
-    const list = data.availableModels;
-    if (!list.length) return null;
-    const i = (list.indexOf(data.models[role]) + dir + list.length) % list.length;
-    return { kind: "setModel", role, model: list[i] };
   };
 
   const trustItems = (): Item[] => {

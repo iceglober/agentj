@@ -49,14 +49,14 @@ describe("config TUI model", () => {
     expect(v.rows.find((r) => r.cursor)?.label).toBe("Uncaged");
   });
 
-  test("←→ on a model row emits setModel cycling the available list", () => {
+  test("←→ does nothing on a model row — Enter opens the picker instead", () => {
     const m = fresh();
-    expect(m.handleKey(k("right"))).toEqual([
-      { kind: "setModel", role: "plan", model: "gpt-5.6-luna" },
-    ]);
-    expect(m.handleKey(k("left"))).toEqual([
-      { kind: "setModel", role: "plan", model: "gpt-5.4-nano" },
-    ]);
+    expect(m.handleKey(k("right"))).toEqual([]);
+    expect(m.handleKey(k("left"))).toEqual([]);
+    expect(m.view().overlay).toBeUndefined();
+    // Enter is the only way to change the model.
+    expect(m.handleKey(k("return"))).toEqual([]);
+    expect(m.view().overlay?.title).toBe("plan model · variant high");
   });
 
   test("model overlay picks a model and its variant with ⏎", () => {
