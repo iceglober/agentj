@@ -1,7 +1,5 @@
 # Background jobs
 
-Anything that would otherwise block the conversation — waiting on CI, a review, a deploy — runs as a background job instead.
-
 ## Start one
 
 Prefix a message with **`&`**:
@@ -10,13 +8,13 @@ Prefix a message with **`&`**:
 & run the full test suite and report failures
 ```
 
-When `&` is the first editor character the editor turns yellow and shows `BACKGROUND JOB`. Jobs run in their own worktree (build) or read-only (plan), never race your checkout, and report into the transcript and the next turn.
+Jobs run in their own worktree (build) or read-only (plan), and report into the transcript and the next turn.
 
-## The agent starts them too
+## Agent-started
 
-Asked to "wait for CI, then fix what breaks," the agent detaches the wait with `run_background_job` rather than sleep-blocking the turn. A job can carry a renewable **soft timeout**: at the deadline the agent is pinged, inspects the job's recent activity, and either extends the deadline or aborts a stuck job — the job keeps running throughout. The bundled `running-background-work` skill guides this for waits, reviews, releases, deploys, and delayed merges.
+The agent detaches waits (CI, review, deploy) with `run_background_job`. A job can carry a renewable soft timeout: at the deadline the agent inspects the job's activity and extends or aborts it while the job keeps running. The `running-background-work` skill covers this.
 
-## Manage them
+## Manage
 
-- `/jobs` — list background jobs
+- `/jobs` — list
 - `/jobs abort <id>` — stop one

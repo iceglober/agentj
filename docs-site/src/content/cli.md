@@ -1,36 +1,32 @@
 # CLI reference
 
-Every subcommand, argument, and flag — the same definitions `glorious --help` prints. `aj` is a short alias for `glorious`.
+Matches `glorious --help`.
 
 ## `glorious`
 
-Open an interactive chat session in the current repo (plan mode).
+Interactive session (plan mode).
 
-- `--continue` — reopen the newest session for this project
-- `--resume <id>` — reopen a specific session
+- `--continue` — newest session for this project
+- `--resume <id>` — a specific session
 
 ## `glorious run <task>`
 
-Run one task non-interactively and exit.
-
-- `<task>` — the task to run
-- `--plan` — plan only: read-only tools, no edits
-- `--allow-all` — resolve permission asks to allow (default: deny with a notice)
+- `<task>`
+- `--plan` — read-only, no edits
+- `--allow-all` — resolve asks to allow (default: deny)
 
 ## `glorious config <set|get|delete> <key> [value]`
 
-Inspect or update configuration. See [config](/config).
+See [config](/config).
 
-- `set <key> [value]` — `--secret` reads from masked input and stores in the OS keychain
-- `get <key>` — read a value
+- `set <key> [value]` — `--secret` reads masked input into the keychain
+- `get <key>`
 - `delete <key>` — `--secret` removes a keychain secret
 
 ## `glorious update`
 
-Update the installed CLI.
-
-- `--channel <next|latest>` — release channel to install
+- `--channel <next|latest>`
 
 ## `glorious eval`
 
-Run the eval harness (`eval`, `eval report`, `eval selfcheck`) — for contributors validating model behavior.
+`eval`, `eval report`, `eval selfcheck`.

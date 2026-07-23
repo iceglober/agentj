@@ -1,23 +1,26 @@
 # Configuration
 
-Set with `glorious config set <key> <value>`; read with `glorious config get <key>`.
+```sh
+glorious config set <key> <value>
+glorious config get <key>
+```
 
-## Where it lives
+## Location
 
 - Global: `~/.config/glorious/config.json`
-- Project: `.glorious/config.json`, then `.glorious/config.local.json` (machine-local, keep it gitignored)
+- Project: `.glorious/config.json`, then `.glorious/config.local.json` (machine-local)
 
-Project layers override global; explicit CLI input wins over all. Secrets like the Azure key live in the OS keychain, never in these files.
+Project layers override global; explicit CLI input wins over all. Secrets live in the OS keychain, not these files.
 
 ## Models
 
-Glorious routes by **tier**, not a raw model id: you define an ordered ladder once, and modes and subagents point at a rung. Swapping the ladder never touches routing config.
+Modes and subagents route to a ladder tier, not a raw model id.
 
 | key | default | meaning |
 |---|---|---|
 | `agent.llm.model` | `gpt-5.6-luna` | primary model id |
-| `agent.llm.provider` | `azure` | provider (Azure AI Foundry is wired in) |
-| `agent.llm.providers.azure.apiKey` | — | Azure key — keychain only, set with `--secret` |
+| `agent.llm.provider` | `azure` | provider (Azure AI Foundry) |
+| `agent.llm.providers.azure.apiKey` | — | Azure key; keychain only, set with `--secret` |
 | `agent.llm.tiers` | `[]` | ordered model ladder |
 | `agent.llm.modes.plan` | `0` | ladder tier for plan mode (0 = frontier) |
 | `agent.llm.modes.build` | `1` | ladder tier for build mode |
@@ -26,7 +29,7 @@ Glorious routes by **tier**, not a raw model id: you define an ordered ladder on
 
 ## Permissions
 
-The full model is in [permissions](/permissions).
+See [permissions](/permissions).
 
 | key | default | meaning |
 |---|---|---|
@@ -41,9 +44,9 @@ The full model is in [permissions](/permissions).
 | key | default | meaning |
 |---|---|---|
 | `agent.tools.edit.mode` | `batch` | edit strategy: exact / batch / hash |
-| `agent.tools.maxOutputChars` | `30000` | cap on tool output to the model (overflow spills to a file) |
-| `agent.context.softLimit` | — | input-token threshold; interactive history compacts at 75% |
+| `agent.tools.maxOutputChars` | `30000` | cap on tool output; overflow spills to a file |
+| `agent.context.softLimit` | — | input-token threshold; history compacts at 75% |
 | `agent.context.onLimit` | `warn` | behavior when a request crosses the soft limit |
-| `agent.steps` | `100` | per-turn tool-loop ceiling — runaway guard, not a work budget |
-| `update.auto` | `true` | check for updates on startup (never auto-installs) |
-| `update.channel` | `auto` | persistent release channel: `next` or `latest` |
+| `agent.steps` | `100` | per-turn tool-loop ceiling |
+| `update.auto` | `true` | check for updates on startup |
+| `update.channel` | `auto` | release channel: `next` or `latest` |
