@@ -13,7 +13,7 @@ import {
   type WritableConfigLayer,
 } from "./config";
 import { providerNames } from "./llm";
-import { AZURE_API_KEY_ACCOUNT, AZURE_SECRET_SERVICE, type SecretStore } from "./secrets";
+import { providerKeyAccount, SECRET_SERVICE, type SecretStore } from "./secrets";
 
 /** Compound public keys that update a provider/model pair atomically. */
 export const LLM_MODEL_KEY = "llm.model";
@@ -136,7 +136,11 @@ type InternalSchema = z.ZodType & {
 };
 
 const PATH_SEGMENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-const SECRET_PATH = ["agent", "llm", "providers", "azure", "apiKey"] as const;
+/** A provider API-key secret: `agent.llm.providers.<name>.apiKey` or the short
+ *  `providers.<name>.api_key` alias. Keyed to the keychain, never the config file. */
+const SECRET_KEY_RE = /^(?:agent\.llm\.providers|providers)\.([a-z0-9-]+)\.(?:apiKey|api_key)$/;
+/** The provider whose key a config key stores, or null if it isn't a secret key. */
+const secretKeyProvider = (key: string): string | null => key.match(SECRET_KEY_RE)?.[1] ?? null;
 
 const errorCopy: Record<ConfigCliErrorCode, string> = {
   unknown_key: "Unknown configuration key.\n",
@@ -230,8 +234,7 @@ export const listConfigPaths = (): string[] => {
 };
 
 const isSecretPath = (path: readonly string[]): boolean =>
-  path.length === SECRET_PATH.length &&
-  path.every((segment, index) => segment === SECRET_PATH[index]);
+  secretKeyProvider(path.join(".")) !== null;
 
 const parseCliValue = (
   schema: InternalSchema,
@@ -358,14 +361,15 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
   };
 
   const storeSecret = async (key: string, secret: string): Promise<ConfigCliResult> => {
-    if (key !== AZURE_API_KEY_KEY && !isSecretPath(parsePath(key) ?? [])) {
-      return writeError(dependencies.writers, "unknown_key", key);
-    }
+    const provider = secretKeyProvider(key);
+    if (!provider) return writeError(dependencies.writers, "unknown_key", key);
     if (secret.trim().length === 0)
       return writeError(dependencies.writers, "prompt_cancelled", key);
     try {
-      await dependencies.secretStore.set(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT, secret);
-      dependencies.writers.stdout.write("Stored providers.azure.api_key in the secure keychain.\n");
+      await dependencies.secretStore.set(SECRET_SERVICE, providerKeyAccount(provider), secret);
+      dependencies.writers.stdout.write(
+        `Stored providers.${provider}.api_key in the secure keychain.\n`,
+      );
       return { ok: true, key, storage: "keychain", changed: true };
     } catch {
       return writeError(dependencies.writers, "secret_store_failed", key);
@@ -374,7 +378,7 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
 
   return {
     async get(input) {
-      if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
+      if (secretKeyProvider(input.key) !== null) {
         return writeError(dependencies.writers, "secret_read_not_allowed", input.key);
       }
       const resolved = resolveNormalPath(input.key);
@@ -396,7 +400,7 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
           return writeError(dependencies.writers, "invalid_model", input.key);
         return write(input.key, mutations, input.scope);
       }
-      if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
+      if (secretKeyProvider(input.key) !== null) {
         if (!input.secret)
           return writeError(dependencies.writers, "secret_flag_required", input.key);
         if (input.value !== undefined)
@@ -488,14 +492,15 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
           return writeError(dependencies.writers, "config_write_failed", input.key);
         }
       }
-      if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
+      const secretProvider = secretKeyProvider(input.key);
+      if (secretProvider) {
         try {
           const changed = await dependencies.secretStore.delete(
-            AZURE_SECRET_SERVICE,
-            AZURE_API_KEY_ACCOUNT,
+            SECRET_SERVICE,
+            providerKeyAccount(secretProvider),
           );
           dependencies.writers.stdout.write(
-            "Deleted providers.azure.api_key from the secure keychain.\n",
+            `Deleted providers.${secretProvider}.api_key from the secure keychain.\n`,
           );
           return { ok: true, key: input.key, storage: "keychain", changed };
         } catch {

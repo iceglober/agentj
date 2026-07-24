@@ -1,5 +1,10 @@
-export const AZURE_SECRET_SERVICE = "glorious";
-export const AZURE_API_KEY_ACCOUNT = "azure-api-key";
+/** Keychain service for all of glorious's secrets. */
+export const SECRET_SERVICE = "glorious";
+/** The keychain account holding a provider's API key. */
+export const providerKeyAccount = (provider: string): string => `${provider}-api-key`;
+
+export const AZURE_SECRET_SERVICE = SECRET_SERVICE;
+export const AZURE_API_KEY_ACCOUNT = providerKeyAccount("azure");
 
 export type AzureApiKeySource = "azure-foundry-api-key" | "azure-api-key" | "secret-store";
 
@@ -61,4 +66,26 @@ export async function resolveAzureApiKey({
 
 export async function hasAzureApiKey(options?: ResolveAzureApiKeyOptions): Promise<boolean> {
   return (await resolveAzureApiKey(options)).status === "resolved";
+}
+
+/**
+ * A provider's API key from the keychain (`<provider>-api-key`). The AI SDK
+ * reads each provider's own env var when this is absent, so a missing key is
+ * not an error here — the caller only injects a key it actually found.
+ */
+export async function resolveProviderKey(
+  provider: string,
+  store?: SecretStore,
+): Promise<string | undefined> {
+  if (!store) return undefined;
+  try {
+    return await store.get(SECRET_SERVICE, providerKeyAccount(provider));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a provider has a key in the keychain. */
+export async function hasProviderKey(provider: string, store?: SecretStore): Promise<boolean> {
+  return Boolean(await resolveProviderKey(provider, store));
 }

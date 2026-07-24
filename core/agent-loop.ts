@@ -67,7 +67,7 @@ import {
 } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { providerNames, type RunStep } from "./lib/llm";
+import { type ProviderName, providerNames, type RunStep } from "./lib/llm";
 import type { McpPromptCatalogEntry, McpPromptResult } from "./lib/mcp";
 import {
   connectModelContextProtocolServer,
@@ -90,6 +90,7 @@ import {
   AZURE_SECRET_SERVICE,
   hasAzureApiKey,
   resolveAzureApiKey,
+  resolveProviderKey,
   type SecretStore,
 } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
@@ -182,6 +183,44 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
 /** The bundled base config path (below the user-writable layers). */
 function baseConfigPath(): string {
   return new URL("./glorious.ts", import.meta.url).pathname;
+}
+
+/**
+ * The active provider's API key. Azure (the default) keeps its env fallback and,
+ * when required, hard-fails with a fix-it message; every other provider uses its
+ * keychain key when present, else the AI SDK reads the provider's own env var.
+ */
+async function resolveActiveProviderKey(
+  provider: ProviderName,
+  store: SecretStore,
+  options: { require?: boolean } = {},
+): Promise<string | undefined> {
+  if (provider === "azure") {
+    const key = await resolveAzureApiKey({ store });
+    if (key.status === "resolved") return key.apiKey;
+    if (options.require)
+      throw new Error(
+        "Azure API key missing; run: glorious config set --secret providers.azure.api_key",
+      );
+    return undefined;
+  }
+  return resolveProviderKey(provider, store);
+}
+
+/** Inject a resolved key into the active provider's slot, leaving others intact. */
+function withProviderKey(
+  llm: AgentConfig["llm"],
+  provider: ProviderName,
+  apiKey: string | undefined,
+): AgentConfig["llm"] {
+  if (!apiKey) return llm;
+  return {
+    ...llm,
+    providers: {
+      ...llm.providers,
+      [provider]: { ...llm.providers?.[provider], apiKey },
+    },
+  };
 }
 
 /** The interactive config-TUI host for a project, wired to the real config
@@ -418,12 +457,10 @@ async function composeChat(
   const loadedConfig = await loadChatConfig(undefined, configLoadOptions);
   const config = loadedConfig.config;
   const secretStore = createKeyringSecretStore({});
-  const key = await resolveAzureApiKey({ store: secretStore });
-  if (key.status !== "resolved") {
-    throw new Error(
-      "Azure API key missing; run: glorious config set --secret providers.azure.api_key",
-    );
-  }
+  const activeProvider = config.agent.llm.provider;
+  const providerApiKey = await resolveActiveProviderKey(activeProvider, secretStore, {
+    require: true,
+  });
   const mcpOAuth = createKeyringMcpOAuthStorage(secretStore);
   // Config-first with the historical env var kept as a fallback enable. The
   // provider is only stood up when an OTLP endpoint is configured; otherwise
@@ -461,13 +498,7 @@ async function composeChat(
   const agentConfig: AgentConfig = {
     ...config.agent,
     rules: [agentsMd, config.agent.rules, skillsSection].filter(Boolean).join("\n\n"),
-    llm: {
-      ...config.agent.llm,
-      providers: {
-        ...config.agent.llm.providers,
-        azure: { ...config.agent.llm.providers?.azure, apiKey: key.apiKey },
-      },
-    },
+    llm: withProviderKey(config.agent.llm, activeProvider, providerApiKey),
   };
   const ctx: PromptContext = {
     cwd: root,
@@ -782,15 +813,13 @@ async function composeChat(
       // must not disturb the session.
       if (JSON.stringify(latest.config.agent.llm) !== JSON.stringify(config.agent.llm)) {
         config.agent.llm = latest.config.agent.llm;
+        // The provider may have changed in the editor — re-resolve its key softly
+        // (no hard-fail mid-session; the SDK surfaces a clear error if truly absent).
+        const nextProvider = latest.config.agent.llm.provider;
+        const nextKey = await resolveActiveProviderKey(nextProvider, secretStore);
         modelRouting.reload({
           ...agentConfig,
-          llm: {
-            ...latest.config.agent.llm,
-            providers: {
-              ...latest.config.agent.llm.providers,
-              azure: { ...latest.config.agent.llm.providers?.azure, apiKey: key.apiKey },
-            },
-          },
+          llm: withProviderKey(latest.config.agent.llm, nextProvider, nextKey),
         });
       }
       // Reconnecting MCP servers is disruptive, so only reconcile when the mcp
