@@ -6,6 +6,7 @@ import {
   providerNames,
   type RunResult,
   type RunStep,
+  resolveTier,
   resolveTierModel,
   resolveTierVariant,
   type ToolSet,
@@ -319,16 +320,13 @@ export function createAgentModelRouting(
 
   return {
     config: () => config,
-    configFor: (mode) =>
-      primaryOverride
-        ? config
-        : {
-            ...config,
-            llm: {
-              ...config.llm,
-              model: resolveTierModel(config.llm, config.llm.modes[mode]),
-            },
-          },
+    configFor: (mode) => {
+      if (primaryOverride) return config;
+      // Each tier carries its own provider/model, so a mode can run on a
+      // different provider than its sibling (plan on azure, build on vertex).
+      const { provider, model } = resolveTier(config.llm, config.llm.modes[mode]);
+      return { ...config, llm: { ...config.llm, provider, model } };
+    },
     selections: () => {
       const child = childAgentConfig(config, "delegate");
       const overridden =

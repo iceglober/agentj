@@ -210,20 +210,26 @@ async function resolveActiveProviderKey(
   return resolveProviderKey(provider, store);
 }
 
-/** Inject a resolved key into the active provider's slot, leaving others intact. */
-function withProviderKey(
+/** Every provider's keychain key, so any tier's provider has its credentials. */
+async function resolveAllProviderKeys(store: SecretStore): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const provider of providerNames) {
+    const key = await resolveActiveProviderKey(provider, store);
+    if (key) out[provider] = key;
+  }
+  return out;
+}
+
+/** Inject each resolved key into its provider slot, leaving other config intact. */
+function withProviderKeys(
   llm: AgentConfig["llm"],
-  provider: ProviderName,
-  apiKey: string | undefined,
+  keys: Record<string, string>,
 ): AgentConfig["llm"] {
-  if (!apiKey) return llm;
-  return {
-    ...llm,
-    providers: {
-      ...llm.providers,
-      [provider]: { ...llm.providers?.[provider], apiKey },
-    },
-  };
+  const providers: Record<string, unknown> = { ...llm.providers };
+  for (const [provider, apiKey] of Object.entries(keys)) {
+    providers[provider] = { ...(providers[provider] as object), apiKey };
+  }
+  return { ...llm, providers: providers as AgentConfig["llm"]["providers"] };
 }
 
 /** The interactive config-TUI host for a project, wired to the real config
@@ -465,10 +471,12 @@ async function composeChat(
   const loadedConfig = await loadChatConfig(undefined, configLoadOptions);
   const config = loadedConfig.config;
   const secretStore = createKeyringSecretStore({});
-  const activeProvider = config.agent.llm.provider;
-  const providerApiKey = await resolveActiveProviderKey(activeProvider, secretStore, {
-    require: true,
-  });
+  const providerKeys = await resolveAllProviderKeys(secretStore);
+  // The default provider must be reachable at startup; azure hard-fails with a
+  // fix-it message (its env vars are also checked by resolveActiveProviderKey).
+  if (config.agent.llm.provider === "azure" && !providerKeys.azure) {
+    await resolveActiveProviderKey("azure", secretStore, { require: true });
+  }
   const mcpOAuth = createKeyringMcpOAuthStorage(secretStore);
   // Config-first with the historical env var kept as a fallback enable. The
   // provider is only stood up when an OTLP endpoint is configured; otherwise
@@ -506,7 +514,7 @@ async function composeChat(
   const agentConfig: AgentConfig = {
     ...config.agent,
     rules: [agentsMd, config.agent.rules, skillsSection].filter(Boolean).join("\n\n"),
-    llm: withProviderKey(config.agent.llm, activeProvider, providerApiKey),
+    llm: withProviderKeys(config.agent.llm, providerKeys),
   };
   const ctx: PromptContext = {
     cwd: root,
@@ -821,13 +829,12 @@ async function composeChat(
       // must not disturb the session.
       if (JSON.stringify(latest.config.agent.llm) !== JSON.stringify(config.agent.llm)) {
         config.agent.llm = latest.config.agent.llm;
-        // The provider may have changed in the editor — re-resolve its key softly
-        // (no hard-fail mid-session; the SDK surfaces a clear error if truly absent).
-        const nextProvider = latest.config.agent.llm.provider;
-        const nextKey = await resolveActiveProviderKey(nextProvider, secretStore);
+        // Providers/tiers may have changed in the editor — re-resolve keys for
+        // every provider so whichever tier runs has its credentials.
+        const nextKeys = await resolveAllProviderKeys(secretStore);
         modelRouting.reload({
           ...agentConfig,
-          llm: withProviderKey(latest.config.agent.llm, nextProvider, nextKey),
+          llm: withProviderKeys(latest.config.agent.llm, nextKeys),
         });
       }
       // Reconnecting MCP servers is disruptive, so only reconcile when the mcp

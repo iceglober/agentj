@@ -2,7 +2,7 @@ import z from "zod";
 import type { MetricsSink } from "../metrics";
 import type { SpillWriter } from "../truncation";
 import { createAiSdkRuntime, providerNames } from "./ai-sdk-adapter";
-import { providersConfigSchema } from "./providers";
+import { type ProviderName, providersConfigSchema } from "./providers";
 
 export { KEY_PROVIDERS, type ProviderName } from "./providers";
 export { providerNames };
@@ -178,6 +178,25 @@ export const llmConfigSchema = z.object({
 export type LlmConfig = z.infer<typeof llmConfigSchema>;
 
 /**
+ * Split a `provider/model` reference. A recognized provider prefix wins;
+ * anything else (including a model id that happens to contain a slash) is the
+ * model under `defaultProvider`, so bare model ids stay backward-compatible.
+ */
+export const parseModelRef = (
+  ref: string,
+  defaultProvider: ProviderName,
+): { provider: ProviderName; model: string } => {
+  const slash = ref.indexOf("/");
+  if (slash > 0) {
+    const prefix = ref.slice(0, slash);
+    if ((providerNames as readonly string[]).includes(prefix)) {
+      return { provider: prefix as ProviderName, model: ref.slice(slash + 1) };
+    }
+  }
+  return { provider: defaultProvider, model: ref };
+};
+
+/**
  * Resolve a tier index against the ladder. Out-of-range indices clamp to the
  * cheapest rung, so routing config written for a deep ladder stays valid on a
  * shallow one; an empty ladder resolves every tier to `model`.
@@ -186,6 +205,17 @@ export const resolveTierModel = (llm: LlmConfig, tier: number): string => {
   const last = llm.tiers.length - 1;
   return last < 0 ? llm.model : (llm.tiers[Math.min(Math.max(tier, 0), last)] as string);
 };
+
+/**
+ * Resolve a tier to its provider and model. Each ladder entry is a
+ * `provider/model` string, so different tiers (plan vs build) can run on
+ * different providers; a bare entry uses the config's default provider.
+ */
+export const resolveTier = (
+  llm: LlmConfig,
+  tier: number,
+): { provider: ProviderName; model: string } =>
+  parseModelRef(resolveTierModel(llm, tier), llm.provider);
 
 /**
  * The explicit variant override for a tier, or undefined when none is set (the
