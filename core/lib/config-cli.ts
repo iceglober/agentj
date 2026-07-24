@@ -1,13 +1,16 @@
 import type z from "zod";
+import { parseRulePattern } from "./agent/permissions";
 import {
+  type ConfigLoadOptions,
   type ConfigObject,
   configSchema,
   type GlobalConfigMutation,
-  type GlobalConfigOptions,
   mergeConfig,
+  mutateConfigLayer,
   mutateGlobalConfig,
   readGlobalConfig,
   type ValidatedConfigPath,
+  type WritableConfigLayer,
 } from "./config";
 import { providerNames } from "./llm";
 import { AZURE_API_KEY_ACCOUNT, AZURE_SECRET_SERVICE, type SecretStore } from "./secrets";
@@ -29,31 +32,49 @@ export interface MaskedSecretPrompt {
 }
 
 export interface ConfigCliDependencies {
-  config?: GlobalConfigOptions;
+  config?: ConfigLoadOptions;
   mutateConfig?: (
     mutations: readonly GlobalConfigMutation[],
-    options?: GlobalConfigOptions,
+    options?: ConfigLoadOptions,
   ) => Promise<boolean>;
-  readConfig?: (options?: GlobalConfigOptions) => Promise<ConfigObject>;
+  readConfig?: (options?: ConfigLoadOptions) => Promise<ConfigObject>;
   secretStore: SecretStore;
   prompt: MaskedSecretPrompt;
   writers: ConfigCliWriters;
 }
 
-export interface ConfigSetInput {
+/** Which layer a write lands in; omitted means the global (user) config. */
+export interface ScopedInput {
+  scope?: WritableConfigLayer;
+}
+
+export interface ConfigSetInput extends ScopedInput {
   key: string;
   value?: string;
   secret?: boolean;
 }
 
-export interface ConfigKeyValueInput {
+export interface ConfigKeyValueInput extends ScopedInput {
   key: string;
   value?: string;
 }
 
-export interface ConfigDeleteInput {
+export interface ConfigDeleteInput extends ScopedInput {
   key: string;
   secret?: boolean;
+}
+
+export interface ConfigRuleInput extends ScopedInput {
+  pattern: string;
+  decision: "allow" | "ask" | "deny";
+}
+
+export interface ConfigUnruleInput extends ScopedInput {
+  pattern: string;
+}
+
+export interface ConfigUncagedInput extends ScopedInput {
+  on: boolean;
 }
 
 export type ConfigCliErrorCode =
@@ -65,6 +86,7 @@ export type ConfigCliErrorCode =
   | "invalid_model"
   | "invalid_value"
   | "operation_not_supported"
+  | "invalid_pattern"
   | "prompt_cancelled"
   | "config_write_failed"
   | "config_read_failed"
@@ -92,6 +114,12 @@ export interface ConfigCliHandlers {
   add(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   remove(input: ConfigKeyValueInput): Promise<ConfigCliResult>;
   delete(input: ConfigDeleteInput): Promise<ConfigCliResult>;
+  /** Idempotently set a permission rule (`config allow|ask|deny <pattern>`). */
+  rule(input: ConfigRuleInput): Promise<ConfigCliResult>;
+  /** Remove a permission rule (`config unrule <pattern>`). */
+  unrule(input: ConfigUnruleInput): Promise<ConfigCliResult>;
+  /** Toggle the uncaged escape hatch (`config uncaged on|off`). */
+  uncaged(input: ConfigUncagedInput): Promise<ConfigCliResult>;
 }
 
 type InternalSchema = z.ZodType & {
@@ -119,6 +147,8 @@ const errorCopy: Record<ConfigCliErrorCode, string> = {
   invalid_model: "llm.model must use provider/model format.\n",
   invalid_value: "Configuration value does not match the key's schema.\n",
   operation_not_supported: "This operation is not supported for the configuration key.\n",
+  invalid_pattern:
+    "Not a recognized tool-call pattern. Use bash(git *), edit, web, or mcp_<server>_<tool>.\n",
   prompt_cancelled: "Secret entry cancelled.\n",
   config_write_failed: "Unable to update global configuration.\n",
   config_read_failed: "Unable to read global configuration.\n",
@@ -270,18 +300,52 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
     return schema ? { path, schema } : null;
   };
 
+  // Global writes go through the injected seam (mutateConfig); project/local
+  // writes resolve their layer file under the project root. Scope defaults to
+  // global, so unscoped callers keep the exact prior behavior.
+  const mutate = (
+    mutations: readonly GlobalConfigMutation[],
+    scope: WritableConfigLayer | undefined,
+  ): Promise<boolean> =>
+    !scope || scope === "global"
+      ? mutateConfig(mutations, dependencies.config)
+      : mutateConfigLayer(scope, mutations, dependencies.config);
+  const layerLabel = (scope: WritableConfigLayer | undefined): string => scope ?? "global";
+
   const write = async (
     key: string,
     mutations: readonly GlobalConfigMutation[],
+    scope?: WritableConfigLayer,
   ): Promise<ConfigCliResult> => {
     try {
-      const changed = await mutateConfig(mutations, dependencies.config);
-      dependencies.writers.stdout.write(`Saved ${key} in global configuration.\n`);
+      const changed = await mutate(mutations, scope);
+      dependencies.writers.stdout.write(`Saved ${key} in ${layerLabel(scope)} configuration.\n`);
       return { ok: true, key, storage: "global_config", changed };
     } catch {
       return writeError(dependencies.writers, "config_write_failed", key);
     }
   };
+
+  /** Like `write`, but with a caller-supplied confirmation message. */
+  const commit = async (
+    key: string,
+    mutations: readonly GlobalConfigMutation[],
+    message: string,
+    scope?: WritableConfigLayer,
+  ): Promise<ConfigCliResult> => {
+    try {
+      const changed = await mutate(mutations, scope);
+      dependencies.writers.stdout.write(`${message}\n`);
+      return { ok: true, key, storage: "global_config", changed };
+    } catch {
+      return writeError(dependencies.writers, "config_write_failed", key);
+    }
+  };
+
+  /** A rule record key is not a dotted path; permissions.rules.<pattern> writes
+   *  the pattern literally as the record key. */
+  const rulePath = (pattern: string): ValidatedConfigPath =>
+    ["permissions", "rules", pattern] as unknown as ValidatedConfigPath;
 
   const readEffectiveConfig = async (): Promise<ConfigObject | null> => {
     try {
@@ -330,7 +394,7 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
         const mutations = modelMutations(input.key, input.value);
         if (mutations.length === 0)
           return writeError(dependencies.writers, "invalid_model", input.key);
-        return write(input.key, mutations);
+        return write(input.key, mutations, input.scope);
       }
       if (input.key === AZURE_API_KEY_KEY || isSecretPath(parsePath(input.key) ?? [])) {
         if (!input.secret)
@@ -351,7 +415,11 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
         return writeError(dependencies.writers, "missing_value", input.key);
       const parsed = parseCliValue(resolved.schema, input.value);
       if (!parsed.success) return writeError(dependencies.writers, "invalid_value", input.key);
-      return write(input.key, [{ type: "set", path: resolved.path, value: parsed.data }]);
+      return write(
+        input.key,
+        [{ type: "set", path: resolved.path, value: parsed.data }],
+        input.scope,
+      );
     },
 
     async setSecret(input) {
@@ -377,9 +445,11 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       if (current.some((value) => Object.is(value, parsed.data))) {
         return { ok: true, key: input.key, storage: "global_config", changed: false };
       }
-      return write(input.key, [
-        { type: "set", path: resolved.path, value: [...current, parsed.data] },
-      ]);
+      return write(
+        input.key,
+        [{ type: "set", path: resolved.path, value: [...current, parsed.data] }],
+        input.scope,
+      );
     },
 
     async remove(input) {
@@ -401,7 +471,7 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       const next = current.filter((value) => !Object.is(value, parsed.data));
       if (next.length === current.length)
         return { ok: true, key: input.key, storage: "global_config", changed: false };
-      return write(input.key, [{ type: "set", path: resolved.path, value: next }]);
+      return write(input.key, [{ type: "set", path: resolved.path, value: next }], input.scope);
     },
 
     async delete(input) {
@@ -409,8 +479,10 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
         if (input.secret)
           return writeError(dependencies.writers, "secret_flag_not_allowed", input.key);
         try {
-          const changed = await mutateConfig(modelDeleteMutations(input.key), dependencies.config);
-          dependencies.writers.stdout.write(`Deleted ${input.key} from global configuration.\n`);
+          const changed = await mutate(modelDeleteMutations(input.key), input.scope);
+          dependencies.writers.stdout.write(
+            `Deleted ${input.key} from ${layerLabel(input.scope)} configuration.\n`,
+          );
           return { ok: true, key: input.key, storage: "global_config", changed };
         } catch {
           return writeError(dependencies.writers, "config_write_failed", input.key);
@@ -435,15 +507,52 @@ export function createConfigCliHandlers(dependencies: ConfigCliDependencies): Co
       const resolved = resolveNormalPath(input.key);
       if (!resolved) return writeError(dependencies.writers, "unknown_key", input.key);
       try {
-        const changed = await mutateConfig(
-          [{ type: "delete", path: resolved.path }],
-          dependencies.config,
+        const changed = await mutate([{ type: "delete", path: resolved.path }], input.scope);
+        dependencies.writers.stdout.write(
+          `Deleted ${input.key} from ${layerLabel(input.scope)} configuration.\n`,
         );
-        dependencies.writers.stdout.write(`Deleted ${input.key} from global configuration.\n`);
         return { ok: true, key: input.key, storage: "global_config", changed };
       } catch {
         return writeError(dependencies.writers, "config_write_failed", input.key);
       }
+    },
+
+    async rule(input) {
+      if (!parseRulePattern(input.pattern)) {
+        return writeError(dependencies.writers, "invalid_pattern", input.pattern);
+      }
+      return commit(
+        input.pattern,
+        [{ type: "set", path: rulePath(input.pattern), value: input.decision }],
+        `${input.decision}  ${input.pattern}`,
+        input.scope,
+      );
+    },
+
+    async unrule(input) {
+      return commit(
+        input.pattern,
+        [{ type: "delete", path: rulePath(input.pattern) }],
+        `removed  ${input.pattern}`,
+        input.scope,
+      );
+    },
+
+    async uncaged(input) {
+      return commit(
+        "permissions.uncaged",
+        [
+          {
+            type: "set",
+            path: ["permissions", "uncaged"] as unknown as ValidatedConfigPath,
+            value: input.on,
+          },
+        ],
+        input.on
+          ? "uncaged: ON — every gated tool call is allowed"
+          : "uncaged: off — default-deny rules apply",
+        input.scope,
+      );
     },
   };
 }

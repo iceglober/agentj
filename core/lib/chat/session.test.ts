@@ -76,6 +76,50 @@ describe("createChatSession", () => {
     });
   });
 
+  test("plan→build handoff: tracks task+plan, and a fresh-context turn resets the continuation", async () => {
+    await withLog(async (log) => {
+      const calls: Array<{ mode: string; messages?: unknown[] }> = [];
+      const agents = {
+        plan: makeAgent(async (_p, opts) => {
+          calls.push({ mode: "plan", messages: opts?.messages });
+          return result("PLAN: change frobnicate()", { messages: [{ turn: 1 }] });
+        }),
+        build: makeAgent(async (_p, opts) => {
+          calls.push({ mode: "build", messages: opts?.messages });
+          return result("built", { messages: [{ turn: 9 }] });
+        }),
+      };
+      const session = createChatSession({ agentFor: async (mode) => agents[mode], log });
+
+      await session.send("fix the flaky test"); // plan turn
+      await session.send("actually, keep it minimal"); // iterate: task stays, plan updates
+      expect(session.planContext()).toEqual({
+        task: "fix the flaky test",
+        plan: "PLAN: change frobnicate()",
+      });
+
+      session.setMode("build");
+      await session.send("seed with task + plan", { freshContext: true });
+      // The builder gets a FRESH continuation, not the planner's [{ turn: 1 }].
+      expect(calls.at(-1)).toEqual({ mode: "build", messages: [] });
+      // Handoff starts a new stage.
+      expect(session.planContext()).toEqual({ task: null, plan: null });
+    });
+  });
+
+  test("clearContext resets the captured task and plan", async () => {
+    await withLog(async (log) => {
+      const session = createChatSession({
+        agentFor: async () => makeAgent(async () => result("PLAN")),
+        log,
+      });
+      await session.send("the task");
+      expect(session.planContext()).toEqual({ task: "the task", plan: "PLAN" });
+      await session.clearContext();
+      expect(session.planContext()).toEqual({ task: null, plan: null });
+    });
+  });
+
   test("resumed build mode selects the build agent despite a stale plan refusal", async () => {
     await withLog(async (log) => {
       const selected: string[] = [];

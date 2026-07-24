@@ -63,8 +63,17 @@ export interface ChatSession {
       transcriptText?: string;
       restoreText?: string;
       images?: readonly ImageAttachment[];
+      /** Reset the model continuation before this turn runs (fresh context),
+       *  keeping the visible transcript. Used for the plan→build handoff. */
+      freshContext?: boolean;
     },
   ): Promise<void>;
+  /**
+   * The current planning stage: the first user message (the task) and the most
+   * recent plan-mode assistant output (the plan). Both reset on a fresh-context
+   * turn and on clearContext. Drives the clean plan→build handoff.
+   */
+  planContext(): { task: string | null; plan: string | null };
   /** Abort the running foreground turn. Returns false when idle. */
   abort(): boolean;
   /**
@@ -93,6 +102,10 @@ export function createChatSession(
   let mode: ChatMode = initial.mode ?? "plan";
   let pendingMode: ChatMode = mode;
   let messages: unknown[] = initial.messages ?? [];
+  // The task (first user message of the current stage) and the latest plan-mode
+  // output, captured for the plan→build handoff. Reset when the context resets.
+  let stageTask: string | null = null;
+  let lastPlan: string | null = null;
   let busy = false;
   let turnAbort: AbortController | null = null;
   const notices: string[] = [];
@@ -103,6 +116,7 @@ export function createChatSession(
     transcriptText?: string;
     restoreText?: string;
     images?: readonly ImageAttachment[];
+    freshContext?: boolean;
     resolve: () => void;
   }> = [];
 
@@ -114,6 +128,7 @@ export function createChatSession(
     text: string,
     transcriptText?: string,
     images?: readonly ImageAttachment[],
+    freshContext?: boolean,
   ): Promise<{
     succeeded: boolean;
     mode: ChatMode;
@@ -121,6 +136,16 @@ export function createChatSession(
     stepLimitReached?: boolean;
   }> => {
     mode = pendingMode;
+    // A fresh-context turn (plan→build handoff) starts a new model continuation
+    // and a new stage — the seed already carried whatever it needed forward.
+    if (freshContext) {
+      messages = [];
+      stageTask = null;
+      lastPlan = null;
+    }
+    // The first genuine user message of a planning stage is the task carried
+    // into the handoff; system/background prompts don't count.
+    if (mode === "plan" && stageTask === null && !text.startsWith("[system]")) stageTask = text;
     turnAbort = new AbortController();
     const abort = turnAbort;
     emit({ type: "turn-started", mode, text, ...(transcriptText ? { transcriptText } : {}) });
@@ -143,6 +168,8 @@ export function createChatSession(
         ...(images && images.length > 0 ? { images } : {}),
       });
       messages = result.messages ?? messages;
+      // Remember the latest plan so /build can hand it to the builder.
+      if (mode === "plan") lastPlan = result.text;
       emit({
         type: "assistant",
         mode,
@@ -198,10 +225,11 @@ export function createChatSession(
     text: string,
     transcriptText?: string,
     images?: readonly ImageAttachment[],
+    freshContext?: boolean,
   ): Promise<void> => {
     busy = true;
     try {
-      await runExchange(text, transcriptText, images);
+      await runExchange(text, transcriptText, images, freshContext);
     } finally {
       busy = false;
       if (pendingMode !== mode) emit({ type: "mode-changed", mode: pendingMode, pending: false });
@@ -213,7 +241,7 @@ export function createChatSession(
     while (queue.length > 0 && !busy) {
       const next = queue.shift();
       if (!next) break;
-      await runTurn(next.text, next.transcriptText, next.images);
+      await runTurn(next.text, next.transcriptText, next.images, next.freshContext);
       next.resolve();
     }
   };
@@ -222,6 +250,7 @@ export function createChatSession(
     const transcriptText = options?.transcriptText;
     const restoreText = options?.restoreText;
     const images = options?.images;
+    const freshContext = options?.freshContext;
     if (busy) {
       emit({
         type: "turn-queued",
@@ -235,12 +264,13 @@ export function createChatSession(
           ...(transcriptText ? { transcriptText } : {}),
           ...(restoreText ? { restoreText } : {}),
           ...(images && images.length > 0 ? { images } : {}),
+          ...(freshContext ? { freshContext } : {}),
           resolve,
         });
       });
       return;
     }
-    await runTurn(text, transcriptText, images);
+    await runTurn(text, transcriptText, images, freshContext);
     await drainQueue();
   };
 
@@ -311,9 +341,15 @@ export function createChatSession(
 
     resumePendingWork,
 
+    planContext() {
+      return { task: stageTask, plan: lastPlan };
+    },
+
     async clearContext() {
       if (busy) return false;
       messages = [];
+      stageTask = null;
+      lastPlan = null;
       notices.length = 0;
       await deps.todos?.clear();
       await deps.log.append({

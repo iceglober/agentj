@@ -11,6 +11,7 @@ import {
 } from "./profiles";
 import { renderTemplate } from "./render";
 
+export { buildHandoffPrompt } from "./handoff";
 export type { ModelParams, Profile, ProfileName };
 export { profileNames, profiles, resolveProfile };
 

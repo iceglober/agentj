@@ -1,40 +1,36 @@
 import z from "zod";
 import type { ToolSet } from "../llm";
+import { isMcpToolPattern, MCP_TOOL_PREFIX, normalizeMcpToolPattern } from "../mcp/naming";
 
 /**
- * Host-first permission gating. The sandbox used to be the implicit permission
- * system; on the host, mutating tools (bash/edit/writeFile) pass through a
- * policy resolved from config, and "ask" outcomes are settled by an injected
- * gate — a plain function port the composition root wires to the TUI (or to a
- * fixed answer for non-interactive runs). Repository reads/searches are never gated; outbound web access has its own policy.
+ * Host-first permission gating, as a default-deny access-control list. On the
+ * host, mutating tools (bash/edit/writeFile), outbound web, and MCP tool calls
+ * are gated: a request is checked against a map of tool-call patterns, and
+ * anything not explicitly allowed (or asked) is denied. "ask" outcomes are
+ * settled by an injected gate — a plain function port the composition root
+ * wires to the TUI (or to a fixed answer for non-interactive runs). Repository
+ * reads/searches are never gated. A single `uncaged` flag opens everything.
+ *
+ * Patterns are the idiomatic tool-call forms, no bespoke expression language:
+ *   bash(pnpm *)   a bash command, prefix-matched (trailing `*`); `bash` = all
+ *   edit           file edits; `edit(src/ *)` prefix-matches the path
+ *   web            outbound search + fetch
+ *   mcp_linear_get_issue   a canonical MCP tool id; `mcp_linear_*` = a server;
+ *                          `mcp__…` (double underscore) is accepted as an alias
  */
 
 export const permissionDecisionSchema = z.enum(["allow", "ask", "deny"]);
 export type PermissionDecision = z.infer<typeof permissionDecisionSchema>;
 
 /** The `permissions.*` config section (composed into the root configSchema). */
-export const permissionsConfigSchema = z.object({
-  /** File edits (edit/writeFile tools) in build mode. */
-  edit: permissionDecisionSchema.default("allow"),
-  bash: z
-    .object({
-      default: permissionDecisionSchema.default("ask"),
-      /** Literal command prefixes, optional trailing `*`. First match wins after deny. */
-      allow: z.array(z.string()).default([]),
-      deny: z.array(z.string()).default([]),
-    })
-    .prefault({}),
-  mcp: z
-    .object({
-      default: permissionDecisionSchema.default("ask"),
-      /** Canonical MCP tool names, with an optional trailing `*` wildcard. */
-      allow: z.array(z.string()).default([]),
-      deny: z.array(z.string()).default([]),
-    })
-    .prefault({}),
-  /** Outbound web research and URL fetches. */
-  web: permissionDecisionSchema.default("allow"),
-});
+export const permissionsConfigSchema = z
+  .object({
+    /** Open season: allow every gated tool call, bypassing the rules. */
+    uncaged: z.boolean().default(false),
+    /** Pattern → decision. Unmatched requests are denied (default-deny floor). */
+    rules: z.record(z.string(), permissionDecisionSchema).default({}),
+  })
+  .prefault({});
 export type PermissionsConfig = z.infer<typeof permissionsConfigSchema>;
 
 export interface PermissionRequest {
@@ -89,18 +85,62 @@ export function createSessionPermissionGate(
 const matchesPattern = (pattern: string, value: string): boolean =>
   pattern.endsWith("*") ? value.startsWith(pattern.slice(0, -1)) : value === pattern;
 
-/** Pure policy resolution: deny list, then allow list, then the default. */
+export interface ParsedRule {
+  kind: PermissionRequest["kind"];
+  /** Inner matcher: `*` matches the whole kind; otherwise a prefix/exact pattern. */
+  inner: string;
+}
+
+/**
+ * Parse a rule pattern into its kind and inner matcher. Returns null for a
+ * pattern that isn't a recognized tool-call form (such rules are inert).
+ *   bash | bash(pnpm *) · edit | edit(src/ *) · web | web(https://x *)
+ *   mcp | mcp_<server>_<tool> | mcp_<server>_* | mcp__<server>_<tool>
+ */
+export function parseRulePattern(raw: string): ParsedRule | null {
+  const p = raw.trim();
+  // MCP tools are matched by their canonical id (the `lib/mcp` naming
+  // convention); `mcp` alone means the whole family, and `mcp__…` is an alias.
+  if (isMcpToolPattern(p)) {
+    return { kind: "mcp", inner: p === "mcp" ? "*" : normalizeMcpToolPattern(p) };
+  }
+  const m = p.match(/^(bash|edit|web)(?:\((.*)\))?$/);
+  if (m) {
+    const inner = (m[2] ?? "").trim();
+    return { kind: m[1] as PermissionRequest["kind"], inner: inner === "" ? "*" : inner };
+  }
+  return null;
+}
+
+/** The value a rule of this kind matches against. */
+const requestTarget = (request: PermissionRequest): string =>
+  request.kind === "mcp" ? request.tool : request.detail;
+
+const ruleMatches = (rule: ParsedRule, request: PermissionRequest): boolean => {
+  if (rule.kind !== request.kind) return false;
+  if (rule.inner === "*") return true;
+  return matchesPattern(rule.inner, requestTarget(request));
+};
+
+/**
+ * Default-deny resolution. `uncaged` opens everything; otherwise, of the rules
+ * matching this request, a deny wins, then an allow, then an ask, and anything
+ * unmatched is denied. Order-independent and idempotent.
+ */
 export function resolvePermission(
   config: PermissionsConfig,
   request: PermissionRequest,
 ): PermissionDecision {
-  if (request.kind === "edit") return config.edit;
-  if (request.kind === "web") return config.web;
-  const policy = request.kind === "mcp" ? config.mcp : config.bash;
-  const target = request.kind === "mcp" ? request.tool : request.detail;
-  if (policy.deny.some((pattern) => matchesPattern(pattern, target))) return "deny";
-  if (policy.allow.some((pattern) => matchesPattern(pattern, target))) return "allow";
-  return policy.default;
+  if (config.uncaged) return "allow";
+  let matched: PermissionDecision | undefined;
+  for (const [pattern, decision] of Object.entries(config.rules)) {
+    const rule = parseRulePattern(pattern);
+    if (!rule || !ruleMatches(rule, request)) continue;
+    if (decision === "deny") return "deny";
+    if (decision === "allow") matched = "allow";
+    else if (matched !== "allow") matched = "ask";
+  }
+  return matched ?? "deny";
 }
 
 /** Tool name → permission kind; unlisted repository read/search tools are never gated. */
@@ -124,7 +164,7 @@ const inputTool = (input: unknown): string | undefined => {
 const permissionKind = (tool: string): PermissionRequest["kind"] | undefined => {
   const builtIn = GATED_TOOLS[tool];
   if (builtIn) return builtIn;
-  if (tool === "call_mcp_tool" || tool.startsWith("mcp_")) return "mcp";
+  if (tool === "call_mcp_tool" || tool.startsWith(MCP_TOOL_PREFIX)) return "mcp";
   return undefined;
 };
 

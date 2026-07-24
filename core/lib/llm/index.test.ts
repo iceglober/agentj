@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { llmConfigSchema, resolveTierModel } from ".";
+import { llmConfigSchema, resolveTierModel, resolveTierVariant } from ".";
 
 describe("llm tier ladder", () => {
   test("defaults: empty ladder, plan on frontier, build one rung down", () => {
@@ -29,6 +29,24 @@ describe("llm tier ladder", () => {
     const llm = llmConfigSchema.parse({ tiers: ["fable", "opus", "haiku"] });
     expect(resolveTierModel(llm, 9)).toBe("haiku");
     expect(resolveTierModel(llm, -1)).toBe("fable");
+  });
+
+  test("per-tier variant overrides resolve by index, unset tiers stay undefined", () => {
+    const llm = llmConfigSchema.parse({ tiers: ["a", "b"], variants: ["high", "low"] });
+    expect(resolveTierVariant(llm, 0)).toBe("high");
+    expect(resolveTierVariant(llm, 1)).toBe("low");
+    // No variant recorded for a tier → undefined (caller uses the profile default).
+    expect(resolveTierVariant(llmConfigSchema.parse({ tiers: ["a", "b"] }), 1)).toBeUndefined();
+    expect(resolveTierVariant(llm, 5)).toBeUndefined();
+  });
+
+  test("variants are constrained to the accepted effort set", () => {
+    expect(llmConfigSchema.parse({ variants: ["minimal", "xhigh", "max"] }).variants).toEqual([
+      "minimal",
+      "xhigh",
+      "max",
+    ]);
+    expect(() => llmConfigSchema.parse({ variants: ["turbo"] })).toThrow();
   });
 
   test("ladder entries must be non-empty strings", () => {

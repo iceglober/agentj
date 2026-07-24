@@ -101,3 +101,15 @@ export function resolveProfile(model: string): ProfileName | null {
   }
   return null;
 }
+
+/**
+ * A model's default variant (reasoning effort) from its profile, for surfaces
+ * that show the effective value when the config sets no explicit override.
+ * Falls back to "medium" for models without a profile-declared effort.
+ */
+export function defaultModelVariant(model: string): string {
+  const name = resolveProfile(model);
+  const params: ModelParams | undefined = name ? profiles[name].params : undefined;
+  const effort = params?.providerOptions?.openai?.reasoningEffort;
+  return typeof effort === "string" ? effort : "medium";
+}

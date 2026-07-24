@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
 import z from "zod";
 import type { AgentMode, ExternalAgentTools, ExternalToolPermissionTargetResolver } from "../agent";
 import { defineTool, type ToolDef, type ToolSet } from "../llm";
 import { requestSignal } from "../tools/options";
 import { type SpillWriter, truncateWithSpill } from "../truncation";
+import { canonicalMcpToolName } from "./naming";
 
 const patternSchema = z
   .string()
@@ -206,18 +206,7 @@ const matchesPattern = (pattern: string, value: string): boolean =>
 const matchesAny = (patterns: readonly string[], ...values: string[]): boolean =>
   patterns.some((pattern) => values.some((value) => matchesPattern(pattern, value)));
 
-const canonicalSegment = (value: string): string =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "") || "unnamed";
-
-export const canonicalMcpToolName = (server: string, tool: string): string => {
-  const full = `mcp_${canonicalSegment(server)}_${canonicalSegment(tool)}`;
-  if (full.length <= 64) return full;
-  const suffix = createHash("sha256").update(full).digest("hex").slice(0, 8);
-  return `${full.slice(0, 55)}_${suffix}`;
-};
+export { canonicalMcpToolName };
 
 async function allPages<T>(load: (cursor?: string) => Promise<McpPage<T>>): Promise<T[]> {
   const output: T[] = [];

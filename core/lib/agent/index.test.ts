@@ -157,6 +157,28 @@ describe("createAgentModelRouting", () => {
     expect(changes).toBe(1);
   });
 
+  test("reload adopts a fresh config, drops any primary override, and signals change", () => {
+    let changes = 0;
+    const routing = createAgentModelRouting(
+      agentConfigSchema.parse({
+        llm: { model: "base", tiers: ["frontier", "economy"], modes: { plan: 0, build: 1 } },
+      }),
+      () => changes++,
+    );
+    routing.configure("primary", { provider: "azure", model: "pinned" });
+    expect(routing.configFor("plan").llm.model).toBe("pinned");
+
+    routing.reload(
+      agentConfigSchema.parse({
+        llm: { model: "base", tiers: ["sol", "luna"], modes: { plan: 0, build: 1 } },
+      }),
+    );
+    // Fresh tiers route again; the live override is gone.
+    expect(routing.configFor("plan").llm.model).toBe("sol");
+    expect(routing.configFor("build").llm.model).toBe("luna");
+    expect(changes).toBe(2); // configure + reload
+  });
+
   test("reports explicit child routing and clears it back to inheritance", () => {
     const routing = createAgentModelRouting(agentConfigSchema.parse({ llm: { model: "primary" } }));
     expect(routing.selections().subagents).toBeNull();
@@ -219,7 +241,7 @@ describe("createAgentTools", () => {
     const gated = await createAgentTools(sandbox, config, {
       ...baseOptions,
       permissions: {
-        config: permissionsConfigSchema.parse({ bash: { default: "deny" } }),
+        config: permissionsConfigSchema.parse({ rules: { "bash(*)": "deny" } }),
         gate: async () => "deny",
       },
     });
@@ -240,7 +262,7 @@ describe("createAgentTools", () => {
       ...baseOptions,
       onToolActivity: record,
       permissions: {
-        config: permissionsConfigSchema.parse({ bash: { default: "deny" } }),
+        config: permissionsConfigSchema.parse({ rules: { "bash(*)": "deny" } }),
         gate: async () => "deny",
       },
     });
@@ -252,7 +274,7 @@ describe("createAgentTools", () => {
       ...baseOptions,
       onToolActivity: record,
       permissions: {
-        config: permissionsConfigSchema.parse({ bash: { default: "ask" } }),
+        config: permissionsConfigSchema.parse({ rules: { "bash(*)": "ask" } }),
         gate: async () => {
           events.push("permission:bash");
           return "allow";
@@ -398,7 +420,7 @@ describe("createAgentTools", () => {
         },
       },
       permissions: {
-        config: permissionsConfigSchema.parse({}),
+        config: permissionsConfigSchema.parse({ rules: { "mcp_*": "ask" } }),
         gate: async (request) => {
           events.push(`gate:${request.tool}`);
           return "allow";

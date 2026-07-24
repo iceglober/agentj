@@ -224,6 +224,52 @@ describe("createConfigCliHandlers", () => {
     expect(stderr.text()).toContain("This operation is not supported for the configuration key.\n");
   });
 
+  test("--scope routes writes to the project and local layer files", async () => {
+    const stored = new Map<string, string>();
+    const fileSystem = {
+      async readFile(path: string) {
+        const contents = stored.get(path);
+        if (contents === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        return contents;
+      },
+      async mkdir() {},
+      async writeFile(path: string, contents: string) {
+        stored.set(path, contents);
+      },
+      async rename(from: string, to: string) {
+        stored.set(to, stored.get(from)!);
+        stored.delete(from);
+      },
+      async rm(path: string) {
+        stored.delete(path);
+      },
+      async chmod() {},
+    };
+    const fake = createStore();
+    const { stdout, writers } = createWriters();
+    const handlers = createConfigCliHandlers({
+      config: { projectRoot: "/repo", fileSystem },
+      prompt: { askSecret: async () => SECRET_FIXTURE },
+      secretStore: fake.store,
+      writers,
+    });
+
+    await expect(
+      handlers.rule({ pattern: "edit", decision: "allow", scope: "project" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      handlers.set({ key: "agent.llm.temperature", value: "0.5", scope: "local" }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(JSON.parse(stored.get("/repo/.glorious/config.json")!)).toEqual({
+      permissions: { rules: { edit: "allow" } },
+    });
+    expect(JSON.parse(stored.get("/repo/.glorious/config.local.json")!)).toEqual({
+      agent: { llm: { temperature: 0.5 } },
+    });
+    expect(stdout.text()).toContain("Saved agent.llm.temperature in local configuration.\n");
+  });
+
   test("gets effective values and removes array entries without accepting secret reads", async () => {
     const config = createConfigPort();
     const fake = createStore();
@@ -456,5 +502,62 @@ describe("createConfigCliHandlers", () => {
       expect(`${stdout.text()}${stderr.text()}`).not.toContain(SECRET_FIXTURE);
       expect(stdout.text()).toBe("Deleted providers.azure.api_key from the secure keychain.\n");
     }
+  });
+});
+
+describe("permission rule verbs", () => {
+  const setup = () => {
+    const config = createConfigPort();
+    const fake = createStore();
+    const { stdout, writers } = createWriters();
+    const handlers = createConfigCliHandlers({
+      ...createDependencies(config, fake.store, undefined, writers),
+      readConfig: async () => ({}),
+    });
+    return { config, stdout, handlers };
+  };
+
+  test("allow/ask/deny write the pattern as a rules record key (idempotent set)", async () => {
+    const { config, handlers, stdout } = setup();
+    await expect(
+      handlers.rule({ pattern: "bash(pnpm *)", decision: "allow" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      handlers.rule({ pattern: "mcp_linear_get_issue", decision: "ask" }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(config.calls).toEqual([
+      [{ type: "set", path: ["permissions", "rules", "bash(pnpm *)"], value: "allow" }],
+      [{ type: "set", path: ["permissions", "rules", "mcp_linear_get_issue"], value: "ask" }],
+    ]);
+    expect(stdout.text()).toContain("allow  bash(pnpm *)");
+  });
+
+  test("rejects a pattern that is not a tool-call form", async () => {
+    const { config, handlers } = setup();
+    await expect(
+      handlers.rule({ pattern: "not a tool", decision: "allow" }),
+    ).resolves.toMatchObject({ ok: false, code: "invalid_pattern" });
+    expect(config.calls).toEqual([]);
+  });
+
+  test("unrule deletes the rule key", async () => {
+    const { config, handlers } = setup();
+    await expect(handlers.unrule({ pattern: "bash(rm -rf *)" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(config.calls).toEqual([
+      [{ type: "delete", path: ["permissions", "rules", "bash(rm -rf *)"] }],
+    ]);
+  });
+
+  test("uncaged toggles the boolean and reports state", async () => {
+    const { config, handlers, stdout } = setup();
+    await expect(handlers.uncaged({ on: true })).resolves.toMatchObject({ ok: true });
+    await expect(handlers.uncaged({ on: false })).resolves.toMatchObject({ ok: true });
+    expect(config.calls).toEqual([
+      [{ type: "set", path: ["permissions", "uncaged"], value: true }],
+      [{ type: "set", path: ["permissions", "uncaged"], value: false }],
+    ]);
+    expect(stdout.text()).toContain("uncaged: ON");
   });
 });

@@ -7,11 +7,15 @@ import {
   loadChatConfig,
   loadConfig,
   mergeConfig,
+  mutateConfigLayer,
   mutateGlobalConfig,
+  readConfigLayers,
   readGlobalConfig,
+  resolveConfigLayerPath,
   resolveGlobalConfigPath,
   resolveProjectConfigPaths,
   setGlobalConfigValue,
+  valueAtConfigPath,
 } from ".";
 
 type FileCall =
@@ -120,11 +124,11 @@ describe("global config reads and merges", () => {
           },
         },
       },
-      permissions: { mcp: { allow: ["mcp_docs_search*"] } },
+      permissions: { rules: { "mcp_docs_search*": "allow" } },
     });
     expect(config.mcp.servers.docs?.tools.build).toEqual(["*"]);
     expect(config.mcp.servers.docs?.resources.plan).toEqual(["docs*"]);
-    expect(config.permissions.mcp.allow).toEqual(["mcp_docs_search*"]);
+    expect(config.permissions.rules["mcp_docs_search*"]).toEqual("allow");
   });
 
   test("treats a missing global config as empty and rejects malformed or non-object files", async () => {
@@ -394,5 +398,57 @@ describe("global config mutations", () => {
       deleteGlobalConfigValue(["agent", "llm", "model"], globalOptions(fixture.fileSystem)),
     ).resolves.toBe(false);
     expect(fixture.calls.filter((call) => call[0] === "writeFile")).toHaveLength(writesAfterDelete);
+  });
+});
+
+describe("config layers", () => {
+  test("resolveConfigLayerPath maps the writable layers", () => {
+    expect(resolveConfigLayerPath("global", { home: "/u" })).toBe(
+      "/u/.config/glorious/config.json",
+    );
+    expect(resolveConfigLayerPath("project", { projectRoot: "/repo" })).toBe(
+      "/repo/.glorious/config.json",
+    );
+    expect(resolveConfigLayerPath("local", { projectRoot: "/repo" })).toBe(
+      "/repo/.glorious/config.local.json",
+    );
+    expect(resolveConfigLayerPath("project", {})).toBeUndefined();
+  });
+
+  test("mutateConfigLayer writes to the chosen layer file", async () => {
+    const fs = makeFileSystem({});
+    await expect(
+      mutateConfigLayer(
+        "project",
+        [{ type: "set", path: ["permissions", "uncaged"] as never, value: true }],
+        { projectRoot: "/repo", fileSystem: fs.fileSystem },
+      ),
+    ).resolves.toBe(true);
+    expect(JSON.parse(fs.stored.get("/repo/.glorious/config.json")!)).toEqual({
+      permissions: { uncaged: true },
+    });
+  });
+
+  test("readConfigLayers exposes each layer's raw object; rules merge across layers", async () => {
+    const fs = makeFileSystem({
+      "/repo/.glorious/config.json": JSON.stringify({ permissions: { rules: { edit: "ask" } } }),
+      "/repo/.glorious/config.local.json": JSON.stringify({ permissions: { uncaged: true } }),
+    });
+    const layers = await readConfigLayers({
+      projectRoot: "/repo",
+      fileSystem: fs.fileSystem,
+      home: "/u",
+    });
+    expect(valueAtConfigPath(layers.project, ["permissions", "rules", "edit"])).toBe("ask");
+    expect(valueAtConfigPath(layers.local, ["permissions", "uncaged"])).toBe(true);
+    expect(layers.global).toEqual({});
+    // The effective merge keeps the project rule and the local uncaged flag.
+    const merged = await loadConfig(undefined, {
+      projectRoot: "/repo",
+      fileSystem: fs.fileSystem,
+      home: "/u",
+    });
+    expect(merged.permissions.rules.edit).toBe("ask");
+    expect(merged.permissions.uncaged).toBe(true);
   });
 });

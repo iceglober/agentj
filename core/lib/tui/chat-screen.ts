@@ -91,6 +91,14 @@ export interface ChatScreen extends GuidedInputPort {
   askPermission(request: PermissionRequest): Promise<PermissionPromptDecision>;
   /** Modal editor prompt. Escape cancels without submitting or retaining the value. */
   askInput(options: GuidedInputOptions): Promise<string | null>;
+  /**
+   * Lend the renderer to a full-screen sub-screen (e.g. the `/config` TUI),
+   * restoring the chat when it finishes. Only screens with a retained-mode
+   * renderer implement it; the line-based ANSI screen leaves it undefined.
+   */
+  runModalScreen?(
+    run: (renderer: import("@opentui/core").CliRenderer) => Promise<void>,
+  ): Promise<void>;
 }
 
 export function createChatScreen(options: CreateChatScreenOptions): ChatScreen {

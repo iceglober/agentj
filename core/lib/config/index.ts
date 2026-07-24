@@ -14,6 +14,7 @@ import {
 import { metricsConfigSchema } from "../metrics";
 import { microsandboxOptionsSchema } from "../sandbox/microsandbox-adapter";
 import { sessionConfigSchema } from "../session";
+import { tuiConfigSchema } from "../tui/config";
 import { updateConfigSchema } from "../update";
 import { projectSetupConfigSchema } from "../workspace";
 
@@ -35,6 +36,7 @@ export const configSchema = z.object({
   project: projectSetupConfigSchema.prefault({}),
   metrics: metricsConfigSchema.prefault({}),
   update: updateConfigSchema.prefault({}),
+  tui: tuiConfigSchema.prefault({}),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -314,6 +316,37 @@ export async function deleteGlobalConfigValue(
   return mutateGlobalConfig([{ type: "delete", path }], options);
 }
 
+/** The named configuration layers, lowest → highest precedence. */
+export type ConfigLayer = "default" | "base" | "global" | "project" | "local";
+/** Layers an edit can be written to. */
+export const WRITABLE_LAYERS = ["global", "project", "local"] as const;
+export type WritableConfigLayer = (typeof WRITABLE_LAYERS)[number];
+
+/** Read every layer's raw object (before merge) for provenance and layered writes. */
+async function readConfigLayerObjects(
+  path: string | undefined,
+  options: ConfigLoadOptions,
+): Promise<Record<ConfigLayer, ConfigObject> & { supplied: ConfigObject }> {
+  const fileSystem = options.fileSystem ?? nodeFileSystem;
+  const projectPaths = options.projectRoot
+    ? resolveProjectConfigPaths(options.projectRoot)
+    : undefined;
+  return {
+    default: configSchema.parse({}) as ConfigObject,
+    base: options.baseConfigPath
+      ? await readConfigObject(options.baseConfigPath, "bundled", fileSystem)
+      : {},
+    global: await readGlobalConfig(options),
+    project: projectPaths
+      ? await readJsonObject(projectPaths.configPath, "project", fileSystem)
+      : {},
+    local: projectPaths
+      ? await readJsonObject(projectPaths.localConfigPath, "local project", fileSystem)
+      : {},
+    supplied: path ? await readConfigObject(path, "supplied", fileSystem) : {},
+  };
+}
+
 /**
  * Compose configuration layers in precedence order. The explicit `path` keeps
  * its public API meaning as a caller-supplied final override; chat startup uses
@@ -323,24 +356,52 @@ async function readLayeredConfig(
   path: string | undefined,
   options: ConfigLoadOptions,
 ): Promise<ConfigObject> {
-  const fileSystem = options.fileSystem ?? nodeFileSystem;
-  const defaults = configSchema.parse({}) as ConfigObject;
-  const base = options.baseConfigPath
-    ? await readConfigObject(options.baseConfigPath, "bundled", fileSystem)
-    : {};
-  const global = await readGlobalConfig(options);
-  const projectPaths = options.projectRoot
-    ? resolveProjectConfigPaths(options.projectRoot)
-    : undefined;
-  const project = projectPaths
-    ? await readJsonObject(projectPaths.configPath, "project", fileSystem)
-    : {};
-  const local = projectPaths
-    ? await readJsonObject(projectPaths.localConfigPath, "local project", fileSystem)
-    : {};
-  const supplied = path ? await readConfigObject(path, "supplied", fileSystem) : {};
+  const l = await readConfigLayerObjects(path, options);
+  return mergeConfig(l.default, l.base, l.global, l.project, l.local, l.supplied);
+}
 
-  return mergeConfig(defaults, base, global, project, local, supplied);
+/** Each layer's raw config object, for provenance display ("where is this set"). */
+export async function readConfigLayers(
+  options: ConfigLoadOptions = {},
+): Promise<Record<ConfigLayer, ConfigObject>> {
+  const l = await readConfigLayerObjects(undefined, options);
+  return { default: l.default, base: l.base, global: l.global, project: l.project, local: l.local };
+}
+
+/** The file backing a writable layer, or undefined (no project root for project/local). */
+export function resolveConfigLayerPath(
+  layer: WritableConfigLayer,
+  options: ConfigLoadOptions = {},
+): string | undefined {
+  if (layer === "global") return resolveGlobalConfigPath(options);
+  if (!options.projectRoot) return undefined;
+  const paths = resolveProjectConfigPaths(options.projectRoot);
+  return layer === "project" ? paths.configPath : paths.localConfigPath;
+}
+
+/** Apply mutations to one writable layer (global / project / local). */
+export async function mutateConfigLayer(
+  layer: WritableConfigLayer,
+  mutations: readonly GlobalConfigMutation[],
+  options: ConfigLoadOptions = {},
+): Promise<boolean> {
+  const path = resolveConfigLayerPath(layer, options);
+  if (!path) throw new Error(`Cannot resolve the "${layer}" config layer (no project root).`);
+  return mutateGlobalConfig(mutations, {
+    globalConfigPath: path,
+    home: options.home,
+    fileSystem: options.fileSystem,
+  });
+}
+
+/** The value at a dotted path within a raw config object, or undefined. */
+export function valueAtConfigPath(config: ConfigObject, path: readonly string[]): unknown {
+  let current: unknown = config;
+  for (const segment of path) {
+    if (!isObject(current)) return undefined;
+    current = current[segment];
+  }
+  return current;
 }
 
 /** Load the effective configuration with defaults validated and filled. */

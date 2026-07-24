@@ -10,6 +10,23 @@ export default defineConfig({
   project: {
     setup: ["bun install --frozen-lockfile"],
   },
+  // Default-deny access control. The schema default is an empty ruleset (deny
+  // everything gated); this is the shipped starter policy — usable out of the
+  // box, fully overridable per project/machine, and equivalent to the old
+  // edit=allow / web=allow / bash=ask / mcp=ask defaults.
+  permissions: {
+    rules: {
+      edit: "allow",
+      web: "allow",
+      "bash(*)": "ask",
+      "bash(git *)": "allow",
+      "bash(bun *)": "allow",
+      "bash(pnpm *)": "allow",
+      "bash(npm *)": "allow",
+      "bash(rm -rf *)": "deny",
+      "mcp_*": "ask",
+    },
+  },
   agent: {
     llm: {
       providers: {

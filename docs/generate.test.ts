@@ -24,7 +24,7 @@ describe("docs generator", () => {
     const reference = renderReferenceMarkdown();
     // A representative command and a key line, so a rename in the registry that
     // skipped regeneration is caught here too, not only by the byte pin above.
-    expect(reference).toContain("`/build` — Switch to build mode");
+    expect(reference).toContain("`/build` — Approve the plan and build it");
     expect(reference).toContain("Ctrl+V — paste copied files");
   });
 

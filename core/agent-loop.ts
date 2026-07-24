@@ -57,7 +57,14 @@ import { type ChatSession, createChatSession } from "./lib/chat/session";
 import { bootstrapInteractiveSession } from "./lib/chat/session-bootstrap";
 import { createSessionTodos } from "./lib/chat/todos";
 import { EXIT_ABORTED, EXIT_FAILURE, EXIT_SUCCESS, runGloriousCli } from "./lib/cli";
-import { loadChatConfig, loadConfig } from "./lib/config";
+import {
+  loadChatConfig,
+  loadConfig,
+  mutateConfigLayer,
+  readConfigLayers,
+  resolveConfigLayerPath,
+  type WritableConfigLayer,
+} from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
 import { providerNames, type RunStep } from "./lib/llm";
@@ -83,6 +90,7 @@ import {
   AZURE_SECRET_SERVICE,
   hasAzureApiKey,
   resolveAzureApiKey,
+  type SecretStore,
 } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
 import { createChildSession } from "./lib/session";
@@ -108,6 +116,8 @@ import {
 } from "./lib/tui/chat-event-format";
 import { type ChatScreen, createChatScreen } from "./lib/tui/chat-screen";
 import { ClipboardAttachmentsUnavailableError } from "./lib/tui/clipboard";
+import { type ConfigTuiHost, createConfigTuiHost } from "./lib/tui/config-tui/host";
+import { runConfigTuiScreen } from "./lib/tui/config-tui/screen";
 import { createCrosscopyClipboardAttachments } from "./lib/tui/crosscopy-clipboard-adapter";
 import { createEditorCompletionProvider } from "./lib/tui/editor-completion";
 import { createOpenTuiChatScreen } from "./lib/tui/opentui-chat-screen";
@@ -169,6 +179,39 @@ export function createProductionEvalCliHandlers(): EvalCliHandlers {
   });
 }
 
+/** The bundled base config path (below the user-writable layers). */
+function baseConfigPath(): string {
+  return new URL("./glorious.ts", import.meta.url).pathname;
+}
+
+/** The interactive config-TUI host for a project, wired to the real config
+ *  layers and keychain. Shared by `glorious config` and in-chat `/config`. */
+function createProjectConfigTuiHost(
+  secretStore: SecretStore,
+  configOptions: { baseConfigPath: string; projectRoot: string },
+): ConfigTuiHost {
+  const home = process.env.HOME ?? "";
+  const root = configOptions.projectRoot;
+  // Shorten for display: home → ~, and project files relative to the root.
+  const displayPath = (layer: WritableConfigLayer): string => {
+    const path = resolveConfigLayerPath(layer, configOptions) ?? "";
+    if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+    if (root && path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+    return path;
+  };
+  return createConfigTuiHost({
+    loadConfig: () => loadConfig(undefined, configOptions),
+    loadLayers: () => readConfigLayers(configOptions),
+    mutate: (layer, mutations) => mutateConfigLayer(layer, mutations, configOptions),
+    hasKey: async () => Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
+    layerPaths: {
+      global: displayPath("global"),
+      project: displayPath("project"),
+      local: displayPath("local"),
+    },
+  });
+}
+
 /** `glorious config` with no subcommand: a prompts-driven editor over the config
  *  keys, persisting through the same handlers as `config set`. */
 function createProductionConfigUi(): () => Promise<number> {
@@ -181,13 +224,28 @@ function createProductionConfigUi(): () => Promise<number> {
     }
     const guided = createClackGuidedInput();
     const silent = { write: () => {} };
+    const secretStore = createKeyringSecretStore({});
     const handlers = createConfigCliHandlers({
-      secretStore: createKeyringSecretStore({}),
+      secretStore,
       prompt: {
         askSecret: () => guided.askInput({ label: "Secret value · <Esc> Back", masked: true }),
       },
       writers: { stdout: silent, stderr: silent },
     });
+    // The full-screen OpenTUI config surface is the common path; the clack
+    // menu below is the fallback when OpenTUI can't run.
+    const host = createProjectConfigTuiHost(secretStore, {
+      baseConfigPath: baseConfigPath(),
+      projectRoot: process.cwd(),
+    });
+    try {
+      await runConfigTuiScreen({ loadData: host.loadData, applyEffect: host.applyEffect });
+      return EXIT_SUCCESS;
+    } catch (error) {
+      processStderr.write(
+        `Config TUI unavailable (${error instanceof Error ? error.message : String(error)}); falling back to the menu.\n`,
+      );
+    }
     const port: ConfigUiPort = {
       ...guided,
       read: async (path) => {
@@ -294,6 +352,8 @@ interface ChatComposition {
   modelFor(mode: ChatMode): ModelSelection;
   /** The configured context soft limit (agent.context.softLimit), if any. */
   contextSoftLimit: number | undefined;
+  /** The selected terminal renderer (opentui default, ansi opt-out). */
+  tuiRenderer: "opentui" | "ansi";
   /** The eval $/Mtok map, reused by /cost for terminal pricing. */
   evalPrices: Readonly<Record<string, { in: number; out: number }>>;
   agentFor(mode: ChatMode): Promise<Agent>;
@@ -318,6 +378,11 @@ interface ChatComposition {
   skillIssues: readonly SkillIssue[];
   startMcp(): Promise<void>;
   reloadMcp(name?: string): Promise<void>;
+  /** A config-TUI host bound to this session's config layers and keychain. */
+  createConfigTuiHost(): ConfigTuiHost;
+  /** Re-read config from disk and apply what this session can change live:
+   *  model routing (tiers/variants/modes), permissions, and MCP servers. */
+  reloadSessionConfig(): Promise<void>;
   mcpStatuses(): readonly McpRuntimeStatus[];
   mcpPrompts(): readonly McpPromptCatalogEntry[];
   getMcpPrompt(
@@ -694,6 +759,7 @@ async function composeChat(
       return { provider: active.provider, model: active.model };
     },
     contextSoftLimit: config.agent.context.softLimit,
+    tuiRenderer: config.tui.renderer,
     evalPrices: config.eval.prices,
     agentFor,
     runBuildJob,
@@ -705,6 +771,35 @@ async function composeChat(
     skillIssues: skillsDiscovery.issues,
     startMcp: mcpController.start,
     reloadMcp: mcpController.reload,
+    createConfigTuiHost: () => createProjectConfigTuiHost(secretStore, configLoadOptions),
+    reloadSessionConfig: async () => {
+      const latest = await loadChatConfig(undefined, configLoadOptions);
+      // Permissions are read live from this object on every tool call, so
+      // updating it in place applies Trust changes without a restart.
+      config.permissions = latest.config.permissions;
+      // Only re-route models when the llm config actually changed — reload clears
+      // the agent cache and drops any live `/model` override, so a no-op close
+      // must not disturb the session.
+      if (JSON.stringify(latest.config.agent.llm) !== JSON.stringify(config.agent.llm)) {
+        config.agent.llm = latest.config.agent.llm;
+        modelRouting.reload({
+          ...agentConfig,
+          llm: {
+            ...latest.config.agent.llm,
+            providers: {
+              ...latest.config.agent.llm.providers,
+              azure: { ...latest.config.agent.llm.providers?.azure, apiKey: key.apiKey },
+            },
+          },
+        });
+      }
+      // Reconnecting MCP servers is disruptive, so only reconcile when the mcp
+      // config actually changed (add/remove/edit), not on every editor close.
+      if (JSON.stringify(latest.config.mcp) !== JSON.stringify(config.mcp)) {
+        config.mcp = latest.config.mcp;
+        await mcpController.reload();
+      }
+    },
     authorizeMcp: mcpController.authorize,
     mcpPrompts: () => mcp.prompts(),
     getMcpPrompt: (server, prompt, args) => mcp.getPrompt(server, prompt, args),
@@ -1158,6 +1253,7 @@ export async function runGloriousChat(
       if (text) emit({ type: "notice", text });
     };
     const interactiveConfig = createConfigCliHandlers({
+      config: { projectRoot: process.cwd() },
       secretStore: createKeyringSecretStore({}),
       prompt: {
         askSecret: () =>
@@ -1179,6 +1275,26 @@ export async function runGloriousChat(
         requestedUpdate = channel;
       },
       config: interactiveConfig,
+      launchConfigTui: async () => {
+        const runModal = screen?.runModalScreen;
+        if (!runModal) {
+          emit({
+            type: "notice",
+            text: "Interactive config needs the full-screen renderer; use /config get|set|delete or `glorious config`.",
+          });
+          return;
+        }
+        const configHost = composition.createConfigTuiHost();
+        await runModal((renderer) =>
+          runConfigTuiScreen({
+            renderer,
+            loadData: configHost.loadData,
+            applyEffect: configHost.applyEffect,
+          }),
+        );
+        // Apply anything the editor changed to the running session.
+        await composition.reloadSessionConfig();
+      },
       cost: { rows: () => usageRows, prices: composition.evalPrices },
       activity: { list: () => completedActivities },
       models: {
@@ -1312,13 +1428,16 @@ export async function runGloriousChat(
         onQuit: () => quitResolve?.(),
       },
     };
+    // OpenTUI is the default full-screen surface; `tui.renderer: ansi` (or
+    // GLORIOUS_TUI=ansi for a one-off) opts into the live-region renderer.
+    const tuiRenderer = process.env.GLORIOUS_TUI ?? composition.tuiRenderer;
     screen =
-      process.env.GLORIOUS_TUI === "opentui"
-        ? await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions })
-        : createChatScreen({
+      tuiRenderer === "ansi"
+        ? createChatScreen({
             liveRegion: createAnsiLiveRegionAdapter({ stdout: processStdout }),
             ...sharedScreenOptions,
-          });
+          })
+        : await createOpenTuiChatScreen({ stdout: processStdout, ...sharedScreenOptions });
 
     screen.start();
     refreshProgress();
@@ -1565,6 +1684,7 @@ const main = async (): Promise<void> => {
   };
   const guided = createPromptsGuidedInput();
   const configHandlers = createConfigCliHandlers({
+    config: { projectRoot: process.cwd() },
     secretStore: createKeyringSecretStore({}),
     prompt: {
       askSecret: () => guided.askInput({ label: "Secret value · <Esc> Back", masked: true }),

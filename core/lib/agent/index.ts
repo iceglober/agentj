@@ -7,6 +7,7 @@ import {
   type RunResult,
   type RunStep,
   resolveTierModel,
+  resolveTierVariant,
   type ToolSet,
 } from "../llm";
 import { compactModelMessages } from "../llm/continuation";
@@ -311,6 +312,7 @@ export function createAgentModelRouting(
   configFor(mode: AgentMode): AgentConfig;
   selections(): { primary: AgentModelSelection; subagents: AgentModelSelection | null };
   configure(target: "primary" | "subagents", selection: AgentModelSelection | null): void;
+  reload(config: AgentConfig): void;
 } {
   let config = initialConfig;
   let primaryOverride = false;
@@ -350,6 +352,15 @@ export function createAgentModelRouting(
           : null,
       );
       if (target === "primary") primaryOverride = selection !== null;
+      onChange();
+    },
+    reload: (next) => {
+      // Adopt a freshly loaded config (e.g. after the config editor writes new
+      // tiers/variants/modes) and drop any live primary override — disk is now
+      // authoritative. onChange clears the per-mode agent cache so the next turn
+      // rebuilds on the new selection.
+      config = next;
+      primaryOverride = false;
       onChange();
     },
   };
@@ -608,6 +619,10 @@ export async function createAgent(
 ): Promise<Agent> {
   const runtime = createRuntime(config.llm, opts.metricsSink);
 
+  // A configured per-tier variant overrides the model profile's default
+  // reasoning effort for the tier this agent runs on.
+  const variantOverride = resolveTierVariant(config.llm, config.llm.modes[opts.mode ?? "build"]);
+
   const composed = composePrompt(
     config.prompt,
     {
@@ -647,7 +662,15 @@ export async function createAgent(
         spill: opts.spill?.write,
         temperature: config.llm.temperature ?? composed.params.temperature,
         topP: config.llm.topP ?? composed.params.topP,
-        providerOptions: composed.params.providerOptions,
+        providerOptions: variantOverride
+          ? {
+              ...composed.params.providerOptions,
+              openai: {
+                ...(composed.params.providerOptions?.openai ?? {}),
+                reasoningEffort: variantOverride,
+              },
+            }
+          : composed.params.providerOptions,
         stopSteps: opts.stopSteps ?? config.steps,
         stopContextTokens: opts.stopContextTokens,
         abortSignal: generateOpts?.abortSignal,
