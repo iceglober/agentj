@@ -1,6 +1,6 @@
 {
   "name": "@glrs-dev/glorious",
-  "version": "0.0.0",
+  "version": "0.1.0-next.0",
   "private": false,
   "description": "glorious: a simple, effective terminal coding agent — the flagship of the @glrs-dev ecosystem. The sole product lives in core/; this file carries the root Bun entrypoints.",
   "license": "MIT",
