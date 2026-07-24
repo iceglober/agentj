@@ -2,8 +2,9 @@ import z from "zod";
 import type { MetricsSink } from "../metrics";
 import type { SpillWriter } from "../truncation";
 import { createAiSdkRuntime, providerNames } from "./ai-sdk-adapter";
-import { azureModelConfigSchema } from "./azure-adapter";
+import { providersConfigSchema } from "./providers";
 
+export { KEY_PROVIDERS, type ProviderName } from "./providers";
 export { providerNames };
 
 /**
@@ -171,11 +172,7 @@ export const llmConfigSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   /** Call setting; nucleus sampling (0–1). Forwarded like temperature. */
   topP: z.number().min(0).max(1).optional(),
-  providers: z
-    .object({
-      azure: azureModelConfigSchema.optional(),
-    })
-    .optional(),
+  providers: providersConfigSchema.optional(),
 });
 
 export type LlmConfig = z.infer<typeof llmConfigSchema>;

@@ -9,7 +9,6 @@ import {
 } from "ai";
 import { type MetricsSink, recordModelUsage } from "../metrics";
 import { truncateUnknownWithSpill } from "../truncation";
-import { type AzureModelConfig, createAzureModelProvider } from "./azure-adapter";
 import type {
   AgentRuntime,
   GenerateRequest,
@@ -20,30 +19,16 @@ import type {
   ToolDef,
   ToolSet,
 } from "./index";
+import {
+  llmProviders,
+  type ModelFactory,
+  type ProviderConfigs,
+  type ProviderName,
+  providerNames,
+} from "./providers";
 
-/** A model constructor bound to one provider's auth; adapters return these. */
-export type ModelFactory = (modelId: string) => LanguageModel;
-
-/**
- * Per-provider connection/auth settings. Every provider needs its own props
- * (azure: resourceName; vertex: project/location; ...), so each vendor-auth
- * adapter exports its own schema and gets a block here.
- */
-export interface ProviderConfigs {
-  azure: AzureModelConfig;
-}
-
-export type ProviderName = keyof ProviderConfigs;
-
-/** Registry keyed by config value (`llm.provider`). Internal to this adapter. */
-const llmProviders: {
-  [K in ProviderName]: (config?: ProviderConfigs[K]) => ModelFactory;
-} = {
-  azure: createAzureModelProvider,
-};
-
-/** Provider names, exported so the port schema derives its enum from here. */
-export const providerNames = Object.keys(llmProviders) as [ProviderName, ...ProviderName[]];
+export type { ModelFactory, ProviderConfigs, ProviderName };
+export { providerNames };
 
 /** Maximum retries for retryable model responses such as rate limits and 5xx errors. */
 export const LLM_MAX_RETRIES = 5;
