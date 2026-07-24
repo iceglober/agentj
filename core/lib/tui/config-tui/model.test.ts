@@ -10,7 +10,12 @@ const DATA: ConfigTuiData = {
   },
   availableModels: ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4-nano"],
   availableVariants: ["low", "medium", "high"],
-  providers: { connected: ["azure"], keySet: true },
+  providers: [
+    { name: "azure", connected: true, keyless: false },
+    { name: "openai", connected: false, keyless: false },
+    { name: "bedrock", connected: false, keyless: true },
+  ],
+  connectableProviders: ["azure", "openai", "anthropic"],
   trust: {
     uncaged: false,
     rules: [
@@ -108,6 +113,40 @@ describe("config TUI model", () => {
     m.handleKey(k("down")); // second suggestion
     const eff = m.handleKey(k("return"));
     expect(eff[0]).toMatchObject({ kind: "setRule", decision: "ask" });
+  });
+
+  test("Providers: connect form picks a provider and captures a masked key", () => {
+    const m = fresh();
+    m.handleKey(k("tab"));
+    m.handleKey(k("tab")); // → Providers, cursor on azure (connected)
+    expect(m.view().rows.find((r) => r.cursor)?.label).toBe("azure");
+    // Enter opens the connect form.
+    m.handleKey(k("return"));
+    expect(m.view().overlay?.title).toBe("connect provider");
+    m.handleKey(k("right")); // provider azure → openai
+    expect(m.view().overlay?.items[0]?.note).toBe("←→ openai");
+    // ⏎ with no key does nothing.
+    expect(m.handleKey(k("return"))).toEqual([]);
+    m.handleKey(k("down")); // → api key field
+    type(m, "sk-123");
+    expect(m.view().overlay?.items[1]?.note).toBe("••••••▏"); // masked
+    expect(m.handleKey(k("return"))).toEqual([
+      { kind: "connectProvider", provider: "openai", apiKey: "sk-123" },
+    ]);
+  });
+
+  test("Providers: keyless providers show cloud auth and can't be key-connected", () => {
+    const m = fresh();
+    m.handleKey(k("tab"));
+    m.handleKey(k("tab"));
+    let guard = 0;
+    while (m.view().rows.find((r) => r.cursor)?.label !== "bedrock" && guard++ < 10)
+      m.handleKey(k("down"));
+    const row = m.view().rows.find((r) => r.cursor);
+    expect(row).toMatchObject({ label: "bedrock", value: "credentials", note: "cloud auth" });
+    // Enter does not open the key form for a keyless provider.
+    expect(m.handleKey(k("return"))).toEqual([]);
+    expect(m.view().overlay).toBeUndefined();
   });
 
   test("MCP: x removes a server, r reloads, + add opens the form", () => {

@@ -24,7 +24,10 @@ export interface ConfigTuiData {
   availableModels: string[];
   /** Variants offered per model (what the model accepts). */
   availableVariants: string[];
-  providers: { connected: string[]; keySet: boolean };
+  /** Every provider with its connection status; keyless = cloud credential chain. */
+  providers: Array<{ name: string; connected: boolean; keyless: boolean }>;
+  /** Providers offered in the connect picker (the API-key ones). */
+  connectableProviders: string[];
   trust: {
     uncaged: boolean;
     uncagedLayer?: ConfigLayer;
@@ -51,8 +54,8 @@ export type ConfigEffect =
   | { kind: "setRule"; pattern: string; decision: PermissionDecision }
   | { kind: "removeRule"; pattern: string }
   | { kind: "setUncaged"; on: boolean }
-  | { kind: "connectProvider" } // host prompts for key, then reloads
-  | { kind: "disconnectProvider"; id: string }
+  | { kind: "connectProvider"; provider: string; apiKey: string }
+  | { kind: "disconnectProvider"; provider: string }
   | { kind: "addServer"; name: string; transport: "stdio" | "http"; target: string }
   | { kind: "removeServer"; name: string }
   | { kind: "reloadMcp" }
@@ -140,10 +143,15 @@ type ServerForm = {
   target: string;
 };
 
+/** The connect-provider form: pick a provider (field 0), enter its key (field 1). */
+const PROVIDER_FIELDS = 2;
+type ProviderForm = { kind: "provider-add"; field: number; idx: number; apiKey: string };
+
 type Overlay =
   | { kind: "model"; role: "plan" | "build"; idx: number; variant: string }
   | { kind: "rule-add"; idx: number; decision: PermissionDecision }
   | ServerForm
+  | ProviderForm
   | null;
 
 /** One focusable/renderable row plus what editing it does. */
@@ -276,22 +284,40 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     return { kind: "setRule", pattern, decision: next };
   };
 
+  const openProviderForm = (): null => {
+    overlay = { kind: "provider-add", field: 0, idx: 0, apiKey: "" };
+    return null;
+  };
+
   const providerItems = (): Item[] => {
     const out: Item[] = [];
-    for (const id of data.providers.connected) {
+    for (const p of data.providers) {
+      const value = p.keyless ? "credentials" : p.connected ? "key ✓" : "no key";
       out.push({
         focusable: true,
-        row: { label: id, value: data.providers.keySet ? "key ✓" : "no key", tone: "muted" },
-        hint: "a connected model provider · ⏎ re-enter key · x disconnect",
-        onEnter: () => ({ kind: "connectProvider" }),
-        onRemove: () => ({ kind: "disconnectProvider", id }),
+        row: {
+          label: p.name,
+          value,
+          tone: p.connected ? "success" : "muted",
+          note: p.keyless ? "cloud auth" : undefined,
+        },
+        hint: p.keyless
+          ? "uses the cloud credential chain (AWS / GCP env or ADC) · set region/project via config"
+          : p.connected
+            ? "a connected provider · ⏎ re-enter key · x disconnect"
+            : "no API key yet · ⏎ connect",
+        onEnter: p.keyless ? undefined : openProviderForm,
+        onRemove:
+          p.connected && !p.keyless
+            ? () => ({ kind: "disconnectProvider", provider: p.name })
+            : undefined,
       });
     }
     out.push({
       focusable: true,
       row: { label: "+ connect provider", action: true, tone: "accent" },
-      hint: "connect an @ai-sdk provider · ⏎ open",
-      onEnter: () => ({ kind: "connectProvider" }),
+      hint: "connect an @ai-sdk provider with an API key · ⏎ open",
+      onEnter: openProviderForm,
     });
     return out;
   };
@@ -424,6 +450,38 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       }
       return [];
     }
+    if (overlay.kind === "provider-add") {
+      const form = overlay;
+      const list = data.connectableProviders;
+      if (esc) {
+        overlay = null;
+        return [];
+      }
+      if (key.name === "up") form.field = Math.max(0, form.field - 1);
+      else if (key.name === "down" || key.name === "tab")
+        form.field = Math.min(PROVIDER_FIELDS - 1, form.field + 1);
+      else if (form.field === 0 && (key.name === "left" || key.name === "right") && list.length) {
+        const dir = key.name === "right" ? 1 : -1;
+        form.idx = (form.idx + dir + list.length) % list.length;
+      } else if (key.name === "return" || key.name === "kpenter") {
+        const provider = list[form.idx];
+        const apiKey = form.apiKey.trim();
+        if (!provider || !apiKey) return []; // both required; keep the form open
+        overlay = null;
+        return [{ kind: "connectProvider", provider, apiKey }];
+      } else if (form.field === 1) {
+        // The API-key field: backspace deletes, any printable char appends.
+        form.apiKey =
+          key.name === "backspace"
+            ? form.apiKey.slice(0, -1)
+            : key.name === "space"
+              ? `${form.apiKey} `
+              : key.char
+                ? form.apiKey + key.char
+                : form.apiKey;
+      }
+      return [];
+    }
     return [];
   };
 
@@ -531,6 +589,28 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
           ["←→", "transport"],
           ["type", "edit"],
           ["⏎", "add + reload"],
+          ["esc", "cancel"],
+        ],
+      };
+    } else if (overlay && overlay.kind === "provider-add") {
+      const o = overlay;
+      const provider = data.connectableProviders[o.idx] ?? "";
+      const masked = "•".repeat(o.apiKey.length);
+      ov = {
+        title: "connect provider",
+        items: [
+          { label: "provider", note: `←→ ${provider}`, cursor: o.field === 0 },
+          {
+            label: "api key",
+            note: o.field === 1 ? `${masked}▏` : masked || "paste key",
+            cursor: o.field === 1,
+          },
+        ],
+        keys: [
+          ["↑↓", "field"],
+          ["←→", "provider"],
+          ["type", "key"],
+          ["⏎", "connect"],
           ["esc", "cancel"],
         ],
       };

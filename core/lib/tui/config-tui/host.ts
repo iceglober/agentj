@@ -6,7 +6,7 @@ import {
   valueAtConfigPath,
   type WritableConfigLayer,
 } from "../../config";
-import { MODEL_VARIANTS, resolveTierVariant } from "../../llm";
+import { KEY_PROVIDERS, MODEL_VARIANTS, providerNames, resolveTierVariant } from "../../llm";
 import { defaultModelVariant } from "../../prompt/profiles";
 import type { ConfigEffect, ConfigTuiData } from "./model";
 
@@ -27,11 +27,17 @@ export interface ConfigTuiHostDeps {
     layer: WritableConfigLayer,
     mutations: readonly GlobalConfigMutation[],
   ) => Promise<boolean>;
-  /** Whether the Azure API key is present in the keychain. */
-  hasKey: () => Promise<boolean>;
+  /** Whether a provider has an API key in the keychain. */
+  hasProviderKey: (provider: string) => Promise<boolean>;
+  /** Store a provider's API key in the keychain. */
+  setProviderKey: (provider: string, apiKey: string) => Promise<void>;
+  /** Remove a provider's API key from the keychain. */
+  removeProviderKey: (provider: string) => Promise<void>;
   /** Display path of each writable layer's file (static for the session). */
   layerPaths: Record<WritableConfigLayer, string>;
 }
+
+const KEYLESS_PROVIDERS = providerNames.filter((p) => !KEY_PROVIDERS.includes(p));
 
 /** Models offered in the picker for the (only wired) Azure provider. */
 const AZURE_MODELS = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4", "gpt-5.4-nano"];
@@ -77,7 +83,14 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
       },
       availableModels: Array.from(new Set([...AZURE_MODELS, plan, build])),
       availableVariants: [...MODEL_VARIANTS],
-      providers: { connected: ["azure"], keySet: await deps.hasKey() },
+      providers: await Promise.all(
+        providerNames.map(async (name) => ({
+          name,
+          keyless: KEYLESS_PROVIDERS.includes(name),
+          connected: KEYLESS_PROVIDERS.includes(name) ? false : await deps.hasProviderKey(name),
+        })),
+      ),
+      connectableProviders: [...KEY_PROVIDERS],
       trust: {
         uncaged: cfg.permissions.uncaged,
         uncagedLayer: source(["permissions", "uncaged"]),
@@ -161,9 +174,11 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
       case "reloadMcp":
         return "↻ reloaded MCP servers";
       case "connectProvider":
-        return "azure is the only wired provider — key: config set --secret providers.azure.api_key";
+        await deps.setProviderKey(effect.provider, effect.apiKey);
+        return `connected ${effect.provider} · set its models in Models`;
       case "disconnectProvider":
-        return "azure is the only wired provider";
+        await deps.removeProviderKey(effect.provider);
+        return `disconnected ${effect.provider}`;
       case "quit":
         return undefined;
     }

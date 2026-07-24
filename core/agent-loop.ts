@@ -89,8 +89,11 @@ import {
   AZURE_API_KEY_ACCOUNT,
   AZURE_SECRET_SERVICE,
   hasAzureApiKey,
+  hasProviderKey,
+  providerKeyAccount,
   resolveAzureApiKey,
   resolveProviderKey,
+  SECRET_SERVICE,
   type SecretStore,
 } from "./lib/secrets";
 import { createKeyringSecretStore } from "./lib/secrets/keyring-adapter";
@@ -242,7 +245,12 @@ function createProjectConfigTuiHost(
     loadConfig: () => loadConfig(undefined, configOptions),
     loadLayers: () => readConfigLayers(configOptions),
     mutate: (layer, mutations) => mutateConfigLayer(layer, mutations, configOptions),
-    hasKey: async () => Boolean(await secretStore.get(AZURE_SECRET_SERVICE, AZURE_API_KEY_ACCOUNT)),
+    hasProviderKey: (provider) => hasProviderKey(provider, secretStore),
+    setProviderKey: (provider, apiKey) =>
+      secretStore.set(SECRET_SERVICE, providerKeyAccount(provider), apiKey),
+    removeProviderKey: async (provider) => {
+      await secretStore.delete(SECRET_SERVICE, providerKeyAccount(provider));
+    },
     layerPaths: {
       global: displayPath("global"),
       project: displayPath("project"),

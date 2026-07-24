@@ -21,6 +21,7 @@ const emptyLayers = (): Record<ConfigLayer, ConfigObject> => ({
 
 function makeHost(opts: { cfg?: Config; layers?: Record<ConfigLayer, ConfigObject> }) {
   const writes: Array<{ layer: WritableConfigLayer; mutations: GlobalConfigMutation[] }> = [];
+  const keys = new Map<string, string>();
   const host = createConfigTuiHost({
     loadConfig: async () => opts.cfg ?? config(),
     loadLayers: async () => opts.layers ?? emptyLayers(),
@@ -28,14 +29,20 @@ function makeHost(opts: { cfg?: Config; layers?: Record<ConfigLayer, ConfigObjec
       writes.push({ layer, mutations: [...mutations] });
       return true;
     },
-    hasKey: async () => true,
+    hasProviderKey: async (provider) => keys.has(provider),
+    setProviderKey: async (provider, apiKey) => {
+      keys.set(provider, apiKey);
+    },
+    removeProviderKey: async (provider) => {
+      keys.delete(provider);
+    },
     layerPaths: {
       global: "~/.config/glorious/config.json",
       project: ".glorious/config.json",
       local: ".glorious/config.local.json",
     },
   });
-  return { host, writes };
+  return { host, writes, keys };
 }
 
 describe("config TUI host", () => {
@@ -123,6 +130,30 @@ describe("config TUI host", () => {
     );
     // gpt-5.6-sol's profile default is "high"; build falls back to its default too.
     expect(variants).toMatchObject({ value: ["high", "medium"] });
+  });
+
+  test("connect/disconnect store and remove a provider's keychain key", async () => {
+    const { host, keys } = makeHost({});
+    await host.applyEffect(
+      { kind: "connectProvider", provider: "openai", apiKey: "sk-1" },
+      "global",
+    );
+    expect(keys.get("openai")).toBe("sk-1");
+    await host.applyEffect({ kind: "disconnectProvider", provider: "openai" }, "global");
+    expect(keys.has("openai")).toBe(false);
+  });
+
+  test("loadData lists every provider with connection status; keyless use the cloud chain", async () => {
+    const { host, keys } = makeHost({});
+    keys.set("anthropic", "sk-a");
+    const data = await host.loadData();
+    const byName = Object.fromEntries(data.providers.map((p) => [p.name, p]));
+    expect(byName.anthropic).toMatchObject({ connected: true, keyless: false });
+    expect(byName.openai).toMatchObject({ connected: false, keyless: false });
+    expect(byName.bedrock).toMatchObject({ keyless: true });
+    expect(byName.vertex).toMatchObject({ keyless: true });
+    expect(data.connectableProviders).toContain("openai");
+    expect(data.connectableProviders).not.toContain("bedrock");
   });
 
   test("loadData tags each value with the highest writable layer that set it", async () => {
