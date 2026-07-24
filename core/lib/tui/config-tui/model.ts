@@ -1,5 +1,6 @@
 import type { PermissionDecision } from "../../agent/permissions";
 import type { ConfigLayer, WritableConfigLayer } from "../../config";
+import { windowList } from "../list-window";
 
 /**
  * Pure state machine for the interactive config TUI. No terminal, no I/O: it
@@ -312,6 +313,8 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     return data.availableVariants.map((v) => ({ value: v, label: v }));
   };
 
+  const EXPLORER_ROWS = 9;
+
   const explorerColumns = (o: ModelExplorer): ConfigOverlayColumn[] =>
     ([0, 1, 2] as const).map((col) => {
       const title = col === 0 ? "provider" : col === 1 ? `model · ${o.provider}` : "variant";
@@ -322,17 +325,31 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       const active = col === o.col;
       const cells = active ? explorerCells(o) : cellsForCol(o, col);
       const sel = col === 0 ? o.provider : col === 1 ? o.model : o.variant;
-      return {
-        title,
-        active,
-        ...(active ? { search: o.query } : {}),
-        items: cells.map((c, i) => ({
+      const focus = active
+        ? o.idx
+        : Math.max(
+            0,
+            cells.findIndex((c) => c.value === sel),
+          );
+      // Long catalogs (models.dev) scroll: a window that follows the cursor,
+      // with faint overflow markers above/below.
+      const win = windowList(cells, focus, EXPLORER_ROWS);
+      const items: ConfigOverlayColumn["items"] = [];
+      if (win.omittedAbove > 0)
+        items.push({ label: `↑ ${win.omittedAbove} more`, cursor: false, muted: true });
+      for (let i = 0; i < win.items.length; i += 1) {
+        const c = win.items[i];
+        const full = win.start + i;
+        items.push({
           label: c.label,
           ...(c.note ? { note: c.note } : {}),
-          cursor: active ? i === o.idx : c.value === sel,
+          cursor: active ? full === o.idx : c.value === sel,
           muted: !active,
-        })),
-      };
+        });
+      }
+      if (win.omittedBelow > 0)
+        items.push({ label: `↓ ${win.omittedBelow} more`, cursor: false, muted: true });
+      return { title, active, ...(active ? { search: o.query } : {}), items };
     });
 
   const trustItems = (): Item[] => {

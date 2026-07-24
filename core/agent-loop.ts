@@ -67,7 +67,7 @@ import {
 } from "./lib/config";
 import { createConfigCliHandlers, LLM_MODEL_KEY, SUBAGENT_LLM_MODEL_KEY } from "./lib/config-cli";
 import { createEvalCliHandlers, type EvalCliHandlers } from "./lib/eval-cli";
-import { type ProviderName, providerNames, type RunStep } from "./lib/llm";
+import { loadModelCatalog, type ProviderName, providerNames, type RunStep } from "./lib/llm";
 import type { McpPromptCatalogEntry, McpPromptResult } from "./lib/mcp";
 import {
   connectModelContextProtocolServer,
@@ -257,6 +257,7 @@ function createProjectConfigTuiHost(
     removeProviderKey: async (provider) => {
       await secretStore.delete(SECRET_SERVICE, providerKeyAccount(provider));
     },
+    loadProviderModels: loadModelCatalog,
     layerPaths: {
       global: displayPath("global"),
       project: displayPath("project"),

@@ -36,6 +36,10 @@ function makeHost(opts: { cfg?: Config; layers?: Record<ConfigLayer, ConfigObjec
     removeProviderKey: async (provider) => {
       keys.delete(provider);
     },
+    loadProviderModels: async () => ({
+      azure: ["gpt-5.6-sol", "gpt-5.6-luna"],
+      openai: ["gpt-4o", "gpt-4o-mini"],
+    }),
     layerPaths: {
       global: "~/.config/glorious/config.json",
       project: ".glorious/config.json",

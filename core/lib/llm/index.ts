@@ -4,6 +4,7 @@ import type { SpillWriter } from "../truncation";
 import { createAiSdkRuntime, providerNames } from "./ai-sdk-adapter";
 import { type ProviderName, providersConfigSchema } from "./providers";
 
+export { fetchModelCatalog, loadModelCatalog } from "./catalog";
 export { KEY_PROVIDERS, type ProviderName } from "./providers";
 export { providerNames };
 

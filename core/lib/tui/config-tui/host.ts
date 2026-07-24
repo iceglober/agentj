@@ -40,31 +40,13 @@ export interface ConfigTuiHostDeps {
   setProviderKey: (provider: string, apiKey: string) => Promise<void>;
   /** Remove a provider's API key from the keychain. */
   removeProviderKey: (provider: string) => Promise<void>;
+  /** Model suggestions per provider (the models.dev catalog); memoized upstream. */
+  loadProviderModels: () => Promise<Record<string, string[]>>;
   /** Display path of each writable layer's file (static for the session). */
   layerPaths: Record<WritableConfigLayer, string>;
 }
 
 const KEYLESS_PROVIDERS = providerNames.filter((p) => !KEY_PROVIDERS.includes(p));
-
-/** Suggested model ids per provider — the picker's column 2 (free text covers the
- *  rest). Editable in one place; the search field handles anything not listed. */
-const PROVIDER_MODELS: Record<string, string[]> = {
-  azure: ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4", "gpt-5.4-nano"],
-  openai: ["gpt-4o", "gpt-4o-mini", "o3", "o3-mini", "o1"],
-  anthropic: ["claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"],
-  google: ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"],
-  vertex: ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"],
-  mistral: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
-  cohere: ["command-r-plus", "command-r"],
-  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
-  deepseek: ["deepseek-chat", "deepseek-reasoner"],
-  xai: ["grok-2", "grok-2-mini"],
-  cerebras: ["llama3.1-70b", "llama3.1-8b"],
-  perplexity: ["sonar-pro", "sonar"],
-  bedrock: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
-  togetherai: [],
-  "openai-compatible": [],
-};
 
 export interface ConfigTuiHost {
   loadData: () => Promise<ConfigTuiData>;
@@ -117,8 +99,10 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
         build.provider,
       ]),
     );
-    // Ensure each role's current model appears in its provider's suggestions.
-    const providerModels: Record<string, string[]> = { ...PROVIDER_MODELS };
+    // Model suggestions from the models.dev catalog; ensure each role's current
+    // model appears even if the catalog omits it.
+    const catalog = await deps.loadProviderModels();
+    const providerModels: Record<string, string[]> = { ...catalog };
     for (const rm of [plan, build]) {
       const list = providerModels[rm.provider] ?? [];
       providerModels[rm.provider] = list.includes(rm.model) ? list : [rm.model, ...list];
@@ -179,7 +163,7 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
         // none was given); the other role keeps its current effective variant.
         const variantFor = (role: "plan" | "build", ref: string, current: string): string => {
           if (effect.role !== role) return current;
-          return effect.variant ?? defaultModelVariant(parseModelRef(ref, plan.provider).model);
+          return effect.variant ?? defaultModelVariant(parseModelRef(ref, "azure").model);
         };
         await deps.mutate(scope, [
           set(["agent", "llm", "tiers"], [nextPlan, nextBuild]),
