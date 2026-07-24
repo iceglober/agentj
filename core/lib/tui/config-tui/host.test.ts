@@ -109,13 +109,14 @@ describe("config TUI host", () => {
         },
       }),
     });
-    // Change only the build model + variant; plan's variant override is preserved.
+    // Change only the build model + variant; plan's variant override is preserved
+    // and its tier canonicalizes to a full provider/model ref.
     await host.applyEffect(
-      { kind: "setModel", role: "build", model: "c", variant: "xhigh" },
+      { kind: "setModel", role: "build", model: "openai/gpt-4o", variant: "xhigh" },
       "global",
     );
     expect(writes[0]?.mutations).toEqual([
-      { type: "set", path: ["agent", "llm", "tiers"], value: ["a", "c"] },
+      { type: "set", path: ["agent", "llm", "tiers"], value: ["azure/a", "openai/gpt-4o"] },
       { type: "set", path: ["agent", "llm", "variants"], value: ["high", "xhigh"] },
       { type: "set", path: ["agent", "llm", "modes", "plan"], value: 0 },
       { type: "set", path: ["agent", "llm", "modes", "build"], value: 1 },

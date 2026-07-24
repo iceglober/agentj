@@ -9,20 +9,27 @@ import type { ConfigLayer, WritableConfigLayer } from "../../config";
  * renderer and the headless tests drive the exact same model.
  */
 
+/** One role's resolved model: the full `provider/model` ref, split, + variant. */
+export interface RoleModel {
+  ref: string;
+  provider: string;
+  model: string;
+  variant: string;
+  layer?: ConfigLayer;
+}
+
 export interface ConfigTuiData {
-  /** Named model roles (compiled to the tier ladder by the host on apply). */
+  /** Named model roles (compiled to the tier ladder by the host on apply). Each
+   *  role's `ref` is the display `provider/model`, with the parts split out. */
   models: {
-    plan: string;
-    build: string;
-    planLayer?: ConfigLayer;
-    buildLayer?: ConfigLayer;
-    /** Effective variant (reasoning effort) per role — override or profile default. */
-    planVariant: string;
-    buildVariant: string;
+    plan: RoleModel;
+    build: RoleModel;
   };
-  /** Model ids offered in the picker (from the connected providers). */
-  availableModels: string[];
-  /** Variants offered per model (what the model accepts). */
+  /** Providers usable for models (connected key, or a cloud-auth one) — column 1. */
+  modelProviders: string[];
+  /** Suggested model ids per provider — column 2 (the picker also takes free text). */
+  providerModels: Record<string, string[]>;
+  /** Variants offered per model — column 3 (what the model accepts). */
   availableVariants: string[];
   /** Every provider with its connection status; keyless = cloud credential chain. */
   providers: Array<{ name: string; connected: boolean; keyless: boolean }>;
@@ -77,6 +84,15 @@ export interface ConfigViewRow {
   divider?: boolean;
 }
 
+/** One column of the Miller-column model picker. */
+export interface ConfigOverlayColumn {
+  title: string;
+  /** The live search string for this column (only the active column shows a caret). */
+  search?: string;
+  active: boolean;
+  items: Array<{ label: string; note?: string; cursor: boolean; muted?: boolean }>;
+}
+
 export interface ConfigOverlayView {
   title: string;
   items: Array<{ label: string; note?: string; cursor: boolean }>;
@@ -84,6 +100,8 @@ export interface ConfigOverlayView {
   /** A ←→-cycled value shown by the title (e.g. the model variant), with the
    *  value highlighted as the anchor for that control. */
   control?: { label: string; value: string };
+  /** Miller-column layout (the model picker); replaces `items` when present. */
+  columns?: ConfigOverlayColumn[];
   keys: Array<[string, string]>;
 }
 
@@ -147,12 +165,30 @@ type ServerForm = {
 const PROVIDER_FIELDS = 2;
 type ProviderForm = { kind: "provider-add"; field: number; idx: number; apiKey: string };
 
+/** The Miller-column model picker: column 0 provider, 1 model, 2 variant. Each
+ *  column searches with `query`; `idx` is the cursor in the active column. */
+type ModelExplorer = {
+  kind: "model";
+  role: "plan" | "build";
+  col: 0 | 1 | 2;
+  provider: string;
+  model: string;
+  variant: string;
+  query: string;
+  idx: number;
+};
+
 type Overlay =
-  | { kind: "model"; role: "plan" | "build"; idx: number; variant: string }
+  | ModelExplorer
   | { kind: "rule-add"; idx: number; decision: PermissionDecision }
   | ServerForm
   | ProviderForm
   | null;
+
+const filterList = (list: readonly string[], query: string): string[] => {
+  const q = query.trim().toLowerCase();
+  return q ? list.filter((x) => x.toLowerCase().includes(q)) : [...list];
+};
 
 /** One focusable/renderable row plus what editing it does. */
 interface Item {
@@ -195,23 +231,30 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
 
   const modelItems = (): Item[] => {
     const pick = (role: "plan" | "build"): Item => {
-      const variant = role === "plan" ? data.models.planVariant : data.models.buildVariant;
-      const layer = layerNote(role === "plan" ? data.models.planLayer : data.models.buildLayer);
+      const rm = data.models[role];
+      const layer = layerNote(rm.layer);
       return {
         focusable: true,
         row: {
           label: role === "plan" ? "Plan model" : "Build model",
-          value: data.models[role],
+          value: rm.ref,
           // Note carries the effective variant, plus the source layer if pinned.
-          note: layer ? `${variant} · ${layer}` : variant,
+          note: layer ? `${rm.variant} · ${layer}` : rm.variant,
         },
-        hint: `which model ${role === "plan" ? "investigates and drafts the plan" : "writes the code"} · ⏎ choose model + variant`,
+        hint: `which model ${role === "plan" ? "drafts the plan" : "writes the code"} · ⏎ pick provider / model / variant`,
         onEnter: () => {
+          // Open on the model column with the current provider selected; Esc
+          // steps back to the provider column.
+          const models = data.providerModels[rm.provider] ?? [];
           overlay = {
             kind: "model",
             role,
-            idx: Math.max(0, data.availableModels.indexOf(data.models[role])),
-            variant,
+            col: 1,
+            provider: rm.provider,
+            model: rm.model,
+            variant: rm.variant,
+            query: "",
+            idx: Math.max(0, models.indexOf(rm.model)),
           };
           return null;
         },
@@ -219,6 +262,78 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     };
     return [pick("plan"), pick("build")];
   };
+
+  // ---- model picker (Miller columns) ----
+  type Cell = { value: string; label: string; note?: string; custom?: boolean };
+
+  const explorerCells = (o: ModelExplorer): Cell[] => {
+    if (o.col === 0)
+      return filterList(data.modelProviders, o.query).map((p) => ({ value: p, label: p }));
+    if (o.col === 2)
+      return filterList(data.availableVariants, o.query).map((v) => ({ value: v, label: v }));
+    // Column 1: the provider's model suggestions, plus a literal from the query.
+    const sugg = filterList(data.providerModels[o.provider] ?? [], o.query);
+    const cells: Cell[] = sugg.map((m) => ({ value: m, label: modelShort(m), note: m }));
+    const q = o.query.trim();
+    if (q && !sugg.includes(q)) cells.push({ value: q, label: `use “${q}”`, custom: true });
+    return cells;
+  };
+
+  /** Sync the column's selection (provider/model/variant) to the cursor. */
+  const explorerApply = (o: ModelExplorer): void => {
+    const cell = explorerCells(o)[o.idx];
+    if (!cell) {
+      if (o.col === 1) o.model = o.query.trim();
+      return;
+    }
+    if (o.col === 0) o.provider = cell.value;
+    else if (o.col === 1) o.model = cell.value;
+    else o.variant = cell.value;
+  };
+
+  /** Point the cursor at the current selection when a column (re)activates. */
+  const explorerReset = (o: ModelExplorer): void => {
+    const cur = o.col === 0 ? o.provider : o.col === 1 ? o.model : o.variant;
+    const cells = explorerCells(o);
+    const at = cells.findIndex((c) => c.value === cur);
+    o.idx = at >= 0 ? at : 0;
+    explorerApply(o);
+  };
+
+  // A column's full (unfiltered) cells, for the trail columns behind the cursor.
+  const cellsForCol = (o: ModelExplorer, col: 0 | 1 | 2): Cell[] => {
+    if (col === 0) return data.modelProviders.map((p) => ({ value: p, label: p }));
+    if (col === 1)
+      return (data.providerModels[o.provider] ?? []).map((m) => ({
+        value: m,
+        label: modelShort(m),
+        note: m,
+      }));
+    return data.availableVariants.map((v) => ({ value: v, label: v }));
+  };
+
+  const explorerColumns = (o: ModelExplorer): ConfigOverlayColumn[] =>
+    ([0, 1, 2] as const).map((col) => {
+      const title = col === 0 ? "provider" : col === 1 ? `model · ${o.provider}` : "variant";
+      if (col > o.col) {
+        const wait = col === 1 ? "choose a provider" : "choose a model";
+        return { title, active: false, items: [{ label: wait, cursor: false, muted: true }] };
+      }
+      const active = col === o.col;
+      const cells = active ? explorerCells(o) : cellsForCol(o, col);
+      const sel = col === 0 ? o.provider : col === 1 ? o.model : o.variant;
+      return {
+        title,
+        active,
+        ...(active ? { search: o.query } : {}),
+        items: cells.map((c, i) => ({
+          label: c.label,
+          ...(c.note ? { note: c.note } : {}),
+          cursor: active ? i === o.idx : c.value === sel,
+          muted: !active,
+        })),
+      };
+    });
 
   const trustItems = (): Item[] => {
     const out: Item[] = [];
@@ -375,24 +490,53 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
     if (!overlay) return [];
     const esc = key.name === "escape";
     if (overlay.kind === "model") {
-      const list = data.availableModels;
-      const variants = data.availableVariants;
-      if (esc) {
-        overlay = null;
+      const o = overlay;
+      // Esc / ← step back a column; from the first column, close.
+      if (esc || key.name === "left") {
+        if (o.col === 0) {
+          overlay = null;
+          return [];
+        }
+        o.col = (o.col - 1) as 0 | 1 | 2;
+        o.query = "";
+        explorerReset(o);
         return [];
       }
-      if (key.name === "up") overlay.idx = Math.max(0, overlay.idx - 1);
-      else if (key.name === "down") overlay.idx = Math.min(list.length - 1, overlay.idx + 1);
-      else if ((key.name === "left" || key.name === "right") && variants.length) {
-        const dir = key.name === "right" ? 1 : -1;
-        const at = variants.indexOf(overlay.variant);
-        overlay.variant = variants[(at + dir + variants.length) % variants.length];
-      } else if (key.name === "return" || key.name === "kpenter") {
-        const model = list[overlay.idx];
-        const role = overlay.role;
-        const variant = overlay.variant;
+      const cells = explorerCells(o);
+      if (key.name === "up") {
+        o.idx = Math.max(0, o.idx - 1);
+        explorerApply(o);
+      } else if (key.name === "down") {
+        o.idx = Math.min(Math.max(0, cells.length - 1), o.idx + 1);
+        explorerApply(o);
+      } else if (key.name === "right" || key.name === "return" || key.name === "kpenter") {
+        explorerApply(o);
+        if (o.col < 2) {
+          o.col = (o.col + 1) as 0 | 1 | 2;
+          o.query = "";
+          explorerReset(o);
+          return [];
+        }
+        const model = o.model.trim();
+        if (!model) return [];
+        const { role, provider, variant } = o;
         overlay = null;
-        return model ? [{ kind: "setModel", role, model, variant }] : [];
+        return [{ kind: "setModel", role, model: `${provider}/${model}`, variant }];
+      } else {
+        // Type to search the active column (col 1 also accepts a literal id).
+        const edited =
+          key.name === "backspace"
+            ? o.query.slice(0, -1)
+            : key.name === "space"
+              ? `${o.query} `
+              : key.char
+                ? o.query + key.char
+                : o.query;
+        if (edited !== o.query) {
+          o.query = edited;
+          o.idx = 0;
+          explorerApply(o);
+        }
       }
       return [];
     }
@@ -540,16 +684,13 @@ export function createConfigTuiModel(initial: ConfigTuiData): ConfigTuiModel {
       const o = overlay;
       ov = {
         title: `${o.role} model`,
-        control: { label: "variant", value: o.variant },
-        items: data.availableModels.map((m, i) => ({
-          label: modelShort(m),
-          note: m,
-          cursor: i === o.idx,
-        })),
+        items: [],
+        columns: explorerColumns(o),
         keys: [
-          ["↑↓", "model"],
-          ["⏎", "select"],
-          ["esc", "cancel"],
+          ["↑↓", "move"],
+          ["type", "search"],
+          ["→ ⏎", "open · select"],
+          ["esc", "back"],
         ],
       };
     } else if (overlay && overlay.kind === "rule-add") {

@@ -6,7 +6,14 @@ import {
   valueAtConfigPath,
   type WritableConfigLayer,
 } from "../../config";
-import { KEY_PROVIDERS, MODEL_VARIANTS, providerNames, resolveTierVariant } from "../../llm";
+import {
+  KEY_PROVIDERS,
+  MODEL_VARIANTS,
+  parseModelRef,
+  providerNames,
+  resolveTier,
+  resolveTierVariant,
+} from "../../llm";
 import { defaultModelVariant } from "../../prompt/profiles";
 import type { ConfigEffect, ConfigTuiData } from "./model";
 
@@ -39,25 +46,46 @@ export interface ConfigTuiHostDeps {
 
 const KEYLESS_PROVIDERS = providerNames.filter((p) => !KEY_PROVIDERS.includes(p));
 
-/** Models offered in the picker for the (only wired) Azure provider. */
-const AZURE_MODELS = ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4", "gpt-5.4-nano"];
+/** Suggested model ids per provider — the picker's column 2 (free text covers the
+ *  rest). Editable in one place; the search field handles anything not listed. */
+const PROVIDER_MODELS: Record<string, string[]> = {
+  azure: ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4", "gpt-5.4-nano"],
+  openai: ["gpt-4o", "gpt-4o-mini", "o3", "o3-mini", "o1"],
+  anthropic: ["claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"],
+  google: ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"],
+  vertex: ["gemini-2.0-flash", "gemini-2.0-pro", "gemini-1.5-pro"],
+  mistral: ["mistral-large-latest", "mistral-small-latest", "codestral-latest"],
+  cohere: ["command-r-plus", "command-r"],
+  groq: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner"],
+  xai: ["grok-2", "grok-2-mini"],
+  cerebras: ["llama3.1-70b", "llama3.1-8b"],
+  perplexity: ["sonar-pro", "sonar"],
+  bedrock: ["anthropic.claude-3-5-sonnet-20241022-v2:0"],
+  togetherai: [],
+  "openai-compatible": [],
+};
 
 export interface ConfigTuiHost {
   loadData: () => Promise<ConfigTuiData>;
   applyEffect: (effect: ConfigEffect, scope: WritableConfigLayer) => Promise<string | undefined>;
 }
 
-export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
-  const roleModels = (cfg: Config): { plan: string; build: string } => {
-    const llm = cfg.agent.llm;
-    const tier = (i: number): string => llm.tiers[i] ?? llm.model;
-    return { plan: tier(llm.modes.plan), build: tier(llm.modes.build) };
-  };
+interface RoleModelData {
+  provider: string;
+  model: string;
+  ref: string;
+  variant: string;
+}
 
-  // Effective variant for a role: the config override for its tier, else the
-  // model profile's default.
-  const roleVariant = (cfg: Config, role: "plan" | "build", model: string): string =>
-    resolveTierVariant(cfg.agent.llm, cfg.agent.llm.modes[role]) ?? defaultModelVariant(model);
+export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
+  // A role's provider/model (resolved from its tier) with the effective variant.
+  const roleModel = (cfg: Config, role: "plan" | "build"): RoleModelData => {
+    const { provider, model } = resolveTier(cfg.agent.llm, cfg.agent.llm.modes[role]);
+    const variant =
+      resolveTierVariant(cfg.agent.llm, cfg.agent.llm.modes[role]) ?? defaultModelVariant(model);
+    return { provider, model, ref: `${provider}/${model}`, variant };
+  };
 
   const loadData = async (): Promise<ConfigTuiData> => {
     const cfg = await deps.loadConfig();
@@ -71,25 +99,39 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
       return "base";
     };
     const modelLayer = source(["agent", "llm", "tiers"], ["agent", "llm", "model"]);
-    const { plan, build } = roleModels(cfg);
+    const plan = roleModel(cfg, "plan");
+    const build = roleModel(cfg, "build");
+    const providerStatuses = await Promise.all(
+      providerNames.map(async (name) => ({
+        name,
+        keyless: KEYLESS_PROVIDERS.includes(name),
+        connected: KEYLESS_PROVIDERS.includes(name) ? false : await deps.hasProviderKey(name),
+      })),
+    );
+    // Providers usable for models: connected key or a cloud-auth one, plus
+    // whichever a role already uses (so the current selection always shows).
+    const modelProviders = Array.from(
+      new Set([
+        ...providerStatuses.filter((p) => p.connected || p.keyless).map((p) => p.name),
+        plan.provider,
+        build.provider,
+      ]),
+    );
+    // Ensure each role's current model appears in its provider's suggestions.
+    const providerModels: Record<string, string[]> = { ...PROVIDER_MODELS };
+    for (const rm of [plan, build]) {
+      const list = providerModels[rm.provider] ?? [];
+      providerModels[rm.provider] = list.includes(rm.model) ? list : [rm.model, ...list];
+    }
     return {
       models: {
-        plan,
-        build,
-        planLayer: modelLayer,
-        buildLayer: modelLayer,
-        planVariant: roleVariant(cfg, "plan", plan),
-        buildVariant: roleVariant(cfg, "build", build),
+        plan: { ...plan, layer: modelLayer },
+        build: { ...build, layer: modelLayer },
       },
-      availableModels: Array.from(new Set([...AZURE_MODELS, plan, build])),
+      modelProviders,
+      providerModels,
       availableVariants: [...MODEL_VARIANTS],
-      providers: await Promise.all(
-        providerNames.map(async (name) => ({
-          name,
-          keyless: KEYLESS_PROVIDERS.includes(name),
-          connected: KEYLESS_PROVIDERS.includes(name) ? false : await deps.hasProviderKey(name),
-        })),
-      ),
+      providers: providerStatuses,
       connectableProviders: [...KEY_PROVIDERS],
       trust: {
         uncaged: cfg.permissions.uncaged,
@@ -125,20 +167,28 @@ export function createConfigTuiHost(deps: ConfigTuiHostDeps): ConfigTuiHost {
     const where = ` · ${scope}`;
     switch (effect.kind) {
       case "setModel": {
-        // Named roles compile to a two-rung tier ladder: plan=tier 0, build=tier 1.
-        // Variants ride alongside in a parallel array; both are pinned to their
+        // Named roles compile to a two-rung tier ladder (plan=0, build=1) of
+        // `provider/model` refs; variants ride alongside, both pinned to their
         // effective value so config always matches what the editor shows.
         const cfg = await deps.loadConfig();
-        const { plan, build } = roleModels(cfg);
-        const nextPlan = effect.role === "plan" ? effect.model : plan;
-        const nextBuild = effect.role === "build" ? effect.model : build;
-        const variantFor = (role: "plan" | "build", model: string): string =>
-          effect.role === role && effect.variant ? effect.variant : roleVariant(cfg, role, model);
+        const plan = roleModel(cfg, "plan");
+        const build = roleModel(cfg, "build");
+        const nextPlan = effect.role === "plan" ? effect.model : plan.ref;
+        const nextBuild = effect.role === "build" ? effect.model : build.ref;
+        // Touched role takes the picked variant (or the new model's default when
+        // none was given); the other role keeps its current effective variant.
+        const variantFor = (role: "plan" | "build", ref: string, current: string): string => {
+          if (effect.role !== role) return current;
+          return effect.variant ?? defaultModelVariant(parseModelRef(ref, plan.provider).model);
+        };
         await deps.mutate(scope, [
           set(["agent", "llm", "tiers"], [nextPlan, nextBuild]),
           set(
             ["agent", "llm", "variants"],
-            [variantFor("plan", nextPlan), variantFor("build", nextBuild)],
+            [
+              variantFor("plan", nextPlan, plan.variant),
+              variantFor("build", nextBuild, build.variant),
+            ],
           ),
           set(["agent", "llm", "modes", "plan"], 0),
           set(["agent", "llm", "modes", "build"], 1),

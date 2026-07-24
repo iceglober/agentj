@@ -4,6 +4,7 @@ import { createOpenTuiStyledText } from "../opentui-styled-text";
 import type { UiLine, UiSpan } from "../styles";
 import {
   type ConfigEffect,
+  type ConfigOverlayColumn,
   type ConfigOverlayView,
   type ConfigTuiData,
   type ConfigView,
@@ -90,7 +91,7 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     borderStyle: "double",
     top: 2,
     left: 8,
-    minWidth: 40,
+    minWidth: 64,
     padding: 1,
     flexDirection: "column",
     ...(colorEnabled ? { backgroundColor: opentui.RGBA.fromHex("#0d1117") } : {}),
@@ -183,7 +184,86 @@ export async function runConfigTuiScreen(options: ConfigTuiScreenOptions): Promi
     return lines;
   };
 
+  // Miller-column layout: header row · search row · aligned item rows.
+  const COL_WIDTHS = [17, 26, 14];
+  const spanW = (spans: UiSpan[]): number => spans.reduce((n, s) => n + s.text.length, 0);
+  const padCell = (
+    spans: UiSpan[],
+    width: number,
+    bg?: UiSpan["background"],
+    last = false,
+  ): UiSpan[] => {
+    const gap = Math.max(0, width - spanW(spans));
+    return [
+      ...spans,
+      ...(gap ? [{ text: " ".repeat(gap), background: bg } as UiSpan] : []),
+      ...(last ? [] : [{ text: "  " } as UiSpan]),
+    ];
+  };
+  const columnLines = (cols: ConfigOverlayColumn[]): UiLine[] => {
+    const w = (i: number): number => COL_WIDTHS[i] ?? 16;
+    const last = (i: number): boolean => i === cols.length - 1;
+    const rowCount = Math.max(1, ...cols.map((c) => c.items.length));
+    const lines: UiLine[] = [];
+    lines.push(
+      cols.flatMap((c, i) =>
+        padCell(
+          [{ text: c.title, tone: c.active ? "accent" : "muted", bold: c.active }],
+          w(i),
+          undefined,
+          last(i),
+        ),
+      ),
+    );
+    lines.push(
+      cols.flatMap((c, i) => {
+        const s: UiSpan[] =
+          c.active && c.search !== undefined && c.search.length > 0
+            ? [
+                { text: `/${c.search}`, tone: "accent" },
+                { text: "▏", tone: "accent" },
+              ]
+            : [{ text: "" }];
+        return padCell(s, w(i), undefined, last(i));
+      }),
+    );
+    for (let r = 0; r < rowCount; r += 1) {
+      lines.push(
+        cols.flatMap((c, i) => {
+          const it = c.items[r];
+          if (!it) return padCell([{ text: "" }], w(i), undefined, last(i));
+          const bg: UiSpan["background"] = it.cursor && c.active ? "muted" : undefined;
+          const tone: UiSpan["tone"] =
+            it.cursor && !c.active ? "accent" : it.muted ? "muted" : undefined;
+          return padCell(
+            [
+              {
+                text: `${it.cursor ? "▸ " : "  "}${it.label}`,
+                background: bg,
+                tone,
+                bold: it.cursor,
+              },
+            ],
+            w(i),
+            bg,
+            last(i),
+          );
+        }),
+      );
+    }
+    return lines;
+  };
+
   const overlayLines = (o: ConfigOverlayView): UiLine[] => {
+    if (o.columns) {
+      return [
+        [{ text: o.title, bold: true, tone: "accent" }],
+        [{ text: "" }],
+        ...columnLines(o.columns),
+        [{ text: "" }],
+        keyLine(o.keys),
+      ];
+    }
     const lines: UiLine[] = [[{ text: o.title, bold: true, tone: "accent" }]];
     if (o.control) {
       // The ←→-cycled value sits by the title, its value highlighted as the

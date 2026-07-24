@@ -3,16 +3,23 @@ import { type ConfigTuiData, createConfigTuiModel, type KeyPress } from "./model
 
 const DATA: ConfigTuiData = {
   models: {
-    plan: "gpt-5.6-sol",
-    build: "gpt-5.6-luna",
-    planVariant: "high",
-    buildVariant: "medium",
+    plan: { ref: "azure/gpt-5.6-sol", provider: "azure", model: "gpt-5.6-sol", variant: "high" },
+    build: {
+      ref: "azure/gpt-5.6-luna",
+      provider: "azure",
+      model: "gpt-5.6-luna",
+      variant: "medium",
+    },
   },
-  availableModels: ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4-nano"],
+  modelProviders: ["azure", "openai"],
+  providerModels: {
+    azure: ["gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.4-nano"],
+    openai: ["gpt-4o", "gpt-4o-mini"],
+  },
   availableVariants: ["low", "medium", "high"],
   providers: [
     { name: "azure", connected: true, keyless: false },
-    { name: "openai", connected: false, keyless: false },
+    { name: "openai", connected: true, keyless: false },
     { name: "bedrock", connected: false, keyless: true },
   ],
   connectableProviders: ["azure", "openai", "anthropic"],
@@ -39,11 +46,17 @@ const type = (m: ReturnType<typeof fresh>, s: string): void => {
 };
 
 describe("config TUI model", () => {
-  test("opens on Models with the first row under the cursor", () => {
+  test("opens on Models; rows show the full provider/model", () => {
     const m = fresh();
     const v = m.view();
     expect(v.sections[0]).toEqual({ label: "Models", active: true });
-    expect(v.rows[0]).toMatchObject({ label: "Plan model", value: "gpt-5.6-sol", cursor: true });
+    expect(v.rows[0]).toMatchObject({
+      label: "Plan model",
+      value: "azure/gpt-5.6-sol",
+      note: "high",
+      cursor: true,
+    });
+    expect(v.rows[1]).toMatchObject({ label: "Build model", value: "azure/gpt-5.6-luna" });
   });
 
   test("tab cycles sections; the cursor lands on the first focusable row", () => {
@@ -54,30 +67,46 @@ describe("config TUI model", () => {
     expect(v.rows.find((r) => r.cursor)?.label).toBe("Uncaged");
   });
 
-  test("←→ does nothing on a model row — Enter opens the picker instead", () => {
+  test("the column picker opens on the model column with the provider selected", () => {
     const m = fresh();
-    expect(m.handleKey(k("right"))).toEqual([]);
-    expect(m.handleKey(k("left"))).toEqual([]);
-    expect(m.view().overlay).toBeUndefined();
-    // Enter is the only way to change the model.
-    expect(m.handleKey(k("return"))).toEqual([]);
-    expect(m.view().overlay?.title).toBe("plan model");
+    m.handleKey(k("return")); // open on col 1 (model), provider=azure
+    const ov = m.view().overlay;
+    expect(ov?.title).toBe("plan model");
+    expect(ov?.columns?.map((c) => c.title)).toEqual(["provider", "model · azure", "variant"]);
+    // column 1 (model) is active, provider column shows azure as the trail.
+    expect(ov?.columns?.[0]?.items.find((i) => i.cursor)?.label).toBe("azure");
+    expect(ov?.columns?.[1]?.active).toBe(true);
+    expect(ov?.columns?.[2]?.items[0]?.label).toBe("choose a model"); // not reached yet
   });
 
-  test("model overlay picks a model and its variant with ⏎", () => {
+  test("navigate provider → model → variant and commit provider/model + variant", () => {
     const m = fresh();
-    expect(m.handleKey(k("return"))).toEqual([]); // opens overlay, seeded with the role's variant
-    expect(m.view().overlay).toMatchObject({
-      title: "plan model",
-      control: { label: "variant", value: "high" },
-    });
-    m.handleKey(k("down")); // second model
-    m.handleKey(k("left")); // variant high → medium
-    expect(m.view().overlay?.control?.value).toBe("medium");
+    m.handleKey(k("return")); // col 1 (model), azure
+    m.handleKey(k("left")); // ← back to col 0 (provider)
+    m.handleKey(k("down")); // azure → openai
+    expect(m.view().overlay?.columns?.[0]?.items.find((i) => i.cursor)?.label).toBe("openai");
+    m.handleKey(k("return")); // → col 1: openai models
+    expect(m.view().overlay?.columns?.[1]?.title).toBe("model · openai");
+    type(m, "mini"); // search openai models → gpt-4o-mini
+    expect(m.view().overlay?.columns?.[1]?.items.find((i) => i.cursor)?.note).toBe("gpt-4o-mini");
+    m.handleKey(k("return")); // → col 2: variant (cursor on the carried "high")
+    m.handleKey(k("up")); // high → medium
     expect(m.handleKey(k("return"))).toEqual([
-      { kind: "setModel", role: "plan", model: "gpt-5.6-luna", variant: "medium" },
+      { kind: "setModel", role: "plan", model: "openai/gpt-4o-mini", variant: "medium" },
     ]);
     expect(m.view().overlay).toBeUndefined();
+  });
+
+  test("a search with no match offers the query as a literal model id", () => {
+    const m = fresh();
+    m.handleKey(k("return")); // col 1 (model), azure
+    type(m, "o1-2024"); // no azure suggestion matches
+    const modelCol = m.view().overlay?.columns?.[1];
+    expect(modelCol?.items.find((i) => i.cursor)?.label).toBe("use “o1-2024”");
+    m.handleKey(k("return")); // → variant
+    expect(m.handleKey(k("return"))).toMatchObject([
+      { kind: "setModel", role: "plan", model: "azure/o1-2024" },
+    ]);
   });
 
   test("Plan/Build rows show the effective variant as a note", () => {
