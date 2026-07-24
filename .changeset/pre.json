@@ -4,5 +4,10 @@
   "initialVersions": {
     "@glrs-dev/glorious": "0.0.0"
   },
-  "changesets": []
+  "changesets": [
+    "config-tui",
+    "initial-release",
+    "permissions-acl",
+    "plan-build-and-models"
+  ]
 }
